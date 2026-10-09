@@ -107,7 +107,7 @@ describe('URL and search parsing', () => {
 
   it('[CB-16] builds first-result URLs only for engines that support it', () => {
     expect(topResultUrl('duckduckgo', 'wikipedia cats')).toBe('https://duckduckgo.com/?q=%5Cwikipedia+cats')
-    expect(topResultUrl('google', 'cats')).toBe('https://www.google.com/search?btnI=1&q=cats')
+    expect(topResultUrl('google', 'cats')).toBeUndefined()
     expect(topResultUrl('bing', 'cats')).toBeUndefined()
   })
 
@@ -117,6 +117,10 @@ describe('URL and search parsing', () => {
     expect(displayUrl('https://www.example.com/a/')).toBe('example.com/a')
     expect(displayUrl('http://localhost:3300/page/Docs%3A%20Orbit')).toBe('localhost:3300/page/Docs: Orbit')
     expect(displayUrl('https://x.example/%E0%A4%A')).toBe('x.example/%E0%A4%A')
+    // F9: separators, controls and bidi overrides stay escaped (no spoofed row text).
+    expect(displayUrl('https://x.example/a%2Fb%3Fc%23d')).toBe('x.example/a%2Fb%3Fc%23d')
+    expect(displayUrl('https://x.example/%E2%80%AEtxt.exe')).toBe('x.example/%E2%80%AEtxt.exe')
+    expect(displayUrl('https://x.example/caf%C3%A9')).toBe('x.example/café')
   })
 })
 
@@ -224,6 +228,20 @@ describe('ranking', () => {
     const h2 = historyOf([['http://localhost:3300/page/Alpha', 'Alpha']])
     expect(complete('localhost:3300/page/al', h2.hostList(), h2.entries(), [], NOW)?.url).toBe(
       'http://localhost:3300/page/Alpha',
+    )
+  })
+
+  it('[CB-08] does not complete a host seen once through a link (review F5)', () => {
+    const once = historyOf([['https://newsletter.example/', 'Newsletter']])
+    expect(complete('news', once.hostList(), once.entries(), [], NOW)).toBeUndefined()
+    const twice = historyOf([['https://newsletter.example/', 'Newsletter', 2]])
+    expect(complete('news', twice.hostList(), twice.entries(), [], NOW)?.text).toBe('newsletter.example')
+    const typed = new HistoryStore('/nonexistent/typed.jsonl', { now: () => NOW })
+    typed.record('https://typed.example/', { typed: true, at: NOW })
+    expect(complete('ty', typed.hostList(), typed.entries(), [], NOW)?.text).toBe('typed.example')
+    // An open tab still completes.
+    expect(complete('news', [], [], [tab('t-9', 'News', 'https://newsletter.example/x')], NOW)?.url).toBe(
+      'https://newsletter.example/',
     )
   })
 

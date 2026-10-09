@@ -8,7 +8,7 @@ import type { MainContext } from '../context'
 import type { HistoryService } from '../history'
 import type { CallContext } from '../registry'
 import { activeTabOf } from '../windows'
-import { pastSearchOf, type RankInput, rank } from './rank'
+import { normKey, pastSearchOf, type RankInput, rank } from './rank'
 import { SourceCache } from './sources'
 import { parseSuggestions } from './suggest'
 
@@ -63,12 +63,21 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
     const engine = SEARCH_ENGINES[state.settings.searchEngine] ?? SEARCH_ENGINES.google
     const siteSearches = state.settings.siteSearch ?? []
     const allTabs = sources.tabs(state)
+    // F1: tabs, folders and Spaces of private (non-persistent) profiles only show in their own windows.
+    const privateProfiles = new Set(
+      Object.values(state.profiles)
+        .filter((p) => !p.partition.startsWith('persist:'))
+        .map((p) => p.id),
+    )
+    const visibleTo = (profileId: string | undefined) =>
+      isPrivate ? profileId === profile?.id : !profileId || !privateProfiles.has(profileId)
+    const spaceProfile = (spaceId: string | undefined) => (spaceId ? state.spaces[spaceId]?.profileId : undefined)
     const input: RankInput = {
       query: args.query,
       mode: args.mode,
       now: Date.now(),
       engine: { name: engine.name, search: engine.search },
-      tabs: isPrivate ? allTabs.filter((t) => state.tabs[t.id]?.profileId === profile?.id) : allTabs,
+      tabs: privateProfiles.size ? allTabs.filter((t) => visibleTo(state.tabs[t.id]?.profileId)) : allTabs,
       activeTabId,
       currentSpaceId: space?.id ?? '',
       spaceNames: sources.spaceNames(state),
@@ -78,8 +87,8 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
       history: hs?.entries() ?? [],
       hosts: hs?.hostList() ?? [],
       archive: profile && !isPrivate ? sources.archive(state, profile.id) : [],
-      spaces: isPrivate ? [] : sources.spaces(state),
-      folders: isPrivate ? [] : sources.folders(state),
+      spaces: isPrivate ? [] : sources.spaces(state).filter((sp) => visibleTo(spaceProfile(sp.id))),
+      folders: isPrivate ? [] : sources.folders(state).filter((f) => visibleTo(spaceProfile(f.spaceId))),
       actions: sources.actions((id) => actions.has(id), process.platform),
       siteSearches,
       scope: args.siteSearchId ? siteSearches.find((s) => s.id === args.siteSearchId) : undefined,
@@ -114,6 +123,8 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
     const state = store.state
     const q = query.trim()
     if (!state.settings.searchSuggestions || !q || q.length > 200) return []
+    // M3: never send an address (paths and query strings can carry secrets) to the engine.
+    if (q.includes('://') || parseInput(q).kind === 'url') return []
     const engine = SEARCH_ENGINES[state.settings.searchEngine] ?? SEARCH_ENGINES.google
     // Tests point this at a local fixture; it is never read outside the e2e harness.
     const template = (ctx.e2e && process.env.ORBIT_SUGGEST_URL) || engine.suggest
@@ -121,6 +132,7 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
     try {
       const res = await net.fetch(fillSearchTemplate(template, q), {
         credentials: 'omit',
+        cache: 'no-store',
         signal: AbortSignal.timeout(1500),
       })
       if (!res.ok) return []
@@ -143,6 +155,7 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
     }
   })
 
+  // CB-20: left clicks only (the renderer just closes the bar for other buttons, review M5).
   commands.register('search.forwardClick', ({ x, y }, c) => {
     const contents = windows.get(windowOf(c) ?? '')?.webContents
     if (!contents || contents.isDestroyed() || !Number.isFinite(x) || !Number.isFinite(y)) return
@@ -203,6 +216,7 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
         if (result.actionId) await actions.run(result.actionId, { windowId })
         return
       case 'current':
+        if (disposition === 'new-tab') return openUrl(result.url, false)
         if (current) await commands.run('tabs.reload', { tabId: current })
         return
       case 'archived':
@@ -263,7 +277,13 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
     if (!profile || isPrivate) return
     const hs = history.store(profile.id)
     if (result.kind === 'history' && result.url) {
-      await hs.delete(result.url)
+      // Rows are deduped by normKey (scheme, www., fragment, trailing slash): remove every sibling.
+      const key = normKey(result.url)
+      const urls = hs
+        .entries()
+        .filter((e) => e.url === result.url || normKey(e.url) === key)
+        .map((e) => e.url)
+      for (const url of urls) await hs.delete(url)
     } else if (result.kind === 'suggestion' && result.query) {
       const q = result.query.toLowerCase()
       const urls = hs

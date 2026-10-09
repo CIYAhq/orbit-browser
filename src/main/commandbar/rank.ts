@@ -151,16 +151,29 @@ export function normKey(url: string): string {
   return noHash.endsWith('/') ? noHash.slice(0, -1) : noHash
 }
 
-/** Compact, readable URL for row text: no scheme, no "www.", no trailing slash, %-escapes decoded. */
+/** Decoded text that stays escaped in row text: separators that change a URL's meaning, controls and bidi overrides. */
+function unsafeDecoded(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i)
+    if (c < 0x20 || (c >= 0x7f && c <= 0x9f) || c === 0x200e || c === 0x200f) return true
+    if ((c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069)) return true
+  }
+  return /[/?#&=%+]/.test(text)
+}
+
+/** Compact, readable URL for row text: no scheme, no "www.", no trailing slash, safe %-escapes decoded (F9). */
 export function displayUrl(url: string): string {
   if (/^(about|data|chrome|devtools|view-source|orbit):/i.test(url)) return url.slice(0, 300)
   let s = url.replace(/^https?:\/\//i, '').replace(/^www\./i, '')
   if (s.endsWith('/')) s = s.slice(0, -1)
-  try {
-    return decodeURIComponent(s)
-  } catch {
-    return s
-  }
+  return s.replace(/(?:%[0-9a-f]{2})+/gi, (run) => {
+    try {
+      const decoded = decodeURIComponent(run)
+      return unsafeDecoded(decoded) ? run : decoded
+    } catch {
+      return run
+    }
+  })
 }
 
 const keyCache = new WeakMap<object, string>()
@@ -247,6 +260,8 @@ export function complete(
   let best: { host: string; origin: string } | undefined
   let bestF = -1
   for (const h of hosts) {
+    // F5: a host visited once by following a link (redirectors, newsletters…) is not completed.
+    if (h.typedCount < 1 && h.visitCount < 2) continue
     if (h.host.length > bare.length && h.host.startsWith(bare)) {
       const f = frecency(h, now) + (h.typedCount > 0 ? 2 : 0) - h.host.length * 0.001
       if (f > bestF) {

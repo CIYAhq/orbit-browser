@@ -33,7 +33,9 @@ export function OverlayApp() {
             void invoke('overlay.close', {})
             // CB-20: the sidebar stays usable: a click over it closes the bar and is passed on.
             const sidebar = win?.sidebar
-            if (kind === 'commandbar' && sidebar && (sidebar.visible || sidebar.peeking) && e.clientX < sidebar.width) {
+            // Left clicks only: a right or middle click just closes the bar (review M5).
+            const overSidebar = sidebar && (sidebar.visible || sidebar.peeking) && e.clientX < sidebar.width
+            if (kind === 'commandbar' && e.button === 0 && overSidebar) {
               void invoke('search.forwardClick', { x: e.clientX, y: e.clientY })
             }
           }}

@@ -29,6 +29,8 @@ interface WindowRecord {
   overlayShown: boolean
   /** Pending hide after the overlay's exit animation. */
   overlayHideTimer?: ReturnType<typeof setTimeout>
+  /** The overlay closed while the window was in the background: give the page focus when it returns. */
+  refocusPage?: boolean
   /** Tab whose page is in HTML fullscreen (video): its view fills the window. */
   htmlFullscreen?: TabId
 }
@@ -273,6 +275,10 @@ export class WindowManager {
     win.on('focus', () => {
       this.lastFocused = id
       this.setRuntime(id, { focused: true })
+      if (rec.refocusPage && !rec.overlayShown) {
+        rec.refocusPage = false
+        this.focusActiveTab(id)
+      }
     })
     win.on('blur', () => this.setRuntime(id, { focused: false }))
     win.on('enter-full-screen', () => this.setRuntime(id, { fullscreen: true }))
@@ -676,6 +682,7 @@ export class WindowManager {
 
   private showOverlay(rec: WindowRecord): void {
     clearTimeout(rec.overlayHideTimer)
+    rec.refocusPage = false
     const overlay = this.ensureOverlay(rec)
     this.fitOverlay(rec)
     rec.win.contentView.addChildView(overlay)
@@ -687,8 +694,10 @@ export class WindowManager {
   private hideOverlay(rec: WindowRecord): void {
     if (!rec.overlayShown || !rec.overlay) return
     rec.overlayShown = false
-    // Focus returns to the page at once; the view stays up while the renderer animates out.
+    // Focus returns to the page at once (or when the window is next focused); the view stays up
+    // while the renderer animates out.
     if (rec.win.isFocused()) this.focusActiveTab(rec.id)
+    else rec.refocusPage = true
     const overlay = rec.overlay
     clearTimeout(rec.overlayHideTimer)
     rec.overlayHideTimer = setTimeout(() => {

@@ -437,6 +437,9 @@ test('[CB-14] Tab on an empty field lists only actions', async () => {
 
 test('[CB-17] a history row can be removed from the keyboard and stays gone', async () => {
   const id = await newTab('Removable page')
+  // A sibling that shows as the same row (trailing slash) must go too (review F13).
+  await run(orbit.app, 'tabs.navigate', { tabId: id, url: fx.url('/page/Removable%20page/') })
+  await expect.poll(async () => (await state(orbit.app)).tabs[id]?.url).toBe(fx.url('/page/Removable%20page/'))
   await run(orbit.app, 'tabs.navigate', { tabId: id, url: fx.url('/page/Other') })
   await expect.poll(async () => (await state(orbit.app)).tabs[id]?.title).toBe('Other')
   const overlay = await openBar()
@@ -471,8 +474,10 @@ test('[CB-12] a URL on the clipboard is offered first as Paste and go', async ()
 
 /** A local OpenSearch-style suggestion endpoint that answers after a delay (ports 3300–3399). */
 async function startSuggestServer(delayMs: number) {
+  const requests: string[] = []
   const server = createServer((req, res) => {
     const q = new URL(req.url ?? '/', 'http://localhost').searchParams.get('q') ?? ''
+    requests.push(q)
     setTimeout(() => {
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify([q, [`${q} browser`, `${q} review`, q]]))
@@ -489,8 +494,27 @@ async function startSuggestServer(delayMs: number) {
   const { port: bound } = server.address() as AddressInfo
   return {
     template: `http://127.0.0.1:${bound}/suggest?q=%s`,
+    requests,
     close: () => new Promise<void>((r) => server.close(() => r())),
   }
+}
+
+/** Relaunches Orbit with engine suggestions pointed at a local endpoint and switched on. */
+async function launchWithSuggestions(template: string): Promise<void> {
+  await orbit.app.close()
+  orbit = await launchOrbit({ env: { ORBIT_SUGGEST_URL: template } })
+  await blockNetwork(orbit.app)
+  await (await viewPage(orbit.app, 'overlay')).getByTestId('overlay').waitFor({ state: 'attached' })
+}
+
+async function enableSuggestions(): Promise<void> {
+  await orbit.app.evaluate(() => {
+    const ctx = (globalThis as unknown as { __orbit: { ctx: { store: { update: (fn: (d: never) => void) => void } } } })
+      .__orbit.ctx
+    ctx.store.update((d: { settings: { searchSuggestions: boolean } }) => {
+      d.settings.searchSuggestions = true
+    })
+  })
 }
 
 test('[CB-15][CB-05][FL-17] opt-in engine suggestions fill rows below without moving the highlight', async () => {
@@ -672,4 +696,107 @@ test('[CB-16][KS-04] ⇧Enter opens the first result directly only when the opti
   await expect.poll(tabCount).toBe(2)
   const urls = Object.values((await state(orbit.app)).tabs).map((t) => t.url)
   expect(urls).toContain('https://duckduckgo.com/?q=%5Cwikipedia+cats')
+})
+
+test('[CB-15][CB-03] with engine suggestions on, ⌘L never sends the current address (review M3)', async () => {
+  const suggest = await startSuggestServer(0)
+  await launchWithSuggestions(suggest.template)
+  await newTab('Account')
+  await run(orbit.app, 'tabs.navigate', {
+    tabId: await activeTabId(orbit.app),
+    url: fx.url('/page/Account?reset_token=SECRET123'),
+  })
+  await expect
+    .poll(async () => {
+      const s = await state(orbit.app)
+      return Object.values(s.tabs)[0]?.url
+    })
+    .toBe(fx.url('/page/Account?reset_token=SECRET123'))
+  await enableSuggestions()
+  const overlay = await openBar('L')
+  await expect(rows(overlay).first()).toHaveAttribute('data-kind', 'current')
+  // Typing another address sends nothing either.
+  await overlay.keyboard.type('example.com/private?id=7')
+  await expect(rows(overlay).first()).toHaveAttribute('data-kind', 'url')
+  await new Promise((r) => setTimeout(r, 600))
+  expect(suggest.requests).toEqual([])
+  // Plain words still get suggestions.
+  await input(overlay).fill('')
+  await overlay.keyboard.type('orbit')
+  await expect.poll(() => suggest.requests.length).toBeGreaterThan(0)
+  expect(suggest.requests.every((q) => !q.includes('SECRET') && !q.includes('://'))).toBe(true)
+  await suggest.close()
+})
+
+test('[CB-21] after a background close, focus returns to the page when the window comes back (review M4)', async () => {
+  const id = await newTab('Focus target')
+  const page = await tabPage(orbit.app, '/page/Focus%20target')
+  await openBar()
+  // Another window takes focus; the bar then closes while Orbit's window is in the background.
+  await orbit.app.evaluate(({ BrowserWindow }) => {
+    const other = new BrowserWindow({ width: 320, height: 240, show: true })
+    ;(globalThis as unknown as { __other: Electron.BrowserWindow }).__other = other
+    other.focus()
+  })
+  const orbitFocused = () =>
+    orbit.app.evaluate(() => {
+      const hooks = (
+        globalThis as unknown as {
+          __orbit: {
+            ctx: { windows: { get: (id: string) => Electron.BrowserWindow | undefined } }
+            windowIds: () => string[]
+          }
+        }
+      ).__orbit
+      return hooks.ctx.windows.get(hooks.windowIds()[0] as string)?.isFocused() ?? false
+    })
+  await expect.poll(orbitFocused).toBe(false)
+  await run(orbit.app, 'overlay.close', {})
+  // Back to Orbit: the page has keyboard focus, not the sidebar.
+  await orbit.app.evaluate(() => {
+    const hooks = (
+      globalThis as unknown as {
+        __orbit: {
+          ctx: { windows: { get: (id: string) => Electron.BrowserWindow | undefined } }
+          windowIds: () => string[]
+        }
+      }
+    ).__orbit
+    hooks.ctx.windows.get(hooks.windowIds()[0] as string)?.focus()
+  })
+  await expect.poll(orbitFocused).toBe(true)
+  // Main's view of keyboard focus: the page's web contents, not the shell (sidebar).
+  const focusedUrl = () => orbit.app.evaluate(({ webContents }) => webContents.getFocusedWebContents()?.getURL() ?? '')
+  await expect.poll(focusedUrl).toContain('/page/Focus%20target')
+  expect(await activeTabId(orbit.app)).toBe(id)
+  expect(page.url()).toContain('/page/Focus%20target')
+  await orbit.app.evaluate(() => (globalThis as unknown as { __other: Electron.BrowserWindow }).__other.destroy())
+})
+
+test('[CB-20] right and middle clicks over the sidebar only close the bar (review M5)', async () => {
+  await newTab('First')
+  const second = await newTab('Second')
+  for (const button of ['right', 'middle'] as const) {
+    const overlay = await openBar()
+    const box = await orbit.shell.getByTestId('tab-row').filter({ hasText: 'First' }).boundingBox()
+    expect(box).toBeTruthy()
+    await overlay.mouse.click((box?.x ?? 0) + 30, (box?.y ?? 0) + (box?.height ?? 0) / 2, { button })
+    await expect(bar(overlay)).toHaveCount(0)
+    expect(await activeTabId(orbit.app)).toBe(second)
+  }
+})
+
+test('[CB-18] Enter on the untouched empty field runs no starter action (review F4)', async () => {
+  const overlay = await openBar()
+  await expect(rows(overlay).first()).toBeVisible()
+  await expect(rows(overlay).filter({ has: overlay.locator('[aria-selected="true"]') })).toHaveCount(0)
+  await expect(bar(overlay).locator('[aria-selected="true"]')).toHaveCount(0)
+  await overlay.keyboard.press('Enter')
+  await new Promise((r) => setTimeout(r, 300))
+  const s = await state(orbit.app)
+  expect(s.spaceOrder).toHaveLength(1)
+  expect(Object.keys(s.tabs)).toHaveLength(0)
+  // Arrow down picks the first row explicitly.
+  await overlay.keyboard.press('ArrowDown')
+  await expect(rows(overlay).first()).toHaveAttribute('aria-selected', 'true')
 })

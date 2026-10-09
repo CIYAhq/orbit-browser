@@ -36,6 +36,16 @@ const MAX_ROWS = 9
 const latencies: number[] = []
 ;(window as unknown as { __orbitCommandBar: { latencies: number[] } }).__orbitCommandBar = { latencies }
 
+/** Text that is (or starts like) an address: never sent to the search engine for suggestions (M3). */
+function looksLikeAddress(text: string): boolean {
+  const t = text.trim()
+  return (
+    t.includes('://') ||
+    /^(localhost|\d{1,3}(\.\d{1,3}){3})(:\d+)?(\/|$)/i.test(t) ||
+    /^[^\s/]+\.[a-z]{2,}(:\d+)?\//i.test(t)
+  )
+}
+
 /** Sample rows for the warm-up instance (one of each look). */
 const WARM_ROWS: SearchResult[] = [
   { id: 'w1', kind: 'tab', title: 'Tab', subtitle: 'example.com', label: 'Tab', hint: 'Switch to tab', score: 0 },
@@ -107,6 +117,8 @@ export function CommandBar({
     noAuto: false,
     composing: false,
     pendingEnter: undefined as { disposition?: OpenDisposition; topResult?: boolean } | undefined,
+    /** Arrow presses made while a query was in flight, applied to its results (review F20). */
+    pendingMove: 0,
     results: [] as SearchResult[],
     selected: 0,
     scope: null as Scope,
@@ -179,6 +191,11 @@ export function CommandBar({
     }
   }
 
+  /** The field still holds exactly the address ⌘L put there (nothing typed yet). */
+  function untouchedAddress(): boolean {
+    return mode === 'edit-url' && !!initialQuery && st.typed === initialQuery
+  }
+
   function runQuery() {
     const seq = ++st.seq
     const sentAt = performance.now()
@@ -189,32 +206,49 @@ export function CommandBar({
       siteSearchId: scope?.kind === 'site' ? scope.site.id : undefined,
       actionsOnly: scope?.kind === 'actions',
       noAutocomplete: st.noAuto || st.composing,
-    }).then((resp) => {
-      if (seq !== st.seq || st.closed) return
-      st.answered = seq
-      applyCompletion(resp.autocomplete)
-      const engineOn = st.suggestOn && !st.scope && !!st.typed.trim()
-      // With engine suggestions on, local rows leave three slots for them.
-      let rows = resp.results.slice(0, engineOn ? Math.max(3, st.maxRows - 3) : st.maxRows)
-      if (engineOn) {
-        const typed = st.typed.trim().toLowerCase()
-        const still = st.suggestions.filter((r) => r.title.toLowerCase().startsWith(typed))
-        rows = mergeSuggestions(rows, still, st.maxRows)
-        requestSuggestions(seq)
-      }
-      st.results = rows
-      setResults(rows)
-      select(0)
-      requestAnimationFrame(() => {
-        latencies.push(performance.now() - sentAt)
-        if (latencies.length > 100) latencies.shift()
-      })
-      const pending = st.pendingEnter
-      if (pending) {
-        st.pendingEnter = undefined
-        choose(rows[0], pending.disposition, pending.topResult)
-      }
     })
+      .then((resp) => applyResponse(seq, sentAt, resp))
+      .catch((err) => {
+        // F12: a failed query must not leave a buffered Enter waiting forever.
+        if (seq !== st.seq || st.closed) return
+        console.error('[commandbar] search failed:', err)
+        st.answered = seq
+        st.pendingEnter = undefined
+        st.pendingMove = 0
+      })
+  }
+
+  function applyResponse(seq: number, sentAt: number, resp: SearchResponse) {
+    if (seq !== st.seq || st.closed) return
+    st.answered = seq
+    applyCompletion(resp.autocomplete)
+    // M3: the untouched ⌘L address (or any address) is never sent to the engine.
+    const engineOn =
+      st.suggestOn && !st.scope && !!st.typed.trim() && !untouchedAddress() && !looksLikeAddress(st.typed)
+    // With engine suggestions on, local rows leave three slots for them.
+    let rows = resp.results.slice(0, engineOn ? Math.max(3, st.maxRows - 3) : st.maxRows)
+    if (engineOn) {
+      const typed = st.typed.trim().toLowerCase()
+      const still = st.suggestions.filter((r) => r.title.toLowerCase().startsWith(typed))
+      rows = mergeSuggestions(rows, still, st.maxRows)
+      requestSuggestions(seq)
+    }
+    st.results = rows
+    setResults(rows)
+    // F4: before anything is typed, only Paste and go or ⌘L's current page is pre-selected.
+    const first = rows[0]
+    const base = st.typed.trim() || first?.kind === 'paste' || first?.kind === 'current' ? 0 : -1
+    select(rows.length ? Math.max(-1, Math.min(rows.length - 1, base + st.pendingMove)) : -1)
+    st.pendingMove = 0
+    requestAnimationFrame(() => {
+      latencies.push(performance.now() - sentAt)
+      if (latencies.length > 100) latencies.shift()
+    })
+    const pending = st.pendingEnter
+    if (pending) {
+      st.pendingEnter = undefined
+      choose(rows[st.selected], pending.disposition, pending.topResult)
+    }
   }
 
   /** Fetches engine suggestions and adds them below, never moving the highlighted row (FL-17). */
@@ -336,15 +370,18 @@ export function CommandBar({
     const n = st.results.length
     if (e.key === 'ArrowDown' || (ctrlNav && e.key === 'n')) {
       e.preventDefault()
-      if (n) select(Math.min(n - 1, st.selected + 1))
+      // F20: moves made while a query is in flight apply to its results.
+      if (st.answered !== st.seq) st.pendingMove++
+      else if (n) select(Math.min(n - 1, st.selected + 1))
     } else if (e.key === 'ArrowUp' || (ctrlNav && e.key === 'p')) {
       e.preventDefault()
-      if (n) select(Math.max(0, st.selected - 1))
+      if (st.answered !== st.seq) st.pendingMove--
+      else if (n && st.selected > 0) select(st.selected - 1)
     } else if (e.key === 'Enter') {
       e.preventDefault()
       const row = st.results[st.selected]
-      const disposition: OpenDisposition | undefined =
-        e.metaKey || e.ctrlKey || (e.altKey && row?.kind === 'tab') ? 'new-tab' : undefined
+      // ⌘/Ctrl+Enter, and ⌥/Alt+Enter on any row (F17), open in a new tab.
+      const disposition: OpenDisposition | undefined = e.metaKey || e.ctrlKey || e.altKey ? 'new-tab' : undefined
       const topResult = e.shiftKey // ⇧Enter (CB-16); main decides whether it applies
       // Type-ahead: Enter before the latest results arrived runs the top row once they do.
       if (st.answered !== st.seq) st.pendingEnter = { disposition, topResult }
@@ -466,7 +503,7 @@ export function CommandBar({
               aria-expanded={results.length > 0}
               aria-controls="cmdbar-list"
               aria-autocomplete="both"
-              aria-activedescendant={results.length ? `cmdbar-option-${selected}` : undefined}
+              aria-activedescendant={selected >= 0 && results.length ? `cmdbar-option-${selected}` : undefined}
               onInput={onInput}
               onKeyDown={onKeyDown}
               onCompositionStart={() => {
