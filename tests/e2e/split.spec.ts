@@ -575,3 +575,63 @@ test('[SV-14][SV-15] the split row returns to the last focused pane; Ctrl+L can 
   expect(await activeTabId(orbit.app)).toBe(other)
   await expectViewsOverPanes(orbit, [a, other])
 })
+
+async function showStrip(app: ElectronApplication, tabId: string): Promise<Box> {
+  await app.evaluate((_e, id) => {
+    const g = globalThis as unknown as {
+      __orbitSplit: { strip: { show: (w: string, t: string) => void } }
+      __orbit: { windowIds: () => string[] }
+    }
+    g.__orbitSplit.strip.show(g.__orbit.windowIds()[0] as string, id)
+  }, tabId)
+  await expect.poll(async () => (await stripInfo(app)).visible).toBe(true)
+  return (await stripInfo(app)).bounds as Box
+}
+
+/** Drags a pane by its strip grip to a point in window coordinates. */
+async function dragPaneTo(o: Orbit, tabId: string, to: { x: number; y: number }, check?: () => Promise<void>) {
+  const bounds = await showStrip(o.app, tabId)
+  const strip = await viewPage(o.app, 'strip' as 'overlay')
+  const grip = await strip.getByTestId('pane-strip-grip').boundingBox()
+  if (!grip) throw new Error('no grip')
+  const sx = grip.x + grip.width / 2
+  const sy = grip.y + grip.height / 2
+  await strip.mouse.move(sx, sy)
+  await strip.mouse.down()
+  const tx = to.x - bounds.x
+  const ty = to.y - bounds.y
+  for (let i = 1; i <= 8; i++) await strip.mouse.move(sx + ((tx - sx) * i) / 8, sy + ((ty - sy) * i) / 8)
+  if (check) await check()
+  await strip.mouse.up()
+}
+
+test('[SV-20][SV-12] dragging a pane by its strip swaps or moves it', async () => {
+  const b = await openTab(orbit.app, 'Bpane')
+  const a = await openTab(orbit.app, 'Apane')
+  const splitId = (await run(orbit.app, 'split.create', { tabIds: [a, b] })) as string
+  await expectViewsOverPanes(orbit, [a, b])
+  const pa = await paneBox(orbit.shell, a)
+  // Onto the centre of the other pane: the two trade places (previewed live while dragging).
+  await dragPaneTo(orbit, b, { x: pa.x + pa.width / 2, y: pa.y + pa.height / 2 }, async () => {
+    await expect
+      .poll(async () => ((await tabView(orbit.app, b))?.bounds.x ?? 0) < ((await tabView(orbit.app, a))?.bounds.x ?? 0))
+      .toBe(true)
+  })
+  await expect
+    .poll(async () => JSON.stringify((await state(orbit.app)).splits[splitId]?.layout))
+    .toContain(`"tabId":"${b}"},{"type":"leaf","tabId":"${a}"`)
+  await expectViewsOverPanes(orbit, [a, b])
+  // A third pane dragged onto the top edge of another pane moves above it.
+  const c = await openTab(orbit.app, 'Cpane')
+  await run(orbit.app, 'split.addTab', { tabId: c, target: a, side: 'right' })
+  await expectViewsOverPanes(orbit, [a, b, c])
+  const pb = await paneBox(orbit.shell, b)
+  await dragPaneTo(orbit, c, { x: pb.x + pb.width / 2, y: pb.y + 40 })
+  await expect
+    .poll(async () => {
+      const layout = (await state(orbit.app)).splits[splitId]?.layout
+      return JSON.stringify(layout)
+    })
+    .toContain(`{"type":"column","children":[{"type":"leaf","tabId":"${c}"},{"type":"leaf","tabId":"${b}"}]`)
+  await expectViewsOverPanes(orbit, [a, b, c])
+})

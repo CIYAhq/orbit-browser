@@ -704,6 +704,14 @@ export function registerSplit(ctx: MainContext): void {
   })
 
   commands.register('split.stripHover', ({ hovered }, c) => strip.setHovered(windowOf(c), hovered))
+  commands.register('split.paneDrag', ({ tabId, phase, x, y }, c) => {
+    const windowId = windowOf(c)
+    if (!windowId) return
+    const origin = strip.info(windowId).bounds
+    strip.setDragging(windowId, phase === 'start' || phase === 'move')
+    if (!origin) return
+    windows.sendToWindow(windowId, 'split:paneDrag', { tabId, phase, x: origin.x + x, y: origin.y + y })
+  })
   commands.register('split.stripTarget', (_args, c) => {
     const windowId = windowOf(c)
     return { tabId: windowId ? strip.info(windowId).tabId : null }

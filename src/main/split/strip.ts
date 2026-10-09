@@ -11,7 +11,7 @@ const REVEAL_ZONE = 28
 const HIDE_ZONE = 64
 const SHOW_DELAY_MS = 150
 const HIDE_DELAY_MS = 250
-export const STRIP_WIDTH = 84
+export const STRIP_WIDTH = 104
 export const STRIP_HEIGHT = 30
 
 interface StripState {
@@ -20,6 +20,8 @@ interface StripState {
   /** Tab the pointer is near the top of (pending show). */
   candidate: TabId | null
   hovered: boolean
+  /** The strip's pane is being dragged by it (SV-20): stay put until the drag ends. */
+  dragging: boolean
   showTimer?: NodeJS.Timeout
   hideTimer?: NodeJS.Timeout
 }
@@ -52,6 +54,7 @@ export class PaneStrip {
     const windowId = this.ctx.windows.windowOfTab(tabId)
     if (!windowId || !this.isShownPane(this.ctx.store.state, windowId, tabId)) return
     const s = this.stateOf(windowId)
+    if (s.dragging) return
     if (mouse.type === 'mouseLeave') {
       s.candidate = null
       this.scheduleHide(windowId)
@@ -71,6 +74,14 @@ export class PaneStrip {
       clearTimeout(s.showTimer)
       if (s.tabId) this.scheduleHide(windowId)
     }
+  }
+
+  setDragging(windowId: WindowId, dragging: boolean): void {
+    const s = this.stateOf(windowId)
+    if (s.dragging === dragging) return
+    s.dragging = dragging
+    if (dragging) clearTimeout(s.hideTimer)
+    else this.scheduleHide(windowId)
   }
 
   setHovered(windowId: WindowId | undefined, hovered: boolean): void {
@@ -116,6 +127,7 @@ export class PaneStrip {
     s.tabId = null
     s.candidate = null
     s.hovered = false
+    s.dragging = false
     if (s.view && !s.view.webContents.isDestroyed()) s.view.setVisible(false)
   }
 
@@ -123,14 +135,14 @@ export class PaneStrip {
     const s = this.stateOf(windowId)
     clearTimeout(s.hideTimer)
     s.hideTimer = setTimeout(() => {
-      if (!s.hovered) this.hide(windowId)
+      if (!s.hovered && !s.dragging) this.hide(windowId)
     }, HIDE_DELAY_MS)
   }
 
   private stateOf(windowId: WindowId): StripState {
     let s = this.windows.get(windowId)
     if (!s) {
-      s = { tabId: null, candidate: null, hovered: false }
+      s = { tabId: null, candidate: null, hovered: false, dragging: false }
       this.windows.set(windowId, s)
     }
     return s

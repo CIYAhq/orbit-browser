@@ -102,3 +102,42 @@ export function useTabDrop(engine: PaneEngine, setDrop: (preview: DropPreview | 
     }
   }, [engine, setDrop])
 }
+
+interface PaneDragMessage {
+  phase: 'start' | 'move' | 'end' | 'cancel'
+  tabId: TabId
+  x: number
+  y: number
+}
+
+/**
+ * Drag a pane by its strip onto another pane (SV-20): the centre swaps the two, an edge
+ * moves the pane to that side. The strip is its own view, so main relays its pointer
+ * (in window coordinates) here; the frame previews the result live.
+ */
+export function usePaneDrag(engine: PaneEngine, setDrop: (preview: DropPreview | null) => void): void {
+  useEffect(() => {
+    let zone: { target: TabId; side: DropPreview['side'] } | null = null
+    return window.orbit.on('split:paneDrag', (payload) => {
+      const { phase, tabId, x, y } = payload as PaneDragMessage
+      if (phase === 'move') {
+        const next = engine.paneDropTargetFor(x, y, tabId)
+        if (next?.target === zone?.target && next?.side === zone?.side) return
+        zone = next
+        setDrop(next ? { tabId, target: next.target, side: next.side, move: true } : null)
+        return
+      }
+      const z = zone
+      zone = null
+      if (phase !== 'end' || !z) {
+        setDrop(null)
+        return
+      }
+      const done =
+        z.side === 'center'
+          ? invoke('split.swap', { a: tabId, b: z.target })
+          : invoke('split.addTab', { tabId, target: z.target, side: z.side })
+      void done.finally(() => setDrop(null))
+    })
+  }, [engine, setDrop])
+}

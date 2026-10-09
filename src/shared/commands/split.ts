@@ -50,6 +50,11 @@ export interface SplitCommands {
   'split.paneMenu': { args: { tabId: TabId }; result: void }
   /** The pane the strip currently belongs to (the strip asks once its page has loaded). */
   'split.stripTarget': { args: Record<string, never>; result: { tabId: TabId | null } }
+  /** The pane strip relays a drag of its pane (strip-view coordinates) to the frame (SV-20). */
+  'split.paneDrag': {
+    args: { tabId: TabId; phase: 'start' | 'move' | 'end' | 'cancel'; x: number; y: number }
+    result: void
+  }
   /** The pane strip reports pointer hover so it stays while used (SV-12). */
   'split.stripHover': { args: { hovered: boolean }; result: void }
 }

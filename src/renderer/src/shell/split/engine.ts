@@ -12,8 +12,13 @@ import {
   nodeAt,
   PANE_GAP,
   type PaneBox,
+  type PaneSide,
+  paneDropZone,
+  removePane,
   type SplitAxis,
+  sameLayout,
   setSizesAt,
+  swapPanes,
 } from '../../../../shared/split'
 import type { SplitLayout, TabId } from '../../../../shared/state'
 import { getSeq } from '../../store'
@@ -34,8 +39,12 @@ export interface FrameModel {
   focused: TabId | null
 }
 
-export interface DropPreview extends DropTarget {
+export interface DropPreview {
   tabId: TabId
+  target: TabId
+  side: PaneSide | 'center'
+  /** A pane of the shown split being moved (SV-20) rather than a tab joining it. */
+  move?: boolean
 }
 
 interface PaneAnim {
@@ -167,7 +176,10 @@ export class PaneEngine {
         node && node.type !== 'leaf' && node.sizes.every((s, i) => Math.abs(s - (this.held?.sizes[i] ?? -1)) < 1e-6)
       if (echoed || !node || node.type === 'leaf') this.held = null
     }
-    if (this.preview && after.includes(this.preview.tabId)) this.preview = null
+    if (this.preview?.move) {
+      // A pane drag's preview ends as soon as the drop changes the stored layout.
+      if (!sameLayout(this.model.layout, model.layout)) this.preview = null
+    } else if (this.preview && after.includes(this.preview.tabId)) this.preview = null
     this.model = model
     this.ready = true
     this.relayout(related && !prefersReducedMotion())
@@ -193,6 +205,20 @@ export class PaneEngine {
   contains(x: number, y: number): boolean {
     const f = this.frame
     return x >= f.x && y >= f.y && x <= f.x + f.width && y <= f.y + f.height
+  }
+
+  /** Where a pane of the shown split dragged to (x, y) would go (SV-20). */
+  paneDropTargetFor(x: number, y: number, tabId: TabId): { target: TabId; side: PaneSide | 'center' } | null {
+    if (!this.contains(x, y)) return null
+    const pane = this.paneBoxes().find(
+      (p) =>
+        p.tabId !== tabId &&
+        x >= p.rect.x &&
+        x <= p.rect.x + p.rect.width &&
+        y >= p.rect.y &&
+        y <= p.rect.y + p.rect.height,
+    )
+    return pane ? { target: pane.tabId, side: paneDropZone(pane.rect, x, y) } : null
   }
 
   /** Where a tab dragged to (x, y) would go; `full` when the shown split has no room. */
@@ -259,7 +285,14 @@ export class PaneEngine {
     const sizes = this.drag ? { path: this.drag.path, sizes: this.drag.sizes } : this.held
     if (sizes) layout = setSizesAt(layout, sizes.path, sizes.sizes)
     const p = this.preview
-    if (p && !layoutLeaves(layout).includes(p.tabId)) layout = insertPane(layout, p.target, DROP_PANE, p.side)
+    if (p?.move) {
+      if (p.side === 'center') return swapPanes(layout, p.tabId, p.target)
+      const without = removePane(layout, p.tabId)
+      return without ? insertPane(without, p.target, DROP_PANE, p.side) : layout
+    }
+    if (p && p.side !== 'center' && !layoutLeaves(layout).includes(p.tabId)) {
+      layout = insertPane(layout, p.target, DROP_PANE, p.side)
+    }
     return layout
   }
 
@@ -394,9 +427,11 @@ export class PaneEngine {
 
   /** Writes pane, divider and focus-ring styles from the animated rects, then reports to main. */
   private write(): void {
-    for (const [id, anim] of this.anims) {
-      const el = this.paneEls.get(id)
-      if (el) this.writePane(el, rectOf(anim))
+    for (const [id, el] of this.paneEls) {
+      const anim = this.anims.get(id)
+      // A pane lifted out of the layout (being dragged, SV-20) hides its card.
+      el.style.visibility = anim ? '' : 'hidden'
+      if (anim) this.writePane(el, rectOf(anim))
     }
     const layout = this.displayLayout()
     const split = !!layout && layout.type !== 'leaf'

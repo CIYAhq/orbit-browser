@@ -828,6 +828,20 @@ html[data-view="strip"] body {
   opacity: 0.75;
 }
 
+.pane-strip__grip {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 22px;
+  border-radius: 6px;
+  opacity: 0.5;
+  cursor: grab;
+}
+
+.pane-strip__grip:active {
+  cursor: grabbing;
+}
+
 .pane-strip__button:hover {
   opacity: 1;
   background: rgba(127, 127, 127, 0.18);

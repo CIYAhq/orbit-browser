@@ -9,7 +9,7 @@ import { activeTabId } from '../selectors'
 import { useOrbit } from '../store'
 import { DROP_PANE, type DropPreview, dividerKey, FRAME_RADIUS, PaneEngine } from './split/engine'
 import { useAltClickSplit } from './split/useAltClickSplit'
-import { useTabDrop } from './split/useTabDrop'
+import { usePaneDrag, useTabDrop } from './split/useTabDrop'
 
 export { FRAME_RADIUS }
 
@@ -60,6 +60,7 @@ export function ContentArea({ win }: { win: WindowState }) {
   }, [engine, frame])
   useLayoutEffect(() => engine.setPreview(drop), [engine, drop])
   useTabDrop(engine, setDrop)
+  usePaneDrag(engine, setDrop)
   useAltClickSplit()
 
   const layout = frame?.layout ?? null
@@ -90,7 +91,7 @@ export function ContentArea({ win }: { win: WindowState }) {
             single={!isSplit}
           />
         ))}
-        {drop && !leaves.includes(drop.tabId) && (
+        {drop && drop.side !== 'center' && (drop.move || !leaves.includes(drop.tabId)) && (
           <div
             key={DROP_PANE}
             className="pane pane--drop"

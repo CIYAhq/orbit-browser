@@ -4,14 +4,14 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 14 built (37 partial) · 20 tested · 0 feel right.
+**Totals:** 485 spec’d · 15 built (36 partial) · 21 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
 | P0 | 174 | 12 | 15 |
 | P1 | 221 | 2 | 5 |
-| P2 | 83 | 0 | 0 |
+| P2 | 83 | 1 | 1 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -215,10 +215,10 @@ Spec: `spec/split-view.md`
 | SV-17 | Close one pane | P0 | ✅ | ✅ e2e | – | strip close, Ctrl+Shift+-, Cmd/Ctrl+W; other panes keep their arrangement; reopen puts the pane back |
 | SV-18 | Separate a split into tabs | P0 | ✅ | ✅ e2e | – | Separate Tabs from the split menu, pane menu and Alt-click |
 | SV-19 | Close the whole split | P0 | 🟡 partial | ✅ e2e | – | row close closes the split as a unit (pinned unloads); reopening tabs rebuilds it; archive entries are per tab |
-| SV-20 | Swap and move panes | P2 | 🟡 partial | – | – | Move Pane Left/Right/Up/Down in the pane menu; drag-to-swap not built |
-| SV-21 | The split row in the sidebar | P0 | 🟡 partial | ✅ e2e | – | one row with a favicon+title segment per pane, segment click focuses; command bar split result and custom name/icon not built |
-| SV-22 | The split as one unit: context menu | P1 | 🟡 partial | ✅ e2e | – | split menu: per-pane submenus, flip, equalize, duplicate, pin/unpin, move to Space, separate, close; rename/icon, archive below, share and Favorites not built |
-| SV-23 | Pinned and Favorite splits | P1 | 🟡 partial | ✅ e2e | – | pinning keeps panes/sizes/orientation; drops onto pinned tabs stay pinned; per-pane pinned URLs; no Favorite split tile |
+| SV-20 | Swap and move panes | P2 | ✅ | ✅ e2e | – | drag a pane by its strip grip: centre swaps, an edge moves it there (live preview); Move Pane Left/Right/Up/Down in the pane menu |
+| SV-21 | The split row in the sidebar | P0 | 🟡 partial | ✅ e2e | – | one row with a favicon+title segment per pane, segment click focuses; a custom name replaces the segments; command bar split result and custom icon not built |
+| SV-22 | The split as one unit: context menu | P1 | 🟡 partial | ✅ e2e | – | split menu: rename, per-pane submenus, flip, equalize, duplicate, pin/unpin, move to Space, separate, close; custom icon, archive below, share and Add to Favorites not built |
+| SV-23 | Pinned and Favorite splits | P1 | 🟡 partial | ✅ e2e | – | pinning keeps panes/sizes/orientation; drops onto pinned tabs stay pinned; per-pane pinned URLs; SplitFavoriteTile ready, not yet rendered by the Favorites grid |
 | SV-24 | Splits persist | P0 | ✅ | ✅ e2e | – | panes, order, orientation, sizes and focused pane survive relaunch |
 | SV-25 | Limits and edge cases | P1 | 🟡 partial | ✅ e2e | – | fifth pane refused with a toast on every route; no split from an empty window; full-screen video not handled |
 | SV-26 | Feel: create, resize, close | P1 | 🟡 partial | – | – | springs for create/close/flip, 1:1 resize, drop indicator fade/slide, frame colour until loaded; no closing-card fade or sidebar merge animation |

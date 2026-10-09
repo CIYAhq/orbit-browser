@@ -429,6 +429,20 @@ export function rowDropSide(row: Box, x: number, y: number): 'left' | 'right' | 
   return x < row.x + row.width / 2 ? 'left' : 'right'
 }
 
+/**
+ * Zone of a pane under the pointer when another pane of the same split is dragged onto it
+ * (SV-20): the centre swaps the two, an edge half moves the dragged pane to that side.
+ */
+export function paneDropZone(r: Box, x: number, y: number): PaneSide | 'center' {
+  const fx = r.width > 0 ? (x - r.x) / r.width : 0.5
+  const fy = r.height > 0 ? (y - r.y) / r.height : 0.5
+  if (fx > 0.3 && fx < 0.7 && fy > 0.3 && fy < 0.7) return 'center'
+  const dx = fx - 0.5
+  const dy = fy - 0.5
+  if (Math.abs(dx) * r.width >= Math.abs(dy) * r.height) return dx < 0 ? 'left' : 'right'
+  return dy < 0 ? 'top' : 'bottom'
+}
+
 export interface DropTarget {
   /** Pane the new tab goes next to. */
   target: TabId
