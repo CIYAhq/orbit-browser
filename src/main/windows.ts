@@ -99,6 +99,8 @@ export class WindowManager {
   private selfClosed = new Set<TabId>()
   /** Main window that most recently had focus (fallback when no window has focus). */
   private lastFocused: WindowId | undefined
+  /** The last main window, closed while the app keeps running (macOS) or is about to quit: its state is kept. */
+  private closedMain: WindowId | undefined
   quitting = false
   private ctx!: MainContext
 
@@ -192,10 +194,13 @@ export class WindowManager {
     return false
   }
 
-  /** Opens a window for an existing window state, or a new one showing `spaceId`. */
+  /**
+   * Opens a window for an existing window state, or a new one showing `spaceId`. With no main
+   * window open, the last closed main window comes back (its bounds, Space and tabs).
+   */
   open(existing?: WindowState, spaceId?: string): WindowId {
     const state = this.ctx.store.state
-    let winState = existing
+    let winState = existing ?? this.takeClosedMain(spaceId)
     if (!winState) {
       const space = spaceId ?? state.windows[this.focusedWindowId() ?? '']?.spaceId ?? state.spaceOrder[0]
       if (!space) throw new Error('No spaces')
@@ -274,6 +279,18 @@ export class WindowManager {
     win.on('moved', saveBounds)
     win.on('maximize', saveBounds)
     win.on('unmaximize', saveBounds)
+    win.on('close', saveBounds)
+    if (process.platform === 'linux') {
+      // Linux has no 'resized'/'moved': save once a resize or move settles.
+      let timer: NodeJS.Timeout | undefined
+      const settle = () => {
+        clearTimeout(timer)
+        timer = setTimeout(saveBounds, 300)
+      }
+      win.on('resize', settle)
+      win.on('move', settle)
+      win.once('closed', () => clearTimeout(timer))
+    }
     win.on('closed', () => {
       this.records.delete(id)
       for (const [tabId, entry] of [...this.attached]) {
@@ -283,15 +300,48 @@ export class WindowManager {
         }
       }
       if (rec.overlay && !rec.overlay.webContents.isDestroyed()) rec.overlay.webContents.close()
-      if (!this.quitting) {
+      if (this.quitting) return
+      if (this.ctx.store.state.windows[id]?.kind === 'main' && !this.hasOpenMain()) {
+        // The last main window: keep its state. Linux and Windows quit right after this and
+        // persist it (TB-22); macOS keeps running and reopens it from the dock.
+        this.closedMain = id
         this.ctx.store.update((d) => {
-          delete d.windows[id]
+          const w = d.windows[id]
+          if (!w) return
+          w.focused = false
+          w.fullscreen = false
+          if (w.overlay.kind !== 'none') w.overlay = { kind: 'none' }
         })
+        return
       }
+      this.ctx.store.update((d) => {
+        delete d.windows[id]
+      })
     })
 
     loadRenderer(win.webContents, 'shell')
     return id
+  }
+
+  private hasOpenMain(): boolean {
+    for (const id of this.records.keys()) if (this.ctx.store.state.windows[id]?.kind === 'main') return true
+    return false
+  }
+
+  /** The kept state of the last closed main window, when no main window is open (see 'closed'). */
+  private takeClosedMain(spaceId?: string): WindowState | undefined {
+    const id = this.closedMain
+    this.closedMain = undefined
+    if (!id || this.hasOpenMain()) return undefined
+    const kept = this.ctx.store.state.windows[id]
+    if (!kept) return undefined
+    if (spaceId && spaceId !== kept.spaceId && this.ctx.store.state.spaces[spaceId]) {
+      this.ctx.store.update((d) => {
+        const w = d.windows[id]
+        if (w) w.spaceId = spaceId
+      })
+    }
+    return this.ctx.store.state.windows[id]
   }
 
   close(windowId: WindowId): void {

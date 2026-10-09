@@ -203,3 +203,30 @@ test('[KS-01] menu actions skip windows that are not Orbit windows (review M6)',
     expect(result.popupGone).toBe(true)
   }
 })
+
+test('[TB-22] closing the last window keeps it for the next launch (review F1)', async () => {
+  const userData = orbit.userData
+  const tabId = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/Kept') })) as string
+  await tabPage(orbit.app, '/page/Kept')
+  const windowId = await orbit.app.evaluate(async () => {
+    const ctx = (globalThis as unknown as OrbitGlobal).__orbit.ctx
+    const id = ctx.windows.ids()[0] as string
+    ctx.windows.get(id)?.setBounds({ x: 40, y: 30, width: 900, height: 640 })
+    return id
+  })
+  const closed = orbit.app.waitForEvent('close')
+  // Linux and Windows quit when the last window closes; macOS keeps running.
+  await orbit.app.evaluate((_e, id) => (globalThis as unknown as OrbitGlobal).__orbit.ctx.windows.close(id), windowId)
+  if (process.platform === 'darwin') {
+    const kept = await state(orbit.app)
+    expect(kept.windows[windowId]?.activeTab[kept.windows[windowId]?.spaceId ?? '']).toBe(tabId)
+    await orbit.app.evaluate(({ app }) => app.quit())
+  }
+  await closed
+  orbit = await launchOrbit({ userData })
+  const s = await state(orbit.app)
+  const win = s.windows[windowId]
+  expect(Object.keys(s.windows)).toEqual([windowId])
+  expect(win?.activeTab[win.spaceId]).toBe(tabId)
+  expect(win?.bounds).toMatchObject({ width: 900, height: 640 })
+})
