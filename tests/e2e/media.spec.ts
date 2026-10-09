@@ -648,7 +648,12 @@ test('[MD-04][MD-05][KS-11] hovering the player shows play/pause, ±15 s, progre
   await pip.mouse.click(bar.x + bar.width * 0.75, bar.y + bar.height / 2)
   await expect.poll(() => currentTime(v.page)).toBeGreaterThan(length * 0.75 - 3)
   expect(await currentTime(v.page)).toBeLessThan(length * 0.75 + 3)
-  await expect(pip.getByTestId('pip-elapsed')).toHaveText(/^0:4\d$/)
+  // The fixture's length varies by machine (67 s on the macOS runner), so compare with the video.
+  const elapsed = async () => {
+    const [m, sec] = ((await pip.getByTestId('pip-elapsed').textContent()) ?? '').split(':').map(Number)
+    return (m as number) * 60 + (sec as number)
+  }
+  await expect.poll(async () => Math.abs((await elapsed()) - (await currentTime(v.page)))).toBeLessThan(2)
 
   // "…": playback speed (MD-04).
   await pip.getByTestId('pip-more').click()
@@ -770,6 +775,8 @@ test('[MD-07][MD-12] closing or navigating the source tab, or the video ending, 
   const { app } = orbit
   // Closing the tab stops its media and the player.
   const a = await openPlaying(app, '/media/long-video/Closing')
+  // Leave only once Orbit has the page's report: a tab left before it doesn't float (verification V-F2).
+  await expect.poll(async () => (await media(app, a.id))?.video).toBe(true)
   const other = await leave(app)
   await expectPlayer(app, a.id)
   await cmd(app, 'tabs.close', { tabId: a.id })
@@ -778,6 +785,7 @@ test('[MD-07][MD-12] closing or navigating the source tab, or the video ending, 
 
   // Navigating it elsewhere.
   const b = await openPlaying(app, '/media/long-video/Navigating')
+  await expect.poll(async () => (await media(app, b.id))?.video).toBe(true)
   await cmd(app, 'tabs.activate', { tabId: other })
   await expectPlayer(app, b.id)
   await b.page.evaluate((url) => {
@@ -789,6 +797,7 @@ test('[MD-07][MD-12] closing or navigating the source tab, or the video ending, 
 
   // The video ends: the player closes and the video doesn't start again.
   const c = await openPlaying(app, '/media/long-video/Ending')
+  await expect.poll(async () => (await media(app, c.id))?.video).toBe(true)
   await cmd(app, 'tabs.activate', { tabId: other })
   await expectPlayer(app, c.id)
   await c.page.evaluate(() => {
