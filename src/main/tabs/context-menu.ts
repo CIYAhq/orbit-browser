@@ -4,7 +4,10 @@ import type { MainContext } from '../context'
 
 /** Native right-click menu for web pages. */
 export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: WebContents, params: ContextMenuParams) {
-  const items: MenuItemConstructorOptions[] = []
+  // Items other features add (media: Picture in Picture on a video).
+  const items: MenuItemConstructorOptions[] = (ctx.hooks.pageContextMenu ?? []).flatMap((hook) =>
+    hook(tabId, contents, params),
+  )
   const openInNewTab = (url: string, activate: boolean) => {
     const tab = ctx.store.state.tabs[tabId]
     void ctx.commands.run('tabs.create', { url, spaceId: tab?.spaceId, activate }, {})
