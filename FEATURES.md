@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 46 built (20 partial) · 60 tested · 0 feel right.
+**Totals:** 485 spec’d · 46 built (20 partial) · 61 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
 | P0 | 174 | 30 | 36 |
-| P1 | 221 | 15 | 22 |
+| P1 | 221 | 15 | 23 |
 | P2 | 83 | 1 | 2 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -380,7 +380,7 @@ Spec: `spec/feel.md`
 | FL-04 | Tab row hover | P0 | – | – | – |  |
 | FL-05 | Tab selection | P0 | – | – | – |  |
 | FL-06 | New-tab insertion | P0 | – | – | – |  |
-| FL-07 | Rows moving between sections without a drag | P1 | – | – | – |  |
+| FL-07 | Rows moving between sections without a drag | P1 | – | ✅ e2e | – |  |
 | FL-08 | Row buttons (close ×, folder search, reset) | P1 | – | – | – |  |
 | FL-09 | Close and archive exit | P0 | – | – | – |  |
 | FL-10 | Drag and drop: lift, follow, spring, drop | P0 | – | – | – |  |

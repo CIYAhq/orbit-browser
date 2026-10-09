@@ -883,6 +883,12 @@ html.is-dragging-tab * {
   }
 }
 
+/* A row travelling to another section draws above its neighbours (FL-07). */
+.row-slot.is-travelling {
+  z-index: 2;
+  overflow: visible;
+}
+
 /* The dragged rows' slots stay in layout (the gap) but are not drawn. */
 .is-drag-hidden {
   visibility: hidden;

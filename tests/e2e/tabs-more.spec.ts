@@ -468,3 +468,22 @@ test('[TB-10][TB-09] dragging with Alt held drops a copy with its history and le
   await act(app, 'nav.back')
   await expect.poll(async () => (await tab(app, copy))?.url.endsWith('/page/Src')).toBe(true)
 })
+
+test('[FL-07][PN-02] a row pinned with Cmd+D travels to the pinned section instead of popping in', async () => {
+  const { app, shell } = orbit
+  const ids: string[] = []
+  for (const n of [1, 2, 3]) ids.unshift(await newTab(app, fx.url(`/page/F${n}`), { activate: false }))
+  const third = ids[2] as string
+  await row(shell, third).click()
+  await waitTab(app, third, '/page/F1')
+  await settled(shell)
+  const before = await row(shell, third).boundingBox()
+  await shell.keyboard.press(`${MOD}+D`)
+  const slot = shell.getByTestId('pinned-list').locator(`[data-slot][data-key="${third}"]`)
+  await expect(slot).toHaveClass(/is-travelling/)
+  // It starts where it was and settles into the pinned section.
+  await expect(slot).not.toHaveClass(/is-travelling/)
+  const after = await row(shell, third).boundingBox()
+  expect((after?.y ?? 0) < (before?.y ?? 0)).toBe(true)
+  expect((await space(app)).pinned).toEqual([third])
+})

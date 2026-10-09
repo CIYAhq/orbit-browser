@@ -9,15 +9,15 @@ import {
   useState,
 } from 'react'
 import { isFolderId, isSplitId, isTabId } from '../../../../shared/ids'
-import type { ItemId, TabId } from '../../../../shared/state'
+import type { ItemId, OrbitState, TabId } from '../../../../shared/state'
 import { isAwayFromPinned, rowTitle } from '../../../../shared/tabs'
 import { splitLeaves, tabsInItem, visibleTabOrder } from '../../../../shared/tree'
 import { invoke, isMac } from '../../api'
 import { activeTabId } from '../../selectors'
-import { getOrbitState, useOrbit } from '../../store'
+import { getOrbitState, useMirror, useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
 import { pressItem } from './drag'
-import { QUICK_EASE, reducedMotion, SNAPPY, SNAPPY_EASE } from './motion-tokens'
+import { QUICK_EASE, reducedMotion, SNAPPY, SNAPPY_EASE, STANDARD } from './motion-tokens'
 import { RenameField } from './RenameField'
 import {
   clearSelection,
@@ -79,6 +79,42 @@ function claimEnterAnimation(): boolean {
   enterBurstCount += 1
   return enterBurstCount <= 12
 }
+
+/**
+ * Rows that change section without a drag (⌘D, Move to, undo) travel from where they were
+ * (FL-07). Before the new state renders, remember where each arriving row is drawn now; the
+ * row mounted in its new list starts there and springs into place.
+ */
+const departed = new Map<string, { top: number; left: number; at: number }>()
+
+function listsOf(state: OrbitState): Map<string, ItemId[]> {
+  const lists = new Map<string, ItemId[]>()
+  for (const space of Object.values(state.spaces)) {
+    lists.set(`pinned:${space.id}`, space.pinned)
+    lists.set(`today:${space.id}`, space.today)
+  }
+  for (const folder of Object.values(state.folders)) lists.set(`folder:${folder.id}`, folder.children)
+  return lists
+}
+
+useMirror.subscribe((next, prev) => {
+  if (!prev.state || !next.state || next.state === prev.state) return
+  if (next.state.spaces === prev.state.spaces && next.state.folders === prev.state.folders) return
+  if (useDrag.getState().phase !== 'idle') return
+  const before = listsOf(prev.state)
+  const now = performance.now()
+  for (const [key, items] of listsOf(next.state)) {
+    const old = before.get(key)
+    if (old === items) continue
+    for (const id of items) {
+      if (old?.includes(id)) continue
+      const el = document.querySelector<HTMLElement>(`[data-slot][data-key="${id}"]:not([data-exiting])`)
+      if (!el || el.dataset.container === key) continue
+      const r = el.getBoundingClientRect()
+      departed.set(id, { top: r.top, left: r.left, at: now })
+    }
+  }
+})
 
 /** Rows leaving together, in list order (drives the cascade delay). */
 const exitOrder = new Map<string, number>()
@@ -185,16 +221,46 @@ function RowSlot({
   className = 'row-slot',
 }: SlotProps & { id: string; folder?: 'open' | 'closed'; children: React.ReactNode; className?: string }) {
   const y = useRowShift(id)
+  const x = useMotionValue(0)
+  const ref = useRef<HTMLDivElement>(null)
   const hidden = useDrag((s) => !!s.hidden[id])
   const present = useIsPresent()
+  // A row arriving from another section travels instead of growing in (FL-07).
+  const [travel] = useState(() => {
+    const d = departed.get(id)
+    return d && !hidden && !reducedMotion() && performance.now() - d.at < 250 ? d : null
+  })
+  const [flying, setFlying] = useState(!!travel)
   // Rows that arrive or leave through a drag appear/disappear at once (the ghost covers them).
-  const [instant] = useState(() => hidden || reducedMotion() || !claimEnterAnimation())
+  const [instant] = useState(() => !!travel || hidden || reducedMotion() || !claimEnterAnimation())
+  useLayoutEffect(() => {
+    if (!travel) return
+    departed.delete(id)
+    const el = ref.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const dy = travel.top - r.top
+    const dx = travel.left - r.left
+    if (Math.abs(dy) < 1 && Math.abs(dx) < 1) return
+    y.jump(dy)
+    x.jump(dx)
+    const a = animate(y, 0, STANDARD)
+    const b = animate(x, 0, STANDARD)
+    void Promise.all([a, b]).then(() => setFlying(false))
+    return () => {
+      a.stop()
+      b.stop()
+    }
+  }, [travel, id, x, y])
   if (!present && hidden) return null
+  // The copy left behind only makes room; the row itself is already travelling.
+  const leaving = !present && departed.has(id)
   const order = present ? undefined : exitOrder.get(id)
   return (
     <motion.div
-      className={`${className}${hidden ? ' is-drag-hidden' : ''}`}
-      style={{ y }}
+      ref={ref}
+      className={`${className}${hidden || leaving ? ' is-drag-hidden' : ''}${flying ? ' is-travelling' : ''}`}
+      style={{ y, x }}
       variants={rowVariants}
       custom={{ stagger: order !== undefined, index: order }}
       onAnimationComplete={() => {
