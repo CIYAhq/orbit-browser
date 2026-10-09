@@ -38,6 +38,7 @@ import {
   popOutInDraft,
   separateInDraft,
   sidebarSorted,
+  splitAnchor,
   swapIntoPaneInDraft,
   windowsShowing,
 } from './model'
@@ -156,9 +157,7 @@ export function registerSplit(ctx: MainContext): void {
     const windowId = windowOf(c)
     let result: ReturnType<typeof addPaneInDraft> = 'invalid'
     // A split row as the target: the new pane goes after its last pane (or before its first for 'left'/'top').
-    const split = store.state.splits[target]
-    const order = split ? paneOrder(split.layout) : []
-    const anchor = split ? ((side === 'left' || side === 'top' ? order[0] : order[order.length - 1]) ?? target) : target
+    const anchor = splitAnchor(store.state, target, side) ?? target
     updateMoving([tabId], (d) => {
       result = addPaneInDraft(d, tabId, anchor, side)
       if (!isFailure(result) && focus && windowId) focusInDraft(d, windowId, tabId)

@@ -5,7 +5,7 @@
  */
 import { createWindowState, MAX_FAVORITES } from '../../shared/defaults'
 import { isFolderId, isTabId, newId } from '../../shared/ids'
-import { isPendingPane, paneAfterClose } from '../../shared/split'
+import { isPendingPane, layoutLeaves, paneAfterClose, SPLIT_FULL_MESSAGE } from '../../shared/split'
 import type {
   ArchivedTab,
   ContainerRef,
@@ -14,6 +14,7 @@ import type {
   ItemId,
   OrbitState,
   SpaceId,
+  SplitId,
   Tab,
   TabId,
   WindowId,
@@ -36,7 +37,16 @@ import {
   tabsInItem,
 } from '../../shared/tree'
 import type { MainContext } from '../context'
-import { type PaneAnchor, restorePaneInDraft, restoreUnitInDraft, type SplitUnit, splitCloseInfo } from '../split/model'
+import {
+  addPaneInDraft,
+  isFailure,
+  type PaneAnchor,
+  restorePaneInDraft,
+  restoreUnitInDraft,
+  type SplitUnit,
+  splitAnchor,
+  splitCloseInfo,
+} from '../split/model'
 import {
   activateInDraft,
   detachFromSplit,
@@ -377,6 +387,12 @@ export class TabOps {
           const i = d.archive.findIndex((a) => a.id === rec.archiveId)
           if (i >= 0) d.archive.splice(i, 1)
         }
+      }
+      // A tab that came back under another profile (its split or folder moved to another
+      // profile's Space) starts afresh in that session: the old session's history stays behind (PR-05).
+      for (const rec of live) {
+        const placed = d.tabs[rec.tab.id]
+        if (placed && placed.profileId !== rec.tab.profileId) this.ctx.tabs.savedHistory.delete(rec.tab.id)
       }
       if (opts.select && opts.windowId && select && d.tabs[select]) activateInDraft(d, opts.windowId, select, now)
     })
@@ -850,6 +866,88 @@ export class TabOps {
   }
 
   /** Move to another Space's pinned or Today section (TB-11). */
+  /**
+   * A tab dropped onto a row's half joins that tab or split as a pane (SV-05). Undoable (TB-18):
+   * ⌘Z puts the rows back as they were, ⌘⇧Z makes the split again.
+   */
+  splitWith(tabId: TabId, target: ItemId, side: 'left' | 'right', windowId?: WindowId): SplitId | null {
+    const state = this.state
+    const anchor = splitAnchor(state, target, side)
+    if (!anchor || anchor === tabId || !state.tabs[tabId]) return null
+    const fromRow = splitOfTab(state, tabId) ? undefined : locate(state, tabId)
+    const joined = splitOfTab(state, anchor)
+    const anchorRow = joined ? undefined : locate(state, anchor)
+    const joinedLayout = joined ? structuredClone(state.splits[joined]?.layout) : undefined
+    const placement = this.capture([tabId, ...(anchorRow ? [anchor] : [])])
+    const profiles = new Map([tabId, anchor].map((id) => [id, state.tabs[id]?.profileId]))
+    let result: ReturnType<typeof addPaneInDraft> = 'invalid'
+    this.ctx.store.update((d) => {
+      result = addPaneInDraft(d, tabId, anchor, side, this.now())
+      if (!isFailure(result) && windowId) activateInDraft(d, windowId, tabId, this.now())
+    })
+    if (isFailure(result)) {
+      if (result === 'full') this.ctx.toast(windowId, SPLIT_FULL_MESSAGE)
+      return null
+    }
+    const splitId: SplitId = result
+    // A tab now in another profile's session reloads there, without the old session's history.
+    for (const [id, before] of profiles) {
+      if (this.state.tabs[id]?.profileId === before) continue
+      this.ctx.tabs.sleep(id)
+      this.ctx.tabs.savedHistory.delete(id)
+    }
+    if (!fromRow) return splitId
+    const isPaneHere = () => {
+      const split = this.state.splits[splitId]
+      return !!split && layoutLeaves(split.layout).includes(tabId)
+    }
+    this.undo.push(
+      'Split View',
+      () => {
+        if (!isPaneHere()) return undefined
+        this.ctx.store.update((d) => {
+          const split = d.splits[splitId]
+          if (!split) return
+          if (joined === splitId && joinedLayout) split.layout = joinedLayout
+          else {
+            removeItem(d, splitId)
+            delete d.splits[splitId]
+          }
+          const rows = [
+            { id: tabId, loc: fromRow },
+            ...(anchorRow && joined !== splitId ? [{ id: anchor, loc: anchorRow }] : []),
+          ].sort((a, b) => a.loc.index - b.loc.index)
+          for (const row of rows) {
+            if (!locate(d, row.id) && !splitOfTab(d, row.id) && containerItems(d, row.loc.container)) {
+              insertItem(d, row.loc.container, row.loc.index, row.id)
+            }
+          }
+          for (const p of placement) {
+            for (const [id, fields] of Object.entries(p.tabs)) {
+              const tab = d.tabs[id]
+              if (!tab) continue
+              tab.spaceId = fields.spaceId
+              tab.profileId = fields.profileId
+              if (fields.pinnedUrl) {
+                tab.pinnedUrl = fields.pinnedUrl
+                tab.pinnedTitle = fields.pinnedTitle
+                tab.pinnedResolvedUrl = fields.pinnedResolvedUrl
+              } else {
+                delete tab.pinnedUrl
+                delete tab.pinnedTitle
+                delete tab.pinnedResolvedUrl
+              }
+            }
+          }
+        })
+        return () => this.splitWith(tabId, target, side, windowId)
+      },
+      this.now(),
+      () => !isPaneHere(),
+    )
+    return splitId
+  }
+
   moveToSpace(ids: ItemId[], spaceId: SpaceId, section: 'pinned' | 'today', windowId?: WindowId): boolean {
     const space = this.state.spaces[spaceId]
     if (!space) return false

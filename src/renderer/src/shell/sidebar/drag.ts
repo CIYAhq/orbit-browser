@@ -74,6 +74,8 @@ interface Session {
   prevY: number
   raf: number
   dwell: { side: 'left' | 'right'; since: number } | null
+  /** Pointer resting on a row's middle band: after SPLIT_DWELL_MS it becomes a split target (SV-05). */
+  splitDwell?: { key: string; since: number; timer: number } | null
   spaceAtStart: SpaceId
   cleanup: () => void
 }
@@ -327,6 +329,14 @@ function listTarget(s: Session, prev: DropTarget | null): DropTarget | null {
  * where they stand on screen, and the list doesn't move while a split target is shown, so rows
  * can't slide under the pointer and back.
  */
+/** How long the pointer rests on a row's middle band before a drop there makes a split (SV-05). */
+const SPLIT_DWELL_MS = 400
+
+function clearSplitDwell(s: Session): void {
+  if (s.splitDwell) window.clearTimeout(s.splitDwell.timer)
+  s.splitDwell = null
+}
+
 function splitTarget(s: Session, y: number): DropTarget | null {
   const first = s.ids[0]
   const scroll = ctx.scroll
@@ -339,8 +349,20 @@ function splitTarget(s: Session, y: number): DropTarget | null {
     if (!isTabId(sl.key) && !isSplitId(sl.key)) continue
     const row = { x: box.left, y: sl.top + (shifts[sl.key] ?? 0), width: box.width, height: sl.height }
     const side = rowDropSide(row, s.lastX, y)
-    if (side) return { type: 'split', key: sl.key, side }
+    if (!side) continue
+    // A quick pass over a row reorders as usual; resting on it for a moment makes a split.
+    const now = performance.now()
+    if (s.splitDwell?.key !== sl.key) {
+      clearSplitDwell(s)
+      const timer = window.setTimeout(() => {
+        if (session === s && s.started) update(s)
+      }, SPLIT_DWELL_MS + 16)
+      s.splitDwell = { key: sl.key, since: now, timer }
+      return null
+    }
+    return now - s.splitDwell.since >= SPLIT_DWELL_MS ? { type: 'split', key: sl.key, side } : null
   }
+  clearSplitDwell(s)
   return null
 }
 
@@ -518,8 +540,8 @@ async function drop(s: Session, ev: PointerEvent): Promise<void> {
   } else if (zone.kind === 'list' && state.target) {
     const target = state.target
     if (target.type === 'split') {
-      // The dragged tab joins the row's tab (or split) on that side (SV-05).
-      commit = () => invoke('split.addTab', { tabId: first, target: target.key, side: target.side })
+      // The dragged tab joins the row's tab (or split) on that side (SV-05); ⌘Z undoes it.
+      commit = () => invoke('tabs.splitWith', { tabId: first, target: target.key, side: target.side })
       landing = 'away'
     } else if (target.type === 'into') {
       commit = () =>

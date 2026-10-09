@@ -233,6 +233,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   commands.register('tabs.moveToSpace', ({ ids, spaceId, section }, c) =>
     ops.moveToSpace(ids, spaceId, section, windowOf(c)),
   )
+  commands.register('tabs.splitWith', ({ tabId, target, side }, c) => ops.splitWith(tabId, target, side, windowOf(c)))
   commands.register('tabs.toNewWindow', ({ tabId, x, y }, c) =>
     ops.toNewWindow(tabId, windowOf(c), x !== undefined && y !== undefined ? { x, y } : undefined),
   )

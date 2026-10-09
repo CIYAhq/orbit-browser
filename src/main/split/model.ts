@@ -291,6 +291,14 @@ export function dropBlankPanes(d: OrbitState): TabId[] {
   return removed
 }
 
+/** The pane a drop targets: the tab itself, or for a split row its first or last pane by side. */
+export function splitAnchor(state: OrbitState, target: ItemId, side: PaneSide): TabId | undefined {
+  const split = state.splits[target]
+  if (!split) return state.tabs[target] ? target : undefined
+  const order = paneOrder(split.layout)
+  return side === 'left' || side === 'top' ? order[0] : order[order.length - 1]
+}
+
 // ---- Closing and reopening panes with the tab model (SV-17, SV-19) ----
 
 /** Where a pane closed on its own sat: beside the group `targets` of split `splitId`. */

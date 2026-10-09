@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 65 built (27 partial) · 94 tested · 0 feel right.
+**Totals:** 485 spec’d · 65 built (27 partial) · 95 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 45 | 56 |
+| P0 | 174 | 45 | 57 |
 | P1 | 221 | 18 | 35 |
 | P2 | 83 | 2 | 3 |
 
@@ -153,7 +153,7 @@ Spec: `spec/spaces.md`
 | PR-02 | Create a profile | P0 | – | – | – |  |
 | PR-03 | Assign a Space to a profile | P0 | – | – | – |  |
 | PR-04 | Profile step in the new-Space flow | P1 | – | – | – |  |
-| PR-05 | What each profile isolates | P0 | – | – | – |  |
+| PR-05 | What each profile isolates | P0 | – | ✅ unit | – |  |
 | PR-06 | Favorites per profile | P0 | – | – | – |  |
 | PR-07 | Profile indicator | P1 | – | – | – |  |
 | PR-08 | Delete a profile | P1 | – | – | – |  |
@@ -200,7 +200,7 @@ Spec: `spec/split-view.md`
 | SV-02 | Create with the keyboard shortcut | P0 | ✅ | ✅ e2e+unit | – | Ctrl+Shift+= adds an empty pane and opens the command bar; a URL or open tab fills it, Escape removes it; refused in an empty window |
 | SV-03 | Create from the command bar | P0 | ✅ | ✅ e2e | – | Add Split Right/Left/Above/Below and New Split View actions; the command bar stays open for the new pane |
 | SV-04 | Create by dragging a tab onto the page | P0 | ✅ | ✅ e2e+unit | – | drag a tab row over the page: theme-coloured drop indicator, the page makes room, release adds the pane |
-| SV-05 | Create by dropping a tab onto another tab row | P0 | ✅ | ✅ e2e+unit | – | dragging one tab onto a tab or split row's middle band highlights that half and makes or extends a split there; the row's top and bottom quarters still reorder |
+| SV-05 | Create by dropping a tab onto another tab row | P0 | ✅ | ✅ e2e+unit | – | resting a dragged tab on a tab or split row's middle band (~400 ms) highlights that half; dropping makes or extends a split there, undoable with Cmd/Ctrl+Z; quick drags reorder as usual |
 | SV-06 | Create from a multi-selection | P0 | ✅ | ✅ e2e+unit | – | Open in Split View in the tab menu for a 2-4 tab multi-selection (sidebar order); more than 4 is disabled with the hint |
 | SV-07 | Create from the "+" menu or the window's split button | P1 | 🟡 partial | ✅ unit | – | New Split View and Add Split Right/Left/Above/Below actions plus newSplitMenuItems(); the '+' menu and title-bar button belong to the sidebar chrome |
 | SV-08 | Open a link into a split | P1 | 🟡 partial | ✅ e2e+unit | – | Open Link in Split View in the page's link menu; Option-click and dragging links not built |

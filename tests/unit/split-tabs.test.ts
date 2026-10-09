@@ -4,7 +4,13 @@ import { detachTab } from '../../src/main/split/model'
 import { Store } from '../../src/main/store'
 import { activateInDraft, makeTab } from '../../src/main/tabs/model'
 import { TabOps } from '../../src/main/tabs/ops'
-import { createInitialState, createWindowState, DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
+import {
+  createInitialState,
+  createProfile,
+  createSpace,
+  createWindowState,
+  DEFAULT_PROFILE_ID,
+} from '../../src/shared/defaults'
 import { layoutLeaves } from '../../src/shared/split'
 import type { OrbitState, SplitLayout, TabId } from '../../src/shared/state'
 import { locate, splitOfTab } from '../../src/shared/tree'
@@ -20,9 +26,10 @@ function world() {
   state.windows[w1.id] = w1
   state.windows[w2.id] = w2
   const store = new Store(state)
+  const runtime = { contents: () => undefined, savedHistory: new Map<string, unknown>(), destroy() {}, sleep() {} }
   const ctx = {
     store,
-    tabs: { contents: () => undefined, savedHistory: new Map(), destroy() {}, sleep() {} },
+    tabs: runtime,
     toast() {},
     windows: { get: () => undefined },
   } as unknown as MainContext
@@ -59,7 +66,7 @@ function world() {
     const win = store.state.windows[windowId]
     return win ? (win.activeTab[win.spaceId] ?? null) : null
   }
-  return { store, ops, spaceId, w1: w1.id, w2: w2.id, add, split, focus, active }
+  return { store, ops, runtime, spaceId, w1: w1.id, w2: w2.id, add, split, focus, active }
 }
 
 describe('split panes in the tab model', () => {
@@ -190,5 +197,48 @@ describe('split panes in the tab model', () => {
     focus(w2, a)
     expect(active(w2)).toBe(a)
     expect([a, b]).not.toContain(active(w1))
+  })
+
+  it('[SV-17] a pane reopened under another profile leaves the old session’s history behind (PR-05)', () => {
+    const { store, ops, runtime, w1, add, split, focus } = world()
+    const [a, b, c] = [add(), add(), add()]
+    const id = split({ type: 'row', sizes: [0.4, 0.3, 0.3], children: [L(a), L(b), L(c)] })
+    const other = createProfile('Work', 'p-work')
+    const space = createSpace('Work', other.id)
+    store.update((d) => {
+      d.profiles[other.id] = other
+      d.spaces[space.id] = space
+      d.spaceOrder.push(space.id)
+    })
+    runtime.savedHistory.set(b, { entries: [{ url: 'https://old-session.test/' }], index: 0 })
+    focus(w1, b)
+    ops.closeTabs([b], 'closed')
+    // Its split moves to a Space of another profile before the pane comes back.
+    expect(ops.moveItems([id], { kind: 'today', spaceId: space.id }, 0)).toBe(true)
+    ops.reopenLast(w1)
+    expect(splitOfTab(store.state, b)).toBe(id)
+    expect(store.state.tabs[b]?.profileId).toBe(other.id)
+    expect(runtime.savedHistory.has(b)).toBe(false)
+  })
+
+  it('[SV-05] a tab dropped on a row half makes a split that undo and redo take back and forth', () => {
+    const { store, ops, w1, add, spaceId } = world()
+    const [a, b, c] = [add(), add(), add()]
+    const before = [...(store.state.spaces[spaceId]?.today ?? [])]
+    const id = ops.splitWith(c, a, 'right', w1) as string
+    expect(store.state.splits[id]?.layout).toEqual({ type: 'row', sizes: [0.5, 0.5], children: [L(a), L(c)] })
+    expect(store.state.spaces[spaceId]?.today).toEqual([id, b])
+    expect(ops.undo.undo()).toBe('Split View')
+    expect(store.state.splits[id]).toBeUndefined()
+    expect(store.state.spaces[spaceId]?.today).toEqual(before)
+    expect(ops.undo.redo()).toBe('Split View')
+    expect(Object.values(store.state.splits)).toHaveLength(1)
+    // Joining an existing split: undo gives the split its old arrangement back.
+    const d = add()
+    const joined = ops.splitWith(d, Object.keys(store.state.splits)[0] as string, 'right', w1) as string
+    expect(layoutLeaves(store.state.splits[joined]?.layout as SplitLayout)).toHaveLength(3)
+    ops.undo.undo()
+    expect(layoutLeaves(store.state.splits[joined]?.layout as SplitLayout)).toEqual([a, c])
+    expect(store.state.spaces[spaceId]?.today).toContain(d)
   })
 })

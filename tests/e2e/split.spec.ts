@@ -943,9 +943,10 @@ async function tabsHook<T>(app: ElectronApplication, name: string, arg?: unknown
   )
 }
 
-test('[SV-05] dropping a tab on the right half of another tab row makes a split there', async () => {
+test('[SV-05] resting a dragged tab on the right half of a row makes a split there; Undo takes it back', async () => {
   const b = await openTab(orbit.app, 'Target')
   const a = await openTab(orbit.app, 'Dropped')
+  const before = (await state(orbit.app)).spaces[(await state(orbit.app)).tabs[a]?.spaceId as string]?.today
   const from = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${a}"]`).boundingBox()
   const to = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${b}"]`).boundingBox()
   if (!from || !to) throw new Error('rows')
@@ -953,12 +954,39 @@ test('[SV-05] dropping a tab on the right half of another tab row makes a split 
   await orbit.shell.mouse.down()
   await orbit.shell.mouse.move(from.x + 40, from.y + from.height / 2 + 6, { steps: 3 })
   await orbit.shell.mouse.move(to.x + to.width * 0.75, to.y + to.height / 2, { steps: 8 })
+  // The split indicator only shows once the pointer has rested on the row for a moment.
+  await expect(orbit.shell.locator('.row-slot.is-split-right')).toHaveCount(0)
   await expect(orbit.shell.locator('.row-slot.is-split-right')).toHaveCount(1)
   await orbit.shell.mouse.up()
   await expect(orbit.shell.getByTestId('split-row')).toHaveCount(1)
   const split = await splitOf(orbit.app, b)
   expect(split && JSON.stringify(split.layout).match(/t-[a-z0-9]+/g)).toEqual([b, a])
   await expectViewsOverPanes(orbit, [a, b])
+  // Undo (TB-18) puts both rows back where they were.
+  expect(await run(orbit.app, 'tabs.undo', {})).toBe('Split View')
+  await expect(orbit.shell.getByTestId('split-row')).toHaveCount(0)
+  const after = await state(orbit.app)
+  expect(after.spaces[after.tabs[a]?.spaceId as string]?.today).toEqual(before)
+})
+
+test('[SV-05] a quick drag across the middle of a row reorders, it does not make a split', async () => {
+  const c = await openTab(orbit.app, 'Third')
+  const b = await openTab(orbit.app, 'Second')
+  const a = await openTab(orbit.app, 'First')
+  const from = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${a}"]`).boundingBox()
+  const to = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${c}"]`).boundingBox()
+  if (!from || !to) throw new Error('rows')
+  await orbit.shell.mouse.move(from.x + 30, from.y + from.height / 2)
+  await orbit.shell.mouse.down()
+  await orbit.shell.mouse.move(from.x + 40, from.y + from.height / 2 + 6, { steps: 2 })
+  // Straight to the lower part of the last row's middle band and released at once.
+  await orbit.shell.mouse.move(to.x + to.width * 0.75, to.y + to.height * 0.7, { steps: 4 })
+  await orbit.shell.mouse.up()
+  await expect(orbit.shell.getByTestId('tab-row')).toHaveCount(3)
+  expect(Object.keys((await state(orbit.app)).splits)).toHaveLength(0)
+  const s = await state(orbit.app)
+  const today = s.spaces[s.tabs[a]?.spaceId as string]?.today ?? []
+  expect(today.indexOf(a)).toBeGreaterThan(today.indexOf(b))
 })
 
 test('[SV-06] Open in Split View from a multi-selection makes one split in sidebar order', async () => {

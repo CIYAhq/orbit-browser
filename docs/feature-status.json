@@ -70,7 +70,7 @@
   "SV-02": { "built": "yes", "note": "Ctrl+Shift+= adds an empty pane and opens the command bar; a URL or open tab fills it, Escape removes it; refused in an empty window" },
   "SV-03": { "built": "yes", "note": "Add Split Right/Left/Above/Below and New Split View actions; the command bar stays open for the new pane" },
   "SV-04": { "built": "yes", "note": "drag a tab row over the page: theme-coloured drop indicator, the page makes room, release adds the pane" },
-  "SV-05": { "built": "yes", "note": "dragging one tab onto a tab or split row's middle band highlights that half and makes or extends a split there; the row's top and bottom quarters still reorder" },
+  "SV-05": { "built": "yes", "note": "resting a dragged tab on a tab or split row's middle band (~400 ms) highlights that half; dropping makes or extends a split there, undoable with Cmd/Ctrl+Z; quick drags reorder as usual" },
   "SV-06": { "built": "yes", "note": "Open in Split View in the tab menu for a 2-4 tab multi-selection (sidebar order); more than 4 is disabled with the hint" },
   "SV-07": { "built": "partial", "note": "New Split View and Add Split Right/Left/Above/Below actions plus newSplitMenuItems(); the '+' menu and title-bar button belong to the sidebar chrome" },
   "SV-08": { "built": "partial", "note": "Open Link in Split View in the page's link menu; Option-click and dragging links not built" },
