@@ -1,5 +1,5 @@
 import { type Cookie, session } from 'electron'
-import { connectionOf, zoomPercent } from '../../shared/nav'
+import { connectionOf, peekShown, zoomPercent } from '../../shared/nav'
 import { isPrivateTab } from '../../shared/private'
 import { permissionOrigin, SITE_PANEL, type SiteControlsInfo } from '../../shared/site'
 import type { ProfileId, TabId, WindowId } from '../../shared/state'
@@ -135,6 +135,8 @@ export function registerSiteControls(ctx: MainContext, prefs: SitePrefs, permiss
       void commands.run('overlay.close', {}, { windowId }).catch(() => {})
       return
     }
+    // The panel would take the Peek's place and close it: the address shows the Peek's page (PK-11).
+    if (peekShown(store.state, windowId)) return
     if (win.sidebar.visible || windows.floatingContents(windowId)) {
       windows.sendToWindow(windowId, 'sidebar:siteControls', {})
     } else {

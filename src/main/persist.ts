@@ -124,6 +124,7 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
   state.spaceOrder = [...new Set(state.spaceOrder)].filter((id) => state.spaces[id])
   for (const id of Object.keys(state.spaces)) if (!state.spaceOrder.includes(id)) state.spaceOrder.push(id)
   repairReferences(state)
+  normalizeLinkSettings(state)
   for (const tab of Object.values(state.tabs)) {
     tab.loading = false
     tab.audible = false
@@ -147,6 +148,44 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
     if (d.state === 'progressing' || d.state === 'paused') d.state = 'interrupted'
   }
   return state
+}
+
+/**
+ * Peek and Mini Window settings (PK-12, MW-04, MW-09, MW-10, ST-09): a malformed value falls back
+ * to its default, and a rule, choice or remembered profile whose Space or profile is gone is dropped.
+ */
+function normalizeLinkSettings(state: OrbitState): void {
+  const s = state.settings
+  if (typeof s.peekShiftClick !== 'boolean') s.peekShiftClick = DEFAULT_SETTINGS.peekShiftClick
+  const rules: unknown[] = Array.isArray(s.linkRules) ? s.linkRules : []
+  s.linkRules = rules.filter(
+    (r): r is OrbitState['settings']['linkRules'][number] =>
+      isRecord(r) &&
+      (r.match === 'contains' || r.match === 'exact') &&
+      typeof r.value === 'string' &&
+      typeof r.spaceId === 'string' &&
+      !!state.spaces[r.spaceId],
+  )
+  const space = s.externalLinksSpace
+  if (!(typeof space === 'string' && state.spaces[space])) s.externalLinksSpace = null
+  const after = s.miniWindowArchiveAfterMs
+  if (!(typeof after === 'number' && Number.isFinite(after) && after >= 0)) {
+    s.miniWindowArchiveAfterMs = DEFAULT_SETTINGS.miniWindowArchiveAfterMs
+  }
+  const profiles: Record<string, unknown> = isRecord(s.miniWindowProfiles) ? s.miniWindowProfiles : {}
+  s.miniWindowProfiles = Object.fromEntries(
+    Object.entries(profiles).filter(
+      (e): e is [string, ProfileId] => typeof e[1] === 'string' && !!state.profiles[e[1]],
+    ),
+  )
+  const b: unknown = s.miniWindowBounds
+  const sane =
+    isRecord(b) &&
+    [b.x, b.y, b.width, b.height].every((n) => typeof n === 'number' && Number.isFinite(n)) &&
+    (b.width as number) > 0 &&
+    (b.height as number) > 0
+  if (!sane) delete s.miniWindowBounds
+  for (const entry of state.archive) if (entry.from !== 'mini' && entry.from !== 'peek') delete entry.from
 }
 
 /**

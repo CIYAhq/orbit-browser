@@ -1,10 +1,9 @@
 import { Check, Link2, ShieldBan, SlidersHorizontal, TriangleAlert } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { connectionOf } from '../../../../shared/nav'
+import { connectionOf, peekShown, shownTabId } from '../../../../shared/nav'
 import { SITE_PANEL } from '../../../../shared/site'
 import { displayHost } from '../../../../shared/url'
 import { invoke, runAction } from '../../api'
-import { activeTabId } from '../../selectors'
 import { useOrbit } from '../../store'
 import { withShortcut } from './shortcut-label'
 
@@ -20,14 +19,17 @@ const COPIED_MS = 1200
  */
 export function Address({ windowId }: { windowId: string }) {
   // Only the URL: the display re-renders on navigations, not on title, favicon or progress changes.
+  // While a Peek shows, it is the Peek's page (PK-11).
   const url = useOrbit((s) => {
-    const id = activeTabId(s, windowId)
+    const id = shownTabId(s, windowId)
     return id ? (s.tabs[id]?.url ?? '') : ''
   })
   const blockedPopups = useOrbit((s) => {
-    const id = activeTabId(s, windowId)
+    const id = shownTabId(s, windowId)
     return id ? (s.tabs[id]?.blockedPopups ?? 0) : 0
   })
+  // The site controls panel would take a Peek's place: no button for it while one shows.
+  const peek = useOrbit((s) => peekShown(s, windowId))
   const page = url && url !== 'about:blank' ? url : ''
   const connection = connectionOf(page)
   const insecure = connection === 'insecure'
@@ -68,7 +70,7 @@ export function Address({ windowId }: { windowId: string }) {
       data-testid="address"
       data-connection={connection}
     >
-      {page && insecure && (
+      {page && insecure && !peek && (
         <button
           type="button"
           className="address__button address__warning"
@@ -79,6 +81,11 @@ export function Address({ windowId }: { windowId: string }) {
         >
           <TriangleAlert size={13} data-testid="insecure-icon" />
         </button>
+      )}
+      {page && insecure && peek && (
+        <span className="address__button address__warning" title="Not secure. This connection is not encrypted.">
+          <TriangleAlert size={13} data-testid="insecure-icon" />
+        </span>
       )}
       <button
         type="button"
@@ -116,7 +123,7 @@ export function Address({ windowId }: { windowId: string }) {
           {copied ? <Check size={13} /> : <Link2 size={14} />}
         </button>
       )}
-      {page && (
+      {page && !peek && (
         <button
           type="button"
           className={`address__button address__site${panelOpen ? ' is-open' : ''}`}

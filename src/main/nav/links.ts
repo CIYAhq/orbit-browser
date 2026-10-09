@@ -1,5 +1,5 @@
 import { app, type BrowserWindow, Menu, type MenuItemConstructorOptions, type WebContents, webContents } from 'electron'
-import { popupTitle } from '../../shared/nav'
+import { popupTitle, shownTabId } from '../../shared/nav'
 import type { TabId, WindowId } from '../../shared/state'
 import { sectionOf } from '../../shared/tree'
 import type { MainContext } from '../context'
@@ -266,7 +266,8 @@ export function registerLinks(ctx: MainContext, deps: LinksDeps): LinksTestHooks
   let lastBlockedMenu: { items: MenuItemConstructorOptions[] } | null = null
   commands.register('nav.blockedPopupsMenu', ({ x, y }, c) => {
     const windowId = c.windowId ?? windows.focusedWindowId()
-    const tabId = windowId ? activeTabOf(store.state, windowId) : null
+    // The page the address display shows: an open Peek's (PK-11), else the active tab's.
+    const tabId = windowId ? shownTabId(store.state, windowId) : null
     const tab = tabId ? store.state.tabs[tabId] : undefined
     if (!windowId || !tabId || !tab) return
     const host = hostOf(tabs.contents(tabId)?.getURL() || tab.url)

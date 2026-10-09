@@ -2,13 +2,12 @@ import { join } from 'node:path'
 import { app, Menu, type MenuItemConstructorOptions, nativeImage } from 'electron'
 import { ACTIONS_BY_ID, formatAccelerator, shortcutsFor } from '../../shared/actions'
 import type { HistoryEntryInfo, NavButton, NavDirection } from '../../shared/commands/nav'
-import { historyEntryLabel, historyMenuIndexes } from '../../shared/nav'
+import { historyEntryLabel, historyMenuIndexes, shownTabId } from '../../shared/nav'
 import { isPrivateTab, isPrivateWindow } from '../../shared/private'
 import type { TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
 import type { TabOps } from '../tabs/ops'
-import { activeTabOf } from '../windows'
 import { type LinksTestHooks, registerLinks } from './links'
 import { openUrlInNewWindow } from './new-window'
 import { registerPageColor } from './page-color'
@@ -62,6 +61,9 @@ const isMac = process.platform === 'darwin'
 export function registerNav(ctx: MainContext, ops: TabOps): void {
   const { store, commands, actions, tabs, windows } = ctx
   const windowOf = (c: CallContext): WindowId | undefined => c.windowId ?? windows.focusedWindowId()
+  /** The tab the top row acts on: an open Peek's page (PK-11), else the active tab. */
+  const shownTab = (windowId: WindowId | undefined): TabId | null =>
+    windowId ? shownTabId(store.state, windowId) : null
 
   /** Keyboard focus goes to the page (after Reload, or a top-row button press), unless an overlay holds it. */
   const focusPage = (windowId: WindowId | undefined, tabId: TabId) => {
@@ -118,7 +120,7 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
 
   commands.register('nav.press', async ({ button, newTab = false, foreground = false }, c) => {
     const windowId = windowOf(c)
-    const tabId = ops.activeTab(windowId)
+    const tabId = shownTab(windowId)
     if (!windowId || !tabId) return null
     if (!newTab) {
       await go(tabId, button)
@@ -138,13 +140,13 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
   })
 
   commands.register('nav.history', ({ tabId, direction }, c) => {
-    const id = tabId ?? ops.activeTab(windowOf(c))
+    const id = tabId ?? shownTab(windowOf(c))
     return id ? historyEntries(id, direction) : []
   })
 
   commands.register('nav.goToIndex', ({ tabId, index, newTab = false }, c) => {
     const windowId = windowOf(c)
-    const id = tabId ?? ops.activeTab(windowId)
+    const id = tabId ?? shownTab(windowId)
     if (!id) return null
     if (newTab) return openEntryInNewTab(windowId, id, index, false)
     const contents = tabs.contents(id)
@@ -182,7 +184,7 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
 
   commands.register('nav.historyMenu', ({ direction, x, y, icons }, c) => {
     const windowId = windowOf(c)
-    const tabId = ops.activeTab(windowId)
+    const tabId = shownTab(windowId)
     closeMenu()
     if (!windowId || !tabId) return
     const entries = historyEntries(tabId, direction)
@@ -213,7 +215,7 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
 
   // The menu belongs to the tab it was opened for: switching tab closes it (NV-01).
   store.subscribe((next) => {
-    if (shown && activeTabOf(next, shown.windowId) !== shown.tabId) closeMenu()
+    if (shown && shownTabId(next, shown.windowId) !== shown.tabId) closeMenu()
   })
 
   // ---- Keys and mouse buttons ----

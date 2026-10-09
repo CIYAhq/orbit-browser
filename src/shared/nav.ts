@@ -3,6 +3,29 @@
  * main process, the shell renderer and unit tests.
  */
 
+import type { OrbitState, TabId, WindowId } from './state'
+
+/**
+ * The tab a window's top row and address display are about: an open Peek's page (PK-11: while a
+ * Peek shows, the address and the buttons are its page's), else the active tab (the focused pane
+ * in split view).
+ */
+export function shownTabId(state: OrbitState, windowId: WindowId): TabId | null {
+  const win = state.windows[windowId]
+  if (!win) return null
+  const overlay = win.overlay
+  const peek = overlay.kind === 'peek' && overlay.phase !== 'closing' ? overlay.tabId : null
+  if (peek && state.tabs[peek]) return peek
+  const id = win.activeTab[win.spaceId] ?? null
+  return id && state.tabs[id] ? id : null
+}
+
+/** True while a Peek shows over the window's page (PK-11). */
+export function peekShown(state: OrbitState, windowId: WindowId): boolean {
+  const overlay = state.windows[windowId]?.overlay
+  return overlay?.kind === 'peek' && overlay.phase !== 'closing' && !!state.tabs[overlay.tabId]
+}
+
 /** How the address display describes a page's connection (SB-04). */
 export type Connection =
   /** https: no icon (Orbit shows no padlock for secure sites). */

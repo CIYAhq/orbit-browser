@@ -17,6 +17,7 @@ import {
   X,
 } from 'lucide-react'
 import { type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { shownTabId } from '../../../../shared/nav'
 import {
   DEVICE_ASK,
   type DeviceKind,
@@ -27,7 +28,6 @@ import {
   siteLabel,
 } from '../../../../shared/site'
 import { invoke } from '../../api'
-import { activeTabId } from '../../selectors'
 import { useOrbit } from '../../store'
 import './prompt.css'
 
@@ -47,10 +47,10 @@ export const PERMISSION_ICON: Record<PermissionKind, LucideIcon> = {
 
 export const DEVICE_ICON: Record<DeviceKind, LucideIcon> = { serial: Cable, usb: Usb, hid: Gamepad2 }
 
-/** The permission prompt waiting on a window's active tab (NV-15), if any. */
+/** The permission prompt waiting on the tab a window's address display shows (NV-15), if any. */
 export function useActivePrompt(windowId: string): Prompt | undefined {
   return useOrbit((s) => {
-    const id = activeTabId(s, windowId)
+    const id = shownTabId(s, windowId)
     return id ? s.tabs[id]?.permissionPrompt : undefined
   })
 }

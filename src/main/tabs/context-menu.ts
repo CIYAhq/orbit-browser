@@ -11,6 +11,7 @@ import {
   searchLabel,
   writingDirectionItem,
 } from '../nav/page-menu'
+import { linkPeekMenuItems } from '../peek/menu'
 import { linkSplitMenuItem } from '../split/menu'
 
 /** Native right-click menu for web pages. */
@@ -24,6 +25,7 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
   if (params.linkURL) {
     items.push(
       { label: 'Open Link in New Tab', click: () => openInNewTab(params.linkURL, false) },
+      ...linkPeekMenuItems(ctx, tabId, params.linkURL),
       // A new pane beside the page's pane (SV-08).
       linkSplitMenuItem(ctx, tabId, params.linkURL),
       ...linkWindowItems(ctx, tabId, params.linkURL),

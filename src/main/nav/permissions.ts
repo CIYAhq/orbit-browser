@@ -8,6 +8,7 @@ import {
   type Rectangle,
   type WebContents,
 } from 'electron'
+import { peekShown } from '../../shared/nav'
 import {
   type DeviceKind,
   deviceKey,
@@ -574,9 +575,11 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
     const tabId = activeTabOf(state, windowId)
     const prompt = tabId ? state.tabs[tabId]?.permissionPrompt : undefined
     const page = tabId ? windows.tabViewBounds(tabId) : undefined
-    // The sidebar shows it (docked, or the floating card while that is out over the corner).
+    // The sidebar shows it (docked, or the floating card while that is out over the corner); a
+    // Peek covers the page and its page's own requests ask in a dialog.
     const inSidebar = win?.sidebar.visible || win?.sidebar.peeking
-    if (!win || !prompt || !page || inSidebar || windows.inHtmlFullscreen(windowId)) {
+    const covered = peekShown(state, windowId) || windows.inHtmlFullscreen(windowId)
+    if (!win || !prompt || !page || inSidebar || covered) {
       windows.hidePrompt(windowId)
       return
     }

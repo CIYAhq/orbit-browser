@@ -1,9 +1,9 @@
 import { ArrowLeft, ArrowRight, RotateCw, X } from 'lucide-react'
 import { type MouseEvent, type PointerEvent, useEffect, useRef } from 'react'
 import type { NavDirection } from '../../../../shared/commands/nav'
+import { shownTabId } from '../../../../shared/nav'
 import { sectionOf } from '../../../../shared/tree'
 import { invoke, isMac } from '../../api'
-import { activeTabId } from '../../selectors'
 import { useOrbitShallow } from '../../store'
 import { playPress } from './press'
 import { rasterizeSvgIcons } from './raster'
@@ -29,7 +29,8 @@ const newTabClick = (e: MouseEvent) => (isMac ? e.metaKey : e.ctrlKey)
 export function NavButtons({ windowId }: { windowId: string }) {
   // Only these four flags: title, favicon and progress updates don't re-render the buttons.
   const nav = useOrbitShallow((s): NavState => {
-    const id = activeTabId(s, windowId)
+    // An open Peek's page while one shows (PK-11), else the active tab.
+    const id = shownTabId(s, windowId)
     const tab = id ? s.tabs[id] : undefined
     if (!id || !tab) return { hasTab: false, back: false, forward: false, loading: false }
     // Back on a fresh tab opened from a link closes it and returns to its opener (TB-19).

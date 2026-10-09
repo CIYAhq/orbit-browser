@@ -69,6 +69,11 @@ export interface Tab {
   blockedPopups?: number
   /** Runtime-only: the permission prompt waiting for an answer on this tab (NV-15). */
   permissionPrompt?: PermissionPrompt
+  /**
+   * Set while the tab lives outside the sidebar: the page of a Peek card or of a Mini Window.
+   * Such a tab sits in no container (and is not persisted) until it is expanded or moved into a Space.
+   */
+  floating?: 'peek' | 'mini'
 }
 
 export interface Folder {
@@ -147,7 +152,21 @@ export type CommandBarMode = 'new-tab' | 'edit-url' | 'search-tabs'
 export type OverlayState =
   | { kind: 'none' }
   | { kind: 'commandbar'; mode: CommandBarMode; query: string; nonce: number }
-  | { kind: 'peek'; tabId: TabId; nonce: number }
+  | {
+      kind: 'peek'
+      tabId: TabId
+      nonce: number
+      /** The tab whose link opened the Peek (it stays selected underneath). */
+      sourceTabId?: TabId
+      /** Size of the page area the overlay covers while the Peek shows (the card is laid out in it). */
+      area?: { width: number; height: number }
+      /** Where the card grows from (the clicked link), in page-area coordinates. */
+      origin?: { x: number; y: number }
+      /** Set while the card animates out (closing) or into a tab or split pane (expanding). */
+      phase?: 'closing' | 'expanding' | 'splitting'
+      /** The page's background colour, for the card that fades out when the Peek closes. */
+      background?: string
+    }
   | { kind: 'panel'; panel: string; nonce: number; params?: Record<string, string | number | boolean> }
 
 export interface SidebarState {
@@ -197,8 +216,20 @@ export interface Settings {
   peekExternalLinks: boolean
   /** Auto picture-in-picture when leaving a tab that plays video. */
   autoPip: boolean
-  /** Links opened from other apps open in a Mini Window. */
+  /** Links opened from other apps open in a Mini Window (off: as tabs, MW-11). */
   miniWindowForExternalLinks: boolean
+  /** Shift-click opens any link in Peek (PK-03, PK-12). */
+  peekShiftClick: boolean
+  /** Where links from other apps open when not in a Mini Window: null = the most recent Space (ST-09). */
+  externalLinksSpace: SpaceId | null
+  /** Link routing rules (ST-09): a URL that matches opens as a tab in the rule's Space. */
+  linkRules: LinkRule[]
+  /** Close Mini Windows left alone this long, archiving their page. 0 = never (MW-09, ST-03). */
+  miniWindowArchiveAfterMs: number
+  /** Profile last chosen in a Mini Window, per site (MW-10). */
+  miniWindowProfiles: Record<string, ProfileId>
+  /** Size and position of the last Mini Window the user moved or resized (MW-04). */
+  miniWindowBounds?: { x: number; y: number; width: number; height: number }
   onboarded: boolean
   /** Command bar site searches (CB-11); edited in Settings (ST-06). */
   siteSearch: SiteSearchEngine[]
@@ -210,6 +241,13 @@ export interface Settings {
   countFavoritesInShortcuts: boolean
   /** ⌘9 selects the last tab (true) or the 9th item (false) (TB-04). */
   lastTabOnCmd9: boolean
+}
+
+/** "URL contains …" or "URL is exactly …" → a Space (ST-09 link routing). */
+export interface LinkRule {
+  match: 'contains' | 'exact'
+  value: string
+  spaceId: SpaceId
 }
 
 export interface ArchivedTab {
@@ -226,6 +264,8 @@ export interface ArchivedTab {
   reason: 'auto' | 'closed' | 'cleared'
   /** Section the tab left from (AR-01). */
   section?: 'today' | 'pinned'
+  /** Where the page was when it closed, when not in the sidebar (the Archive's "Mini Window" filter, AR-01). */
+  from?: 'mini' | 'peek'
 }
 
 export interface Download {

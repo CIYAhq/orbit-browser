@@ -307,6 +307,12 @@ function RowSlot({
 function onRowPointerDown(e: ReactPointerEvent<HTMLElement>, tabId: TabId) {
   if (e.button !== 0) return
   const sel = useSelection.getState()
+  if ((isMac ? e.metaKey : e.ctrlKey) && e.altKey && !e.shiftKey) {
+    // ⌘⌥-click opens the tab in a Mini Window (MW-07; owned by the peek lane).
+    e.preventDefault()
+    void invoke('mini.fromTab', { tabId })
+    return
+  }
   if ((isMac ? e.metaKey : e.ctrlKey) && !e.altKey) {
     // ⌘-click toggles a row in the multi-selection (TB-13).
     e.preventDefault()

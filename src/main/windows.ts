@@ -4,7 +4,16 @@ import { actionForInput, outsideTextActionFor } from '../shared/actions'
 import { createWindowState, DEFAULT_SIDEBAR_WIDTH } from '../shared/defaults'
 import { isPrivateSpace, PRIVATE_PALETTE } from '../shared/private'
 import type { Rect, RendererView } from '../shared/rpc'
-import type { ColorMode, OrbitState, SidebarState, SpaceId, TabId, WindowId, WindowState } from '../shared/state'
+import type {
+  ColorMode,
+  OrbitState,
+  OverlayState,
+  SidebarState,
+  SpaceId,
+  TabId,
+  WindowId,
+  WindowState,
+} from '../shared/state'
 import { paletteFor } from '../shared/theme'
 import { splitLeaves, splitOfTab } from '../shared/tree'
 import type { MainContext } from './context'
@@ -167,6 +176,7 @@ export class WindowManager {
   private layoutListeners: ((windowId: WindowId) => void)[] = []
   /** Tabs whose page closed its own web contents (window.close()): not reopened until selected again. */
   private selfClosed = new Set<TabId>()
+  private floatingOwners: ((tabId: TabId) => WindowId | undefined)[] = []
   /** Main window that most recently had focus (fallback when no window has focus). */
   private lastFocused: WindowId | undefined
   /** The last main window, closed while the app keeps running (macOS) or is about to quit: its state is kept. */
@@ -211,7 +221,7 @@ export class WindowManager {
 
   /** The window a tab's view is currently attached to. */
   windowOfTab(tabId: TabId): WindowId | undefined {
-    return this.attached.get(tabId)?.windowId
+    return this.attached.get(tabId)?.windowId ?? this.floatingWindowOf(tabId)
   }
 
   /** The Orbit window a web contents belongs to (UI renderer or attached tab). */
@@ -220,7 +230,24 @@ export class WindowManager {
     if (ui) return ui
     const tabId = this.ctx.tabs.tabIdFor(contents)
     const entry = tabId ? this.attached.get(tabId) : undefined
-    return entry && entry.contentsId === contents.id ? entry.windowId : undefined
+    if (entry) return entry.contentsId === contents.id ? entry.windowId : undefined
+    return tabId ? this.floatingWindowOf(tabId) : undefined
+  }
+
+  /**
+   * Features that place a tab's view themselves (a Peek card, a Mini Window) say which window
+   * holds it, so shortcuts and menus in that page act on the right window.
+   */
+  addFloatingOwner(owner: (tabId: TabId) => WindowId | undefined): void {
+    this.floatingOwners.push(owner)
+  }
+
+  private floatingWindowOf(tabId: TabId): WindowId | undefined {
+    for (const owner of this.floatingOwners) {
+      const windowId = owner(tabId)
+      if (windowId) return windowId
+    }
+    return undefined
   }
 
   /**
@@ -589,6 +616,8 @@ export class WindowManager {
     rec.visible = wanted
     if (panes.length === 1) rec.lastSingleRect = panes[0]?.rect
     if (rec.htmlFullscreen) this.layoutHtmlFullscreen(rec, wanted)
+    // A Peek's overlay covers the page area, which just moved or resized.
+    if (rec.overlayShown) this.fitOverlay(rec)
     this.focusIfNewlyShown(rec, shownBefore)
     for (const listener of this.layoutListeners) listener(windowId)
   }
@@ -705,6 +734,19 @@ export class WindowManager {
     const active = activeTabOf(this.ctx.store.state, rec.id)
     if (!active || !rec.visible.has(active) || shownBefore.has(active)) return
     if (!rec.overlayShown && rec.win.isFocused()) this.liveContents(active)?.focus()
+  }
+
+  /** The page area: the bounding box of the window's page panes (window coordinates, DIP). */
+  pageArea(windowId: WindowId): Rect | undefined {
+    const rec = this.records.get(windowId)
+    if (!rec || rec.win.isDestroyed()) return undefined
+    const rects = rec.panes.length > 0 ? rec.panes.map((p) => p.rect) : rec.lastSingleRect ? [rec.lastSingleRect] : []
+    if (rects.length === 0) return undefined
+    const x = Math.min(...rects.map((r) => r.x))
+    const y = Math.min(...rects.map((r) => r.y))
+    const right = Math.max(...rects.map((r) => r.x + r.width))
+    const bottom = Math.max(...rects.map((r) => r.y + r.height))
+    return roundRect({ x, y, width: right - x, height: bottom - y })
   }
 
   /**
@@ -975,8 +1017,12 @@ export class WindowManager {
         continue
       }
       if (now.overlay !== before?.overlay) {
-        if (now.overlay.kind === 'none') this.hideOverlay(rec)
-        else this.showOverlay(rec)
+        // A Peek has played its own close by now (or was dismissed outright): its layer goes at
+        // once so the page takes clicks again (FL-19). Other overlays linger to animate out.
+        if (now.overlay.kind === 'none') this.hideOverlay(rec, before?.overlay.kind === 'peek')
+        else if (!rec.overlayShown || overlayKey(now.overlay) !== overlayKey(before?.overlay)) this.showOverlay(rec)
+        // The same overlay changed (e.g. a Peek's phase or area): keep its place and focus.
+        else this.fitOverlay(rec)
       }
       if (now.sidebar !== before?.sidebar) this.onSidebar(rec, now.sidebar, before?.sidebar)
       const tabNow = activeTabOf(next, rec.id)
@@ -1229,7 +1275,7 @@ export class WindowManager {
     overlay.webContents.focus()
   }
 
-  private hideOverlay(rec: WindowRecord): void {
+  private hideOverlay(rec: WindowRecord, immediately = false): void {
     if (!rec.overlayShown || !rec.overlay) return
     rec.overlayShown = false
     // Focus returns to the page at once (or when the window is next focused); the view stays up
@@ -1238,6 +1284,10 @@ export class WindowManager {
     else rec.refocusPage = true
     const overlay = rec.overlay
     clearTimeout(rec.overlayHideTimer)
+    if (immediately) {
+      overlay.setVisible(false)
+      return
+    }
     rec.overlayHideTimer = setTimeout(() => {
       rec.overlayHideTimer = undefined
       if (rec.overlayShown || rec.win.isDestroyed() || overlay.webContents.isDestroyed()) return
@@ -1251,7 +1301,9 @@ export class WindowManager {
 
   private fitOverlay(rec: WindowRecord): void {
     const [width = 0, height = 0] = rec.win.getContentSize()
-    rec.overlay?.setBounds({ x: 0, y: 0, width, height })
+    // A Peek's overlay covers only the page area, so the sidebar stays usable beside it (PK-13).
+    const area = this.ctx.store.state.windows[rec.id]?.overlay.kind === 'peek' ? this.pageArea(rec.id) : undefined
+    rec.overlay?.setBounds(area ?? { x: 0, y: 0, width, height })
   }
 
   /** The native background shows at the window's edges while resizing: keep it the frame's colour. */
@@ -1297,6 +1349,11 @@ export function windowBackground(state: OrbitState, spaceId: SpaceId | undefined
   if (isPrivateSpace(state, space.id)) return PRIVATE_PALETTE.windowBackground
   // The theme source follows settings.appearance, so this is the global light/dark choice.
   return paletteFor(space.theme, nativeTheme.shouldUseDarkColors).windowBackground
+}
+
+/** Identifies one opening of an overlay (its kind and nonce): updates to it keep the same key. */
+function overlayKey(overlay: OverlayState | undefined): string {
+  return overlay && overlay.kind !== 'none' ? `${overlay.kind}:${overlay.nonce}` : 'none'
 }
 
 function roundRect(r: Rect): Rect {
