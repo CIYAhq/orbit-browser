@@ -403,7 +403,10 @@ export function siblingOf(layout: SplitLayout, tabId: TabId): TabId | undefined 
  * Where a pane sits relative to a neighbour, so it can be put back after closing:
  * e.g. { target: 'b', side: 'left' } means "left of b". Prefers the next sibling.
  */
-export function anchorOf(layout: SplitLayout, tabId: TabId): { target: TabId; side: PaneSide } | undefined {
+export function anchorOf(
+  layout: SplitLayout,
+  tabId: TabId,
+): { target: TabId; targets: TabId[]; side: PaneSide } | undefined {
   const path = leafPath(layout, tabId)
   if (!path || path.length === 0) return undefined
   const parent = nodeAt(layout, path.slice(0, -1))
@@ -411,10 +414,64 @@ export function anchorOf(layout: SplitLayout, tabId: TabId): { target: TabId; si
   if (!parent || parent.type === 'leaf') return undefined
   const row = parent.type === 'row'
   const next = parent.children[index + 1]
-  if (next) return { target: layoutLeaves(next)[0] as TabId, side: row ? 'left' : 'top' }
+  if (next) {
+    const targets = layoutLeaves(next)
+    return { target: targets[0] as TabId, targets, side: row ? 'left' : 'top' }
+  }
   const prev = parent.children[index - 1]
-  if (prev) return { target: layoutLeaves(prev).at(-1) as TabId, side: row ? 'right' : 'bottom' }
+  if (prev) {
+    const targets = layoutLeaves(prev)
+    return { target: targets.at(-1) as TabId, targets, side: row ? 'right' : 'bottom' }
+  }
   return undefined
+}
+
+/** Path of the node whose leaves are exactly `tabIds` (in any order). */
+function pathOfGroup(layout: SplitLayout, tabIds: TabId[], path: LayoutPath = []): LayoutPath | undefined {
+  const leaves = layoutLeaves(layout)
+  if (leaves.length === tabIds.length && leaves.every((id) => tabIds.includes(id))) return path
+  if (layout.type === 'leaf') return undefined
+  for (let i = 0; i < layout.children.length; i++) {
+    const found = pathOfGroup(layout.children[i] as SplitLayout, tabIds, [...path, i])
+    if (found) return found
+  }
+  return undefined
+}
+
+/**
+ * Puts `newTabId` on `side` of the group of panes `targets` (e.g. the neighbour a closed pane sat
+ * beside), so reopening restores the old arrangement. Falls back to the first target's pane.
+ */
+export function insertBeside(layout: SplitLayout, targets: TabId[], newTabId: TabId, side: PaneSide): SplitLayout {
+  const leaves = layoutLeaves(layout)
+  if (leaves.includes(newTabId) || leaves.length >= MAX_PANES) return layout
+  const path = targets.length > 0 ? pathOfGroup(layout, targets) : undefined
+  if (!path) return targets[0] ? insertPane(layout, targets[0], newTabId, side) : layout
+  const axis = axisOfSide(side)
+  const before = sideIsBefore(side)
+  const parent = path.length > 0 ? nodeAt(layout, path.slice(0, -1)) : undefined
+  const index = path[path.length - 1]
+  let next: SplitLayout | null
+  if (parent && parent.type === axis && index !== undefined) {
+    next = replaceAt(layout, path.slice(0, -1), (node) => {
+      const c = node as Container
+      const half = (c.sizes[index] ?? 0) / 2
+      const children = [...c.children]
+      const sizes = [...c.sizes]
+      sizes[index] = half
+      const at = before ? index : index + 1
+      children.splice(at, 0, leaf(newTabId))
+      sizes.splice(at, 0, half)
+      return { ...c, children, sizes }
+    })
+  } else {
+    next = replaceAt(layout, path, (node) => ({
+      type: axis,
+      children: before ? [leaf(newTabId), node] : [node, leaf(newTabId)],
+      sizes: [0.5, 0.5],
+    }))
+  }
+  return normalizeLayout(next) ?? layout
 }
 
 /**

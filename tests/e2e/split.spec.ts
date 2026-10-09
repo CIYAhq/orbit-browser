@@ -592,6 +592,8 @@ async function showStrip(app: ElectronApplication, tabId: string): Promise<Box> 
 async function dragPaneTo(o: Orbit, tabId: string, to: { x: number; y: number }, check?: () => Promise<void>) {
   const bounds = await showStrip(o.app, tabId)
   const strip = await viewPage(o.app, 'strip' as 'overlay')
+  // The strip takes clicks again once it has re-rendered out of a previous fade-out.
+  await expect(strip.locator('[data-testid="pane-strip"]:not(.is-leaving)')).toBeVisible()
   const grip = await strip.getByTestId('pane-strip-grip').boundingBox()
   if (!grip) throw new Error('no grip')
   const sx = grip.x + grip.width / 2
@@ -806,4 +808,20 @@ test('[SV-02][SV-23] a split made from a Favorite stays in the Favorites grid', 
   const tile = orbit.shell.locator('[data-testid="favorite-tile"][data-split-id]')
   await expect(tile).toHaveCount(1)
   await expect(orbit.shell.getByTestId('split-pane')).toHaveCount(2)
+})
+
+test('[SV-17] a reopened pane returns to its exact spot beside a stacked pair', async () => {
+  const b = await openTab(orbit.app, 'StackTop')
+  const a = await openTab(orbit.app, 'LeftTall')
+  const splitId = (await run(orbit.app, 'split.create', { tabIds: [a, b] })) as string
+  const c = await openTab(orbit.app, 'StackBottom')
+  await run(orbit.app, 'split.addTab', { tabId: c, target: b, side: 'bottom' })
+  await expectViewsOverPanes(orbit, [a, b, c])
+  const before = (await state(orbit.app)).splits[splitId]?.layout
+  await run(orbit.app, 'split.closePane', { tabId: a })
+  await expect(orbit.shell.getByTestId('split-segment')).toHaveCount(2)
+  await action(orbit.app, 'tab.reopenClosed')
+  await expect(orbit.shell.getByTestId('split-segment')).toHaveCount(3)
+  expect(JSON.stringify((await state(orbit.app)).splits[splitId]?.layout)).toBe(JSON.stringify(before))
+  await expectViewsOverPanes(orbit, [a, b, c])
 })

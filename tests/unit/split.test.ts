@@ -17,6 +17,7 @@ import {
   dropTargetAt,
   equalizeLayout,
   flipLayout,
+  insertBeside,
   insertPane,
   layoutBoxes,
   layoutLeaves,
@@ -147,11 +148,18 @@ describe('split layout tree', () => {
 
   it('remembers where a pane sat so it can be put back', () => {
     const layout = row([L('a'), col([L('b'), L('c')])])
-    expect(anchorOf(layout, 'a')).toEqual({ target: 'b', side: 'left' })
-    expect(anchorOf(layout, 'c')).toEqual({ target: 'b', side: 'bottom' })
-    expect(anchorOf(layout, 'b')).toEqual({ target: 'c', side: 'top' })
+    expect(anchorOf(layout, 'a')).toEqual({ target: 'b', targets: ['b', 'c'], side: 'left' })
+    expect(anchorOf(layout, 'c')).toEqual({ target: 'b', targets: ['b'], side: 'bottom' })
+    expect(anchorOf(layout, 'b')).toEqual({ target: 'c', targets: ['c'], side: 'top' })
     const back = insertPane(removePane(layout, 'c') as SplitLayout, 'b', 'c', 'bottom')
     expect(back).toEqual(layout)
+    // Beside the whole group it sat next to: row[a, column[b, c]] comes back exactly.
+    const withoutA = removePane(layout, 'a') as SplitLayout
+    expect(insertBeside(withoutA, ['b', 'c'], 'a', 'left')).toEqual(row([L('a'), col([L('b'), L('c')])], [0.5, 0.5]))
+    const four = row([L('a'), col([L('b'), L('c')]), L('d')])
+    const reopened = insertBeside(removePane(four, 'a') as SplitLayout, ['b', 'c'], 'a', 'left')
+    expect(layoutLeaves(reopened)).toEqual(['a', 'b', 'c', 'd'])
+    expect(reopened.type === 'row' && reopened.children.length).toBe(3)
   })
 
   it('[SV-05] splits a sidebar row drop into left/right halves, leaving edges for reordering', () => {

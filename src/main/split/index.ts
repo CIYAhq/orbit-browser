@@ -4,6 +4,7 @@ import {
   anchorOf,
   equalizeLayout,
   flipLayout,
+  insertBeside,
   layoutLeaves,
   MAX_PANES,
   neighborPane,
@@ -376,7 +377,7 @@ export function registerSplit(ctx: MainContext): void {
   })
 
   /** Closed panes and the neighbour they sat beside (most recent last). */
-  const closedPanes = new Map<TabId, { target: TabId; side: PaneSide }>()
+  const closedPanes = new Map<TabId, { target: TabId; targets: TabId[]; side: PaneSide }>()
   const rememberClosed = (layout: SplitLayout, tabId: TabId) => {
     const anchor = anchorOf(layout, tabId)
     if (!anchor) return
@@ -394,7 +395,19 @@ export function registerSplit(ctx: MainContext): void {
     if (!anchor || !tab || !target || splitOfTab(state, tabId) || tab.profileId !== target.profileId) return
     if (leavesOf(state, splitOfTab(state, anchor.target)).length >= MAX_PANES) return
     updateMoving([tabId], (d) => {
-      addPaneInDraft(d, tabId, anchor.target, anchor.side)
+      const splitId = splitOfTab(d, anchor.target)
+      const split = splitId ? d.splits[splitId] : undefined
+      if (!splitId || !split) {
+        addPaneInDraft(d, tabId, anchor.target, anchor.side)
+        return
+      }
+      // Beside the same group of panes it sat next to, so the arrangement comes back as it was.
+      detachTab(d, tabId)
+      const current = d.splits[splitId]
+      if (!current) return
+      const targets = anchor.targets.filter((id) => d.tabs[id])
+      current.layout = insertBeside(current.layout, targets, tabId, anchor.side)
+      adoptPlacement(d, [tabId], locate(d, splitId)?.container)
     })
   }
 
