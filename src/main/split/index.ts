@@ -60,6 +60,9 @@ interface PaneSession {
   activeTabsAtClose?: Record<string, TabId | null>
 }
 
+/** How long an empty pane waits for the command bar's choice before it is removed. */
+const SETTLE_GRACE_MS = 120
+
 /** Split feature (main process). Owned by the split lane; see docs/ARCHITECTURE.md. */
 export function registerSplit(ctx: MainContext): void {
   const { store, commands, actions, windows } = ctx
@@ -322,7 +325,8 @@ export function registerSplit(ctx: MainContext): void {
         const chose =
           (tab && !isBlankPane(tab)) || activeTabOf(state, session.windowId) !== session.activeAtClose || !session.blank
         if (chose) settle(session.windowId)
-        else setTimeout(() => settle(session.windowId), 0)
+        // Nothing yet (Escape, click outside, or a choice still on its way): decide shortly.
+        else setTimeout(() => settle(session.windowId), SETTLE_GRACE_MS)
       })
     }
     for (const win of Object.values(next.windows)) {
