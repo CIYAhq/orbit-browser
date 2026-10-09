@@ -21,6 +21,11 @@ export interface PeekCommands {
    * the sidebar); a pinned tab or Favorite stays and opens its page there. Returns the window.
    */
   'mini.fromTab': { args: { tabId: TabId }; result: WindowId | null }
+  /**
+   * Readies a hidden blank Mini Window, so the next one shows a working lookup bar at once
+   * (MW-15). Orbit does this a moment after launch; the e2e harness asks for it instead.
+   */
+  'mini.prepare': { args: Record<string, never>; result: void }
   /** Loads what was typed in a Mini Window's lookup bar or address field (MW-06). */
   'mini.navigate': { args: { input: string }; result: void }
   /** Moves the Mini Window's page into a Space (most recent by default) and closes it (MW-05). */

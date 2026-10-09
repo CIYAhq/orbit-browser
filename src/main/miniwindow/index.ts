@@ -771,7 +771,10 @@ export function registerMiniWindow(ctx: MainContext): void {
     quitting = true
     dropSpare()
   })
-  spareSoon(1500)
+  // A spare a moment after launch. Under the e2e harness only Mini Window tests ask for one
+  // (mini.prepare): an extra renderer starting mid-test would skew every other test's timing.
+  if (!ctx.e2e) spareSoon(1500)
+  commands.register('mini.prepare', () => ensureSpare())
 
   // ⌘⌥N from anywhere (MW-06), where the system allows a global shortcut (MW-14).
   const def = ACTIONS_BY_ID['window.newMini']

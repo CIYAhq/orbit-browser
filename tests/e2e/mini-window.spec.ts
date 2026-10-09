@@ -183,8 +183,15 @@ test('[MW-05] ⌘O moves the live page into the most recent Space and closes the
 })
 
 test('[MW-06][MW-15] ⌘⌥N opens a blank Mini Window whose lookup bar takes keys at once', async () => {
-  // Let the window be warm, as it is a moment after launch.
-  await new Promise((r) => setTimeout(r, 2000))
+  // Warm, as Orbit is a moment after launch: a hidden blank window with its lookup bar ready.
+  await run(orbit.app, 'mini.prepare', {})
+  await expect
+    .poll(() =>
+      orbit.app.evaluate(() =>
+        (globalThis as unknown as OrbitGlobal).__orbit.ctx.perf.marks.some((m) => m.name === 'mini:lookup-ready'),
+      ),
+    )
+    .toBe(true)
   await orbit.shell.keyboard.press(isMacKeys('Meta+Alt+N', 'Control+Alt+N'))
   await expect.poll(async () => (await minis(orbit.app)).length).toBe(1)
   const [mini] = await minis(orbit.app)
