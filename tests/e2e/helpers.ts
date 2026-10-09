@@ -22,10 +22,17 @@ export interface Orbit {
   userData: string
 }
 
+/**
+ * Tests stay offline. Orbit runs behind a dead local proxy, which loopback (where the fixture pages
+ * are served) bypasses, so a search or a link to a real site gets its URL but loads nothing.
+ */
+const DEAD_PROXY = '127.0.0.1:9'
+const OFFLINE = `--proxy-server=http://${DEAD_PROXY}`
+
 /** Launches the built app (out/) with an isolated profile directory. */
 export async function launchOrbit(opts: { userData?: string; env?: Record<string, string> } = {}): Promise<Orbit> {
   const userData = opts.userData ?? mkdtempSync(join(tmpdir(), 'orbit-e2e-'))
-  const args = [resolve('out/main/index.js')]
+  const args = [OFFLINE, resolve('out/main/index.js')]
   // Linux CI/dev boxes often lack the setuid sandbox helper; macOS runs fully sandboxed.
   if (process.platform === 'linux') args.unshift('--no-sandbox')
   const app = await electron.launch({
@@ -35,7 +42,29 @@ export async function launchOrbit(opts: { userData?: string; env?: Record<string
   evaluateBetweenTasks(app)
   const shell = await viewPage(app, 'shell')
   await shell.getByTestId('sidebar').waitFor()
+  await waitOffline(app)
   return { app, shell, userData }
+}
+
+/**
+ * Waits until every profile's session sends web requests to the dead proxy. A session picks up the
+ * command line's proxy a moment after it's made: here, about 50 ms after the sidebar shows.
+ */
+async function waitOffline(app: ElectronApplication): Promise<void> {
+  const deadline = Date.now() + 10_000
+  for (;;) {
+    const routes = await app.evaluate(async ({ session }) => {
+      const { profiles } = (globalThis as unknown as { __orbit: { state: () => OrbitState } }).__orbit.state()
+      const sessions = [
+        session.defaultSession,
+        ...Object.values(profiles).map((p) => session.fromPartition(p.partition)),
+      ]
+      return Promise.all(sessions.map((s) => s.resolveProxy('https://example.com/')))
+    })
+    if (routes.every((r) => r === `PROXY ${DEAD_PROXY}`)) return
+    if (Date.now() > deadline) throw new Error(`Orbit would reach the network: ${routes.join(', ')}`)
+    await new Promise((r) => setTimeout(r, 20))
+  }
 }
 
 /**
