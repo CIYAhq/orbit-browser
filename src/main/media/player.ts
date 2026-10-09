@@ -38,6 +38,7 @@ import {
   pipAspect,
   pipDimensions,
   resizeWithResistance,
+  roundedShape,
   STANDARD_CURVE,
   settleCorner,
   springStep,
@@ -52,10 +53,15 @@ const isMac = process.platform === 'darwin'
 /** Corner radius of the player where Orbit rounds it itself (macOS rounds its windows natively). */
 const RADIUS = 10
 /**
- * The borrowed view is this much taller than the page area it came from: when the window manager
- * puts it back, the page sees its size change and puts the video back before drawing (agent.ts).
+ * The borrowed view is this much taller than the page area it came from, so the page can tell
+ * where it is from its size alone (agent.ts): at the player's size the video lifts, at any other
+ * size (back in its window) it goes back into the page, each before the frame is drawn. 24 DIP is
+ * still more than the page's 2 px tolerance at 500% page zoom.
  */
-const EXTRA_HEIGHT = 8
+const EXTRA_HEIGHT = 24
+const PLAYER_BACKGROUND = '#000000'
+/** Tab views' own background (tabs/runtime.ts), given back when the view leaves the player. */
+const TAB_BACKGROUND = '#ffffffff'
 /** Enter motion (MD-16: about 300 ms, smooth, no overshoot; feel.md "standard" curve). */
 const ENTER_MS = 300
 /** Exits are quicker than entrances (FL-01: about 0.7×). */
@@ -137,6 +143,8 @@ export interface PlayerInfo {
 export class PipPlayer {
   private win: BaseWindow | undefined
   private ui: WebContentsView | undefined
+  /** The window has its rounded shape for its current size (not macOS). */
+  private shaped = false
   private session: Session | undefined
   /** Increments on every open/close: a slow open that lost the race gives up. */
   private seq = 0
@@ -162,10 +170,7 @@ export class PipPlayer {
     app.on('browser-window-created', (_e, win) => {
       win.once('closed', () => setImmediate(() => this.onWindowClosed()))
     })
-    // Orbit's windows coming forward stay below the player.
-    app.on('browser-window-focus', () => {
-      if (this.session && this.win && !this.win.isDestroyed() && this.win.isVisible()) this.win.moveTop()
-    })
+
     screen.on('display-removed', () => this.refit())
     screen.on('display-metrics-changed', () => this.refit())
   }
@@ -276,7 +281,9 @@ export class PipPlayer {
     this.ctx.windows.detachView(tabId, view)
     win.contentView.addChildView(view, 0)
     view.setBounds({ x: 0, y: 0, ...viewSize })
-    view.setBorderRadius(isMac ? 0 : RADIUS)
+    view.setBorderRadius(0)
+    // Until the page draws at its new size, the view shows its background: black, like the video.
+    view.setBackgroundColor(PLAYER_BACKGROUND)
     view.setVisible(true)
     ui.setVisible(true)
 
@@ -297,8 +304,6 @@ export class PipPlayer {
     }
     this.place(start)
     if (!win.isVisible()) win.showInactive()
-    // Above other windows even where the window manager ignores "always on top".
-    win.moveTop()
     this.openMs = Date.now() - began
     this.lastEnter = from ? { from: start, to: target } : null
     if (from) this.animateTimed(start, target, ms)
@@ -332,6 +337,9 @@ export class PipPlayer {
     const release = () => {
       if (win && !win.isDestroyed() && win.contentView.children.includes(s.view))
         win.contentView.removeChildView(s.view)
+      try {
+        s.view.setBackgroundColor(TAB_BACKGROUND)
+      } catch {}
       if (!s.contents.isDestroyed()) void this.host.call(s.tabId, 'drop')
     }
     const fade = isMac && richMotion() && (why === 'close' || why === 'off' || why === 'ended')
@@ -515,6 +523,11 @@ export class PipPlayer {
     const before = win.getBounds()
     win.setBounds(r)
     this.ui?.setBounds({ x: 0, y: 0, width: r.width, height: r.height })
+    // macOS rounds the window itself; elsewhere the window takes a rounded shape (MD-03).
+    if (!isMac && (before.width !== r.width || before.height !== r.height || !this.shaped)) {
+      win.setShape(roundedShape(r.width, r.height, RADIUS))
+      this.shaped = true
+    }
     if (resizeVideo && s && (before.width !== r.width || before.height !== r.height)) {
       void this.host.call(s.tabId, 'size', r.width / s.zoom, r.height / s.zoom, 0)
     }
@@ -635,8 +648,7 @@ export class PipPlayer {
       skipTaskbar: true,
       hasShadow: true,
       roundedCorners: true,
-      transparent: !isMac,
-      backgroundColor: isMac ? '#000000' : '#00000000',
+      backgroundColor: PLAYER_BACKGROUND,
     })
     if (isMac) {
       win.setAlwaysOnTop(true, 'floating')
@@ -644,7 +656,6 @@ export class PipPlayer {
     }
     const ui = new WebContentsView({ webPreferences: uiWebPreferences(windowId, 'pip') })
     ui.setBackgroundColor('#00000000')
-    if (!isMac) ui.setBorderRadius(RADIUS)
     win.contentView.addChildView(ui)
     ui.setBounds({ x: 0, y: 0, width: 320, height: 180 })
     this.ctx.windows.registerUi(ui.webContents, windowId)
@@ -681,6 +692,7 @@ export class PipPlayer {
     })
     this.win = win
     this.ui = ui
+    this.shaped = false
     return { win, ui }
   }
 

@@ -384,27 +384,12 @@ export const AGENT_SOURCE = `(() => {
 
   // The video goes to the top layer at size 'from', then grows or shrinks to 'to' over ms
   // (the player window does the same, MD-16). arm: the page's size while it is in the player.
+  // Nothing changes on screen until the page has that size: the tab may still be drawn in its
+  // window for a frame or two after leaving it, and must look the same there.
   function liftVideo(o) {
     const v = lift ? lift.v : chosen
     if (!v || !v.isConnected) return false
-    if (!lift) {
-      lift = { v, w: o.from.w, h: o.from.h, ms: 0, scale: 1, tx: 0, ty: 0, popover: v.getAttribute('popover'), armW: 0, armH: 0 }
-      try {
-        lift.sheet = new CSSStyleSheet()
-        document.adoptedStyleSheets = [...document.adoptedStyleSheets, lift.sheet]
-      } catch {
-        lift.sheet = null
-        lift.style = document.createElement('style')
-        document.documentElement.appendChild(lift.style)
-      }
-      v.setAttribute(LIFT, '')
-      paint()
-      if (v.popover !== 'manual') v.popover = 'manual'
-      try {
-        if (!v.matches(':popover-open')) v.showPopover()
-      } catch {}
-      watchRemoval(v)
-    }
+    if (!lift) lift = { v, w: o.from.w, h: o.from.h, ms: 0, scale: 1, tx: 0, ty: 0, armW: 0, armH: 0, shown: false }
     if (o.arm) {
       lift.armW = o.arm.w
       lift.armH = o.arm.h
@@ -412,9 +397,10 @@ export const AGENT_SOURCE = `(() => {
     lift.w = o.from.w
     lift.h = o.from.h
     lift.ms = 0
+    if (!lift.shown && (!lift.armW || armed())) show()
     paint()
     if (o.ms > 0 && (o.to.w !== o.from.w || o.to.h !== o.from.h)) {
-      v.getBoundingClientRect()
+      if (lift.shown) v.getBoundingClientRect()
       lift.ms = o.ms
     }
     lift.w = o.to.w
@@ -422,6 +408,30 @@ export const AGENT_SOURCE = `(() => {
     paint()
     bump(true)
     return true
+  }
+
+  const armed = () => Math.abs(innerWidth - lift.armW) <= 2 && Math.abs(innerHeight - lift.armH) <= 2
+
+  function show() {
+    const l = lift
+    const v = l.v
+    l.shown = true
+    l.popover = v.getAttribute('popover')
+    try {
+      l.sheet = new CSSStyleSheet()
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, l.sheet]
+    } catch {
+      l.sheet = null
+      l.style = document.createElement('style')
+      document.documentElement.appendChild(l.style)
+    }
+    v.setAttribute(LIFT, '')
+    paint()
+    if (v.popover !== 'manual') v.popover = 'manual'
+    try {
+      if (!v.matches(':popover-open')) v.showPopover()
+    } catch {}
+    watchRemoval(v)
   }
 
   // The player was resized (MD-06): the video follows at once; a zoomed crop keeps its place.
@@ -467,6 +477,10 @@ export const AGENT_SOURCE = `(() => {
     chosen = null
     if (removal) removal.disconnect()
     removal = null
+    if (!l.shown) {
+      bump(true)
+      return true
+    }
     try {
       if (l.v.matches(':popover-open')) l.v.hidePopover()
     } catch {}
@@ -488,12 +502,13 @@ export const AGENT_SOURCE = `(() => {
     removal.observe(document, { childList: true, subtree: true })
   }
 
-  // Back on screen: the view's size changes from its size in the player, and the video goes back
-  // into the page before that frame is drawn (MD-01: no blank frame).
+  // In the player, the page takes the size it was armed with and the video lifts in that frame.
+  // Back on screen, the size changes again and the video goes back into the page before that
+  // frame is drawn (MD-01: no blank frame).
   window.addEventListener('resize', () => {
     if (!lift || !lift.armW) return
-    if (Math.abs(innerWidth - lift.armW) <= 1 && Math.abs(innerHeight - lift.armH) <= 1) return
-    drop()
+    if (!armed()) drop()
+    else if (!lift.shown) show()
   }, true)
 
   // ---- Controls ----

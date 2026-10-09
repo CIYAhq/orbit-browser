@@ -208,3 +208,24 @@ export function springStep(
   }
   return { offset: x, velocity: v }
 }
+
+/**
+ * The player's rounded outline as rectangles, for a window shape where the system can't round a
+ * window's corners (MD-03 on Windows and Linux): one-pixel rows for each corner's curve, then the
+ * middle. Rows of the same width are merged.
+ */
+export function roundedShape(width: number, height: number, radius: number): Rect[] {
+  const w = Math.max(1, Math.round(width))
+  const h = Math.max(1, Math.round(height))
+  const r = Math.max(0, Math.min(Math.round(radius), Math.floor(w / 2), Math.floor(h / 2)))
+  const top: Rect[] = []
+  for (let y = 0; y < r; y++) {
+    const dy = r - y - 0.5
+    const inset = Math.round(r - Math.sqrt(r * r - dy * dy))
+    const last = top[top.length - 1]
+    if (last && last.x === inset) last.height++
+    else top.push({ x: inset, y, width: w - 2 * inset, height: 1 })
+  }
+  const bottom = top.map((row) => ({ ...row, y: h - row.y - row.height })).reverse()
+  return [...top, { x: 0, y: r, width: w, height: h - 2 * r }, ...bottom]
+}
