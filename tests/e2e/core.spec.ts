@@ -502,15 +502,16 @@ test('[NV-20] leaving HTML fullscreen right after entering does not leave the pa
 })
 
 test('[TB-19] a tab view that replaces another stays below the open command bar (review R1)', async () => {
-  const opener = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/Alpha') })) as string
-  await tabPage(orbit.app, '/page/Alpha')
+  await run(orbit.app, 'tabs.create', { url: fx.url('/page/Alpha') })
+  const alpha = await tabPage(orbit.app, '/page/Alpha')
   await action(orbit.app, 'tab.new')
   const overlay = await viewPage(orbit.app, 'overlay')
   await expect(overlay.getByTestId('command-input')).toBeFocused()
   // The page opens a tab while the command bar is up: its first view is replaced by the real one.
-  await inPage(orbit.app, opener, `window.open(${JSON.stringify(fx.url('/page/Ext'))}); 'ok'`)
+  // A real click, because pages may only open tabs on a user gesture (review M6).
+  await alpha.click('#external')
   await expect.poll(async () => Object.keys((await state(orbit.app)).tabs).length).toBe(2)
-  await expect.poll(async () => (await zOrder(orbit.app)).filter((l) => l === '/page/Ext').length).toBe(1)
+  await expect.poll(async () => (await zOrder(orbit.app)).filter((l) => l === '/page/External').length).toBe(1)
   await expect.poll(async () => (await zOrder(orbit.app)).at(-1)).toBe('OVERLAY')
   expect(await overlay.getByTestId('command-input').isVisible()).toBe(true)
 })
