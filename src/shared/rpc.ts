@@ -14,7 +14,7 @@ import type { CoreCommands, CoreEvents } from './commands/core'
 import type { DownloadCommands } from './commands/downloads'
 import type { ExtensionCommands } from './commands/extensions'
 import type { ImportCommands } from './commands/import'
-import type { PeekCommands } from './commands/peek'
+import type { PeekCommands, PeekEvents } from './commands/peek'
 import type { SettingsCommands } from './commands/settings'
 import type { SpaceCommands } from './commands/spaces'
 import type { SplitCommands } from './commands/split'
@@ -35,7 +35,7 @@ export interface OrbitCommands
     DownloadCommands,
     ImportCommands {}
 
-export interface OrbitEvents extends CoreEvents {}
+export interface OrbitEvents extends CoreEvents, PeekEvents {}
 
 export type CommandName = keyof OrbitCommands
 export type CommandArgs<K extends CommandName> = OrbitCommands[K] extends { args: infer A } ? A : never

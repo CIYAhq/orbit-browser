@@ -3,7 +3,7 @@ import { BrowserWindow, nativeTheme, screen, type WebContents, WebContentsView, 
 import { actionForInput } from '../shared/actions'
 import { createWindowState } from '../shared/defaults'
 import type { Rect, RendererView } from '../shared/rpc'
-import type { ColorMode, OrbitState, SpaceId, TabId, WindowId, WindowState } from '../shared/state'
+import type { ColorMode, OrbitState, OverlayState, SpaceId, TabId, WindowId, WindowState } from '../shared/state'
 import { paletteFor } from '../shared/theme'
 import { splitLeaves, splitOfTab } from '../shared/tree'
 import type { MainContext } from './context'
@@ -103,6 +103,7 @@ export class WindowManager {
   private attached = new Map<TabId, Attachment>()
   /** Tabs whose page closed its own web contents (window.close()): not reopened until selected again. */
   private selfClosed = new Set<TabId>()
+  private floatingOwners: ((tabId: TabId) => WindowId | undefined)[] = []
   /** Main window that most recently had focus (fallback when no window has focus). */
   private lastFocused: WindowId | undefined
   /** The last main window, closed while the app keeps running (macOS) or is about to quit: its state is kept. */
@@ -146,7 +147,7 @@ export class WindowManager {
 
   /** The window a tab's view is currently attached to. */
   windowOfTab(tabId: TabId): WindowId | undefined {
-    return this.attached.get(tabId)?.windowId
+    return this.attached.get(tabId)?.windowId ?? this.floatingWindowOf(tabId)
   }
 
   /** The Orbit window a web contents belongs to (UI renderer or attached tab). */
@@ -155,7 +156,24 @@ export class WindowManager {
     if (ui) return ui
     const tabId = this.ctx.tabs.tabIdFor(contents)
     const entry = tabId ? this.attached.get(tabId) : undefined
-    return entry && entry.contentsId === contents.id ? entry.windowId : undefined
+    if (entry) return entry.contentsId === contents.id ? entry.windowId : undefined
+    return tabId ? this.floatingWindowOf(tabId) : undefined
+  }
+
+  /**
+   * Features that place a tab's view themselves (a Peek card, a Mini Window) say which window
+   * holds it, so shortcuts and menus in that page act on the right window.
+   */
+  addFloatingOwner(owner: (tabId: TabId) => WindowId | undefined): void {
+    this.floatingOwners.push(owner)
+  }
+
+  private floatingWindowOf(tabId: TabId): WindowId | undefined {
+    for (const owner of this.floatingOwners) {
+      const windowId = owner(tabId)
+      if (windowId) return windowId
+    }
+    return undefined
   }
 
   /**
@@ -409,6 +427,21 @@ export class WindowManager {
     rec.visible = wanted
     if (panes.length === 1) rec.lastSingleRect = panes[0]?.rect
     if (rec.htmlFullscreen) this.layoutHtmlFullscreen(rec, wanted)
+    // A Peek's overlay covers the page area, which just moved or resized.
+    if (rec.overlayShown) this.fitOverlay(rec)
+  }
+
+  /** The page area: the bounding box of the window's page panes (window coordinates, DIP). */
+  pageArea(windowId: WindowId): Rect | undefined {
+    const rec = this.records.get(windowId)
+    if (!rec || rec.win.isDestroyed()) return undefined
+    const rects = rec.panes.length > 0 ? rec.panes.map((p) => p.rect) : rec.lastSingleRect ? [rec.lastSingleRect] : []
+    if (rects.length === 0) return undefined
+    const x = Math.min(...rects.map((r) => r.x))
+    const y = Math.min(...rects.map((r) => r.y))
+    const right = Math.max(...rects.map((r) => r.x + r.width))
+    const bottom = Math.max(...rects.map((r) => r.y + r.height))
+    return roundRect({ x, y, width: right - x, height: bottom - y })
   }
 
   /**
@@ -650,7 +683,9 @@ export class WindowManager {
       }
       if (now.overlay !== before?.overlay) {
         if (now.overlay.kind === 'none') this.hideOverlay(rec)
-        else this.showOverlay(rec)
+        else if (!rec.overlayShown || overlayKey(now.overlay) !== overlayKey(before?.overlay)) this.showOverlay(rec)
+        // The same overlay changed (e.g. a Peek's phase or area): keep its place and focus.
+        else this.fitOverlay(rec)
       }
       const tabNow = activeTabOf(next, rec.id)
       const tabBefore = before ? activeTabOf(prev, rec.id) : null
@@ -731,7 +766,9 @@ export class WindowManager {
 
   private fitOverlay(rec: WindowRecord): void {
     const [width = 0, height = 0] = rec.win.getContentSize()
-    rec.overlay?.setBounds({ x: 0, y: 0, width, height })
+    // A Peek's overlay covers only the page area, so the sidebar stays usable beside it (PK-13).
+    const area = this.ctx.store.state.windows[rec.id]?.overlay.kind === 'peek' ? this.pageArea(rec.id) : undefined
+    rec.overlay?.setBounds(area ?? { x: 0, y: 0, width, height })
   }
 
   /** The native background shows at the window's edges while resizing: keep it the frame's colour. */
@@ -774,6 +811,11 @@ export function windowBackground(state: OrbitState, spaceId: SpaceId | undefined
   const space = spaceId ? state.spaces[spaceId] : undefined
   if (!space) return undefined
   return paletteFor({ ...space.theme, mode: 'system' }, nativeTheme.shouldUseDarkColors).windowBackground
+}
+
+/** Identifies one opening of an overlay (its kind and nonce): updates to it keep the same key. */
+function overlayKey(overlay: OverlayState | undefined): string {
+  return overlay && overlay.kind !== 'none' ? `${overlay.kind}:${overlay.nonce}` : 'none'
 }
 
 function roundRect(r: Rect): Rect {

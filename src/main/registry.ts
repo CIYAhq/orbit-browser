@@ -51,9 +51,13 @@ export interface ActionContext {
   windowId?: WindowId
 }
 
+/** Takes an action over before its handler runs (e.g. an open Peek handles Close Tab). True when handled. */
+export type ActionInterceptor = (id: string, ctx: ActionContext) => boolean
+
 /** User-facing actions (shortcuts, menu, command bar) keyed by ActionDef id. */
 export class ActionRegistry {
   private handlers = new Map<string, (ctx: ActionContext) => void | Promise<void>>()
+  private interceptors: ActionInterceptor[] = []
 
   register(id: string, handler: (ctx: ActionContext) => void | Promise<void>): void {
     this.handlers.set(id, handler)
@@ -63,7 +67,16 @@ export class ActionRegistry {
     return this.handlers.has(id)
   }
 
+  /**
+   * Lets a feature act first while it is in charge of a window (a Peek card, a Mini Window):
+   * the first interceptor that returns true handles the action instead of its handler.
+   */
+  intercept(interceptor: ActionInterceptor): void {
+    this.interceptors.push(interceptor)
+  }
+
   async run(id: string, ctx: ActionContext): Promise<void> {
+    for (const interceptor of this.interceptors) if (interceptor(id, ctx)) return
     const handler = this.handlers.get(id)
     if (!handler) {
       console.warn(`[actions] no handler for ${id}`)
