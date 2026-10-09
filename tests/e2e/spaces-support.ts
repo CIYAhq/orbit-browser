@@ -95,6 +95,14 @@ export async function settled(shell: Page): Promise<void> {
   )
 }
 
+/** A property of the theme's background layer (`.shell-bg`), e.g. --bg-top. */
+export async function bgVar(shell: Page, name: string): Promise<string> {
+  return shell.evaluate(
+    (n) => (document.querySelector('.shell-bg') as HTMLElement).style.getPropertyValue(n).trim(),
+    name,
+  )
+}
+
 /** Shell CSS variable value (e.g. the theme's --frame-top). */
 export async function cssVar(shell: Page, name: string): Promise<string> {
   return shell.evaluate(

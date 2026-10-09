@@ -105,16 +105,26 @@ function grainImage(): string {
 }
 
 /**
- * Paints the Space theme on the shell as CSS variables, without React renders.
- * - Resting changes (theme edits, presets) blend over ~200 ms in OKLab; rapid
- *   changes (dragging a colour handle) apply at drag rate (FL-14).
- * - A light/dark change cross-fades the whole shell (AP-01).
- * - During a Space swipe or switch the switcher drives every frame (`drive`).
+ * Paints the Space theme without React renders (SP-16, FL-14).
+ *
+ * Two targets keep the per-frame cost flat whatever the sidebar holds (review M5):
+ * - the background layer (`.shell-bg`): the gradient stops are registered,
+ *   non-inherited properties set only on that element, and grain is its child's
+ *   opacity, so a frame of a Space swipe restyles one element, not every row;
+ * - the shell root: the inherited variables (text, accent, surfaces…) change only
+ *   at rest, or once at the midpoint of a transition (text never passes through
+ *   an unreadable blend).
+ * Resting changes (theme edits, presets) blend over ~200 ms; rapid ones (dragging
+ * a colour handle) apply at drag rate; light/dark cross-fades the whole shell.
  */
 export class ThemeDriver {
   private el: HTMLElement | null = null
+  private bg: HTMLElement | null = null
+  private grain: HTMLElement | null = null
   private written = new Map<string, string>()
+  private bgWritten = new Map<string, string>()
   private shown: Palette | undefined
+  private restShown: Palette | undefined
   private target: Palette | undefined
   private lastTargetAt = 0
   private driving = false
@@ -125,7 +135,15 @@ export class ThemeDriver {
     this.written.clear()
     if (!el) return
     el.style.setProperty('--grain-image', grainImage())
-    if (this.shown) this.write(this.shown)
+    if (this.restShown) this.writeRest(this.restShown)
+  }
+
+  /** The background layer (`.shell-bg`, with the grain as its first child). */
+  attachBackground(el: HTMLElement | null): void {
+    this.bg = el
+    this.grain = (el?.firstElementChild as HTMLElement | null) ?? null
+    this.bgWritten.clear()
+    if (el && this.shown) this.writeFrame(this.shown)
   }
 
   /** The current colours (possibly mid-transition). */
@@ -147,11 +165,15 @@ export class ThemeDriver {
     else this.blend(from, p, 200)
   }
 
-  /** The Space switcher paints this frame's blend. */
-  drive(p: Palette): void {
+  /**
+   * The Space switcher paints this frame: `blend` on the background layer, and
+   * `near` (the palette the frame is closer to) for everything that inherits.
+   */
+  drive(blend: Palette, near: Palette): void {
     this.stop()
     this.driving = true
-    this.write(p)
+    this.writeFrame(blend)
+    this.writeRest(near)
   }
 
   /** The switcher is done; settle on the resting palette. */
@@ -192,11 +214,14 @@ export class ThemeDriver {
 
   private blend(from: Palette, to: Palette, ms: number): void {
     this.stop()
+    // Inherited colours take the destination at once (same light/dark mode); only the
+    // background layer animates.
+    this.writeRest(to)
     const start = performance.now()
     const tick = (now: number) => {
       const t = Math.min(1, (now - start) / ms)
       const eased = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2
-      this.write(t >= 1 ? to : mixPalettes(from, to, eased))
+      this.writeFrame(t >= 1 ? to : mixPalettes(from, to, eased))
       this.raf = t < 1 ? requestAnimationFrame(tick) : 0
     }
     this.raf = requestAnimationFrame(tick)
@@ -208,7 +233,35 @@ export class ThemeDriver {
   }
 
   private write(p: Palette): void {
+    this.writeFrame(p)
+    this.writeRest(p)
+  }
+
+  /** Per-frame: the background layer only (no inherited properties change). */
+  private writeFrame(p: Palette): void {
     this.shown = p
+    const bg = this.bg
+    if (!bg) return
+    const set = (name: string, value: string) => {
+      if (this.bgWritten.get(name) === value) return
+      bg.style.setProperty(name, value)
+      this.bgWritten.set(name, value)
+    }
+    set('--bg-top', p.frameTop)
+    set('--bg-mid', p.frameMid)
+    set('--bg-bottom', p.frameBottom)
+    const grain = (p.grain * 0.6).toFixed(3)
+    if (this.bgWritten.get('grain') !== grain) {
+      if (this.grain) this.grain.style.opacity = grain
+      if (p.grain > 0.001) bg.dataset.grain = ''
+      else delete bg.dataset.grain
+      this.bgWritten.set('grain', grain)
+    }
+  }
+
+  /** At rest or at a transition's midpoint: every inherited theme variable on the shell. */
+  private writeRest(p: Palette): void {
+    this.restShown = p
     const el = this.el
     if (!el) return
     for (const [name, value] of paletteEntries(p)) {
@@ -219,19 +272,9 @@ export class ThemeDriver {
     const scheme = p.dark ? 'dark' : 'light'
     if (this.written.get('color-scheme') !== scheme) {
       el.style.colorScheme = scheme
-      this.written.set('color-scheme', scheme)
-    }
-    if (this.written.get('dark') !== scheme) {
       if (p.dark) el.dataset.dark = ''
       else delete el.dataset.dark
-      this.written.set('dark', scheme)
-    }
-    // The grain layer (a blended full-window texture) only exists while there is grain.
-    const grain = p.grain > 0.001 ? 'on' : ''
-    if (this.written.get('grain') !== grain) {
-      if (grain) el.dataset.grain = grain
-      else delete el.dataset.grain
-      this.written.set('grain', grain)
+      this.written.set('color-scheme', scheme)
     }
   }
 }
@@ -240,13 +283,19 @@ export class ThemeDriver {
 export const themeDriver = new ThemeDriver()
 
 /**
- * Keeps the shell element painted with the active Space's theme (SP-16, SB-24).
- * Returns the ref callback for the element that carries the theme variables.
+ * Keeps the shell painted with the active Space's theme (SP-16, SB-24).
+ * Returns ref callbacks for the shell root (inherited variables) and for its
+ * background layer (`.shell-bg`, gradient and grain).
  */
-export function useShellTheme(spaceId: string | undefined): (el: HTMLElement | null) => void {
+export function useShellTheme(spaceId: string | undefined): {
+  shellRef: (el: HTMLElement | null) => void
+  backgroundRef: (el: HTMLElement | null) => void
+} {
   const palette = usePalette(spaceId)
   useLayoutEffect(() => {
     if (palette) themeDriver.setTarget(palette)
   }, [palette])
-  return useCallback((el: HTMLElement | null) => themeDriver.attach(el), [])
+  const shellRef = useCallback((el: HTMLElement | null) => themeDriver.attach(el), [])
+  const backgroundRef = useCallback((el: HTMLElement | null) => themeDriver.attachBackground(el), [])
+  return useMemo(() => ({ shellRef, backgroundRef }), [shellRef, backgroundRef])
 }

@@ -121,30 +121,52 @@ export class VelocityTracker {
 
 /**
  * Detects the start of OS momentum (inertial) scrolling in a wheel stream:
- * after the fingers lift, deltas keep coming but decay geometrically. Four
- * consecutive steady decays mean the fingers are off the trackpad.
+ * after the fingers lift, deltas keep coming at the display's cadence but
+ * decay by an almost constant factor. A finger easing off is irregular, so
+ * this needs six samples whose ratios sit in a narrow band (0.82–0.98) with
+ * little spread, at a regular pace (review M4).
  */
 export class MomentumDetector {
-  private deltas: number[] = []
+  private samples: { d: number; t: number }[] = []
 
   reset(): void {
-    this.deltas = []
+    this.samples = []
   }
 
-  /** Feeds one wheel delta along the gesture axis; returns true once momentum is detected. */
-  push(delta: number): boolean {
-    this.deltas.push(Math.abs(delta))
-    if (this.deltas.length > 6) this.deltas.shift()
-    if (this.deltas.length < 5) return false
-    for (let i = this.deltas.length - 4; i < this.deltas.length; i++) {
-      const prev = this.deltas[i - 1] as number
-      const cur = this.deltas[i] as number
-      if (prev < 1.5) return false
-      const ratio = cur / prev
-      if (ratio < 0.5 || ratio > 0.97) return false
+  /** Feeds one wheel delta along the gesture axis (and its time); true once momentum is detected. */
+  push(delta: number, t: number): boolean {
+    this.samples.push({ d: Math.abs(delta), t })
+    if (this.samples.length > 6) this.samples.shift()
+    if (this.samples.length < 6) return false
+    const ratios: number[] = []
+    const gaps: number[] = []
+    for (let i = 1; i < this.samples.length; i++) {
+      const prev = this.samples[i - 1] as { d: number; t: number }
+      const cur = this.samples[i] as { d: number; t: number }
+      if (prev.d < 1) return false
+      ratios.push(cur.d / prev.d)
+      gaps.push(cur.t - prev.t)
     }
-    return true
+    if ((this.samples[0]?.d ?? 0) < 3) return false
+    if (ratios.some((r) => r < 0.82 || r > 0.98)) return false
+    const mean = ratios.reduce((a, b) => a + b, 0) / ratios.length
+    const spread = Math.sqrt(ratios.reduce((a, r) => a + (r - mean) ** 2, 0) / ratios.length)
+    if (spread > 0.04) return false
+    const minGap = Math.min(...gaps)
+    const maxGap = Math.max(...gaps)
+    return minGap >= 2 && maxGap <= 40 && maxGap <= minGap * 2.5
   }
+}
+
+/**
+ * Mouse wheels move in notches (lines or pages, or Chromium's 120-unit
+ * wheelDelta). They keep their normal meaning over the sidebar and never
+ * page between Spaces (SP-08: mouse paging is off by default; review F4).
+ */
+export function isWheelNotch(e: { deltaMode: number; deltaX: number; deltaY: number; wheelDeltaX?: number }): boolean {
+  if (e.deltaMode !== 0) return true
+  const wx = e.wheelDeltaX ?? 0
+  return wx !== 0 && wx % 120 === 0 && Math.abs(e.deltaX) >= 40
 }
 
 /** Which page slot the viewport mostly shows, and how far it is toward the next one. */

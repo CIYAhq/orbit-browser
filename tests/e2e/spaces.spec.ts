@@ -12,6 +12,7 @@ import {
 } from './helpers'
 import {
   activeSpace,
+  bgVar,
   createSpace,
   cssVar,
   flick,
@@ -126,9 +127,9 @@ test('[SP-08][FL-13] a short slow swipe springs back while a quick short flick c
   await swipe(shell, 4, 10, 40)
   await settled(shell)
   expect(await activeSpace(app)).toBe(a)
-  // Flick: 60 px (under a third of the width) in three quick events still switches.
+  // Flick: about 45 px (well under a third of the width) then OS-style momentum still switches.
   await sleep(200)
-  await flick(shell, [20, 20, 20], 8)
+  await flick(shell, [8, 8, 8, 7.2, 6.5, 5.9, 5.3, 4.8, 4.3], 6)
   await expect.poll(() => activeSpace(app), { timeout: 3000 }).toBe(b)
   await settled(shell)
 })
@@ -222,16 +223,16 @@ test('[SP-19][FL-14][SP-16] the theme colour blends between Spaces during a swit
   await run(app, 'spaces.update', { spaceId: b, theme: { colors: ['#ff8a2f'], intensity: 1, grain: 0 } })
   await settled(shell)
   await sleep(300)
-  const start = await cssVar(shell, '--frame-top')
-  // Sample the colour every frame while the switch animates.
+  const start = await bgVar(shell, '--bg-top')
+  // Sample the background layer's colour every frame while the switch animates.
   const samples = shell.evaluate(
     () =>
       new Promise<string[]>((done) => {
         const out: string[] = []
-        const el = document.querySelector('[data-testid="shell"]') as HTMLElement
+        const el = document.querySelector('.shell-bg') as HTMLElement
         const t0 = performance.now()
         const tick = () => {
-          out.push(el.style.getPropertyValue('--frame-top').trim())
+          out.push(el.style.getPropertyValue('--bg-top').trim())
           if (performance.now() - t0 < 600) requestAnimationFrame(tick)
           else done(out)
         }
@@ -240,7 +241,9 @@ test('[SP-19][FL-14][SP-16] the theme colour blends between Spaces during a swit
   )
   await run(app, 'spaces.switch', { spaceId: b })
   const frames = [...new Set(await samples)]
-  const end = await cssVar(shell, '--frame-top')
+  const end = await bgVar(shell, '--bg-top')
+  // At rest the inherited variables match the background layer again.
+  expect(await cssVar(shell, '--frame-top')).toBe(end)
   expect(end).not.toBe(start)
   // Several in-between colours, none of them grey.
   const between = frames.filter((c) => c !== start && c !== end)

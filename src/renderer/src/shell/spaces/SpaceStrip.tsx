@@ -34,8 +34,8 @@ export const SpaceStrip = memo(function SpaceStrip({ windowId, spaceId }: { wind
     const viewport = viewportRef.current
     if (!viewport) return
     switcher.attach(trackRef.current, () => viewport.querySelector<HTMLElement>('[data-slot="0"] .sidebar__scroll'))
-    switcher.setWidth(viewport.clientWidth)
-    const observer = new ResizeObserver(() => switcher.setWidth(viewport.clientWidth))
+    switcher.setSize(viewport.clientWidth, viewport.clientHeight)
+    const observer = new ResizeObserver(() => switcher.setSize(viewport.clientWidth, viewport.clientHeight))
     observer.observe(viewport)
     const sidebar = viewport.closest<HTMLElement>('.sidebar') ?? viewport
     sidebar.addEventListener('wheel', switcher.onWheel, { passive: false })
@@ -94,7 +94,7 @@ export const SpaceStrip = memo(function SpaceStrip({ windowId, spaceId }: { wind
                 style={{ left: `${s.k * 100}%` }}
                 inert
               >
-                <SpacePreview spaceId={s.id} windowId={windowId} />
+                <SpacePreview spaceId={s.id} windowId={windowId} height={switcher.height} />
               </div>
             ),
           )}

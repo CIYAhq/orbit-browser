@@ -12,17 +12,47 @@
   background: color-mix(in srgb, var(--frame-top) 40%, #19191c);
 }
 
-/* Static grain over the sidebar and frame margin (not the page card, which sits above it). */
-.shell[data-grain]::before {
-  content: "";
+/*
+ * The theme's gradient and grain live on their own layer behind the sidebar and the
+ * frame. Its colour stops are non-inherited, so painting a frame of a Space swipe
+ * restyles this element only (review M5). The page card sits above it.
+ */
+@property --bg-top {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: #e7e7eb;
+}
+@property --bg-mid {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: #eaeaee;
+}
+@property --bg-bottom {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: #ededf0;
+}
+
+.shell-bg {
   position: absolute;
   inset: 0;
   z-index: -1;
   pointer-events: none;
+  background: linear-gradient(180deg, var(--bg-top), var(--bg-mid), var(--bg-bottom));
+  will-change: transform;
+}
+
+.shell-bg__grain {
+  position: absolute;
+  inset: 0;
+  display: none;
   background-image: var(--grain-image, none);
   background-size: 96px 96px;
-  opacity: var(--grain-opacity, 0);
   mix-blend-mode: soft-light;
+}
+
+.shell-bg[data-grain] .shell-bg__grain {
+  display: block;
 }
 
 .sidebar ::selection,

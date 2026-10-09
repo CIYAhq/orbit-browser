@@ -1,5 +1,5 @@
 import { ChevronRight, Folder, Plus } from 'lucide-react'
-import { memo, type ReactNode, useLayoutEffect, useRef, useState } from 'react'
+import { memo, type ReactNode } from 'react'
 import { isFolderId, isSplitId, isTabId } from '../../../../shared/ids'
 import type { ItemId, OrbitState, SpaceId } from '../../../../shared/state'
 import { splitLeaves } from '../../../../shared/tree'
@@ -16,21 +16,24 @@ const ROW_PITCH = 33
  * rows that can be on screen, no handlers, no test ids and no per-row store
  * subscriptions, so mounting one is cheap even for Spaces with hundreds of tabs.
  */
-export const SpacePreview = memo(function SpacePreview({ spaceId, windowId }: { spaceId: SpaceId; windowId: string }) {
+export const SpacePreview = memo(function SpacePreview({
+  spaceId,
+  windowId,
+  height,
+}: {
+  spaceId: SpaceId
+  windowId: string
+  /** The strip's height, measured once by the strip (no layout read per preview; review M5). */
+  height: number
+}) {
   const space = useOrbit((s) => s.spaces[spaceId])
   const favorites = useOrbit((s) => (space ? s.profiles[space.profileId]?.favorites : undefined))
   const active = useOrbit((s) => s.windows[windowId]?.activeTab[spaceId] ?? null)
   const single = useOrbit((s) => s.spaceOrder.length === 1)
-  const ref = useRef<HTMLDivElement>(null)
-  const [height, setHeight] = useState(800)
-  useLayoutEffect(() => {
-    const h = ref.current?.clientHeight
-    if (h) setHeight(h)
-  }, [])
   if (!space) return null
   const state = getOrbitState()
   const scrollTop = scrollMemory.get(spaceId) ?? 0
-  const budget = Math.ceil((scrollTop + height) / ROW_PITCH) + 4
+  const budget = Math.ceil((scrollTop + (height || 900)) / ROW_PITCH) + 4
   const pinnedRows = collectRows(state, space.pinned, 0, budget, active)
   const todayRows = collectRows(state, space.today, 0, Math.max(0, budget - pinnedRows.length - 2), active)
   return (
@@ -49,7 +52,7 @@ export const SpacePreview = memo(function SpacePreview({ spaceId, windowId }: { 
           </div>
         ) : null}
       </div>
-      <div className="sidebar__scroll space-page__preview-scroll" ref={ref}>
+      <div className="sidebar__scroll space-page__preview-scroll">
         <div style={scrollTop ? { transform: `translateY(${-scrollTop}px)` } : undefined}>
           {single && space.unnamed ? null : (
             <div className="space-title">

@@ -7,6 +7,7 @@ import { getOrbitState } from '../../store'
 import { cachedPalette, isDarkNow, prefersReducedMotion, themeDriver } from '../../theme'
 import {
   classify,
+  isWheelNotch,
   MomentumDetector,
   NEW_SPACE_FRACTION,
   NEW_SPACE_HINT_FRACTION,
@@ -44,6 +45,8 @@ interface Gesture {
   ax: number
   ay: number
   travel: number
+  /** Vertical pixels held back while the gesture was undecided (given back if it turns out vertical). */
+  held: number
   hasPrev: boolean
   hasNext: boolean
   canCreate: boolean
@@ -81,6 +84,8 @@ export class SpaceSwitcher {
   private pill: HTMLElement | null = null
   private newHint: HTMLElement | null = null
   private stuckTimer: ReturnType<typeof setTimeout> | undefined
+  /** A released swipe asked main to switch; the strip may rest a page over until the Space arrives. */
+  private pendingCommit = false
   /** Theme shown for the "new Space" page (follows the creation flow's choice). */
   private newTheme: SpaceTheme | undefined
   /** "hint": the faint + while over-swiping; "flow": the creation flow is open on it. */
@@ -121,6 +126,14 @@ export class SpaceSwitcher {
     this.track = track
     this.scroller = scroller
     this.paint()
+  }
+
+  /** Height of the strip's pages (previews size their row budget from it). */
+  height = 0
+
+  setSize(width: number, height: number): void {
+    if (height > 0) this.height = height
+    this.setWidth(width)
   }
 
   setWidth(width: number): void {
@@ -202,6 +215,15 @@ export class SpaceSwitcher {
       return
     }
     this.active = active
+    this.pendingCommit = false
+    // A switch from elsewhere (keys, click, another window) during a swipe ends the swipe
+    // first, so the strip is never re-based under the fingers (review F9).
+    const g = this.gesture
+    if (g?.phase === 'tracking') {
+      if (g.releaseTimer) clearTimeout(g.releaseTimer)
+      g.releaseTimer = undefined
+      g.phase = 'swallow'
+    }
     if (!prev || this.width <= 0) {
       this.stopAnim()
       this.x.jump(0)
@@ -300,47 +322,61 @@ export class SpaceSwitcher {
   /** Wheel events over the sidebar. Must be attached as a non-passive listener. */
   onWheel = (e: WheelEvent): void => {
     if (e.ctrlKey || this.width <= 0) return // pinch-zoom
-    const scale = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? this.width : 1
-    const dx = e.deltaX * scale
-    const dy = e.deltaY * scale
+    if (isWheelNotch(e as WheelEvent & { wheelDeltaX?: number })) return // mouse wheels scroll as usual
+    const dx = e.deltaX
+    const dy = e.deltaY
     const now = e.timeStamp || performance.now()
+    // Mainly vertical input always scrolls the list natively and is never held back (SB-23, review M2).
+    const vertical = Math.abs(dy) >= Math.abs(dx)
     let g = this.gesture
     if (!g || now - g.lastAt > RELEASE_GAP_MS) g = this.startGesture(now, 'wheel')
-    const along = g.phase === 'tracking' || g.phase === 'swallow' ? dx : Math.abs(dx) > Math.abs(dy) ? dx : dy
     if (g.phase === 'swallow') {
-      // Momentum after a lifted swipe never scrolls the list or switches again,
-      // unless deltas grow again (new finger contact).
-      if (Math.abs(along) > Math.abs(g.lastDelta) * 1.6 + 3) g = this.startGesture(now, 'wheel')
-      else {
+      // OS momentum after a lifted swipe never scrolls the list or switches again. Anything
+      // else is new input: a vertical scroll, a reversal, or growing deltas (fingers back on),
+      // which picks the strip up where it is (review M4).
+      const reversing = !vertical && Math.abs(dx) > 1 && Math.sign(dx) !== Math.sign(g.lastDelta)
+      const growing = !vertical && Math.abs(dx) > Math.abs(g.lastDelta) * 1.05 + 0.5
+      if (!vertical && !reversing && !growing) {
         e.preventDefault()
         g.lastAt = now
-        g.lastDelta = along
+        g.lastDelta = dx
+        return
+      }
+      g = this.startGesture(now, 'wheel')
+      if (!vertical) {
+        e.preventDefault()
+        g.lastAt = now
+        g.lastDelta = dx
+        this.beginTracking(g, dx, now)
         return
       }
     }
     g.lastAt = now
-    g.lastDelta = along
+    g.lastDelta = vertical ? dy : dx
     if (g.phase === 'vertical') return
     if (g.phase === 'undecided') {
-      const heldBack = g.ay
       g.ax += dx
       g.ay += dy
       const axis = classify(g.ax, g.ay)
-      if (axis === 'y') {
-        // A vertical gesture scrolls the list natively (and never switches Space);
-        // give back the few pixels held while it was still undecided.
-        g.phase = 'vertical'
-        if (heldBack) this.scroller()?.scrollBy({ top: heldBack, behavior: 'instant' })
+      if (axis === 'x') {
+        e.preventDefault()
+        this.beginTracking(g, g.ax, now)
         return
       }
-      // Until the direction is known the list must not move (SB-23).
-      e.preventDefault()
-      if (axis === 'x') this.beginTracking(g, g.ax, now)
+      if (!vertical) {
+        // A mostly horizontal start: hold its small vertical part until the direction is known.
+        e.preventDefault()
+        g.held += dy
+      }
+      if (axis === 'y') {
+        g.phase = 'vertical'
+        this.giveBack(g)
+      }
       return
     }
     e.preventDefault()
     this.track1to1(g, g.travel + dx, now)
-    if (this.momentum.push(dx)) this.release()
+    if (this.momentum.push(dx, now)) this.release()
     else this.armRelease(g)
   }
 
@@ -375,12 +411,20 @@ export class SpaceSwitcher {
   onPointerUp = (e: PointerEvent): void => {
     if (!this.pointer || e.pointerId !== this.pointer.id) return
     this.pointer = undefined
-    if (this.gesture?.source === 'pointer' && this.gesture.phase === 'tracking') this.release()
+    if (this.gesture?.source === 'pointer' && this.gesture.phase === 'tracking') this.release(false)
     else this.gesture = undefined
   }
 
   private startGesture(now: number, source: Gesture['source']): Gesture {
-    if (this.gesture?.releaseTimer) clearTimeout(this.gesture.releaseTimer)
+    const old = this.gesture
+    if (old) {
+      if (old.releaseTimer) clearTimeout(old.releaseTimer)
+      old.releaseTimer = undefined
+      // A gesture whose release timer was starved (e.g. by a long task) still releases (review M3).
+      if (old.phase === 'tracking') this.release(true)
+      // An undecided start gives back the vertical pixels it held (review M2).
+      else if (old.phase === 'undecided') this.giveBack(old)
+    }
     const order = this.order
     const i = order.indexOf(this.active)
     this.gesture = {
@@ -389,6 +433,7 @@ export class SpaceSwitcher {
       lastDelta: 0,
       ax: 0,
       ay: 0,
+      held: 0,
       travel: 0,
       hasPrev: i > 0,
       hasNext: i >= 0 && i < order.length - 1,
@@ -401,15 +446,22 @@ export class SpaceSwitcher {
     return this.gesture
   }
 
+  private giveBack(g: Gesture): void {
+    if (g.held) this.scroller()?.scrollBy({ top: g.held, behavior: 'instant' })
+    g.held = 0
+  }
+
   private beginTracking(g: Gesture, travel: number, now: number): void {
-    g.phase = 'tracking'
-    // Interrupt a running settle from where it is (FL-01).
-    const current = -this.x.get()
-    this.stopAnim()
+    // The new-Space page owns the strip while it is open or sliding in: leave it be (review M3).
     if (this.newPage === 'flow') {
       g.phase = 'vertical'
       return
     }
+    g.phase = 'tracking'
+    this.pendingCommit = false
+    // Interrupt a running settle from where it is (FL-01).
+    const current = -this.x.get()
+    this.stopAnim()
     const i = this.order.indexOf(this.active)
     const prev = this.order[i - 1]
     const next = this.order[i + 1]
@@ -432,15 +484,21 @@ export class SpaceSwitcher {
 
   private armRelease(g: Gesture): void {
     if (g.releaseTimer) clearTimeout(g.releaseTimer)
-    g.releaseTimer = setTimeout(() => this.release(), RELEASE_GAP_MS)
+    g.releaseTimer = setTimeout(() => this.release(true), RELEASE_GAP_MS)
   }
 
-  private release(): void {
+  /**
+   * The fingers lifted. `stillSince`: released because events stopped, so the
+   * fingers had stopped too: the velocity is measured up to now, not up to the
+   * last motion (a held-still lift is not a flick; review F3).
+   */
+  private release(stillSince = false): void {
     const g = this.gesture
     if (g?.phase !== 'tracking') return
     if (g.releaseTimer) clearTimeout(g.releaseTimer)
     g.releaseTimer = undefined
     g.phase = 'swallow'
+    if (stillSince) this.velocity.add(Math.max(performance.now(), g.lastAt), g.travel)
     const offset = -this.x.get()
     const v = this.velocity.velocity()
     const dir = Math.sign(offset) || Math.sign(v)
@@ -449,6 +507,7 @@ export class SpaceSwitcher {
     const decision = releaseDecision(offset, v, this.width, !!target, g.canCreate)
     const reduced = prefersReducedMotion()
     if (decision === 'commit' && target) {
+      this.pendingCommit = true
       void invoke('spaces.switch', { spaceId: target })
       this.springTo(-dir * this.width, -v, SETTLE_SPRING, reduced)
       this.watchStuck()
@@ -475,7 +534,9 @@ export class SpaceSwitcher {
     const expected = this.active
     this.stuckTimer = setTimeout(() => {
       this.stuckTimer = undefined
-      if (this.active === expected && this.x.get() !== 0 && !this.newPage && this.gesture?.phase !== 'tracking') {
+      if (this.active !== expected || !this.pendingCommit) return
+      this.pendingCommit = false
+      if (this.x.get() !== 0 && !this.newPage && this.gesture?.phase !== 'tracking') {
         this.springTo(0, 0, STANDARD_SPRING)
       }
     }, 700)
@@ -516,6 +577,16 @@ export class SpaceSwitcher {
     const x = this.x.get()
     if (Math.abs(x) < 0.5 && x !== 0) this.x.jump(0)
     if (this.gesture?.phase === 'tracking') return
+    // Never rest between pages (review M3): only the active page, the open new-Space page,
+    // or a page whose switch is on its way from main are valid resting places.
+    const rest = this.newPage === 'flow' ? -this.width : 0
+    const atRest = Math.abs(this.x.get() - rest) < 0.5
+    const awaitingSwitch = this.pendingCommit && Math.abs(Math.abs(this.x.get()) - this.width) < 0.5
+    if (!atRest && !awaitingSwitch) {
+      this.springTo(rest, 0, STANDARD_SPRING, prefersReducedMotion())
+      return
+    }
+    if (atRest && rest !== 0) this.x.jump(rest)
     if (this.x.get() === 0) {
       if (this.newPage === 'hint') this.newPage = undefined
       this.setSlots(this.slots.filter((s) => s.k === 0))
@@ -567,7 +638,7 @@ export class SpaceSwitcher {
     if (moving) {
       const pa = this.paletteOf(a?.id, dark)
       const pb = this.paletteOf(b?.id, dark) ?? pa
-      if (pa && pb) themeDriver.drive(mixPalettes(pa, pb, t))
+      if (pa && pb) themeDriver.drive(mixPalettes(pa, pb, t), t < 0.5 ? pa : pb)
     } else {
       themeDriver.release()
     }

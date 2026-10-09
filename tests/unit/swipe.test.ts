@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   classify,
+  isWheelNotch,
   MomentumDetector,
   RUBBER_SPRING,
   releaseDecision,
@@ -80,12 +81,33 @@ describe('[FL-13][SP-08] swipe physics', () => {
     expect(v.velocity()).toBeLessThan(100)
   })
 
-  it('detects OS momentum (steady decay) but not a finger that keeps moving', () => {
+  const feed = (m: MomentumDetector, deltas: number[], every = 16) => deltas.map((d, i) => m.push(d, i * every))
+
+  it('detects OS momentum (steady decay at a regular pace) but not a finger that keeps moving', () => {
     const m = new MomentumDetector()
-    expect([20, 22, 19, 23, 21, 24].map((d) => m.push(d)).some(Boolean)).toBe(false)
+    expect(feed(m, [20, 22, 19, 23, 21, 24]).some(Boolean)).toBe(false)
     m.reset()
-    const decays = [30, 27, 24.3, 21.9, 19.7, 17.7].map((d) => m.push(d))
-    expect(decays.at(-1)).toBe(true)
+    expect(feed(m, [30, 27.6, 25.4, 23.4, 21.5, 19.8]).at(-1)).toBe(true)
+  })
+
+  it('[review M4] a finger easing off and moving on again is never mistaken for momentum', () => {
+    const m = new MomentumDetector()
+    const easeOffThenOn = [10, 6, 6, 6, 6, 6, 5, 4, 3, 2, 3, 4, 5, ...Array(13).fill(6)]
+    expect(feed(m, easeOffThenOn).some(Boolean)).toBe(false)
+    m.reset()
+    // Same decay ratios but an irregular pace (a hand, not the OS curve).
+    expect(m.push(30, 0) || m.push(27.6, 10) || m.push(25.4, 50) || m.push(23.4, 55) || m.push(21.5, 100)).toBe(false)
+    expect(m.push(19.8, 104)).toBe(false)
+    m.reset()
+    // Tiny deltas are never momentum.
+    expect(feed(m, [2, 1.8, 1.6, 1.45, 1.3, 1.2]).some(Boolean)).toBe(false)
+  })
+
+  it('[review F4] mouse-wheel notches are not swipes', () => {
+    expect(isWheelNotch({ deltaMode: 1, deltaX: 3, deltaY: 0 })).toBe(true)
+    expect(isWheelNotch({ deltaMode: 0, deltaX: 100, deltaY: 0, wheelDeltaX: -120 })).toBe(true)
+    expect(isWheelNotch({ deltaMode: 0, deltaX: 12, deltaY: 0, wheelDeltaX: -36 })).toBe(false)
+    expect(isWheelNotch({ deltaMode: 0, deltaX: 40, deltaY: 0 })).toBe(false)
   })
 
   it('maps the strip offset to the pair of pages on screen', () => {

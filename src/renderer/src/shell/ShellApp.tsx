@@ -9,16 +9,19 @@ import { Toasts } from './Toasts'
 export function ShellApp() {
   const win = useWindow()
   // The Space theme is painted as CSS variables by the theme driver (no re-render per frame).
-  const themeRef = useShellTheme(win?.spaceId)
+  const theme = useShellTheme(win?.spaceId)
   if (!win) return null
   const style = { '--sidebar-w': `${win.sidebar.width}px` } as CSSProperties
   return (
     <div
       className={`shell${win.sidebar.visible ? '' : ' shell--sidebar-hidden'}${win.focused ? '' : ' shell--blurred'}`}
       style={style}
-      ref={themeRef}
+      ref={theme.shellRef}
       data-testid="shell"
     >
+      <div className="shell-bg" ref={theme.backgroundRef} aria-hidden>
+        <div className="shell-bg__grain" />
+      </div>
       <Sidebar win={win} />
       <ContentArea win={win} />
       <Toasts />
