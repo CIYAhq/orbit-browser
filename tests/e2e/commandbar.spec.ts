@@ -8,7 +8,6 @@ import {
   activeTabId,
   type Fixtures,
   FRAME_SLACK,
-  isMac,
   launchOrbit,
   MOD,
   type Orbit,
@@ -31,6 +30,9 @@ test.afterAll(async () => {
 test.beforeEach(async () => {
   orbit = await launchOrbit()
   await blockNetwork(orbit.app)
+  // macOS keeps the clipboard after the app quits: a URL a CB-12 test left there would put
+  // Paste and go first, pre-selected (F4), in every later test. Linux loses it with the app.
+  await orbit.app.evaluate(({ clipboard }) => clipboard.clear())
   // The overlay renderer is pre-warmed shortly after launch (CB-22); start once it is up.
   const overlay = await viewPage(orbit.app, 'overlay')
   await overlay.getByTestId('overlay').waitFor({ state: 'attached' })
@@ -38,6 +40,17 @@ test.beforeEach(async () => {
 test.afterEach(async () => {
   await orbit.app.close()
 })
+
+/** A mouse-move over result row `i` at a screen point, sent to the bar directly. */
+async function hoverRow(overlay: Page, i: number, screenX: number, screenY: number): Promise<void> {
+  await overlay.evaluate(
+    ([i, screenX, screenY]) => {
+      const row = document.querySelectorAll('[data-testid="command-result"]')[i]
+      row?.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, screenX, screenY }))
+    },
+    [i, screenX, screenY] as const,
+  )
+}
 
 /** Tests never reach the network: anything but the local fixture server is cancelled. */
 async function blockNetwork(app: ElectronApplication): Promise<void> {
@@ -219,12 +232,17 @@ test('[CB-10] arrows move the highlight, hovering highlights, Enter runs the hig
   const third = rows(overlay).nth(2)
   await expect(third).toHaveAttribute('aria-selected', 'true')
   await expect(rows(overlay).nth(0)).toHaveAttribute('aria-selected', 'false')
-  // Hover moves it too, once the pointer really moves (a resting pointer selects nothing: F4 below).
-  const over = (await rows(overlay).nth(1).boundingBox()) as { x: number; y: number; height: number }
-  await overlay.mouse.move(over.x + 40, over.y + over.height / 2 - 8)
-  await overlay.mouse.move(over.x + 40, over.y + over.height / 2, { steps: 2 })
+  // Hover moves it too, once the pointer moves. The bar gets its mouse-moves straight from the test
+  // here, so where the OS pointer happens to rest doesn't matter.
+  await hoverRow(overlay, 1, 500, 300)
+  await hoverRow(overlay, 1, 500, 320)
   await expect(rows(overlay).nth(1)).toHaveAttribute('aria-selected', 'true')
   await overlay.keyboard.press('ArrowDown')
+  await expect(third).toHaveAttribute('aria-selected', 'true')
+  // Rows that change under a still pointer keep the keyboard's choice: a mouse-move at the same
+  // spot over another row (what a re-render under a resting pointer sends) selects nothing.
+  await hoverRow(overlay, 0, 500, 320)
+  await expect(third).toHaveAttribute('aria-selected', 'true')
   const chosen = (await third.getAttribute('data-id')) as string
   expect(chosen).toMatch(/^tab:/)
   await overlay.keyboard.press('Enter')
@@ -805,15 +823,6 @@ test('[CB-20] right and middle clicks over the sidebar only close the bar (revie
 test('[CB-18] Enter on the untouched empty field runs no starter action (review F4)', async () => {
   const overlay = await openBar()
   await expect(rows(overlay).first()).toBeVisible()
-  // A pointer resting where the rows appear selects nothing. macOS itself sends the bar a mouse-move
-  // at that unchanged spot when it appears (the CI runner's pointer rests over the rows); elsewhere
-  // the test sends it, twice at one spot over the first row.
-  if (isMac) await new Promise((r) => setTimeout(r, 500))
-  else {
-    const under = (await rows(overlay).first().boundingBox()) as { x: number; y: number; height: number }
-    await overlay.mouse.move(under.x + 40, under.y + under.height / 2)
-    await overlay.mouse.move(under.x + 40, under.y + under.height / 2)
-  }
   await expect(rows(overlay).filter({ has: overlay.locator('[aria-selected="true"]') })).toHaveCount(0)
   await expect(bar(overlay).locator('[aria-selected="true"]')).toHaveCount(0)
   await overlay.keyboard.press('Enter')
