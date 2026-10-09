@@ -983,7 +983,19 @@ test('[PR-06][SP-07] a click switch between Spaces of one profile keeps the Favo
         })
         .join(' '),
     )
-  const before = await tiles()
+  // The new tiles' entrance animation must be over first (slow CI machines run it late).
+  let before = ''
+  await expect
+    .poll(
+      async () => {
+        const first = await tiles()
+        await sleep(250)
+        before = await tiles()
+        return first === before && before.split(' ').length === 3
+      },
+      { timeout: 10_000 },
+    )
+    .toBe(true)
   // Sample the visible tiles every frame while switching back and forth.
   const sampled = shell.evaluate(
     () =>
