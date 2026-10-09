@@ -4,14 +4,14 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 32 built (30 partial) · 39 tested · 0 feel right.
+**Totals:** 485 spec’d · 32 built (30 partial) · 50 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 26 | 28 |
-| P1 | 221 | 6 | 11 |
-| P2 | 83 | 0 | 0 |
+| P0 | 174 | 26 | 35 |
+| P1 | 221 | 6 | 14 |
+| P2 | 83 | 0 | 1 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -57,11 +57,11 @@ Spec: `spec/tabs.md`
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
 | TB-01 | Tab row anatomy and states | P0 | – | – | – |  |
-| TB-02 | Create a new tab | P0 | 🟡 partial | – | – | scaffold |
+| TB-02 | Create a new tab | P0 | 🟡 partial | ✅ e2e | – | scaffold |
 | TB-03 | Where new tabs are inserted | P0 | – | – | – |  |
 | TB-04 | Switching between tabs (pointer and keyboard) | P0 | 🟡 partial | – | – | scaffold |
 | TB-05 | Recent-tab switcher (Ctrl+Tab) | P1 | – | – | – |  |
-| TB-06 | Closing a tab | P0 | 🟡 partial | – | – | scaffold |
+| TB-06 | Closing a tab | P0 | 🟡 partial | ✅ e2e | – | scaffold |
 | TB-07 | Reopen the last closed tab | P0 | 🟡 partial | – | – | scaffold |
 | TB-08 | Reorder tabs by drag and drop | P0 | – | – | – |  |
 | TB-09 | Drag and drop to other destinations | P0 | – | – | – |  |
@@ -72,12 +72,12 @@ Spec: `spec/tabs.md`
 | TB-14 | Tab context menu | P0 | 🟡 partial | – | – | scaffold |
 | TB-15 | Audio, mute, microphone/camera and screen-share indicators | P1 | – | – | – |  |
 | TB-16 | Tab sleeping and background resource limits | P1 | 🟡 partial | – | – | sleep/wake runtime; no timer yet |
-| TB-17 | Tabs across multiple windows | P1 | – | – | – |  |
+| TB-17 | Tabs across multiple windows | P1 | – | ✅ e2e | – |  |
 | TB-18 | Undo sidebar actions | P1 | – | – | – |  |
-| TB-19 | Back on a fresh child tab returns to its opener | P2 | – | – | – |  |
+| TB-19 | Back on a fresh child tab returns to its opener | P2 | – | ✅ e2e | – |  |
 | TB-20 | Copy a tab's URL | P1 | – | – | – |  |
 | TB-21 | Hover cards for known web apps | P2 | – | – | – |  |
-| TB-22 | Session restore on relaunch | P0 | 🟡 partial | – | – | scaffold |
+| TB-22 | Session restore on relaunch | P0 | 🟡 partial | ✅ e2e | – | scaffold |
 | PN-01 | What a pinned tab is | P0 | – | – | – |  |
 | PN-02 | Pin and unpin | P0 | 🟡 partial | – | – | scaffold |
 | PN-03 | Pinned URL memory and the "navigated away" indicator | P0 | – | – | – |  |
@@ -242,13 +242,13 @@ Spec: `spec/navigation.md`
 | NV-11 | Private (incognito) window | P0 | – | – | – |  |
 | NV-12 | Page context menu | P0 | – | – | – |  |
 | NV-13 | Load-error pages | P1 | – | – | – |  |
-| NV-14 | Crashed or unresponsive tab | P1 | – | – | – |  |
-| NV-15 | Permission prompts | P0 | – | – | – |  |
+| NV-14 | Crashed or unresponsive tab | P1 | – | ✅ e2e | – |  |
+| NV-15 | Permission prompts | P0 | – | ✅ e2e | – |  |
 | NV-16 | Site controls panel | P0 | – | – | – |  |
 | NV-17 | Copy the current URL | P0 | – | – | – |  |
-| NV-18 | Links from other apps (Orbit as the default browser) | P0 | – | – | – |  |
+| NV-18 | Links from other apps (Orbit as the default browser) | P0 | – | ✅ e2e | – |  |
 | NV-19 | Links that open other apps (external protocols) | P1 | – | – | – |  |
-| NV-20 | Full screen | P1 | – | – | – |  |
+| NV-20 | Full screen | P1 | – | ✅ e2e | – |  |
 | NV-21 | Save page and view source | P2 | – | – | – |  |
 | NV-22 | Translate a page | P2 | – | – | – |  |
 | NV-23 | Reader mode | P2 | – | – | – |  |
@@ -347,7 +347,7 @@ Spec: `spec/shortcuts.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| KS-01 | One keymap, remapping and persistence | P0 | – | – | – |  |
+| KS-01 | One keymap, remapping and persistence | P0 | – | ✅ e2e | – |  |
 | KS-02 | Conflicts with web pages ("prefer websites" vs "prefer Orbit") | P0 | – | – | – |  |
 | KS-03 | Platform mapping rules | P0 | – | – | – |  |
 | KS-04 | Command bar and address | P0 | – | – | – |  |
@@ -413,7 +413,7 @@ Spec: `spec/appearance.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| AP-01 | Light, Dark or Match system | P0 | – | – | – |  |
+| AP-01 | Light, Dark or Match system | P0 | – | ✅ e2e | – |  |
 | AP-02 | Theme colours carry through the whole interface | P1 | – | – | – |  |
 | AP-03 | Restore the default (neutral) theme | P1 | – | ✅ unit | – |  |
 | AP-04 | Dark mode quality | P1 | – | ✅ unit | – |  |

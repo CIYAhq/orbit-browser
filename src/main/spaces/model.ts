@@ -341,9 +341,13 @@ export function normalizeSpacesInDraft(d: OrbitState): void {
   d.spaceOrder.forEach((spaceId, i) => {
     const space = d.spaces[spaceId]
     if (!space) return
-    const theme = normalizeSpaceTheme(space.theme)
-    const raw = space.theme as unknown as Record<string, unknown>
-    if (!raw || 'mode' in raw || 'color' in raw || !sameTheme(space.theme, theme)) space.theme = theme
+    // Total for any stored shape: a theme without a `colors` array is rewritten, never compared.
+    const raw: unknown = space.theme
+    const theme = normalizeSpaceTheme(raw)
+    const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : undefined
+    if (!r || !Array.isArray(r.colors) || 'mode' in r || 'color' in r || !sameTheme(space.theme, theme)) {
+      space.theme = theme
+    }
     if (typeof space.icon !== 'string') space.icon = ''
     if (!Array.isArray(space.pinned)) space.pinned = []
     if (!Array.isArray(space.today)) space.today = []

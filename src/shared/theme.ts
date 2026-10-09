@@ -156,6 +156,7 @@ export function normalizeSpaceTheme(raw: unknown): SpaceTheme {
 }
 
 export function sameTheme(a: SpaceTheme, b: SpaceTheme): boolean {
+  if (!a || !b || !Array.isArray(a.colors) || !Array.isArray(b.colors)) return false
   return (
     a.intensity === b.intensity &&
     a.grain === b.grain &&
