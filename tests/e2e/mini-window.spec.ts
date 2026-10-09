@@ -318,7 +318,11 @@ test('[MW-10] a Mini Window can reopen its page in another profile, remembered f
   if (!mini?.tabId) throw new Error('no mini')
   const tabId = mini.tabId
   const ui = await miniUi(orbit.app, mini.id)
-  await expect(ui.getByTestId('mini-profile')).toContainText('Personal')
+  // It starts in the profile of the most recent Space (the default profile here).
+  const s0 = await state(orbit.app)
+  const startProfile = s0.profiles[s0.tabs[tabId]?.profileId ?? '']?.name
+  expect(startProfile).toBeTruthy()
+  await expect(ui.getByTestId('mini-profile')).toContainText(startProfile ?? '')
   await fromMini(orbit.app, mini.id, 'mini.setProfile', { profileId: work })
   await expect(ui.getByTestId('mini-profile')).toContainText('Work')
   const partition = () =>

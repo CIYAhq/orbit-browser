@@ -1,11 +1,20 @@
-import { app, BrowserWindow, globalShortcut, Menu, screen, systemPreferences, type WebContents } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  globalShortcut,
+  Menu,
+  nativeTheme,
+  screen,
+  systemPreferences,
+  type WebContents,
+} from 'electron'
 import { ACTIONS_BY_ID, shortcutsFor, toElectronAccelerator } from '../../shared/actions'
-import { createWindowState, THEME_PRESETS } from '../../shared/defaults'
+import { createWindowState } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
 import { routeFor } from '../../shared/link-routing'
 import type { Rect } from '../../shared/rpc'
 import type { OrbitState, ProfileId, SpaceId, TabId, WindowId } from '../../shared/state'
-import { paletteFor } from '../../shared/theme'
+import { NEUTRAL_THEME, paletteFor } from '../../shared/theme'
 import { insertItem } from '../../shared/tree'
 import { parseInput, siteOf } from '../../shared/url'
 import type { MainContext } from '../context'
@@ -180,8 +189,8 @@ export function registerMiniWindow(ctx: MainContext): void {
     return { x, y, width, height }
   }
 
-  const neutralBackground = () =>
-    paletteFor({ ...(THEME_PRESETS[7] ?? THEME_PRESETS[0]), mode: 'system' } as never, false).windowBackground
+  /** A Mini Window has no Space: the neutral theme, light or dark as the app is (MW-03). */
+  const neutralBackground = () => paletteFor(NEUTRAL_THEME, nativeTheme.shouldUseDarkColors).windowBackground
 
   const createWindow = (id: WindowId): BrowserWindow => {
     const win = new BrowserWindow({
@@ -369,7 +378,9 @@ export function registerMiniWindow(ctx: MainContext): void {
       const tab = store.state.tabs[mini.tabId]
       if (!tab) return
       const url = tabs.contents(mini.tabId)?.getURL() || tab.url
-      store.update((d) => archiveFloating(d, { ...tab, url }, 'mini', mini.idleClose ? 'auto' : 'closed'))
+      store.update((d) => {
+        archiveFloating(d, { ...tab, url }, 'mini', mini.idleClose ? 'auto' : 'closed')
+      })
     })
     win.once('closed', () => {
       clearTimeout(saveTimer)
