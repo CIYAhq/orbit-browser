@@ -8,13 +8,20 @@ import {
   sameSite,
 } from '../../src/shared/link-routing'
 import {
+  advanceSpring,
   dismissesOnRelease,
   draggedCard,
   dragTravel,
+  PEEK_CLOSE_MS,
+  PEEK_CLOSE_SCALE,
   PEEK_DRAG_UP_MAX,
+  PEEK_EXPAND_SPRING,
+  PEEK_OPEN_SPRING,
   peekCard,
   peekStart,
   releaseVelocity,
+  type Spring,
+  springResting,
 } from '../../src/shared/peek-geometry'
 
 const on: LinkSettings = { peekExternalLinks: true, peekShiftClick: true, linkRules: [] }
@@ -218,5 +225,55 @@ describe('Peek interactive dismiss (PK-06, FL-19)', () => {
     expect(releaseVelocity(samples, 400)).toBe(0)
     expect(releaseVelocity([], 10)).toBe(0)
     expect(releaseVelocity([{ t: 0, y: 0 }], 0)).toBe(0)
+  })
+})
+
+/** Runs a spring frame by frame, as the overlay does: when it looks done, when it rests, its peak. */
+function runSpring(cfg: Spring, fps: number) {
+  let x = 0
+  let v = 0
+  let ms = 0
+  let peak = 0
+  let done: number | undefined
+  while (ms < 2000) {
+    const next = advanceSpring(cfg, x, v, 1 / fps)
+    x = next.x
+    v = next.v
+    ms += 1000 / fps
+    peak = Math.max(peak, x)
+    if (done === undefined && Math.abs(1 - x) < 0.005) done = ms
+    if (springResting(x, v)) return { done: done ?? ms, rest: ms, peak }
+  }
+  throw new Error('the spring never came to rest')
+}
+
+describe('Peek motion timing (FL-19)', () => {
+  it('[FL-19][PK-06] the card grows into place in about 280–320 ms with no visible overshoot', () => {
+    const open = runSpring(PEEK_OPEN_SPRING, 60)
+    expect(open.done).toBeGreaterThanOrEqual(250)
+    expect(open.done).toBeLessThanOrEqual(330)
+    expect(open.peak).toBeLessThanOrEqual(1.02)
+    expect(open.rest).toBeLessThan(450)
+  })
+
+  it('[FL-19][PK-07] expanding to a tab meets the page frame in about 220–260 ms', () => {
+    const expand = runSpring(PEEK_EXPAND_SPRING, 60)
+    expect(expand.done).toBeGreaterThanOrEqual(200)
+    expect(expand.done).toBeLessThanOrEqual(270)
+    expect(expand.peak).toBeLessThanOrEqual(1.02)
+  })
+
+  it('[FL-19][PK-09] closing shrinks to about 0.96 and fades in 150–180 ms', () => {
+    expect(PEEK_CLOSE_MS).toBeGreaterThanOrEqual(150)
+    expect(PEEK_CLOSE_MS).toBeLessThanOrEqual(180)
+    expect(PEEK_CLOSE_SCALE).toBeCloseTo(0.96, 5)
+  })
+
+  it('[FL-19] slow frames neither speed the springs up nor make them jump or overshoot', () => {
+    // At 10 fps a frame is 100 ms; each frame advances at most 50 ms of motion.
+    const slow = runSpring(PEEK_OPEN_SPRING, 10)
+    expect(slow.peak).toBeLessThanOrEqual(1.02)
+    expect(slow.done).toBeGreaterThan(runSpring(PEEK_OPEN_SPRING, 60).done)
+    expect(advanceSpring(PEEK_OPEN_SPRING, 0, 0, 5).x).toBeCloseTo(advanceSpring(PEEK_OPEN_SPRING, 0, 0, 0.05).x, 9)
   })
 })

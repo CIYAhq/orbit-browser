@@ -20,6 +20,39 @@ export const PEEK_START_SCALE = 0.94
 /** Scale of the small card that grows out of the clicked link. */
 export const PEEK_ORIGIN_SCALE = 0.14
 
+/** A unit spring (mass 1) of feel.md FL-01. */
+export interface Spring {
+  stiffness: number
+  damping: number
+}
+/** Open: grows into place in about 280–320 ms with no visible overshoot (FL-19). */
+export const PEEK_OPEN_SPRING: Spring = { stiffness: 520, damping: 42 }
+/** Expand to a tab: the card meets the page frame in about 220–260 ms (FL-19). */
+export const PEEK_EXPAND_SPRING: Spring = { stiffness: 632, damping: 45 }
+/** Close: a slight shrink (to about 0.96) and a fade over about 150–180 ms (FL-19). */
+export const PEEK_CLOSE_MS = 160
+export const PEEK_CLOSE_SCALE = 0.96
+
+/**
+ * Advances a unit spring (0 → 1) by `dt` seconds. Fixed sub-steps keep it stable on slow
+ * frames, and a long stall counts as at most 50 ms so the card never jumps.
+ */
+export function advanceSpring(cfg: Spring, x: number, v: number, dt: number): { x: number; v: number } {
+  let left = Math.min(0.05, Math.max(0, dt))
+  while (left > 0) {
+    const h = Math.min(left, 1 / 240)
+    v += (cfg.stiffness * (1 - x) - cfg.damping * v) * h
+    x += v * h
+    left -= h
+  }
+  return { x, v }
+}
+
+/** Close enough to rest that snapping to the end is invisible. */
+export function springResting(x: number, v: number): boolean {
+  return Math.abs(1 - x) < 0.002 && Math.abs(v) < 0.02
+}
+
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 
 /** The card, centred and inset from the page area's edges so the page shows around it (PK-05). */

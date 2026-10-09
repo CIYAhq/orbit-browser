@@ -2,17 +2,24 @@ import { Columns2, Maximize2, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ACTIONS_BY_ID, formatAccelerator, shortcutsFor } from '../../../shared/actions'
 import {
+  advanceSpring,
   type Box,
   dismissesOnRelease,
   draggedCard,
   FRAME_RADIUS,
   lerpBox,
+  PEEK_CLOSE_MS,
+  PEEK_CLOSE_SCALE,
+  PEEK_EXPAND_SPRING,
+  PEEK_OPEN_SPRING,
   PEEK_RADIUS,
   peekCard,
   peekStart,
   releaseVelocity,
+  type Spring,
   scaleBox,
   splitTarget,
+  springResting,
 } from '../../../shared/peek-geometry'
 import type { OverlayState } from '../../../shared/state'
 import { invoke, perfMark } from '../api'
@@ -21,12 +28,7 @@ import './peek.css'
 type PeekOverlay = Extract<OverlayState, { kind: 'peek' }>
 type Phase = NonNullable<PeekOverlay['phase']> | 'open'
 
-/** Springs from feel.md FL-01 (mass 1): the open is close to "standard", the expand "snappy". */
-const OPEN_SPRING = { stiffness: 520, damping: 42 }
-const EXPAND_SPRING = { stiffness: 632, damping: 45 }
-/** Close: a slight shrink (to about 0.96) and a fade over about 150–180 ms (FL-19). */
-const CLOSE_MS = 160
-const CLOSE_SCALE = 0.96
+/** Reduced motion: the card fades in and out in place. */
 const FADE_MS = 130
 const BUTTON = 28
 const BUTTON_GAP = 8
@@ -149,7 +151,7 @@ class PeekAnimator {
       const from = this.frame?.rect ?? peekStart(card, a, this.overlay.origin)
       this.draw({ rect: from, radius: PEEK_RADIUS, dim: 0, chrome: 1, page: true })
       this.spring(
-        OPEN_SPRING,
+        PEEK_OPEN_SPRING,
         (p, elapsed) =>
           this.draw({
             rect: lerpBox(from, card, p),
@@ -177,7 +179,7 @@ class PeekAnimator {
       return
     }
     this.spring(
-      EXPAND_SPRING,
+      PEEK_EXPAND_SPRING,
       (p) => {
         const q = Math.min(1, p)
         this.draw({
@@ -221,11 +223,11 @@ class PeekAnimator {
       )
       return
     }
-    const to = scaleBox(start.rect, CLOSE_SCALE)
+    const to = scaleBox(start.rect, PEEK_CLOSE_SCALE)
     // An ease-out starts at 3× its average speed: travel so that matches the release speed.
-    if (dragged) to.y += Math.max(40, (Math.max(0, velocity) * CLOSE_MS) / 3000)
+    if (dragged) to.y += Math.max(40, (Math.max(0, velocity) * PEEK_CLOSE_MS) / 3000)
     this.tween(
-      CLOSE_MS,
+      PEEK_CLOSE_MS,
       (e) =>
         this.draw({
           rect: lerpBox(start.rect, to, e),
@@ -315,7 +317,7 @@ class PeekAnimator {
     }
     // In spring units (0 → 1 is the whole way back); moving down is moving away.
     const v0 = Math.abs(offset) > 1 ? Math.max(-30, Math.min(30, -velocity / Math.abs(offset))) : 0
-    this.spring(OPEN_SPRING, step, undefined, v0)
+    this.spring(PEEK_OPEN_SPRING, step, undefined, v0)
   }
 
   pointerDown(clientY: number): boolean {
@@ -349,7 +351,7 @@ class PeekAnimator {
 
   /** Runs a unit spring (0 → 1) frame by frame; `done` fires once it rests. */
   private spring(
-    cfg: { stiffness: number; damping: number },
+    cfg: Spring,
     step: (p: number, elapsed: number) => void,
     done?: () => void,
     initialVelocity = 0,
@@ -360,16 +362,11 @@ class PeekAnimator {
     let first = 0
     const tick = (now: number) => {
       if (!first) first = last = now
-      // Fixed sub-steps keep the spring stable on slow frames.
-      let dt = Math.min(0.05, (now - last) / 1000)
+      const next = advanceSpring(cfg, x, v, (now - last) / 1000)
+      x = next.x
+      v = next.v
       last = now
-      while (dt > 0) {
-        const h = Math.min(dt, 1 / 240)
-        v += (cfg.stiffness * (1 - x) - cfg.damping * v) * h
-        x += v * h
-        dt -= h
-      }
-      const resting = Math.abs(1 - x) < 0.002 && Math.abs(v) < 0.02
+      const resting = springResting(x, v)
       step(resting ? 1 : x, now - first)
       if (resting) {
         this.raf = 0
