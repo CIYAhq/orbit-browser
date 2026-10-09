@@ -1,3 +1,7 @@
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { expect, test } from '@playwright/test'
 import type { MainContext } from '../../src/main/context'
 import {
@@ -259,4 +263,30 @@ test('[TB-02] opening tabs keeps every UI mirror in step without resyncs (review
     expect(await page.evaluate(() => (globalThis as unknown as Mirror).__orbitMirror.resyncs())).toBe(1)
   }
   expect(errors.filter((e) => e.includes('[store]') || e.includes('Immer'))).toEqual([])
+})
+
+test('[NV-18] links and files from other apps open as tabs in the current Space (review F10)', async () => {
+  const s0 = await state(orbit.app)
+  const windowId = Object.keys(s0.windows)[0] as string
+  const spaceId = s0.windows[windowId]?.spaceId as string
+  const active = async () => {
+    const s = await state(orbit.app)
+    const id = s.windows[windowId]?.activeTab[spaceId]
+    return id ? s.tabs[id]?.url : undefined
+  }
+  // A second launch with a URL on its command line (Linux/Windows default browser).
+  const fromArgv = fx.url('/page/FromArgv')
+  await orbit.app.evaluate(({ app }, url) => app.emit('second-instance', {}, ['orbit', '--flag', url], '/'), fromArgv)
+  await expect.poll(active).toBe(fromArgv)
+  // macOS open-url and open-file.
+  const fromOpenUrl = fx.url('/page/FromOpenUrl')
+  await orbit.app.evaluate(({ app }, url) => app.emit('open-url', { preventDefault() {} }, url), fromOpenUrl)
+  await expect.poll(active).toBe(fromOpenUrl)
+  const file = join(mkdtempSync(join(tmpdir(), 'orbit-file-')), 'doc.html')
+  writeFileSync(file, '<title>Doc</title><h1 id="title">Doc</h1>')
+  await orbit.app.evaluate(({ app }, path) => app.emit('open-file', { preventDefault() {} }, path), file)
+  await expect.poll(active).toBe(pathToFileURL(file).href)
+  const s = await state(orbit.app)
+  expect(s.spaces[spaceId]?.today).toHaveLength(3)
+  expect(Object.values(s.tabs).every((t) => t.spaceId === spaceId)).toBe(true)
 })
