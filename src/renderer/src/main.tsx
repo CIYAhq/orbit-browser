@@ -35,6 +35,14 @@ async function boot(): Promise<void> {
         <OverlayApp />
       </StrictMode>,
     )
+  } else if (view === 'strip') {
+    // Split view pane strip (split lane, SV-12): a tiny transparent view over a pane's top edge.
+    const { PaneStripApp } = await import('./shell/split/PaneStripApp')
+    root.render(
+      <StrictMode>
+        <PaneStripApp />
+      </StrictMode>,
+    )
   } else {
     const { ShellApp } = (await app) as typeof import('./shell/ShellApp')
     root.render(

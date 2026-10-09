@@ -276,7 +276,7 @@ test('[TB-08] dragging a split view row moves the whole split to the drop slot',
   const split = shell.locator('[data-slot][data-key="v-test"]')
   await expect(split).toBeVisible()
   const last = await center(row(shell, c))
-  await drag(shell, split.locator('[data-testid="tab-row"]').first(), {
+  await drag(shell, split.locator('[data-testid="split-row"]'), {
     x: last.x,
     y: last.box.y + last.box.height - 4,
   })

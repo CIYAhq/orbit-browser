@@ -8,7 +8,8 @@
  * nothing flickers, and the ghost settles into the row's new place.
  */
 import { animate, motionValue } from 'motion/react'
-import { isFolderId, isTabId } from '../../../../shared/ids'
+import { isFolderId, isSplitId, isTabId } from '../../../../shared/ids'
+import { rowDropSide } from '../../../../shared/split'
 import type { ItemId, OrbitState, SpaceId } from '../../../../shared/state'
 import { locate, parseContainerKey, visibleTabOrder } from '../../../../shared/tree'
 import { invoke } from '../../api'
@@ -76,6 +77,8 @@ interface Session {
   measuredAt: number
   raf: number
   dwell: { side: 'left' | 'right'; since: number } | null
+  /** Pointer resting on a row's middle band: after SPLIT_DWELL_MS it becomes a split target (SV-05). */
+  splitDwell?: { key: string; since: number; timer: number } | null
   spaceAtStart: SpaceId
   /** The Space whose rows `slots` describes (changes after an edge-dwell switch). */
   measuredSpace: SpaceId
@@ -303,6 +306,8 @@ function listTarget(s: Session, prev: DropTarget | null): DropTarget | null {
   const scroll = ctx.scroll
   if (!scroll) return null
   const y = s.lastY - scroll.getBoundingClientRect().top + scroll.scrollTop
+  const split = splitTarget(s, y)
+  if (split) return split
   const space = getOrbitState().spaces[ctx.spaceId]
   const count = (list: string[] | undefined) => ({
     length: list?.length ?? 0,
@@ -329,8 +334,62 @@ function listTarget(s: Session, prev: DropTarget | null): DropTarget | null {
   return target
 }
 
+/**
+ * One tab over the middle band of another tab or split row combines them into a split, on the
+ * half under the pointer (SV-05); the row's top and bottom quarters still reorder. Rows are hit
+ * where they stand on screen, and the list doesn't move while a split target is shown, so rows
+ * can't slide under the pointer and back.
+ */
+/** How long the pointer rests on a row's middle band before a drop there makes a split (SV-05). */
+const SPLIT_DWELL_MS = 400
+
+function clearSplitDwell(s: Session): void {
+  if (s.splitDwell) window.clearTimeout(s.splitDwell.timer)
+  s.splitDwell = null
+}
+
+function splitTarget(s: Session, y: number): DropTarget | null {
+  const first = s.ids[0]
+  const scroll = ctx.scroll
+  if (s.ids.length !== 1 || !first || !isTabId(first) || ctx.spaceId !== s.spaceAtStart || !scroll) {
+    clearSplitDwell(s)
+    return null
+  }
+  const box = scroll.getBoundingClientRect()
+  // Rows where they are on screen now; a split target keeps the list as it is (shiftsFor).
+  const shifts = useDrag.getState().shifts
+  for (const sl of s.slots) {
+    if (sl.kind !== 'item' || sl.folder || s.dragged.has(sl.key) || sl.ancestors.some((a) => s.dragged.has(a))) continue
+    if (!isTabId(sl.key) && !isSplitId(sl.key)) continue
+    const row = { x: box.left, y: sl.top + (shifts[sl.key] ?? 0), width: box.width, height: sl.height }
+    const side = rowDropSide(row, s.lastX, y)
+    if (!side) continue
+    // A quick pass over a row reorders as usual; resting on it for a moment makes a split.
+    const now = performance.now()
+    if (s.splitDwell?.key !== sl.key) {
+      clearSplitDwell(s)
+      const timer = window.setTimeout(() => {
+        if (session === s && s.started) update(s)
+      }, SPLIT_DWELL_MS + 16)
+      s.splitDwell = { key: sl.key, since: now, timer }
+      return null
+    }
+    return now - s.splitDwell.since >= SPLIT_DWELL_MS ? { type: 'split', key: sl.key, side } : null
+  }
+  clearSplitDwell(s)
+  return null
+}
+
+/** Where a list or folder target opens its gap (split targets open none). */
+function gapTopOf(t: DropTarget | null | undefined): number | undefined {
+  return t && t.type !== 'split' ? t.gapTop : undefined
+}
+
 function sameTarget(a: DropTarget | null, b: DropTarget | null): boolean {
   if (!a || !b) return a === b
+  if (a.type === 'split' || b.type === 'split') {
+    return a.type === 'split' && b.type === 'split' && a.key === b.key && a.side === b.side
+  }
   if (a.type === 'into' || b.type === 'into') return a.type === b.type && a.at === b.at
   return a.container === b.container && a.index === b.index && a.at === b.at
 }
@@ -376,12 +435,16 @@ function update(s: Session): void {
     outside: false,
   }
   let target: DropTarget | null = null
+  // No drop target until the rows under the pointer are the measured ones (review V1).
+  const measured = ready && s.measuredSpace === ctx.spaceId
+  // A rest counts only while the pointer stays on the list: a detour off it, however short,
+  // starts the rest over when it comes back (review W1).
+  if (zone.kind !== 'list' || !measured) clearSplitDwell(s)
   if (zone.kind === 'list') {
-    // No drop target until the rows under the pointer are the measured ones (review V1).
-    target = ready && s.measuredSpace === ctx.spaceId ? listTarget(s, useDrag.getState().target) : null
+    target = measured ? listTarget(s, useDrag.getState().target) : null
     patch.target = target
     patch.intoFolder = target?.type === 'into' ? target.folderId : null
-  } else if (zone.kind === 'favorites' && s.ids.every(isTabId)) {
+  } else if (zone.kind === 'favorites' && s.ids.every((id) => isTabId(id) || isSplitId(id))) {
     patch.favIndex = favoritesIndex(s)
   } else if (zone.kind === 'space') {
     patch.spaceTarget = zone.spaceId
@@ -393,7 +456,7 @@ function update(s: Session): void {
   if (prev.spaceTarget !== (patch.spaceTarget ?? null)) markSpaceTarget(patch.spaceTarget ?? null)
   if (
     !sameTarget(prev.target, target) ||
-    prev.target?.gapTop !== target?.gapTop ||
+    gapTopOf(prev.target) !== gapTopOf(target) ||
     prev.favIndex !== patch.favIndex ||
     prev.spaceTarget !== patch.spaceTarget ||
     prev.outside !== patch.outside ||
@@ -422,6 +485,7 @@ function markSpaceTarget(spaceId: string | null): void {
 }
 
 function shiftsFor(s: Session, target: DropTarget | null): Record<string, number> {
+  if (target?.type === 'split') return useDrag.getState().shifts
   if (ctx.spaceId !== s.spaceAtStart) {
     // Rows of another Space: only open the gap (the dragged rows aren't here).
     const shifts: Record<string, number> = {}
@@ -505,6 +569,7 @@ function remeasure(s: Session): void {
 /** Ends a drag: idle state, and keyboard focus back to the page (it moved to the sidebar for Escape). */
 function endSession(s: Session): void {
   if (session === s) session = null
+  clearSplitDwell(s)
   document.documentElement.classList.remove('is-dragging-tab')
   markSpaceTarget(null)
   useDrag.setState(IDLE_DRAG)
@@ -531,7 +596,11 @@ async function drop(s: Session, ev: PointerEvent): Promise<void> {
     landing = 'tile'
   } else if (zone.kind === 'list' && state.target) {
     const target = state.target
-    if (target.type === 'into') {
+    if (target.type === 'split') {
+      // The dragged tab joins the row's tab (or split) on that side (SV-05); ⌘Z undoes it.
+      commit = () => invoke('tabs.splitWith', { tabId: first, target: target.key, side: target.side })
+      landing = 'away'
+    } else if (target.type === 'into') {
       commit = () =>
         invoke('tabs.move', {
           id: first,
@@ -550,7 +619,12 @@ async function drop(s: Session, ev: PointerEvent): Promise<void> {
     return
   }
   // ⌥-drag drops a copy (with history) and leaves the original in place (TB-09, TB-10).
-  const copy = ev.altKey && s.ids.length === 1 && isTabId(first) && (zone.kind === 'list' || zone.kind === 'favorites')
+  const copy =
+    ev.altKey &&
+    s.ids.length === 1 &&
+    isTabId(first) &&
+    state.target?.type !== 'split' &&
+    (zone.kind === 'list' || zone.kind === 'favorites')
   if (copy) {
     const target = state.target
     const to =
@@ -558,7 +632,7 @@ async function drop(s: Session, ev: PointerEvent): Promise<void> {
         ? { kind: 'favorites' as const, profileId: ctx.profileId }
         : target?.type === 'into'
           ? { kind: 'folder' as const, folderId: target.folderId }
-          : target
+          : target?.type === 'between'
             ? parseContainerKey(target.container)
             : undefined
     // The original stays where it is, so a copy uses the index of the list as it is now.

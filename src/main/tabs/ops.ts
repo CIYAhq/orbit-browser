@@ -6,6 +6,7 @@
 import { createWindowState, MAX_FAVORITES } from '../../shared/defaults'
 import { isFolderId, isTabId, newId } from '../../shared/ids'
 import { isMediaBusy } from '../../shared/media'
+import { isPendingPane, layoutLeaves, paneAfterClose, SPLIT_FULL_MESSAGE } from '../../shared/split'
 import type {
   ArchivedTab,
   ContainerRef,
@@ -14,6 +15,7 @@ import type {
   ItemId,
   OrbitState,
   SpaceId,
+  SplitId,
   Tab,
   TabId,
   WindowId,
@@ -37,6 +39,16 @@ import {
 } from '../../shared/tree'
 import type { MainContext } from '../context'
 import {
+  addPaneInDraft,
+  isFailure,
+  type PaneAnchor,
+  restorePaneInDraft,
+  restoreUnitInDraft,
+  type SplitUnit,
+  splitAnchor,
+  splitCloseInfo,
+} from '../split/model'
+import {
   activateInDraft,
   dedupeDisplayed,
   detachFromSplit,
@@ -56,6 +68,10 @@ export interface ClosedTab {
   history?: SavedHistory
   archiveId?: string
   closedAt?: number
+  /** A split pane closed on its own: reopening puts it back beside its neighbours (SV-17). */
+  pane?: PaneAnchor
+  /** Closed with every other pane of its split: reopening brings the whole split back (SV-19). */
+  unit?: SplitUnit
 }
 
 /** Tab fields that moving between sections changes (restored by undo). */
@@ -213,10 +229,14 @@ export class TabOps {
     const state = this.state
     const removing: TabId[] = []
     const unloading: TabId[] = []
+    // A split pane closed on its own leaves its split, even a pinned or Favorite one (SV-17);
+    // closing every pane of a split closes the split as one unit (SV-19).
+    const splitInfo = splitCloseInfo(state, new Set(tabIds))
     for (const id of new Set(tabIds)) {
       if (!state.tabs[id]) continue
       const section = sectionOf(state, id)
-      if (!opts.remove && (section === 'pinned' || section === 'favorite')) unloading.push(id)
+      const ownPane = !!splitInfo.get(id)?.pane || isPendingPane(state, id)
+      if (!opts.remove && !ownPane && (section === 'pinned' || section === 'favorite')) unloading.push(id)
       else removing.push(id)
     }
     if (removing.length === 0 && unloading.length === 0) return
@@ -227,6 +247,7 @@ export class TabOps {
       location: locate(state, splitOfTab(state, id) ?? id),
       history: this.historyOf(id),
       closedAt,
+      ...splitInfo.get(id),
     }))
     const todayTabs = (spaceId: SpaceId) =>
       new Set((state.spaces[spaceId]?.today ?? []).flatMap((id) => tabsInItem(state, id)))
@@ -236,8 +257,9 @@ export class TabOps {
             const today = todayTabs(spaceId)
             return mostRecentTab(state, spaceId, excluding, (t) => !today.has(t.id))
           }
-        : (spaceId: SpaceId, current: TabId, excluding: Set<TabId>) =>
-            nextAfterClose(state, spaceId, current, excluding)
+        : // A closing pane hands focus to a pane of its split, so the split stays on screen (SV-17).
+          (spaceId: SpaceId, current: TabId, excluding: Set<TabId>) =>
+            paneAfterClose(state, current, excluding) ?? nextAfterClose(state, spaceId, current, excluding)
     this.ctx.store.update((d) => {
       reselectAway(d, all, pick, this.now())
       // Archive bottom-up so the first tab of a batch ends up newest (the top of the Archive list).
@@ -267,6 +289,10 @@ export class TabOps {
     for (const id of unloading) {
       this.ctx.tabs.sleep(id)
       this.ctx.tabs.savedHistory.delete(id)
+    }
+    // An empty split pane still waiting for its first page is not worth reopening.
+    for (let i = records.length - 1; i >= 0; i--) {
+      if (isPendingPane(state, (records[i] as ClosedTab).tab.id)) records.splice(i, 1)
     }
     if (records.length === 0) return
     if (reason !== 'auto') {
@@ -301,14 +327,52 @@ export class TabOps {
     for (const rec of live) if (rec.history) this.ctx.tabs.savedHistory.set(rec.tab.id, rec.history)
     const now = this.now()
     const sorted = [...live].sort((a, b) => (a.location?.index ?? 0) - (b.location?.index ?? 0))
+    let select = live[live.length - 1]?.tab.id
     this.ctx.store.update((d) => {
+      // Tabs of whole splits first go into state; their splits come back as units below.
+      const units = new Map<string, SplitUnit>()
       for (const rec of sorted) {
+        if (!rec.unit) continue
         const tab: Tab = { ...rec.tab, asleep: true, loading: false, audible: false, lastActiveAt: now }
+        if (!d.spaces[tab.spaceId]) tab.spaceId = d.spaceOrder[0] as string
+        d.tabs[tab.id] = tab
+        units.set(rec.unit.id, rec.unit)
+      }
+      const placedByUnit = new Set<TabId>()
+      for (const unit of units.values()) {
+        const landed = restoreUnitInDraft(d, unit, now)
+        if (!landed) continue
+        for (const id of unit.tabIds) {
+          if (!d.tabs[id]) continue
+          placedByUnit.add(id)
+          for (const moved of this.fixupTabs(d, [id], landed)) this.ctx.tabs.savedHistory.delete(moved)
+        }
+        if (unit.focus && placedByUnit.has(unit.focus)) select = unit.focus
+      }
+      for (const rec of sorted) {
+        if (placedByUnit.has(rec.tab.id)) {
+          if (rec.archiveId) {
+            const i = d.archive.findIndex((a) => a.id === rec.archiveId)
+            if (i >= 0) d.archive.splice(i, 1)
+          }
+          continue
+        }
+        const tab: Tab = d.tabs[rec.tab.id] ?? {
+          ...rec.tab,
+          asleep: true,
+          loading: false,
+          audible: false,
+          lastActiveAt: now,
+        }
         if (!d.spaces[tab.spaceId]) tab.spaceId = d.spaceOrder[0] as string
         d.tabs[tab.id] = tab
         const where = rec.location && containerItems(d, rec.location.container) ? rec.location : undefined
         let landed: ContainerRef | undefined
-        if (where) {
+        // A pane goes back into its split, in this same update (no frame shows it on its own).
+        const intoSplit = rec.pane ? restorePaneInDraft(d, tab.id, rec.pane) : undefined
+        if (intoSplit) {
+          landed = intoSplit
+        } else if (where) {
           insertItem(d, where.container, where.index, tab.id)
           landed = where.container
         } else {
@@ -327,8 +391,13 @@ export class TabOps {
           if (i >= 0) d.archive.splice(i, 1)
         }
       }
-      const last = live[live.length - 1]
-      if (opts.select && opts.windowId && last) activateInDraft(d, opts.windowId, last.tab.id, now)
+      // A tab that came back under another profile (its split or folder moved to another
+      // profile's Space) starts afresh in that session: the old session's history stays behind (PR-05).
+      for (const rec of live) {
+        const placed = d.tabs[rec.tab.id]
+        if (placed && placed.profileId !== rec.tab.profileId) this.ctx.tabs.savedHistory.delete(rec.tab.id)
+      }
+      if (opts.select && opts.windowId && select && d.tabs[select]) activateInDraft(d, opts.windowId, select, now)
     })
     return live.map((r) => r.tab.id)
   }
@@ -339,8 +408,22 @@ export class TabOps {
     const rec = i >= 0 ? this.recentlyClosed[i] : undefined
     if (!rec) return null
     this.recentlyClosed.splice(i, 1)
-    const [id] = this.restoreClosed([rec], { windowId, select: true })
+    const [id] = this.restoreClosed(this.withUnit(rec), { windowId, select: true })
     return id ?? null
+  }
+
+  /** A record of a split closed as one unit comes back with every other tab of that split (SV-19). */
+  private withUnit(rec: ClosedTab): ClosedTab[] {
+    const unitId = rec.unit?.id
+    if (!unitId) return [rec]
+    const rest: ClosedTab[] = []
+    for (let i = this.recentlyClosed.length - 1; i >= 0; i--) {
+      const r = this.recentlyClosed[i] as ClosedTab
+      if (r.unit?.id !== unitId) continue
+      rest.unshift(r)
+      this.recentlyClosed.splice(i, 1)
+    }
+    return [...rest, rec]
   }
 
   /** ⌘⇧T: reopens the most recently closed tab (a stack). */
@@ -348,8 +431,8 @@ export class TabOps {
     while (this.recentlyClosed.length > 0) {
       const rec = this.recentlyClosed.pop() as ClosedTab
       if (this.state.tabs[rec.tab.id]) continue
-      const [id] = this.restoreClosed([rec], { windowId, select: true })
-      return id ?? null
+      const restored = this.restoreClosed(this.withUnit(rec), { windowId, select: true })
+      return restored[restored.length - 1] ?? null
     }
     return null
   }
@@ -797,6 +880,88 @@ export class TabOps {
   }
 
   /** Move to another Space's pinned or Today section (TB-11). */
+  /**
+   * A tab dropped onto a row's half joins that tab or split as a pane (SV-05). Undoable (TB-18):
+   * ⌘Z puts the rows back as they were, ⌘⇧Z makes the split again.
+   */
+  splitWith(tabId: TabId, target: ItemId, side: 'left' | 'right', windowId?: WindowId): SplitId | null {
+    const state = this.state
+    const anchor = splitAnchor(state, target, side)
+    if (!anchor || anchor === tabId || !state.tabs[tabId]) return null
+    const fromRow = splitOfTab(state, tabId) ? undefined : locate(state, tabId)
+    const joined = splitOfTab(state, anchor)
+    const anchorRow = joined ? undefined : locate(state, anchor)
+    const joinedLayout = joined ? structuredClone(state.splits[joined]?.layout) : undefined
+    const placement = this.capture([tabId, ...(anchorRow ? [anchor] : [])])
+    const profiles = new Map([tabId, anchor].map((id) => [id, state.tabs[id]?.profileId]))
+    let result: ReturnType<typeof addPaneInDraft> = 'invalid'
+    this.ctx.store.update((d) => {
+      result = addPaneInDraft(d, tabId, anchor, side, this.now())
+      if (!isFailure(result) && windowId) activateInDraft(d, windowId, tabId, this.now())
+    })
+    if (isFailure(result)) {
+      if (result === 'full') this.ctx.toast(windowId, SPLIT_FULL_MESSAGE)
+      return null
+    }
+    const splitId: SplitId = result
+    // A tab now in another profile's session reloads there, without the old session's history.
+    for (const [id, before] of profiles) {
+      if (this.state.tabs[id]?.profileId === before) continue
+      this.ctx.tabs.sleep(id)
+      this.ctx.tabs.savedHistory.delete(id)
+    }
+    if (!fromRow) return splitId
+    const isPaneHere = () => {
+      const split = this.state.splits[splitId]
+      return !!split && layoutLeaves(split.layout).includes(tabId)
+    }
+    this.undo.push(
+      'Split View',
+      () => {
+        if (!isPaneHere()) return undefined
+        this.ctx.store.update((d) => {
+          const split = d.splits[splitId]
+          if (!split) return
+          if (joined === splitId && joinedLayout) split.layout = joinedLayout
+          else {
+            removeItem(d, splitId)
+            delete d.splits[splitId]
+          }
+          const rows = [
+            { id: tabId, loc: fromRow },
+            ...(anchorRow && joined !== splitId ? [{ id: anchor, loc: anchorRow }] : []),
+          ].sort((a, b) => a.loc.index - b.loc.index)
+          for (const row of rows) {
+            if (!locate(d, row.id) && !splitOfTab(d, row.id) && containerItems(d, row.loc.container)) {
+              insertItem(d, row.loc.container, row.loc.index, row.id)
+            }
+          }
+          for (const p of placement) {
+            for (const [id, fields] of Object.entries(p.tabs)) {
+              const tab = d.tabs[id]
+              if (!tab) continue
+              tab.spaceId = fields.spaceId
+              tab.profileId = fields.profileId
+              if (fields.pinnedUrl) {
+                tab.pinnedUrl = fields.pinnedUrl
+                tab.pinnedTitle = fields.pinnedTitle
+                tab.pinnedResolvedUrl = fields.pinnedResolvedUrl
+              } else {
+                delete tab.pinnedUrl
+                delete tab.pinnedTitle
+                delete tab.pinnedResolvedUrl
+              }
+            }
+          }
+        })
+        return () => this.splitWith(tabId, target, side, windowId)
+      },
+      this.now(),
+      () => !isPaneHere(),
+    )
+    return splitId
+  }
+
   moveToSpace(ids: ItemId[], spaceId: SpaceId, section: 'pinned' | 'today', windowId?: WindowId): boolean {
     const space = this.state.spaces[spaceId]
     if (!space) return false

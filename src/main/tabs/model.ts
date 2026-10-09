@@ -4,6 +4,7 @@
 import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
 import { isMediaBusy } from '../../shared/media'
+import { noteSplitFocus, removePane } from '../../shared/split'
 import type { ItemId, OrbitState, Space, SpaceId, Tab, TabId, WindowId } from '../../shared/state'
 import {
   containerItems,
@@ -62,6 +63,7 @@ export function activateInDraft(d: OrbitState, windowId: WindowId, tabId: TabId,
   }
   win.activeTab[win.spaceId] = tabId
   tab.lastActiveAt = now
+  noteSplitFocus(d, tabId)
   // A page is live in one window at a time (TB-17): a window that was showing this tab (or a
   // pane of its split) hands it over and shows another tab nobody else shows.
   dedupeDisplayed(d, windowId)
@@ -198,25 +200,28 @@ export function reselectAway(
       win.activeTab[spaceId] = next
       const tab = next ? d.tabs[next] : undefined
       if (tab && spaceId === win.spaceId) tab.lastActiveAt = now
+      if (next) noteSplitFocus(d, next)
     }
   }
   dedupeDisplayed(d)
 }
 
-/** Removes a tab from a split view, dissolving the split when one pane is left. Draft helper. */
+/**
+ * Removes a tab from a split view, dissolving the split when one pane is left. The other panes
+ * keep their arrangement and sizes (SV-17). Draft helper.
+ */
 export function detachFromSplit(d: OrbitState, tabId: TabId): void {
   const splitId = splitOfTab(d, tabId)
   if (!splitId) return
   const split = d.splits[splitId]
   if (!split) return
-  const remaining = splitLeaves(split.layout).filter((id) => id !== tabId)
+  const kept = removePane(split.layout, tabId)
+  const remaining = kept ? splitLeaves(kept) : []
   const loc = locate(d, splitId)
-  if (remaining.length >= 2) {
-    split.layout = {
-      type: 'row',
-      children: remaining.map((id) => ({ type: 'leaf', tabId: id })),
-      sizes: remaining.map(() => 1 / remaining.length),
-    }
+  if (kept && remaining.length >= 2) {
+    split.layout = kept
+    if (split.focus === tabId) delete split.focus
+    if (split.pending === tabId) delete split.pending
     return
   }
   delete d.splits[splitId]
