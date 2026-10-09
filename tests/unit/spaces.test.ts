@@ -124,6 +124,24 @@ describe('[SP-10][SP-23] switching', () => {
   })
 })
 
+describe('[SP-23][TB-17] Spaces across windows', () => {
+  it('switching Space never leaves two windows on the same tab (the switching window keeps it)', () => {
+    const { state, a, win, addTab } = world()
+    const b = createSpaceInDraft(state, { name: 'B', afterSpaceId: a })
+    const t1 = addTab(a, 'today')
+    const t2 = addTab(a, 'today')
+    state.windows[win]!.activeTab[a] = t1
+    switchSpaceInDraft(state, win, b.id)
+    // A second window shows t1 while the first one is away on B.
+    const w2 = createWindowState(a)
+    w2.activeTab[a] = t1
+    state.windows[w2.id] = w2
+    switchSpaceInDraft(state, win, a)
+    expect(state.windows[win]?.activeTab[a]).toBe(t1)
+    expect(state.windows[w2.id]?.activeTab[a]).toBe(t2)
+  })
+})
+
 describe('[SP-12] delete a Space', () => {
   it('archives its tabs tagged with its name, moves windows to the left neighbour and keeps the profile', () => {
     const { state, a, win, addTab } = world()

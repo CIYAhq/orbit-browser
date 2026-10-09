@@ -204,8 +204,24 @@ export class SpaceSwitcher {
    * The tab drag waits for this before measuring the rows of a Space it slid to.
    */
   whenSettled(): Promise<void> {
-    if (!this.isMoving()) return Promise.resolve()
+    if (!this.isMoving() && !this.standIn) return Promise.resolve()
     return new Promise((resolve) => this.settleWaiters.push(resolve))
+  }
+
+  /** True while slot 0 shows the stand-in and the real page is still rendering. */
+  private standIn = false
+
+  setStandIn(on: boolean): void {
+    this.standIn = on
+    // Slot 0's content changed (stand-in shown or replaced): hold its Favorites in place now,
+    // before the browser paints the new DOM.
+    this.paint()
+    if (!on && !this.isMoving()) this.flushSettled()
+  }
+
+  private flushSettled(): void {
+    if (this.standIn) return
+    for (const resolve of this.settleWaiters.splice(0)) resolve()
   }
 
   // ---- Active Space changes (clicks, keys, commits, other code) ----
@@ -333,10 +349,13 @@ export class SpaceSwitcher {
   /** Wheel events over the sidebar. Must be attached as a non-passive listener. */
   onWheel = (e: WheelEvent): void => {
     if (e.ctrlKey || this.width <= 0) return // pinch-zoom
-    if (isWheelNotch(e as WheelEvent & { wheelDeltaX?: number })) return // mouse wheels scroll as usual
+    const now = e.timeStamp || performance.now()
+    // Mouse wheels scroll as usual. Only a gesture's first event can be a notch: trackpads may
+    // report notch-like values mid-flick (wheelDeltaX = 3 × deltaX on macOS; review V4).
+    const starting = !this.gesture || now - this.gesture.lastAt > RELEASE_GAP_MS
+    if (starting && isWheelNotch(e as WheelEvent & { wheelDeltaX?: number })) return
     const dx = e.deltaX
     const dy = e.deltaY
-    const now = e.timeStamp || performance.now()
     // Mainly vertical input always scrolls the list natively and is never held back (SB-23, review M2).
     const vertical = Math.abs(dy) >= Math.abs(dx)
     let g = this.gesture
@@ -602,7 +621,7 @@ export class SpaceSwitcher {
       if (this.newPage === 'hint') this.newPage = undefined
       this.setSlots(this.slots.filter((s) => s.k === 0))
       perfMark('space:switch:settled')
-      for (const resolve of this.settleWaiters.splice(0)) resolve()
+      this.flushSettled()
     }
     this.paint()
   }
@@ -709,8 +728,7 @@ export class SpaceSwitcher {
     const pages = track.querySelectorAll<HTMLElement>(':scope > [data-slot]')
     if (!moving) {
       for (const page of pages) {
-        const fav = page.querySelector<HTMLElement>(FAVORITES_LAYER)
-        if (fav) {
+        for (const fav of favoritesLayers(page)) {
           fav.style.transform = ''
           fav.style.opacity = ''
         }
@@ -723,9 +741,9 @@ export class SpaceSwitcher {
     const same = profileOf(a) === profileOf(b) || profileOf(b) === 'new' || profileOf(a) === 'new'
     for (const page of pages) {
       const k = Number(page.dataset.slot)
-      const fav = page.querySelector<HTMLElement>(FAVORITES_LAYER)
-      if (!fav) continue
-      fav.style.transform = `translate3d(${-(k * this.width + x)}px,0,0)`
+      const layers = favoritesLayers(page)
+      if (layers.length === 0) continue
+      const transform = `translate3d(${-(k * this.width + x)}px,0,0)`
       let opacity = 0
       if (same) {
         const lead = (t < 0.5 ? a : b) ?? a
@@ -733,16 +751,23 @@ export class SpaceSwitcher {
         if (profileOf(lead) === 'new' && (a?.k === k || b?.k === k)) opacity = profileOf(a) === 'new' ? 0 : 1
       } else if (a?.k === k) opacity = 1 - t
       else if (b?.k === k) opacity = t
-      fav.style.opacity = String(opacity)
+      // Slot 0 may hold the stand-in and the real page (hidden) at once: both get the same.
+      for (const fav of layers) {
+        fav.style.transform = transform
+        fav.style.opacity = String(opacity)
+      }
     }
   }
 }
 
 /**
- * The Favorites grid of a page: our wrapper, or a Favorites root rendered by
- * other sidebar code (first match in document order wins).
+ * The Favorites grids of a page: the `data-favorites-layer` wrappers, or else a
+ * Favorites root rendered by other sidebar code. Never both (they nest).
  */
-const FAVORITES_LAYER = '[data-favorites-layer], [data-testid="favorites"]'
+function favoritesLayers(page: HTMLElement): HTMLElement[] {
+  const layers = page.querySelectorAll<HTMLElement>('[data-favorites-layer]')
+  return [...(layers.length ? layers : page.querySelectorAll<HTMLElement>('[data-testid="favorites"]'))]
+}
 
 /** The shell's Space switcher (one sidebar per shell renderer). */
 export const switcher = new SpaceSwitcher()

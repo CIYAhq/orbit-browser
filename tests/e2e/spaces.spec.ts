@@ -831,25 +831,42 @@ test('[SP-08][FL-13] the strip never freezes between pages (review M3)', async (
   await createSpace(app, { name: 'Beta', activate: false })
   await settled(shell)
   const w = await stripWidth(shell)
-  await hoverSidebar(shell)
-  // (a) Fingers still moving while the new-Space page springs in: it still arrives.
+  // (a) Fingers still moving while the new-Space page springs in: once the slide has started,
+  // three small horizontal events arrive. The page still arrives fully.
   await run(app, 'spaces.beginCreate', {})
-  await sleep(40)
-  await swipe(shell, 6, 3, 8)
-  await expect.poll(() => stripX(shell), { timeout: 3000 }).toBeCloseTo(-w, 0)
+  await shell.waitForFunction(() => {
+    const m = /translate3d\((-?[\d.]+)px/.exec(
+      document.querySelector<HTMLElement>('.space-strip__track')?.style.transform ?? '',
+    )
+    return !!m && Number(m[1]) < -5
+  })
+  await shell.evaluate(async () => {
+    const target = document.querySelector('[data-testid="sidebar"]') as HTMLElement
+    for (let i = 0; i < 3; i++) {
+      target.dispatchEvent(new WheelEvent('wheel', { deltaX: 6, deltaY: 0, bubbles: true, cancelable: true }))
+      await new Promise((r) => setTimeout(r, 8))
+    }
+  })
+  await expect.poll(() => stripX(shell), { timeout: 3000 }).toBe(-w)
   await shell.getByTestId('new-space-cancel').click()
   await settled(shell)
-  // (b) A release starved by a long task, then a vertical event: the strip still settles.
+  // (b) A release starved by a long task: the next event (vertical, in the same task as the
+  // busy loop, so no timer can run in between) still releases the swipe and the strip settles.
   await sleep(150)
-  await swipe(shell, 10, 6, 10)
-  await expect.poll(() => stripX(shell)).toBeLessThan(-20)
-  await shell.evaluate(() => {
+  await shell.evaluate(async () => {
+    const target = document.querySelector('[data-testid="sidebar-scroll"]') as HTMLElement
+    const wheel = (dx: number, dy: number) =>
+      target.dispatchEvent(new WheelEvent('wheel', { deltaX: dx, deltaY: dy, bubbles: true, cancelable: true }))
+    for (let i = 0; i < 6; i++) {
+      wheel(10, 0)
+      await new Promise((r) => setTimeout(r, 10))
+    }
     const end = performance.now() + 150
     while (performance.now() < end) {
       // busy: the release timer can't run
     }
+    wheel(0, 8)
   })
-  await shell.mouse.wheel(0, 8)
   await settled(shell)
   expect(await stripX(shell)).toBe(0)
 })
@@ -922,4 +939,128 @@ test('[SP-15] a stored theme without colors still opens the window (review M1)',
   orbit = await launchOrbit({ userData })
   await expect(orbit.shell.getByTestId('sidebar')).toBeVisible()
   expect((await state(orbit.app)).spaces[a]?.theme).toEqual({ colors: [], intensity: 0.6, grain: 0 })
+})
+
+test('[SP-21][TB-09] a tab dropped right after an edge-dwell Space switch lands where it was dropped (review V1)', async () => {
+  const { app, shell } = orbit
+  const a = await activeSpace(app)
+  const b = await createSpace(app, { name: 'B', activate: false })
+  const inB: string[] = []
+  for (let i = 0; i < 3; i++) inB.push(await newTab(app, fx.url(`/page/InB${i}`), { spaceId: b, activate: false }))
+  const mover = await newTab(app, fx.url('/page/Mover'))
+  await settled(shell)
+  const rowOf = (id: string) => shell.locator(`[data-testid="tab-row"][data-tab-id="${id}"]`)
+  const start = await rowOf(mover).boundingBox()
+  const sidebar = await shell.getByTestId('sidebar').boundingBox()
+  if (!start || !sidebar) throw new Error('no layout')
+  const sx = start.x + start.width / 2
+  const sy = start.y + start.height / 2
+  await shell.mouse.move(sx, sy)
+  await shell.mouse.down()
+  await shell.mouse.move(sx, sy + 6, { steps: 2 })
+  await shell.mouse.move(sidebar.x + sidebar.width + 4, sy + 20, { steps: 8 })
+  // Hold at the right edge until the window shows B…
+  await expect.poll(() => activeSpace(app), { timeout: 4000 }).toBe(b)
+  // …then go straight back over B's first row and let go about 150 ms after the switch.
+  const firstB = inB[inB.length - 1] as string
+  await expect(rowOf(firstB)).toBeVisible()
+  const target = await rowOf(firstB).boundingBox()
+  if (!target) throw new Error('no row')
+  await shell.mouse.move(sx, target.y + 4, { steps: 4 })
+  await sleep(60)
+  await shell.mouse.up()
+  // Dropped above B's first row: first in B's Today, not at the end.
+  await expect.poll(async () => (await state(app)).spaces[b]?.today[0]).toBe(mover)
+  expect((await state(app)).spaces[b]?.today).toHaveLength(4)
+  expect((await state(app)).spaces[a]?.today).not.toContain(mover)
+})
+
+test('[PR-06][SP-07] a click switch between Spaces of one profile keeps the Favorites grid still (review V2)', async () => {
+  const { app, shell } = orbit
+  for (let i = 0; i < 3; i++) {
+    await newTab(app, fx.url(`/page/Fav${i}`), { container: { kind: 'favorites', profileId: 'p-default' } })
+  }
+  const a = await activeSpace(app)
+  const b = await createSpace(app, { name: 'Same profile', activate: false })
+  for (let i = 0; i < 60; i++) await newTab(app, fx.url(`/page/Many${i}`), { spaceId: b, activate: false })
+  await settled(shell)
+  const tiles = () =>
+    shell.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('[data-slot="0"] .favorite')]
+        .filter((el) => el.getClientRects().length > 0)
+        .map((el) => {
+          const r = el.getBoundingClientRect()
+          return `${Math.round(r.x)}:${Math.round(r.width)}`
+        })
+        .join(' '),
+    )
+  const before = await tiles()
+  // Sample the visible tiles every frame while switching back and forth.
+  const sampled = shell.evaluate(
+    () =>
+      new Promise<string[]>((done) => {
+        const out = new Set<string>()
+        const t0 = performance.now()
+        const tick = () => {
+          out.add(
+            [...document.querySelectorAll<HTMLElement>('[data-slot="0"] .favorite')]
+              .filter((el) => el.getClientRects().length > 0)
+              .map((el) => {
+                const r = el.getBoundingClientRect()
+                return `${Math.round(r.x)}:${Math.round(r.width)}`
+              })
+              .join(' '),
+          )
+          if (performance.now() - t0 < 1400) requestAnimationFrame(tick)
+          else done([...out])
+        }
+        requestAnimationFrame(tick)
+      }),
+  )
+  await shell.locator(`[data-testid="space-dot"][data-space-id="${b}"]`).click()
+  await sleep(600)
+  await shell.locator(`[data-testid="space-dot"][data-space-id="${a}"]`).click()
+  const seen = (await sampled).filter((g) => g !== '')
+  // One grid on screen on every frame: no tile changes size or place.
+  expect(new Set(seen).size).toBe(1)
+  expect(seen[0]).toBe(before)
+  expect(before.split(' ')).toHaveLength(3)
+})
+
+test('[SP-23][TB-17] switching Space never puts two windows on the same tab', async () => {
+  const { app, shell } = orbit
+  const a = await activeSpace(app)
+  const t1 = await newTab(app, fx.url('/page/Shared1'))
+  const t2 = await newTab(app, fx.url('/page/Shared2'), { activate: false })
+  await run(app, 'tabs.activate', { tabId: t1 })
+  const b = await createSpace(app, { name: 'B', activate: false })
+  await settled(shell)
+  const ids = (await state(app)).windows
+  const w1 = Object.keys(ids)[0] as string
+  // A second window on Space A.
+  await app.evaluate(async (_e, w) => {
+    const hooks = (globalThis as unknown as { __orbit: { action: (id: string, w?: string) => Promise<void> } }).__orbit
+    await hooks.action('window.new', w)
+  }, w1)
+  await expect.poll(async () => Object.keys((await state(app)).windows).length).toBe(2)
+  const w2 = Object.keys((await state(app)).windows).find((id) => id !== w1) as string
+  const runIn = (w: string, name: string, args: unknown) =>
+    app.evaluate(
+      (_e, [ww, n, ar]) =>
+        (
+          globalThis as unknown as { __orbit: { run: (n: string, a: unknown, w?: string) => Promise<unknown> } }
+        ).__orbit.run(n, ar, ww),
+      [w, name, args] as const,
+    )
+  await runIn(w2, 'overlay.close', {})
+  // Window 1 goes to B (remembering t1 for A); window 2 then shows t1.
+  await runIn(w1, 'spaces.switch', { spaceId: b })
+  await runIn(w2, 'tabs.activate', { tabId: t1 })
+  await expect.poll(async () => (await state(app)).windows[w2]?.activeTab[a]).toBe(t1)
+  // Window 1 comes back to A: it keeps t1, and window 2 shows another tab.
+  await runIn(w1, 'spaces.switch', { spaceId: a })
+  await expect.poll(async () => (await state(app)).windows[w1]?.spaceId).toBe(a)
+  const s = await state(app)
+  expect(s.windows[w1]?.activeTab[a]).toBe(t1)
+  expect(s.windows[w2]?.activeTab[a]).toBe(t2)
 })

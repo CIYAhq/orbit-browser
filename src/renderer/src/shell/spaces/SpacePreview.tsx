@@ -9,6 +9,8 @@ import { scrollMemory } from './scroll-memory'
 
 /** Approximate row pitch (row height + gap) used to budget preview rows. */
 const ROW_PITCH = 33
+/** Most Favorites tiles per row (matches the tabs lane's grid, FV-02). */
+const MAX_FAVORITE_COLUMNS = 4
 
 /**
  * A light, static picture of a neighbouring Space for the swipe and switch
@@ -43,12 +45,26 @@ export const SpacePreview = memo(function SpacePreview({
     <div className={`space-page space-page--preview${standIn ? ' is-stand-in' : ''}`} aria-hidden={!standIn}>
       <div className="space-page__favorites" data-favorites-layer>
         {favorites && favorites.length > 0 ? (
-          <div className="favorites">
+          // Same grid and tiles as the tabs lane's Favorites, so a stand-in or a cross-fading
+          // neighbour never changes the tiles' size or place (PR-06; review V2).
+          <div
+            className="favorites"
+            style={{
+              gridTemplateColumns: `repeat(${Math.max(1, Math.min(MAX_FAVORITE_COLUMNS, favorites.filter(isTabId).length))}, minmax(0, 1fr))`,
+            }}
+          >
             {favorites.filter(isTabId).map((id) => {
               const tab = state.tabs[id]
               return (
-                <div key={id} className={`favorite${active === id ? ' is-active' : ''}`}>
-                  <Favicon src={tab?.favicon} size={18} />
+                <div
+                  key={id}
+                  className={`favorite${active === id ? ' is-active' : ''}${tab?.asleep ? ' is-asleep' : ''}`}
+                >
+                  {tab?.icon ? (
+                    <span className="favorite__emoji">{tab.icon}</span>
+                  ) : (
+                    <Favicon src={tab?.favicon} size={20} />
+                  )}
                 </div>
               )
             })}

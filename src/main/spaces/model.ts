@@ -24,6 +24,7 @@ import type {
 } from '../../shared/state'
 import { normalizeSpaceTheme, sameTheme } from '../../shared/theme'
 import { splitLeaves, tabsInItem } from '../../shared/tree'
+import { dedupeDisplayed } from '../tabs/model'
 
 /** Archive size cap; trimmed in chunks from the oldest end so trims are rare (review F2, same rule as tabs/ops.ts). */
 export const MAX_ARCHIVE = 5000
@@ -99,6 +100,9 @@ export function switchSpaceInDraft(d: OrbitState, windowId: WindowId, spaceId: S
   const win = d.windows[windowId]
   if (!win || !d.spaces[spaceId] || win.spaceId === spaceId) return false
   win.spaceId = spaceId
+  // The Space's remembered tab may be on screen in another window: a page is live in one
+  // window at a time, so the window that switched keeps it and the other picks again (TB-17).
+  dedupeDisplayed(d, windowId)
   return true
 }
 
@@ -190,11 +194,11 @@ export function deleteSpaceInDraft(d: OrbitState, spaceId: SpaceId, now = Date.n
     if (!tab.url || tab.url === 'about:blank') continue
     const id = newId('a')
     deleted.archiveIds.push(id)
+    // No favicon: archive entries stay small (icons are looked up with tabs.favicon).
     entries.push({
       id,
       url: tab.url,
       title: tab.customTitle ?? tab.title,
-      favicon: tab.favicon,
       spaceId,
       spaceName: space.name,
       profileId: tab.profileId,
@@ -208,6 +212,8 @@ export function deleteSpaceInDraft(d: OrbitState, spaceId: SpaceId, now = Date.n
   for (const folder of deleted.folders) delete d.folders[folder.id]
   for (const split of deleted.splits) delete d.splits[split.id]
   delete d.spaces[spaceId]
+  // Windows moved to the neighbour may now show a tab another window shows.
+  dedupeDisplayed(d)
   return deleted
 }
 
@@ -247,6 +253,7 @@ export function restoreSpaceInDraft(d: OrbitState, deleted: DeletedSpace, window
   }
   const caller = windowId ? d.windows[windowId] : undefined
   if (caller) caller.spaceId = restored.id
+  dedupeDisplayed(d, windowId)
   return true
 }
 

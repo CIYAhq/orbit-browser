@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 74 built (29 partial) · 105 tested · 0 feel right.
+**Totals:** 485 spec’d · 74 built (29 partial) · 106 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 52 | 68 |
+| P0 | 174 | 52 | 69 |
 | P1 | 221 | 21 | 35 |
 | P2 | 83 | 1 | 2 |
 
@@ -143,7 +143,7 @@ Spec: `spec/spaces.md`
 | SP-18 | Light / Dark / Automatic switch in the theme picker | P1 | ✅ | ✅ e2e+unit | – | one global Automatic/Light/Dark switch in the picker (D12) |
 | SP-19 | Theme transition between Spaces | P1 | ✅ | ✅ e2e+unit | – | OKLab blend driven by the swipe or switch spring, no neutral frame |
 | SP-20 | Per-Space pinned and Today sections | P0 | ✅ | ✅ e2e | – | per-Space pinned and Today containers (tab behaviour in the tabs lane) |
-| SP-21 | Move tabs between Spaces | P0 | ✅ | – | – | drop on a switcher target moves the tab (tabs lane drag); edge dwell slides the strip and measures once it settles |
+| SP-21 | Move tabs between Spaces | P0 | ✅ | ✅ e2e | – | drop on a switcher target moves the tab (tabs lane drag); edge dwell slides the strip and measures once it settles |
 | SP-22 | Spaces in the command bar | P1 | 🟡 partial | – | – | New Space, Rename Space, Edit Theme, Change Space Icon and Delete Space actions; Move to/Pin to [Space] not yet |
 | SP-23 | Spaces across windows | P0 | ✅ | ✅ e2e+unit | – | each window keeps its own Space; all windows share Spaces |
 | SP-24 | What a new window shows | P0 | ✅ | ✅ e2e | – | Cmd/Ctrl+N: same Space, sidebar shown, cascaded, command bar open, full screen follows |

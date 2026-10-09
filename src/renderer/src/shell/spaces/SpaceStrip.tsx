@@ -25,6 +25,9 @@ export const SpaceStrip = memo(function SpaceStrip({ windowId, spaceId }: { wind
   // strip slides, so a switch never blocks a frame on mounting rows (review M5).
   const shownSpace = useDeferredValue(spaceId)
   const standIn = shownSpace !== spaceId
+  useLayoutEffect(() => {
+    switcher.setStandIn(standIn)
+  }, [standIn])
 
   useLayoutEffect(() => {
     switcher.syncActive(spaceId, order)
