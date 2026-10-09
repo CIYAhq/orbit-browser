@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 140 built (45 partial) · 187 tested · 0 feel right.
+**Totals:** 485 spec’d · 140 built (45 partial) · 188 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
 | P0 | 174 | 97 | 117 |
-| P1 | 221 | 39 | 65 |
+| P1 | 221 | 39 | 66 |
 | P2 | 83 | 4 | 5 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -262,7 +262,7 @@ Spec: `spec/peek.md`
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
 | PK-01 | What Peek is | P0 | ✅ | ✅ e2e+unit | – | floating card over the source tab; one Peek per window; links inside navigate it |
-| PK-02 | Which links open in Peek: other-site links in pinned tabs and Favorites | P0 | ✅ | ✅ e2e+unit | – | other-site (eTLD+1) clicks and target=_blank in pinned tabs/Favorites; same-site navigates |
+| PK-02 | Which links open in Peek: other-site links in pinned tabs and Favorites | P0 | ✅ | ✅ e2e+unit | – | other-site (eTLD+1) link clicks, Enter on a focused link, and target=_blank in pinned tabs/Favorites; same-site navigates. Only a navigation to the clicked link counts, so form posts, script navigations and auto-posted sign-ins stay in the tab |
 | PK-03 | Shift-click opens any link in Peek | P1 | ✅ | ✅ e2e+unit | – | Shift-click in any tab; link menu 'Open Link in Peek' |
 | PK-04 | Exceptions: meeting links and link-routing rules | P1 | ✅ | ✅ e2e+unit | – | meeting links open a tab; routing rules (settings.linkRules) win; rules UI is the settings lane's |
 | PK-05 | The Peek card's look | P0 | ✅ | ✅ e2e+unit | – | inset card, shadow, dimmed page area, Close / Open as Tab / Split buttons with shortcut tooltips; no toolbar (AP-07 not built) |
@@ -287,13 +287,13 @@ Spec: `spec/mini-window.md`
 | MW-01 | What the Mini Window is | P0 | ✅ | ✅ e2e | – | separate small window, one floating tab, main window untouched |
 | MW-02 | Links from other apps open in a Mini Window by default | P0 | ✅ | ✅ e2e | – | open-url / second-instance / argv links open a Mini Window; same URL resurfaces it; routing rules first |
 | MW-03 | Look and anatomy | P0 | ✅ | ✅ e2e | – | slim top bar: controls, favicon+host (click/⌘L edits), Open in…, profile pill; inset page card; neutral theme |
-| MW-04 | Opening animation and window placement | P1 | 🟡 partial | – | – | last-used size/position, 24 px cascade, fade-in on macOS/Windows, best-effort above fullscreen on macOS; no 92% to 100% grow (resizing an OS window reflows the page every frame) |
+| MW-04 | Opening animation and window placement | P1 | 🟡 partial | ✅ unit | – | last-used size/position, 24 px cascade, fade-in on macOS/Windows, best-effort above fullscreen on macOS; no 92% to 100% grow (resizing an OS window reflows the page every frame) |
 | MW-05 | Move the page into a Space ("Open in…") | P0 | ✅ | ✅ e2e | – | ⌘O to the most recent Space, Open in… / ⌘⌥O (⌘⇧O) native Space menu; live page, no reload |
-| MW-06 | Open a blank Mini Window for a quick lookup | P0 | ✅ | ✅ e2e | – | ⌘⌥N (global shortcut outside e2e) opens a pre-rendered blank window with a focused lookup bar; Esc/⌘W close |
+| MW-06 | Open a blank Mini Window for a quick lookup | P0 | ✅ | ✅ e2e+unit | – | ⌘⌥N opens a pre-rendered blank window with a focused lookup bar; Esc/⌘W close. System-wide on macOS only (outside e2e); on Windows/Linux Ctrl+Alt+N works inside Orbit, so other apps (and AltGr+N) keep the key |
 | MW-07 | Open a link or a tab in a Mini Window on purpose | P1 | ✅ | ✅ e2e+unit | – | ⌘⌥-click a link, link menu Open Link in Mini Window, or ⌘⌥-click a sidebar row: Today rows move live, pinned/Favorite rows open a copy |
 | MW-08 | Several Mini Windows at once | P1 | ✅ | ✅ e2e | – | any number; Show/Hide All action and macOS dock menu |
-| MW-09 | Closing, auto-archive and the Archive | P0 | ✅ | ✅ e2e | – | close and idle auto-close (settings.miniWindowArchiveAfterMs, 6 h, 0 = never; not while audible) archive with from 'mini' |
-| MW-10 | Profiles | P1 | ✅ | ✅ e2e | – | profile pill/menu reopens the page in another profile; remembered per site |
+| MW-09 | Closing, auto-archive and the Archive | P0 | ✅ | ✅ e2e+unit | – | close and idle auto-close (settings.miniWindowArchiveAfterMs, 6 h, 0 = never; not while audible) archive with from 'mini' |
+| MW-10 | Profiles | P1 | ✅ | ✅ e2e+unit | – | profile pill/menu reopens the page in another profile; remembered per site |
 | MW-11 | Turning the Mini Window off | P1 | ✅ | ✅ e2e | – | settings.miniWindowForExternalLinks off: tabs in the most recent or chosen Space (externalLinksSpace) |
 | MW-12 | What works inside a Mini Window | P2 | 🟡 partial | – | – | fullscreen video fills the window, copy URL, devtools, downloads via the session; no captures |
 | MW-13 | Menu-bar / tray button | P2 | – | – | – |  |
