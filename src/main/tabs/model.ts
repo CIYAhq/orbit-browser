@@ -1,6 +1,7 @@
 /**
  * Pure tab-model helpers operating on state or drafts (no Electron imports, unit-testable).
  */
+import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
 import type { ItemId, OrbitState, Space, SpaceId, Tab, TabId, WindowId } from '../../shared/state'
 import {
@@ -171,11 +172,14 @@ export function detachFromSplit(d: OrbitState, tabId: TabId): void {
   }
 }
 
-/** Auto-archive period for a Space's Today tabs: its profile's value, else the global setting (TD-03). */
+/**
+ * Auto-archive period for a Space's Today tabs (TD-03): its profile's value; profiles without
+ * one inherit the Default profile's, then the global setting.
+ */
 export function archiveAfterFor(state: OrbitState, spaceId: SpaceId): number {
   const space = state.spaces[spaceId]
   const profile = space ? state.profiles[space.profileId] : undefined
-  return profile?.archiveAfterMs ?? state.settings.archiveAfterMs
+  return profile?.archiveAfterMs ?? state.profiles[DEFAULT_PROFILE_ID]?.archiveAfterMs ?? state.settings.archiveAfterMs
 }
 
 /**

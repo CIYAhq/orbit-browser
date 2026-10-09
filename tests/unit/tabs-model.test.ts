@@ -159,6 +159,11 @@ describe('[TD-02][TD-03][TD-06] auto-archive rule', () => {
     state.profiles[work.id] = work
     state.spaces[s2]!.profileId = work.id
     expect(autoArchiveCandidates(state, now)).not.toContain(other)
+    // A profile without its own value inherits the Default profile's.
+    delete work.archiveAfterMs
+    state.profiles[DEFAULT_PROFILE_ID]!.archiveAfterMs = 24 * HOUR
+    expect(autoArchiveCandidates(state, now)).not.toContain(other)
+    expect(autoArchiveCandidates(state, 24 * HOUR + 1)).toContain(other)
   })
 
   it('archives a split view in Today as one unit', () => {
