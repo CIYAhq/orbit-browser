@@ -4,6 +4,7 @@ import {
   memo,
   type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   useEffect,
   useLayoutEffect,
@@ -11,7 +12,7 @@ import {
   useState,
 } from 'react'
 import { isFolderId, isTabId } from '../../../../shared/ids'
-import type { Space, WindowState } from '../../../../shared/state'
+import type { Space, SpaceId } from '../../../../shared/state'
 import { containerKey, locate, sectionOf } from '../../../../shared/tree'
 import { parseInput } from '../../../../shared/url'
 import { invoke, isMac, runAction } from '../../api'
@@ -30,12 +31,25 @@ import { clearSelection, startRename, useDrag, useIconPicker, useKeyboardFocus, 
  * Favorites, then one scrolling list with the Space title, pinned section, divider with
  * Clear, "+ New Tab" and Today. Owns drag and drop, keyboard navigation and auto-reveal.
  */
-export function SidebarItems({ win, space, header }: { win: WindowState; space: Space; header: ReactNode }) {
+export const SidebarItems = memo(function SidebarItems({
+  spaceId,
+  header,
+  onContextMenu,
+}: {
+  spaceId: SpaceId
+  /** The Space title row (owned by the Spaces lane), drawn at the top of the scrolling list. */
+  header?: ReactNode
+  /** Right-click on empty list space (rows handle their own menus first). */
+  onContextMenu?: (e: ReactMouseEvent) => void
+}) {
+  const space = useOrbit((s) => s.spaces[spaceId])
+  const active = useOrbit((s) => activeTabId(s))
   const scrollRef = useRef<HTMLDivElement>(null)
   const favRef = useRef<HTMLDivElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
   useLayoutEffect(() => {
+    if (!space) return
     setDragContext({
       scroll: scrollRef.current,
       favorites: favRef.current,
@@ -47,14 +61,17 @@ export function SidebarItems({ win, space, header }: { win: WindowState; space: 
 
   useMainMessages(scrollRef)
   useShellUndo()
-  useScrollMemory(scrollRef, space.id)
-  const reveal = useAutoReveal(scrollRef, win)
+  useScrollMemory(scrollRef, spaceId)
+  const reveal = useAutoReveal(scrollRef, active)
   const onKeyDown = useKeyboardNav(scrollRef)
+  if (!space) return null
 
   return (
     <MotionConfig reducedMotion="user">
       <div className="sidebar-items" ref={rootRef}>
-        <Favorites ref={favRef} profileId={space.profileId} />
+        <div className="sidebar-items__favorites" data-favorites-layer>
+          <Favorites ref={favRef} profileId={space.profileId} />
+        </div>
         <div
           className="sidebar__scroll"
           ref={scrollRef}
@@ -65,6 +82,9 @@ export function SidebarItems({ win, space, header }: { win: WindowState; space: 
           onKeyDown={onKeyDown}
           onDragOver={onLinkDragOver}
           onDrop={(e) => onLinkDrop(e, space.id)}
+          onContextMenu={(e) => {
+            if (!e.defaultPrevented) onContextMenu?.(e)
+          }}
         >
           <SpaceHeader space={space}>{header}</SpaceHeader>
           <PinnedSection space={space} />
@@ -99,7 +119,7 @@ export function SidebarItems({ win, space, header }: { win: WindowState; space: 
       </div>
     </MotionConfig>
   )
-}
+})
 
 /** Space title row with the pinned-section caret (PN-09). */
 function SpaceHeader({ space, children }: { space: Space; children: ReactNode }) {
@@ -330,8 +350,7 @@ function useScrollMemory(scrollRef: React.RefObject<HTMLDivElement | null>, spac
  * Scrolls a newly selected tab into view and, while the selected tab is scrolled out of
  * sight, shows a small pill pointing to it (SB-23).
  */
-function useAutoReveal(scrollRef: React.RefObject<HTMLDivElement | null>, win: WindowState) {
-  const active = win.activeTab[win.spaceId] ?? null
+function useAutoReveal(scrollRef: React.RefObject<HTMLDivElement | null>, active: string | null) {
   const [side, setSide] = useState<'above' | 'below' | null>(null)
   const rowOf = (id: string) => rowIn(scrollRef.current, id)
   useEffect(() => {

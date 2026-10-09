@@ -14,8 +14,7 @@ export function Sidebar({ win }: { win: WindowState }) {
     <aside className="sidebar" data-testid="sidebar" aria-hidden={!win.sidebar.visible}>
       <TopBar win={win} />
       <SidebarItems
-        win={win}
-        space={space}
+        spaceId={space.id}
         header={
           <div className="sidebar__space-name" data-testid="space-name">
             {space.icon ? <span className="sidebar__space-icon">{space.icon}</span> : null}
