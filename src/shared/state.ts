@@ -165,6 +165,8 @@ export interface Settings {
   onboarded: boolean
   /** Command bar site searches (CB-11); edited in Settings (ST-06). */
   siteSearch: SiteSearchEngine[]
+  /** Ask the search engine for suggestions while typing in the command bar (CB-15). Off by default: it sends keystrokes to the engine. */
+  searchSuggestions: boolean
 }
 
 export interface ArchivedTab {

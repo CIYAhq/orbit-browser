@@ -13,7 +13,7 @@
  * The same URL appears once (open tab > archived > history).
  */
 import { findSiteSearch, type SearchResponse, type SearchResult } from '../../shared/commands/commandbar'
-import type { CommandBarMode, SiteSearchEngine, SpaceId, TabId } from '../../shared/state'
+import type { CommandBarMode, FolderId, SiteSearchEngine, SpaceId, TabId } from '../../shared/state'
 import { fillSearchTemplate, parseInput, SEARCH_ENGINES } from '../../shared/url'
 import { frecency, type HostInfo, type IndexedEntry, urlKeyOf } from '../history/store'
 import { type DocMatch, matchDoc, matchName, terms as splitTerms } from './match'
@@ -56,6 +56,14 @@ export interface SpaceDoc {
   nameLower: string
 }
 
+export interface FolderDoc {
+  id: FolderId
+  name: string
+  nameLower: string
+  /** Space whose sidebar shows the folder. */
+  spaceId?: SpaceId
+}
+
 export interface ActionDoc {
   id: string
   title: string
@@ -83,6 +91,7 @@ export interface RankInput {
   hosts: readonly HostInfo[]
   archive: readonly ArchiveDoc[]
   spaces: readonly SpaceDoc[]
+  folders?: readonly FolderDoc[]
   actions: readonly ActionDoc[]
   siteSearches: readonly SiteSearch[]
   /** Active site-search chip (CB-11). */
@@ -116,6 +125,17 @@ export function displayUrl(url: string): string {
   if (/^(about|data|chrome|devtools|view-source|orbit):/i.test(url)) return url
   const s = url.replace(/^https?:\/\//i, '').replace(/^www\./i, '')
   return s.endsWith('/') ? s.slice(0, -1) : s
+}
+
+const keyCache = new WeakMap<object, string>()
+/** normKey of a history or archive entry, computed once per entry. */
+function keyOf(e: { url: string }): string {
+  let key = keyCache.get(e)
+  if (key === undefined) {
+    key = normKey(e.url)
+    keyCache.set(e, key)
+  }
+  return key
 }
 
 // ---- Past searches (local search suggestions) ----
@@ -297,6 +317,10 @@ function recencyBonus(at: number, now: number): number {
 class TopN {
   readonly items: Cand[] = []
   constructor(private n: number) {}
+  /** Whether a candidate with this score would be kept (check before building it). */
+  accepts(score: number): boolean {
+    return this.items.length < this.n || (this.items[this.items.length - 1] as Cand).r.score < score
+  }
   add(c: Cand): void {
     const items = this.items
     if (items.length === this.n && (items[items.length - 1] as Cand).r.score >= c.r.score) return
@@ -339,10 +363,12 @@ export function rank(input: RankInput): SearchResponse {
       (m.hostPrefix ? 100 : 0) +
       (t.spaceId === input.currentSpaceId ? 20 : 0) +
       recencyBonus(t.lastActiveAt, now)
-    tabs.add({ r: tabRow(t, input, score), key: normKey(t.url), strong: m.strong, prio: 4 })
+    if (!tabs.accepts(score)) continue
+    tabs.add({ r: tabRow(t, input, score), key: keyOf(t), strong: m.strong, prio: 4 })
   }
 
   const spaces = new TopN(3)
+  const folders = new TopN(2)
   const history = new TopN(6)
   const suggestions = new TopN(3)
   const archived = new TopN(3)
@@ -369,6 +395,27 @@ export function rank(input: RankInput): SearchResponse {
       })
     }
 
+    for (const f of input.folders ?? []) {
+      const m = matchName(ts, f.nameLower)
+      if (m.score === 0) continue
+      const other = f.spaceId && f.spaceId !== input.currentSpaceId ? input.spaceNames[f.spaceId] : undefined
+      folders.add({
+        r: {
+          id: `folder:${f.id}`,
+          kind: 'folder',
+          title: f.name,
+          ...(other ? { subtitle: other } : {}),
+          label: 'Folder',
+          hint: 'Open folder',
+          folderId: f.id,
+          spaceId: f.spaceId,
+          score: 450 + m.score,
+        },
+        strong: m.strong,
+        prio: 0,
+      })
+    }
+
     const seenQueries = new Set<string>([lower])
     for (const e of input.history) {
       const m = matchDoc(ts, e.titleLower, e.urlKey)
@@ -381,6 +428,8 @@ export function rank(input: RankInput): SearchResponse {
         if (seenQueries.has(pastLower)) continue
         const pm = matchName(ts, pastLower)
         if (pm.score === 0) continue
+        const pastScore = 200 + pm.score + 3 * f
+        if (!suggestions.accepts(pastScore)) continue
         seenQueries.add(pastLower)
         suggestions.add({
           r: {
@@ -392,16 +441,17 @@ export function rank(input: RankInput): SearchResponse {
             url: fillSearchTemplate(input.engine.search, past),
             query: past,
             removable: true,
-            score: 200 + pm.score + 3 * f,
+            score: pastScore,
           },
           strong: false,
           prio: 0,
         })
         continue
       }
-      const key = normKey(e.url)
-      if (key === activeKey) continue
       const score = 400 + m.score + 6 * f + (m.hostPrefix ? 40 : 0)
+      if (!history.accepts(score)) continue
+      const key = keyOf(e)
+      if (key === activeKey) continue
       history.add({ r: historyRow(e, score), key, strong: m.strong, prio: 1 })
     }
 
@@ -409,6 +459,9 @@ export function rank(input: RankInput): SearchResponse {
       const m = matchDoc(ts, a.titleLower, a.urlKey)
       if (m.score === 0) continue
       const score = 250 + m.score + recencyBonus(a.archivedAt, now)
+      if (!archived.accepts(score)) continue
+      const key = keyOf(a)
+      if (key === activeKey) continue
       archived.add({
         r: {
           id: `archived:${a.id}`,
@@ -423,7 +476,7 @@ export function rank(input: RankInput): SearchResponse {
           spaceId: a.spaceId,
           score,
         },
-        key: normKey(a.url),
+        key,
         strong: m.strong,
         prio: 2,
       })
@@ -447,6 +500,7 @@ export function rank(input: RankInput): SearchResponse {
   const pool = dedupe([
     ...tabs.items,
     ...spaces.items,
+    ...folders.items,
     ...history.items,
     ...archived.items,
     ...suggestions.items,
@@ -456,7 +510,7 @@ export function rank(input: RankInput): SearchResponse {
   let topKey: string | undefined
   if (target && !tabsOnly) {
     topKey = normKey(target)
-    const tab = input.tabs.find((t) => t.id !== input.activeTabId && normKey(t.url) === topKey)
+    const tab = input.tabs.find((t) => t.id !== input.activeTabId && keyOf(t) === topKey)
     if (tab) {
       top = tabRow(tab, input, 10_000)
     } else {
@@ -522,7 +576,7 @@ function findHistory(history: readonly IndexedEntry[], key: string): IndexedEntr
   let best: IndexedEntry | undefined
   for (const e of history) {
     if (e.urlKey.length < key.length || !e.urlKey.startsWith(key)) continue
-    if (normKey(e.url) !== key) continue
+    if (keyOf(e) !== key) continue
     if (!best || e.lastVisit > best.lastVisit) best = e
   }
   return best
@@ -637,9 +691,9 @@ function emptyState(input: RankInput): SearchResult[] {
   const open = new Set(input.tabs.map((t) => normKey(t.url)))
   const frequent = new TopN(EMPTY_STATE_ROWS)
   for (const e of input.history) {
-    if (pastSearchOf(e) !== undefined) continue
     const f = frecency(e, input.now)
-    frequent.add({ r: historyRow(e, f), key: normKey(e.url), strong: false, prio: 1 })
+    if (!frequent.accepts(f) || pastSearchOf(e) !== undefined) continue
+    frequent.add({ r: historyRow(e, f), key: keyOf(e), strong: false, prio: 1 })
   }
   for (const c of frequent.items) {
     if (out.length >= EMPTY_STATE_ROWS) break

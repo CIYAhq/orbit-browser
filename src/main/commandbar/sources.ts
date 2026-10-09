@@ -5,17 +5,18 @@
  */
 import { ACTIONS, formatAccelerator, shortcutsFor } from '../../shared/actions'
 import { isFolderId, isSplitId, isTabId } from '../../shared/ids'
-import type { ArchivedTab, ItemId, OrbitState, ProfileId, SpaceId, Tab, TabId } from '../../shared/state'
+import type { ArchivedTab, FolderId, ItemId, OrbitState, ProfileId, SpaceId, Tab, TabId } from '../../shared/state'
 import { splitLeaves } from '../../shared/tree'
 import { hostOf, urlKeyOf } from '../history/store'
 import { initials } from './match'
-import type { ActionDoc, ArchiveDoc, SpaceDoc, TabDoc } from './rank'
+import type { ActionDoc, ArchiveDoc, FolderDoc, SpaceDoc, TabDoc } from './rank'
 
 type Section = 'favorite' | 'pinned' | 'today'
 
 interface Layout {
   section: Map<TabId, Section>
   split: Map<TabId, TabId[]>
+  folders: FolderDoc[]
 }
 
 /** Actions the bar never lists (they open the bar itself). */
@@ -36,7 +37,7 @@ export function actionNeedsTab(id: string, category: string): boolean {
 
 export class SourceCache {
   private layoutRefs: unknown[] = []
-  private layout: Layout = { section: new Map(), split: new Map() }
+  private layout: Layout = { section: new Map(), split: new Map(), folders: [] }
   private tabDocCache = new WeakMap<Tab, TabDoc>()
   private tabsRef: unknown[] = []
   private tabDocs: TabDoc[] = []
@@ -89,6 +90,11 @@ export class SourceCache {
     return this.archiveDocs
   }
 
+  /** Folders by name, with the Space that shows them (FD-09 "Open [Folder]"). */
+  folders(state: OrbitState): FolderDoc[] {
+    return this.layoutOf(state).folders
+  }
+
   spaces(state: OrbitState): SpaceDoc[] {
     this.refreshSpaces(state)
     return this.spaceDocs
@@ -138,11 +144,20 @@ export class SourceCache {
     this.layoutRefs = refs
     const section = new Map<TabId, Section>()
     const split = new Map<TabId, TabId[]>()
-    const visit = (id: ItemId, sec: Section, depth: number) => {
+    const folders: FolderDoc[] = []
+    const seenFolders = new Set<FolderId>()
+    const visit = (id: ItemId, sec: Section, depth: number, spaceId?: SpaceId) => {
       if (depth > 32) return
       if (isTabId(id)) section.set(id, sec)
-      else if (isFolderId(id)) for (const child of state.folders[id]?.children ?? []) visit(child, sec, depth + 1)
-      else if (isSplitId(id)) {
+      else if (isFolderId(id)) {
+        const folder = state.folders[id]
+        if (!folder) return
+        if (!seenFolders.has(id)) {
+          seenFolders.add(id)
+          folders.push({ id, name: folder.name, nameLower: folder.name.toLowerCase(), spaceId })
+        }
+        for (const child of folder.children) visit(child, sec, depth + 1, spaceId)
+      } else if (isSplitId(id)) {
         const s = state.splits[id]
         if (!s) return
         const leaves = splitLeaves(s.layout)
@@ -154,10 +169,10 @@ export class SourceCache {
     }
     for (const p of Object.values(state.profiles)) for (const id of p.favorites) visit(id, 'favorite', 0)
     for (const s of Object.values(state.spaces)) {
-      for (const id of s.pinned) visit(id, 'pinned', 0)
-      for (const id of s.today) visit(id, 'today', 0)
+      for (const id of s.pinned) visit(id, 'pinned', 0, s.id)
+      for (const id of s.today) visit(id, 'today', 0, s.id)
     }
-    this.layout = { section, split }
+    this.layout = { section, split, folders }
     // Section is part of each cached doc: start over.
     this.tabDocCache = new WeakMap()
     return this.layout

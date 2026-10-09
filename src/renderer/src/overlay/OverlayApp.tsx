@@ -23,7 +23,13 @@ export function OverlayApp() {
           style={paletteVars(palette) as CSSProperties}
           data-testid="overlay"
           onMouseDown={(e) => {
-            if (e.target === e.currentTarget && kind !== 'none') void invoke('overlay.close', {})
+            if (e.target !== e.currentTarget || kind === 'none') return
+            void invoke('overlay.close', {})
+            // CB-20: the sidebar stays usable: a click over it closes the bar and is passed on.
+            const sidebar = win?.sidebar
+            if (kind === 'commandbar' && sidebar && (sidebar.visible || sidebar.peeking) && e.clientX < sidebar.width) {
+              void invoke('search.forwardClick', { x: e.clientX, y: e.clientY })
+            }
           }}
         >
           <AnimatePresence>

@@ -1,3 +1,5 @@
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 import {
   activeTabId,
@@ -329,7 +331,9 @@ test('[CB-19][SP-22] switching Space with the bar open keeps it open; the new ta
 test('[CB-21] clicking outside the bar closes it and creates nothing', async () => {
   const overlay = await openBar()
   await overlay.keyboard.type('abc')
-  await overlay.mouse.click(20, 20)
+  // Over the page, away from the bar (a click over the sidebar is passed on to it: CB-20).
+  const size = await overlay.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }))
+  await overlay.mouse.click(size.w - 40, size.h - 40)
   await expect(overlay.getByTestId('command-bar')).toHaveCount(0)
   expect(await tabCount()).toBe(0)
   await openBar()
@@ -463,4 +467,89 @@ test('[CB-12] a URL on the clipboard is offered first as Paste and go', async ()
   await overlay.keyboard.press('Enter')
   await expect.poll(tabCount).toBe(1)
   expect(Object.values((await state(orbit.app)).tabs)[0]?.url).toBe(url)
+})
+
+/** A local OpenSearch-style suggestion endpoint that answers after a delay (ports 3300–3399). */
+async function startSuggestServer(delayMs: number) {
+  const server = createServer((req, res) => {
+    const q = new URL(req.url ?? '/', 'http://localhost').searchParams.get('q') ?? ''
+    setTimeout(() => {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify([q, [`${q} browser`, `${q} review`, q]]))
+    }, delayMs)
+  })
+  let port = 3399
+  await new Promise<void>((resolve, reject) => {
+    server.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE' && port > 3360) server.listen(--port, '127.0.0.1')
+      else reject(err)
+    })
+    server.listen(port, '127.0.0.1', () => resolve())
+  })
+  const { port: bound } = server.address() as AddressInfo
+  return {
+    template: `http://127.0.0.1:${bound}/suggest?q=%s`,
+    close: () => new Promise<void>((r) => server.close(() => r())),
+  }
+}
+
+test('[CB-15][CB-05][FL-17] opt-in engine suggestions fill rows below without moving the highlight', async () => {
+  const suggest = await startSuggestServer(250)
+  await orbit.app.close()
+  orbit = await launchOrbit({ env: { ORBIT_SUGGEST_URL: suggest.template } })
+  await blockNetwork(orbit.app)
+  await (await viewPage(orbit.app, 'overlay')).getByTestId('overlay').waitFor({ state: 'attached' })
+  await newTab('Orbit notes')
+  await newTab('Elsewhere')
+  // Off by default: nothing is fetched.
+  expect(await run(orbit.app, 'search.suggest', { query: 'orbit' })).toEqual([])
+  await orbit.app.evaluate(() => {
+    const ctx = (globalThis as unknown as { __orbit: { ctx: { store: { update: (fn: (d: never) => void) => void } } } })
+      .__orbit.ctx
+    ctx.store.update((d: { settings: { searchSuggestions: boolean } }) => {
+      d.settings.searchSuggestions = true
+    })
+  })
+  const overlay = await openBar()
+  await overlay.keyboard.type('orbit')
+  await expect(rows(overlay)).toHaveCount(2) // the open tab and the web search, before suggestions arrive
+  await overlay.keyboard.press('ArrowDown')
+  const highlighted = await rows(overlay).nth(1).getAttribute('data-id')
+  const suggestions = rows(overlay).filter({ has: overlay.locator('.cmdbar__label', { hasText: 'Suggestion' }) })
+  await expect(suggestions).toHaveCount(2)
+  await expect(suggestions.first()).toContainText('orbit browser')
+  await expect(rows(overlay).nth(1)).toHaveAttribute('aria-selected', 'true')
+  expect(await rows(overlay).nth(1).getAttribute('data-id')).toBe(highlighted)
+  await suggest.close()
+})
+
+test('[CB-05][CB-13] "Open folder" finds a folder by name and expands it', async () => {
+  const tab = await newTab('Soup')
+  const spaceId = (await state(orbit.app)).spaceOrder[0] as string
+  const folderId = (await run(orbit.app, 'folders.create', {
+    container: { kind: 'pinned', spaceId },
+    name: 'Recipes',
+    items: [tab],
+  })) as string
+  await run(orbit.app, 'folders.setCollapsed', { folderId, collapsed: true })
+  const overlay = await openBar()
+  await overlay.keyboard.type('recip')
+  const row = rows(overlay).filter({ hasText: 'Recipes' })
+  await expect(row).toHaveAttribute('data-kind', 'folder')
+  await row.click()
+  await expect.poll(async () => (await state(orbit.app)).folders[folderId]?.collapsed).toBe(false)
+})
+
+test('[CB-20] clicking a tab in the sidebar while the bar is open selects it in one click', async () => {
+  const first = await newTab('First')
+  await newTab('Second')
+  const overlay = await openBar()
+  await overlay.keyboard.type('abc')
+  const row = orbit.shell.getByTestId('tab-row').filter({ hasText: 'First' })
+  const box = await row.boundingBox()
+  expect(box).toBeTruthy()
+  await overlay.mouse.click((box?.x ?? 0) + 30, (box?.y ?? 0) + (box?.height ?? 0) / 2)
+  await expect(bar(overlay)).toHaveCount(0)
+  await expect.poll(() => activeTabId(orbit.app)).toBe(first)
+  expect(await tabCount()).toBe(2)
 })

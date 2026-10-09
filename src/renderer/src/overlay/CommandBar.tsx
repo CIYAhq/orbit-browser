@@ -12,6 +12,7 @@ import {
 } from 'react'
 import {
   findSiteSearch,
+  mergeSuggestions,
   type OpenDisposition,
   type SearchResponse,
   type SearchResult,
@@ -77,6 +78,7 @@ export function CommandBar({
   const maxRows = useMaxRows()
   const present = useIsPresent()
   const spaceId = useOrbit((s) => s.windows[window.orbit.windowId]?.spaceId)
+  const suggestOn = useOrbit((s) => !!s.settings.searchSuggestions)
   const currentFavicon = useOrbit((s) => {
     const id = activeTabId(s)
     return id ? s.tabs[id]?.favicon : undefined
@@ -96,8 +98,13 @@ export function CommandBar({
     scope: null as Scope,
     maxRows,
     closed: false,
+    suggestOn,
+    /** Latest engine suggestions (CB-15), kept while they still match so rows don't blink. */
+    suggestions: [] as SearchResult[],
+    suggestTimer: undefined as ReturnType<typeof setTimeout> | undefined,
   }).current
   st.maxRows = maxRows
+  st.suggestOn = suggestOn
   if (!present) st.closed = true
 
   // Plain (hoisted) functions: they read `st`, so they never go stale.
@@ -170,7 +177,15 @@ export function CommandBar({
       if (seq !== st.seq || st.closed) return
       st.answered = seq
       applyCompletion(resp.autocomplete)
-      const rows = resp.results.slice(0, st.maxRows)
+      const engineOn = st.suggestOn && !st.scope && !!st.typed.trim()
+      // With engine suggestions on, local rows leave three slots for them.
+      let rows = resp.results.slice(0, engineOn ? Math.max(3, st.maxRows - 3) : st.maxRows)
+      if (engineOn) {
+        const typed = st.typed.trim().toLowerCase()
+        const still = st.suggestions.filter((r) => r.title.toLowerCase().startsWith(typed))
+        rows = mergeSuggestions(rows, still, st.maxRows)
+        requestSuggestions(seq)
+      }
       st.results = rows
       setResults(rows)
       select(0)
@@ -184,6 +199,25 @@ export function CommandBar({
         choose(rows[0], pending.disposition)
       }
     })
+  }
+
+  /** Fetches engine suggestions and adds them below, never moving the highlighted row (FL-17). */
+  function requestSuggestions(seq: number) {
+    clearTimeout(st.suggestTimer)
+    st.suggestTimer = setTimeout(() => {
+      const query = st.typed
+      void invoke('search.suggest', { query }).then((list) => {
+        if (seq !== st.seq || st.closed || st.typed !== query) return
+        st.suggestions = list
+        const highlighted = st.results[st.selected]
+        if (highlighted?.id.startsWith('engine:')) return
+        const base = st.results.filter((r) => !r.id.startsWith('engine:'))
+        const merged = mergeSuggestions(base, list, st.maxRows)
+        if (merged.length === st.results.length && merged.every((r, i) => r.id === st.results[i]?.id)) return
+        st.results = merged
+        setResults(merged)
+      })
+    }, 60)
   }
 
   function setScope(next: Scope) {
@@ -235,6 +269,7 @@ export function CommandBar({
     runQuery()
     return () => {
       st.closed = true
+      clearTimeout(st.suggestTimer)
       releaseTypeahead(buffered.token)
     }
   }, [])

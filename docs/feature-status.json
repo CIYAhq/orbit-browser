@@ -29,7 +29,7 @@
   "CB-02": { "built": "yes", "note": "⌘T/Ctrl+T, + New Tab row, macOS File menu; second ⌘T closes" },
   "CB-03": { "built": "yes", "note": "⌘L/Ctrl+L/Alt+D: full URL selected, current-page row (Enter reloads), navigates the current tab" },
   "CB-04": { "built": "yes", "note": "centred in the window (D11b), input ~36% down, 660 px wide, ≤9 rows sized to fit, no scroll bar, Space accent, dark" },
-  "CB-05": { "built": "partial", "note": "tabs, pinned/Favorites, archive, per-profile history, typed URL + autocomplete, past searches, actions, Spaces; no network engine suggestions, folders, extensions or settings sections yet" },
+  "CB-05": { "built": "partial", "note": "tabs, pinned/Favorites, folders, archive, per-profile history, typed URL + autocomplete, past searches, opt-in engine suggestions, actions, Spaces; extensions and settings sections wait for their lanes" },
   "CB-06": { "built": "yes", "note": "kind label on every row, split favicons, other-Space name, shortcuts, hints, middle-truncated URLs" },
   "CB-07": { "built": "yes", "note": "one ranked list (src/main/commandbar/rank.ts, tunable), best-guess top row, dedupe tab > archived > history, stable row ids" },
   "CB-08": { "built": "yes", "note": "inline domain/URL completion from history and tabs; Backspace drops it, →/End accept; scheme added" },
@@ -39,7 +39,7 @@
   "CB-12": { "built": "partial", "note": "Paste and go row first in the empty state; the ⌘⌥V action belongs to TB-02" },
   "CB-13": { "built": "partial", "note": "every registered action is searchable by name/synonym/initials with its shortcut, tab-only actions hidden on empty Spaces; many catalogue actions do not exist yet" },
   "CB-14": { "built": "partial", "note": "Tab on an empty field → Actions chip; Esc/Backspace leaves; the '/ ' prefix (P2) is not done" },
-  "CB-15": { "built": "partial", "note": "default engine search row and destination (q=a+b); network engine suggestions not implemented (local past searches only)" },
+  "CB-15": { "built": "yes", "note": "default engine search row and destination (q=a+b); engine suggestions opt-in (settings.searchSuggestions, off by default), non-blocking with a 1.5 s timeout" },
   "CB-17": { "built": "yes", "note": "hover × and ⌘⌥⌫ / Shift+Delete delete history and past-search rows" },
   "CB-18": { "built": "yes", "note": "recent tabs, frequent sites, paste row; starter actions/sites in a fresh profile; current page in ⌘L mode" },
   "CB-19": { "built": "yes", "note": "results use the window's current Space/profile and re-run on Space switch; new tabs go to the current Space" },
@@ -49,5 +49,6 @@
   "KS-04": { "built": "partial", "note": "all command bar keys except ⇧Enter (CB-16) and ⌘⌥V (TB-02)" },
   "KS-19": { "built": "partial", "note": "command bar: ⌘T/⌘L/⌘W/Esc handled by the bar first (ActionRegistry.intercept); other overlays belong to their lanes" },
   "FL-16": { "built": "yes", "note": "motion spring (0.97→1, 4 px drop), 100 ms exit while focus returns at once; centred in the window" },
-  "FL-17": { "built": "partial", "note": "per-keystroke local results, identity-keyed memoized rows, instant highlight; no network suggestions to merge yet" }
+  "FL-17": { "built": "yes", "note": "per-keystroke local results, identity-keyed memoized rows, instant highlight; engine suggestions fill free rows without moving the highlight" },
+  "CB-20": { "built": "partial", "note": "a click over the sidebar closes the bar and is forwarded to the sidebar (one-click tab select); hover-reveal sidebar interplay untested" }
 }

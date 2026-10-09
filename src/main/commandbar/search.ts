@@ -1,14 +1,15 @@
-import { clipboard } from 'electron'
-import type { SearchResult } from '../../shared/commands/commandbar'
+import { clipboard, net } from 'electron'
+import type { SearchQueryArgs, SearchResult } from '../../shared/commands/commandbar'
 import type { CommandName } from '../../shared/rpc'
 import type { OrbitState, WindowId } from '../../shared/state'
-import { parseInput, SEARCH_ENGINES } from '../../shared/url'
+import { fillSearchTemplate, parseInput, SEARCH_ENGINES } from '../../shared/url'
 import type { MainContext } from '../context'
 import type { HistoryService } from '../history'
 import type { CallContext } from '../registry'
 import { activeTabOf } from '../windows'
 import { pastSearchOf, type RankInput, rank } from './rank'
 import { SourceCache } from './sources'
+import { parseSuggestions } from './suggest'
 
 /** Keystroke → results timings (ms) of the last queries, for tests and tuning. */
 export const queryTimings: number[] = []
@@ -54,12 +55,8 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
     return parsed.kind === 'url' && /^https?:/i.test(parsed.url) ? parsed.url : undefined
   }
 
-  commands.register('search.query', async (args, c) => {
-    const wantsClipboard = args.mode === 'new-tab' && !args.query.trim() && !args.actionsOnly && !args.siteSearchId
-    const clip = wantsClipboard ? await clipboardUrl() : undefined
-    const t0 = performance.now()
+  const buildInput = (args: SearchQueryArgs, windowId: WindowId | undefined, clip?: string): RankInput => {
     const state = store.state
-    const windowId = windowOf(c)
     const { space, profile, isPrivate } = profileOf(state, windowId)
     const activeTabId = windowId ? activeTabOf(state, windowId) : null
     const active = activeTabId ? state.tabs[activeTabId] : undefined
@@ -84,6 +81,7 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
       hosts: hs?.hostList() ?? [],
       archive: profile && !isPrivate ? sources.archive(state, profile.id) : [],
       spaces: isPrivate ? [] : sources.spaces(state),
+      folders: isPrivate ? [] : sources.folders(state),
       actions: sources.actions((id) => actions.has(id), process.platform),
       siteSearches,
       scope: args.siteSearchId ? siteSearches.find((s) => s.id === args.siteSearchId) : undefined,
@@ -91,10 +89,73 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
       noAutocomplete: args.noAutocomplete,
       clipboardUrl: clip,
     }
-    const response = rank(input)
+    return input
+  }
+
+  commands.register('search.query', async (args, c) => {
+    const wantsClipboard = args.mode === 'new-tab' && !args.query.trim() && !args.actionsOnly && !args.siteSearchId
+    const clip = wantsClipboard ? await clipboardUrl() : undefined
+    const t0 = performance.now()
+    const response = rank(buildInput(args, windowOf(c), clip))
     queryTimings.push(performance.now() - t0)
     if (queryTimings.length > 200) queryTimings.splice(0, 100)
     return response
+  })
+
+  // Warm per-entry caches and the JIT once history has loaded, so the first keystroke is as fast as later ones.
+  setTimeout(() => {
+    const windowId = windows.focusedWindowId()
+    const { profile, isPrivate } = profileOf(store.state, windowId)
+    if (!profile || isPrivate) return
+    void history
+      .store(profile.id)
+      .load()
+      .then(() => {
+        for (const query of ['', 'e', 'ex']) rank(buildInput({ query, mode: 'new-tab' }, windowId))
+      })
+  }, 1500)
+
+  // CB-15: engine suggestions, only when the user turned them on (they send keystrokes to the engine).
+  commands.register('search.suggest', async ({ query }) => {
+    const state = store.state
+    const q = query.trim()
+    if (!state.settings.searchSuggestions || !q || q.length > 200) return []
+    const engine = SEARCH_ENGINES[state.settings.searchEngine] ?? SEARCH_ENGINES.google
+    // Tests point this at a local fixture; it is never read outside the e2e harness.
+    const template = (ctx.e2e && process.env.ORBIT_SUGGEST_URL) || engine.suggest
+    if (!template) return []
+    try {
+      const res = await net.fetch(fillSearchTemplate(template, q), {
+        credentials: 'omit',
+        signal: AbortSignal.timeout(1500),
+      })
+      if (!res.ok) return []
+      return parseSuggestions(await res.json(), q)
+        .slice(0, 4)
+        .map(
+          (text): SearchResult => ({
+            id: `engine:${text.toLowerCase()}`,
+            kind: 'suggestion',
+            title: text,
+            subtitle: `Search ${engine.name}`,
+            label: 'Suggestion',
+            url: fillSearchTemplate(engine.search, text),
+            query: text,
+            score: 0,
+          }),
+        )
+    } catch {
+      return [] // Offline or slow: local results stand on their own.
+    }
+  })
+
+  commands.register('search.forwardClick', ({ x, y }, c) => {
+    const contents = windows.get(windowOf(c) ?? '')?.webContents
+    if (!contents || contents.isDestroyed() || !Number.isFinite(x) || !Number.isFinite(y)) return
+    const at = { x: Math.round(x), y: Math.round(y) }
+    contents.sendInputEvent({ type: 'mouseMove', ...at })
+    contents.sendInputEvent({ type: 'mouseDown', ...at, button: 'left', clickCount: 1 })
+    contents.sendInputEvent({ type: 'mouseUp', ...at, button: 'left', clickCount: 1 })
   })
 
   commands.register('search.siteSearches', () =>
@@ -132,6 +193,15 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
       case 'space':
         if (result.spaceId) await commands.run('spaces.switch', { spaceId: result.spaceId }, { windowId })
         return
+      case 'folder': {
+        // FD-09: open the folder (expanded) where it lives.
+        if (!result.folderId || !state.folders[result.folderId]) return
+        if (result.spaceId && result.spaceId !== state.windows[windowId ?? '']?.spaceId) {
+          await commands.run('spaces.switch', { spaceId: result.spaceId }, { windowId })
+        }
+        await commands.run('folders.setCollapsed', { folderId: result.folderId, collapsed: false })
+        return
+      }
       case 'action':
         if (result.actionId) await actions.run(result.actionId, { windowId })
         return
@@ -198,9 +268,10 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
     return true
   })
 
-  // CB-21: the bar closes when its window loses focus.
+  // CB-21: the bar closes when its window loses focus. Not under the e2e harness: parallel
+  // test apps share one display and take focus from each other.
   store.subscribe((next, prev) => {
-    if (next.windows === prev.windows || windows.quitting) return
+    if (next.windows === prev.windows || windows.quitting || ctx.e2e) return
     for (const [id, win] of Object.entries(next.windows)) {
       if (win.overlay.kind === 'commandbar' && prev.windows[id]?.focused && !win.focused) {
         queueMicrotask(() => closeBar(id))

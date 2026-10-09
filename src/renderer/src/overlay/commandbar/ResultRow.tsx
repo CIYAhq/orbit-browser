@@ -1,4 +1,4 @@
-import { Archive, ClipboardPaste, Globe, History, Layers, RotateCw, Search, X, Zap } from 'lucide-react'
+import { Archive, ClipboardPaste, Folder, Globe, History, Layers, RotateCw, Search, X, Zap } from 'lucide-react'
 import { type MouseEvent, memo } from 'react'
 import type { SearchResult } from '../../../../shared/commands/commandbar'
 import { Favicon } from '../../ui/Favicon'
@@ -40,6 +40,8 @@ function RowIcon({ r }: { r: SearchResult }) {
       return <ClipboardPaste size={16} />
     case 'action':
       return <Zap size={16} />
+    case 'folder':
+      return <Folder size={16} />
     case 'space':
       return r.spaceIcon ? <span className="cmdbar__emoji">{r.spaceIcon}</span> : <Layers size={16} />
     default:

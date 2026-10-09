@@ -1,4 +1,4 @@
-import type { CommandBarMode, SiteSearchEngine, SpaceId, TabId } from '../state'
+import type { CommandBarMode, FolderId, SiteSearchEngine, SpaceId, TabId } from '../state'
 
 /**
  * What a command bar row does when chosen (CB-06):
@@ -10,6 +10,7 @@ import type { CommandBarMode, SiteSearchEngine, SpaceId, TabId } from '../state'
  * - `sitesearch`: enter site-search mode for a site (same as pressing Tab, CB-11)
  * - `action`: run a browser action (CB-13)
  * - `space`: switch to a Space
+ * - `folder`: open (expand) a folder and show its Space (FD-09)
  * - `current`: the current page in edit-URL mode (Enter reloads it, CB-03)
  * - `paste`: open the URL on the clipboard (CB-12)
  */
@@ -23,6 +24,7 @@ export type SearchResultKind =
   | 'sitesearch'
   | 'action'
   | 'space'
+  | 'folder'
   | 'current'
   | 'paste'
 
@@ -43,6 +45,7 @@ export interface SearchResult {
   splitFavicons?: (string | null)[]
   tabId?: TabId
   spaceId?: SpaceId
+  folderId?: FolderId
   /** Emoji/icon of a Space row. */
   spaceIcon?: string
   actionId?: string
@@ -103,6 +106,10 @@ export interface CommandBarCommands {
   }
   /** Deletes a history or past-search row from history (CB-17). */
   'search.remove': { args: { result: SearchResult }; result: void }
+  /** Search-engine suggestions for the text (CB-15); [] unless settings.searchSuggestions is on. */
+  'search.suggest': { args: { query: string }; result: SearchResult[] }
+  /** CB-20: a click on the backdrop over the sidebar closes the bar and reaches the sidebar. */
+  'search.forwardClick': { args: { x: number; y: number }; result: void }
   /** Site searches available for the Tab chip (CB-11). */
   'search.siteSearches': { args: Record<string, never>; result: SiteSearchInfo[] }
 }
@@ -115,4 +122,25 @@ export function findSiteSearch(sites: readonly SiteSearchEngine[], text: string)
     sites.find((s) => s.keyword.toLowerCase() === lower) ??
     (lower.length >= 2 ? sites.find((s) => s.name.toLowerCase().startsWith(lower)) : undefined)
   return site ? { id: site.id, name: site.name, keyword: site.keyword } : undefined
+}
+
+/**
+ * Adds engine suggestions to the local results without moving the highlighted
+ * row (FL-17): they only fill free slots below, never replace a row, and skip
+ * texts already shown.
+ */
+export function mergeSuggestions(rows: SearchResult[], suggestions: SearchResult[], max: number): SearchResult[] {
+  if (rows.length >= max || suggestions.length === 0) return rows
+  const seen = new Set(rows.map((r) => (r.query ?? '').toLowerCase()).filter(Boolean))
+  const ids = new Set(rows.map((r) => r.id))
+  const out = [...rows]
+  for (const s of suggestions) {
+    if (out.length >= max) break
+    const key = (s.query ?? s.title).toLowerCase()
+    if (seen.has(key) || ids.has(s.id)) continue
+    seen.add(key)
+    ids.add(s.id)
+    out.push(s)
+  }
+  return out.length === rows.length ? rows : out
 }

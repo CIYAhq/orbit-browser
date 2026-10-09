@@ -12,7 +12,9 @@ import {
   tabTarget,
 } from '../../src/main/commandbar/rank'
 import { actionNeedsTab, SourceCache } from '../../src/main/commandbar/sources'
+import { parseSuggestions } from '../../src/main/commandbar/suggest'
 import { HistoryStore, hostOf, urlKeyOf } from '../../src/main/history/store'
+import { mergeSuggestions, type SearchResult } from '../../src/shared/commands/commandbar'
 import { DEFAULT_SITE_SEARCH } from '../../src/shared/defaults'
 import { fillSearchTemplate, parseInput } from '../../src/shared/url'
 
@@ -294,6 +296,8 @@ describe('ranking', () => {
     }
     times.sort((a, b) => a - b)
     const p95 = times[Math.floor(times.length * 0.95)] as number
+    const p50 = times[Math.floor(times.length / 2)] as number
+    console.info(`[commandbar bench] per keystroke p50 ${p50.toFixed(2)} ms, p95 ${p95.toFixed(2)} ms`)
     expect(p95).toBeLessThanOrEqual(30)
   })
 })
@@ -307,5 +311,47 @@ describe('sources', () => {
     expect(docs.find((a) => a.id === 'tab.togglePin')?.shortcut).toBe('⌘D')
     expect(docs.some((a) => a.id === 'tab.new')).toBe(false)
     expect(docs.some((a) => a.id === 'window.newMini')).toBe(false)
+  })
+})
+
+describe('engine suggestions', () => {
+  it('[CB-15] parses OpenSearch suggestion responses', () => {
+    expect(parseSuggestions(['orbit', ['orbit browser', 'Orbit', 'orbit browser', 42, 'orbital']], 'orbit')).toEqual([
+      'orbit browser',
+      'orbital',
+    ])
+    expect(parseSuggestions({ nope: true }, 'x')).toEqual([])
+    expect(parseSuggestions(['x'], 'x')).toEqual([])
+  })
+
+  it('[CB-15][FL-17] fills free rows below without touching existing rows', () => {
+    const row = (id: string, query?: string): SearchResult => ({
+      id,
+      kind: 'search',
+      title: id,
+      label: '',
+      query,
+      score: 0,
+    })
+    const local = [row('tab:1'), row('search', 'orbit')]
+    const merged = mergeSuggestions(
+      local,
+      [row('engine:orbit', 'orbit'), row('engine:a', 'a'), row('engine:b', 'b')],
+      3,
+    )
+    expect(merged.map((r) => r.id)).toEqual(['tab:1', 'search', 'engine:a'])
+    expect(merged[0]).toBe(local[0])
+    expect(mergeSuggestions(local, [], 9)).toBe(local)
+  })
+})
+
+describe('folders', () => {
+  it('[CB-05][CB-13] finds folders by name as "Open folder" rows', () => {
+    const r = rank(
+      input('recipes', {
+        folders: [{ id: 'f-1', name: 'Recipes', nameLower: 'recipes', spaceId: 's-b' }],
+      }),
+    )
+    expect(r.results[0]).toMatchObject({ kind: 'folder', folderId: 'f-1', label: 'Folder', subtitle: 'Work' })
   })
 })
