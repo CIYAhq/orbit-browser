@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  activateInDraft,
   autoArchiveCandidates,
+  dedupeDisplayed,
   FAVORITE_WARM_FACTOR,
   makeTab,
   nextAfterClose,
   numberedTarget,
+  reselectAway,
   sleepCandidates,
   steppedTarget,
   todayInsertIndex,
@@ -327,5 +330,70 @@ describe('[FV-03] review fixes in the tree rules', () => {
     expect(canMoveTo(state, 'v-1', { kind: 'favorites', profileId: DEFAULT_PROFILE_ID })).toBe(false)
     // A pane is not an item of its own.
     expect(canMoveTo(state, a, { kind: 'pinned', spaceId: s1 })).toBe(false)
+  })
+})
+
+describe('[TB-17][TB-06] no two windows draw the same tab (lane review MF-1)', () => {
+  function twoWindows() {
+    const w = world()
+    const second = createWindowState(w.s1)
+    w.state.windows[second.id] = second
+    return { ...w, w2: second.id }
+  }
+  const shown = (state: OrbitState) => Object.values(state.windows).map((win) => win.activeTab[win.spaceId] ?? null)
+
+  it('closing in one window never hands it the tab the other window shows', () => {
+    const { state, s1, win, w2, add } = twoWindows()
+    const x = add(s1, 'today', 3)
+    const y = add(s1, 'today', 2)
+    const z = add(s1, 'today', 1)
+    state.windows[win]!.activeTab[s1] = x
+    state.windows[w2]!.activeTab[s1] = y
+    reselectAway(state, new Set([x]))
+    expect(state.windows[win]!.activeTab[s1]).toBe(z)
+    expect(state.windows[w2]!.activeTab[s1]).toBe(y)
+  })
+
+  it('a three-window handoff leaves every window on a different tab', () => {
+    const { state, s1, win, w2, add } = twoWindows()
+    const w3 = createWindowState(s1)
+    state.windows[w3.id] = w3
+    const a = add(s1, 'today', 1)
+    const b = add(s1, 'today', 2)
+    const c = add(s1, 'today', 9)
+    state.windows[win]!.activeTab[s1] = a
+    state.windows[w2]!.activeTab[s1] = b
+    state.windows[w3.id]!.activeTab[s1] = c
+    activateInDraft(state, w2, a, 10)
+    const tabs = shown(state)
+    expect(new Set(tabs).size).toBe(3)
+    expect(state.windows[w2]!.activeTab[s1]).toBe(a)
+    expect(state.windows[w3.id]!.activeTab[s1]).toBe(c)
+    expect(state.windows[win]!.activeTab[s1]).toBe(b)
+  })
+
+  it('dedupe keeps the winner and re-picks overlapping windows, splits included', () => {
+    const { state, s1, win, w2, add } = twoWindows()
+    const a = add(s1, 'today')
+    const b = add(s1, 'today')
+    const c = add(s1, 'today')
+    state.spaces[s1]!.today = ['v-1', c]
+    state.splits['v-1'] = {
+      id: 'v-1',
+      createdAt: 0,
+      layout: {
+        type: 'row',
+        sizes: [0.5, 0.5],
+        children: [
+          { type: 'leaf', tabId: a },
+          { type: 'leaf', tabId: b },
+        ],
+      },
+    }
+    state.windows[win]!.activeTab[s1] = a
+    state.windows[w2]!.activeTab[s1] = b
+    dedupeDisplayed(state, win)
+    expect(state.windows[win]!.activeTab[s1]).toBe(a)
+    expect(state.windows[w2]!.activeTab[s1]).toBe(c)
   })
 })

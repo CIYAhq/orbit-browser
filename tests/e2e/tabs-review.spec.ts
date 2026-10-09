@@ -296,3 +296,105 @@ test('[FD-02][TB-18] undoing New Folder made from scattered pinned tabs restores
   expect((await space(app)).pinned).toEqual([x, b, y])
   expect((await state(app)).folders[folderId]).toBeUndefined()
 })
+
+/** Window ids in creation order. */
+function windowIds(o: Orbit): Promise<string[]> {
+  return o.app.evaluate(() => (globalThis as unknown as { __orbit: { windowIds: () => string[] } }).__orbit.windowIds())
+}
+
+/** Which window each tab's live view is placed in. */
+function holderOf(o: Orbit, tabId: string): Promise<string | undefined> {
+  return o.app.evaluate(
+    (_e, id) =>
+      (
+        globalThis as unknown as { __orbit: { ctx: { windows: { windowOfTab: (t: string) => string | undefined } } } }
+      ).__orbit.ctx.windows.windowOfTab(id),
+    tabId,
+  )
+}
+
+/** Every window shows a different tab, and each tab's view sits in the window that shows it. */
+async function expectDistinct(o: Orbit) {
+  const ids = await windowIds(o)
+  await expect
+    .poll(async () => {
+      const s = await state(o.app)
+      const shown = ids.map((w) => {
+        const win = s.windows[w]
+        return win ? (win.activeTab[win.spaceId] ?? null) : null
+      })
+      const real = shown.filter((t): t is string => !!t)
+      if (new Set(real).size !== real.length) return `duplicate: ${shown.join(',')}`
+      for (const [i, t] of shown.entries()) {
+        if (t && (await holderOf(o, t)) !== ids[i]) return `${t} not in ${ids[i]}`
+      }
+      return 'ok'
+    })
+    .toBe('ok')
+}
+
+async function resize(o: Orbit, windowId: string) {
+  await o.app.evaluate((_e, id) => {
+    const win = (
+      globalThis as unknown as { __orbit: { ctx: { windows: { get: (w: string) => Electron.BrowserWindow } } } }
+    ).__orbit.ctx.windows.get(id)
+    const b = win.getBounds()
+    win.setBounds({ ...b, width: b.width - 40 })
+  }, windowId)
+  await new Promise((r) => setTimeout(r, 400))
+}
+
+test('[TB-17][TB-06] two windows on one Space: closing or clearing never leaves both on the same tab (lane review MF-1)', async () => {
+  const { app } = orbit
+  const sp = (await space(app)).id
+  const pinned = await newTab(app, fx.url('/page/Pin'), { container: { kind: 'pinned', spaceId: sp }, activate: false })
+  const z = await newTab(app, fx.url('/page/Z'), { activate: false })
+  const y = await newTab(app, fx.url('/page/Y'), { activate: false })
+  const x = await newTab(app, fx.url('/page/X'))
+  await waitTab(app, x, '/page/X')
+  await act(app, 'window.new')
+  await expect.poll(async () => (await windowIds(orbit)).length).toBe(2)
+  const [w1, w2] = (await windowIds(orbit)) as [string, string]
+  await cmd(app, 'tabs.activate', { tabId: y }, 1)
+  await expectDistinct(orbit)
+  // R1: Cmd+W in window 1 must not pick Y (window 2 shows it).
+  await act(app, 'tab.close', 0)
+  await expectDistinct(orbit)
+  let s = await state(app)
+  expect(s.windows[w1]?.activeTab[sp]).toBe(z)
+  expect(s.windows[w2]?.activeTab[sp]).toBe(y)
+  await resize(orbit, w2)
+  await expectDistinct(orbit)
+  await resize(orbit, w1)
+  await expectDistinct(orbit)
+  // R14: Clear in window 1: one window gets the pinned tab, the other nothing.
+  await cmd(app, 'tabs.clearToday', { spaceId: sp }, 0)
+  await expectDistinct(orbit)
+  s = await state(app)
+  const shown = [s.windows[w1]?.activeTab[sp] ?? null, s.windows[w2]?.activeTab[sp] ?? null]
+  expect(shown.filter((t) => t === pinned)).toHaveLength(1)
+})
+
+test('[TB-17] three windows: a handoff leaves every window on a different tab (lane review MF-1)', async () => {
+  const { app } = orbit
+  const c = await newTab(app, fx.url('/page/C'), { activate: false })
+  const b = await newTab(app, fx.url('/page/B'), { activate: false })
+  const a = await newTab(app, fx.url('/page/A'))
+  await waitTab(app, a, '/page/A')
+  await act(app, 'window.new')
+  await act(app, 'window.new')
+  await expect.poll(async () => (await windowIds(orbit)).length).toBe(3)
+  await cmd(app, 'tabs.activate', { tabId: b }, 1)
+  await cmd(app, 'tabs.activate', { tabId: c }, 2)
+  await expectDistinct(orbit)
+  // R2: window 2 takes A from window 1; window 1 must not land on C (window 3 shows it).
+  await cmd(app, 'tabs.activate', { tabId: a }, 1)
+  await expectDistinct(orbit)
+  const ids = await windowIds(orbit)
+  const s = await state(app)
+  const sp = s.spaceOrder[0] as string
+  expect(s.windows[ids[1] as string]?.activeTab[sp]).toBe(a)
+  expect(s.windows[ids[2] as string]?.activeTab[sp]).toBe(c)
+  await resize(orbit, ids[0] as string)
+  await expectDistinct(orbit)
+})
