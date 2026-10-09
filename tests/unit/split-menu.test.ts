@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { MainContext } from '../../src/main/context'
-import { linkSplitMenuItem, tabSplitMenuItems } from '../../src/main/split/menu'
+import { linkSplitMenuItem, newSplitMenuItems, tabSplitMenuItems } from '../../src/main/split/menu'
 import { createSplitInDraft } from '../../src/main/split/model'
 import { makeTab } from '../../src/main/tabs/model'
 import { createInitialState, createWindowState, DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
@@ -27,7 +27,7 @@ function setup() {
 }
 
 describe('split menu items for other menus', () => {
-  it('offers Open in Split View for 2–4 selected tabs and refuses more', () => {
+  it('[SV-06][SV-25] offers Open in Split View for 2–4 selected tabs and refuses more', () => {
     const { add, ctx, run, win } = setup()
     const ids = [add(), add(), add()]
     const [item] = tabSplitMenuItems(ctx, ids, win)
@@ -41,7 +41,7 @@ describe('split menu items for other menus', () => {
     expect(refused?.label).toContain('up to 4')
   })
 
-  it('offers a single other tab beside the current one, but not the current tab or a pane of the same split', () => {
+  it('[SV-09] offers a single other tab beside the current one, but not the current tab or a pane of the same split', () => {
     const { add, ctx, run, state, win, spaceId } = setup()
     const [a, b, c] = [add(), add(), add()]
     const w = state.windows[win]
@@ -54,7 +54,7 @@ describe('split menu items for other menus', () => {
     expect(tabSplitMenuItems(ctx, [c], win)).toEqual([])
   })
 
-  it('opens a link in a pane beside the page', () => {
+  it('[SV-08] opens a link in a pane beside the page', () => {
     const { add, ctx, run, win } = setup()
     const a = add()
     const item = linkSplitMenuItem(ctx, a, 'https://y.test/')
@@ -64,5 +64,18 @@ describe('split menu items for other menus', () => {
       { url: 'https://y.test/', target: a, side: 'right' },
       { windowId: win },
     )
+  })
+
+  it('[SV-07] gives the + menu or a title-bar button the four Add Split items', () => {
+    const { ctx, win } = setup()
+    const items = newSplitMenuItems(ctx, win)
+    expect(items.map((i) => i.label)).toEqual([
+      'Add Split Right',
+      'Add Split Left',
+      'Add Split Above',
+      'Add Split Below',
+    ])
+    items[3]?.click?.({} as never, undefined, {} as never)
+    expect((ctx.actions.run as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual(['split.addBelow', { windowId: win }])
   })
 })

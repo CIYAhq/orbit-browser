@@ -60,7 +60,7 @@ describe('split layout tree', () => {
     expect(insertPane(L('a'), 'a', 'b', 'top')).toEqual(col([L('b'), L('a')]))
   })
 
-  it('never holds more than four panes or the same tab twice', () => {
+  it('[SV-01][SV-25] never holds more than four panes or the same tab twice', () => {
     let layout: SplitLayout = L('a')
     for (const id of ['b', 'c', 'd', 'e']) layout = insertPane(layout, 'a', id, 'right')
     expect(layoutLeaves(layout)).toHaveLength(MAX_PANES)
@@ -84,7 +84,7 @@ describe('split layout tree', () => {
     expect(normalizeLayout(row([L('a')]))).toEqual(L('a'))
   })
 
-  it('swaps panes and flips orientation keeping order and ratios', () => {
+  it('[SV-11][SV-20] swaps panes and flips orientation keeping order and ratios', () => {
     const layout = row([L('a'), col([L('b'), L('c')], [0.3, 0.7])], [0.6, 0.4])
     expect(layoutLeaves(swapPanes(layout, 'a', 'c'))).toEqual(['c', 'b', 'a'])
     expect(flipLayout(layout)).toEqual(col([L('a'), row([L('b'), L('c')], [0.3, 0.7])], [0.6, 0.4]))
@@ -109,7 +109,7 @@ describe('split layout tree', () => {
     expect(dividers[0]?.rect).toEqual({ x: 500, y: 0, width: PANE_GAP, height: 600 })
   })
 
-  it('drags a divider 1:1, stops at the minimum width and snaps to the middle', () => {
+  it('[SV-13] drags a divider 1:1, stops at the minimum width and snaps to the middle', () => {
     const layout = row([L('a'), L('b')])
     const free = 1008 - PANE_GAP
     const moved = dragSizes(layout, [0.5, 0.5], 0, 100, 1008)
@@ -133,7 +133,7 @@ describe('split layout tree', () => {
     expect(siblingOf(row([L('a'), col([L('b'), L('c')])]), 'a')).toBe('b')
   })
 
-  it('picks drop zones on a page and on panes', () => {
+  it('[SV-04] picks drop zones on a page and on panes', () => {
     const single = [{ tabId: 'a', rect: { x: 0, y: 0, width: 1000, height: 800 } }]
     expect(dropTargetAt(single, 500, 400)).toEqual({ target: 'a', side: 'right' })
     expect(dropTargetAt(single, 500, 50)).toEqual({ target: 'a', side: 'top' })
@@ -153,7 +153,7 @@ describe('split layout tree', () => {
     expect(back).toEqual(layout)
   })
 
-  it('splits a sidebar row drop into left/right halves, leaving edges for reordering', () => {
+  it('[SV-05] splits a sidebar row drop into left/right halves, leaving edges for reordering', () => {
     const r = { x: 0, y: 0, width: 200, height: 32 }
     expect(rowDropSide(r, 50, 16)).toBe('left')
     expect(rowDropSide(r, 150, 16)).toBe('right')
@@ -161,7 +161,7 @@ describe('split layout tree', () => {
     expect(rowDropSide(r, 150, 30)).toBeNull()
   })
 
-  it('picks swap or move zones when a pane is dragged onto another', () => {
+  it('[SV-20] picks swap or move zones when a pane is dragged onto another', () => {
     const r = { x: 0, y: 0, width: 400, height: 300 }
     expect(paneDropZone(r, 200, 150)).toBe('center')
     expect(paneDropZone(r, 20, 150)).toBe('left')

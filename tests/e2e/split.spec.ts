@@ -680,3 +680,42 @@ test('[SV-13] resizing the window keeps each pane’s proportion', async () => {
   const [pa, pb] = [await paneBox(orbit.shell, a), await paneBox(orbit.shell, b)]
   expect(pa.width / pb.width).toBeCloseTo(0.7 / 0.3, 1)
 })
+
+test('[SV-26] a new pane grows in with a spring and a closed one fades out', async () => {
+  const b = await openTab(orbit.app, 'Grow2')
+  const a = await openTab(orbit.app, 'Grow1')
+  await expect.poll(async () => (await tabView(orbit.app, a))?.visible).toBe(true)
+  // Sample the new pane's card width every frame from the moment it appears.
+  const sampling = orbit.shell.evaluate(
+    (id) =>
+      new Promise<{ t: number; w: number }[]>((resolve) => {
+        const samples: { t: number; w: number }[] = []
+        let start = 0
+        const tick = (now: number) => {
+          const el = document.querySelector<HTMLElement>(`[data-testid="split-pane"][data-tab-id="${id}"]`)
+          if (el) {
+            if (!start) start = now
+            samples.push({ t: now - start, w: el.getBoundingClientRect().width })
+          }
+          if (start && now - start > 700) resolve(samples)
+          else requestAnimationFrame(tick)
+        }
+        requestAnimationFrame(tick)
+      }),
+    b,
+  )
+  await run(orbit.app, 'split.addTab', { tabId: b, target: a, side: 'right' })
+  const samples = await sampling
+  const final = samples[samples.length - 1]?.w ?? 0
+  expect(samples[0]?.w ?? final).toBeLessThan(final * 0.5)
+  // Mostly increasing (a spring, not a jump), settled (within 1 px) by about 400 ms, no visible overshoot.
+  const settled = samples.find((s) => Math.abs(s.w - final) <= 1)
+  expect(settled?.t ?? 1000).toBeLessThan(450)
+  expect(Math.max(...samples.map((s) => s.w))).toBeLessThan(final + 4)
+  expect(samples.filter((s) => s.w > 1 && s.w < final - 1).length).toBeGreaterThan(3)
+  // Closing a pane leaves a short-lived fading card.
+  const ghost = orbit.shell.waitForSelector('[data-testid="split-ghost"]', { state: 'attached', timeout: 5000 })
+  await run(orbit.app, 'split.closePane', { tabId: b })
+  await ghost
+  await expect(orbit.shell.locator('[data-testid="split-ghost"]')).toHaveCount(0)
+})
