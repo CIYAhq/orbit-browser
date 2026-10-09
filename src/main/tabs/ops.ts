@@ -5,6 +5,7 @@
  */
 import { createWindowState, MAX_FAVORITES } from '../../shared/defaults'
 import { isFolderId, isTabId, newId } from '../../shared/ids'
+import { isLostPrivateTab, isPrivateProfileId, isPrivateSpace, mayReopenIn, privateMoveAllowed } from '../../shared/private'
 import { isPendingPane, layoutLeaves, paneAfterClose, SPLIT_FULL_MESSAGE } from '../../shared/split'
 import type {
   ArchivedTab,
@@ -197,6 +198,8 @@ export class TabOps {
     section: 'today' | 'pinned',
   ): string | undefined {
     if (!tab.url || tab.url === 'about:blank') return undefined
+    // Private tabs leave nothing behind (NV-11).
+    if (isPrivateProfileId(tab.profileId)) return undefined
     const id = newId('a')
     // Appended (newest last): an unshift would rewrite every entry's patch path.
     d.archive.push({
@@ -316,7 +319,8 @@ export class TabOps {
 
   /** Puts closed tabs back where they were (or at the top of Today), with their history (TB-07). */
   restoreClosed(records: ClosedTab[], opts: { windowId?: WindowId; select: boolean }): TabId[] {
-    const live = records.filter((r) => !this.state.tabs[r.tab.id])
+    // A private tab whose window is gone never comes back (NV-11).
+    const live = records.filter((r) => !this.state.tabs[r.tab.id] && !isLostPrivateTab(this.state, r.tab))
     if (live.length === 0) return []
     const ids = new Set(live.map((r) => r.tab.id))
     for (let i = this.recentlyClosed.length - 1; i >= 0; i--) {
@@ -405,7 +409,7 @@ export class TabOps {
   reopen(tabId: TabId, windowId: WindowId | undefined): TabId | null {
     const i = this.recentlyClosed.findIndex((r) => r.tab.id === tabId)
     const rec = i >= 0 ? this.recentlyClosed[i] : undefined
-    if (!rec) return null
+    if (!rec || !mayReopenIn(this.state, rec.tab, windowId)) return null
     this.recentlyClosed.splice(i, 1)
     const [id] = this.restoreClosed(this.withUnit(rec), { windowId, select: true })
     return id ?? null
@@ -427,8 +431,11 @@ export class TabOps {
 
   /** ⌘⇧T: reopens the most recently closed tab (a stack). */
   reopenLast(windowId: WindowId | undefined): TabId | null {
-    while (this.recentlyClosed.length > 0) {
-      const rec = this.recentlyClosed.pop() as ClosedTab
+    // Private windows reopen their own tabs, normal windows never a private one (NV-11).
+    const fits = (r: ClosedTab) => mayReopenIn(this.state, r.tab, windowId)
+    while (this.recentlyClosed.some(fits)) {
+      const i = this.recentlyClosed.findLastIndex(fits)
+      const rec = this.recentlyClosed.splice(i, 1)[0] as ClosedTab
       if (this.state.tabs[rec.tab.id]) continue
       const restored = this.restoreClosed(this.withUnit(rec), { windowId, select: true })
       return restored[restored.length - 1] ?? null
@@ -763,6 +770,7 @@ export class TabOps {
     )
     if (items.length === 0) return false
     if (!items.every((id) => canMoveTo(state, id, to))) return false
+    if (!privateMoveAllowed(state, items, to)) return false
     // Never move a folder into one of the other moving folders' subtrees.
     if (to.kind === 'folder' && items.includes(to.folderId)) return false
     if (to.kind === 'favorites') {
@@ -972,7 +980,7 @@ export class TabOps {
     const tab = state.tabs[tabId]
     if (!tab) return null
     const spaceId = fromWindowId ? this.spaceOfWindow(fromWindowId) : tab.spaceId
-    const win = createWindowState(spaceId)
+    const win = createWindowState(spaceId, isPrivateSpace(state, spaceId) ? 'private' : 'main')
     win.activeTab[spaceId] = tabId
     const source = fromWindowId ? this.ctx.windows.get(fromWindowId) : undefined
     const size = source && !source.isDestroyed() ? source.getBounds() : { width: 1100, height: 760 }

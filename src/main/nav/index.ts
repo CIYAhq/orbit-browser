@@ -3,18 +3,23 @@ import { app, Menu, type MenuItemConstructorOptions, nativeImage } from 'electro
 import { ACTIONS_BY_ID, formatAccelerator, shortcutsFor } from '../../shared/actions'
 import type { HistoryEntryInfo, NavButton, NavDirection } from '../../shared/commands/nav'
 import { historyEntryLabel, historyMenuIndexes } from '../../shared/nav'
+import { isPrivateTab, isPrivateWindow } from '../../shared/private'
 import type { TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
 import type { TabOps } from '../tabs/ops'
 import { activeTabOf } from '../windows'
+import { type LinksTestHooks, registerLinks } from './links'
+import { openUrlInNewWindow } from './new-window'
+import { type PageMenuTestHooks, pageMenuTestHooks, setLinkOpeners } from './page-menu'
 import { registerPageColor } from './page-color'
+import { type PrivateWindows, registerPrivate } from './private'
 import { type PageToolsInfo, registerPageTools } from './page-tools'
 import { type RevealHoldInfo, registerSidebarReveal } from './sidebar-reveal'
 import { SitePrefs } from './site-prefs'
 
 /** Test-only handle (ORBIT_E2E=1): globalThis.__orbitNav. */
-export interface NavTestHooks {
+export interface NavTestHooks extends LinksTestHooks, PageMenuTestHooks {
   /** The history menu on screen (labels top to bottom, and which items have an icon), or null once it closed. */
   menu: () => { windowId: WindowId; direction: NavDirection; labels: string[]; icons: boolean[] } | null
   /** Chooses an item of the open history menu by label; `newTab` is a ⌘-click (Ctrl-click). */
@@ -258,6 +263,24 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
   registerPageColor(ctx)
   // Find in page and page zoom (NV-05, NV-06). Registered after the tabs lane, so its zoom actions are replaced.
   const pageTools = registerPageTools(ctx, prefs)
+  // Private windows (NV-11).
+  const privateWindows: PrivateWindows = registerPrivate(ctx, ops, prefs)
+  /** A link in a new window: a private one when it comes from a private window (NV-08, NV-12). */
+  const openLinkWindow = (url: string, from: { tabId?: TabId; windowId?: WindowId }) => {
+    const state = store.state
+    if ((from.tabId && isPrivateTab(state, from.tabId)) || isPrivateWindow(state, from.windowId)) {
+      privateWindows.open({ url, fromWindowId: from.windowId })
+    } else {
+      openUrlInNewWindow(ctx, ops, url, from.windowId)
+    }
+  }
+  // Modified clicks on links, pop-ups and downloads (NV-08, NV-09).
+  const links = registerLinks(ctx, { ops, prefs, openWindow: openLinkWindow })
+  // The page menu's Open Link in New Window / Private Window (NV-12).
+  setLinkOpeners({
+    window: openLinkWindow,
+    private: (url, from) => void privateWindows.open({ url, fromWindowId: from.windowId }),
+  })
 
   // Placeholder until the site controls panel (NV-16) lands.
   actions.register('site.controls', (c) => ctx.toast(windowOf(c), 'Site controls are coming soon'))
@@ -280,6 +303,8 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
 
   if (ctx.e2e) {
     const hooks: NavTestHooks = {
+      ...links,
+      ...pageMenuTestHooks,
       menu: () =>
         shown
           ? {

@@ -13,6 +13,7 @@ import {
   MIN_SIDEBAR_WIDTH,
 } from '../shared/defaults'
 import { isFolderId, isSplitId, isTabId } from '../shared/ids'
+import { withoutPrivate } from '../shared/private'
 import type { ItemId, OrbitState, ProfileId, SpaceId, SplitLayout, TabId } from '../shared/state'
 import { STATE_SCHEMA } from '../shared/state'
 import { normalizeSpaceTheme } from '../shared/theme'
@@ -129,6 +130,7 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
     tab.asleep = true
     tab.progress = undefined
     tab.error = undefined
+    tab.blockedPopups = undefined
     tab.canGoBack = tab.canGoBack ?? false
     tab.canGoForward = tab.canGoForward ?? false
     tab.muted = tab.muted ?? false
@@ -371,7 +373,7 @@ function repairReferences(state: OrbitState): void {
  * touch nothing else (loading flips, focus, audio, download progress…) don't cause a write.
  */
 const RUNTIME_ONLY: Record<string, ReadonlySet<string>> = {
-  tabs: new Set(['loading', 'audible', 'asleep', 'progress', 'error', 'canGoBack', 'canGoForward']),
+  tabs: new Set(['loading', 'audible', 'asleep', 'progress', 'error', 'canGoBack', 'canGoForward', 'blockedPopups']),
   windows: new Set(['focused', 'fullscreen', 'overlay']),
   downloads: new Set(['receivedBytes']),
 }
@@ -384,9 +386,12 @@ export function isRuntimeOnlyPatch(patch: Patch): boolean {
   return RUNTIME_ONLY[String(root)]?.has(String(field)) ?? false
 }
 
-/** Runtime-only fields are written too (they are small) and reset on load. */
+/**
+ * Runtime-only fields are written too (they are small) and reset on load. Private windows and
+ * everything in them never are (NV-11).
+ */
 function serialize(state: OrbitState): string {
-  return JSON.stringify(state)
+  return JSON.stringify(withoutPrivate(state))
 }
 
 export const backupOf = (file: string): string => `${file}.bak`

@@ -1,6 +1,15 @@
 import { type ContextMenuParams, clipboard, Menu, type MenuItemConstructorOptions, type WebContents } from 'electron'
 import type { TabId } from '../../shared/state'
 import type { MainContext } from '../context'
+import {
+  dictionaryItems,
+  keepPageMenu,
+  linkWindowItems,
+  lookUpItems,
+  pageItems,
+  saveLinkItem,
+  searchLabel,
+} from '../nav/page-menu'
 import { linkSplitMenuItem } from '../split/menu'
 
 /** Native right-click menu for web pages. */
@@ -16,16 +25,18 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
       { label: 'Open Link in New Tab', click: () => openInNewTab(params.linkURL, false) },
       // A new pane beside the page's pane (SV-08).
       linkSplitMenuItem(ctx, tabId, params.linkURL),
+      ...linkWindowItems(ctx, tabId, params.linkURL),
       { label: 'Copy Link Address', click: () => clipboard.writeText(params.linkURL) },
+      saveLinkItem(contents, params.linkURL),
       { type: 'separator' },
     )
   }
   if (params.mediaType === 'image' && params.srcURL) {
     items.push(
       { label: 'Open Image in New Tab', click: () => openInNewTab(params.srcURL, false) },
+      { label: 'Save Image As…', click: () => contents.downloadURL(params.srcURL) },
       { label: 'Copy Image', click: () => contents.copyImageAt(params.x, params.y) },
       { label: 'Copy Image Address', click: () => clipboard.writeText(params.srcURL) },
-      { label: 'Save Image As…', click: () => contents.downloadURL(params.srcURL) },
       { type: 'separator' },
     )
   }
@@ -33,7 +44,9 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
     for (const suggestion of params.dictionarySuggestions.slice(0, 4)) {
       items.push({ label: suggestion, click: () => contents.replaceMisspelling(suggestion) })
     }
-    if (params.dictionarySuggestions.length) items.push({ type: 'separator' })
+    const dictionary = dictionaryItems(contents, params)
+    items.push(...dictionary)
+    if (params.dictionarySuggestions.length || dictionary.length) items.push({ type: 'separator' })
     items.push(
       { role: 'undo', enabled: params.editFlags.canUndo },
       { role: 'redo', enabled: params.editFlags.canRedo },
@@ -41,15 +54,15 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
       { role: 'cut', enabled: params.editFlags.canCut },
       { role: 'copy', enabled: params.editFlags.canCopy },
       { role: 'paste', enabled: params.editFlags.canPaste },
+      { role: 'pasteAndMatchStyle', enabled: params.editFlags.canPaste },
       { role: 'selectAll' },
       { type: 'separator' },
     )
   } else if (params.selectionText) {
-    const text = params.selectionText.trim().slice(0, 40)
     items.push(
       { role: 'copy' },
       {
-        label: `Search for “${text}${params.selectionText.length > 40 ? '…' : ''}”`,
+        label: searchLabel(ctx, params.selectionText),
         click: () => {
           const engine = ctx.store.state.settings.searchEngine
           void import('../../shared/url').then(({ searchUrl }) =>
@@ -57,6 +70,7 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
           )
         },
       },
+      ...lookUpItems(contents, params.selectionText),
       { type: 'separator' },
     )
   }
@@ -74,10 +88,13 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
       },
       { label: 'Reload', click: () => contents.reload() },
       { type: 'separator' },
+      ...pageItems(ctx, tabId, contents),
+      { type: 'separator' },
       { label: 'Copy Page URL', click: () => clipboard.writeText(contents.getURL()) },
       { type: 'separator' },
     )
   }
   items.push({ label: 'Inspect', click: () => contents.inspectElement(params.x, params.y) })
+  if (keepPageMenu(ctx, tabId, items)) return
   Menu.buildFromTemplate(items).popup()
 }

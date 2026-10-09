@@ -1,4 +1,5 @@
 import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { isPrivateSpace, PRIVATE_PALETTE } from '../../shared/private'
 import type { SpaceTheme } from '../../shared/state'
 import { mixPalettes, type Palette, paletteFor, resolveDark } from '../../shared/theme'
 import { getOrbitState, useOrbit } from './store'
@@ -51,8 +52,13 @@ export function cachedPalette(theme: SpaceTheme, dark: boolean): Palette {
 
 export function usePalette(spaceId: string | undefined): Palette | undefined {
   const theme = useOrbit((s) => (spaceId ? s.spaces[spaceId]?.theme : undefined))
+  // Private windows are near-black whatever the theme or light/dark setting (AP-05).
+  const isPrivate = useOrbit((s) => isPrivateSpace(s, spaceId))
   const dark = useDark()
-  return useMemo(() => (theme ? cachedPalette(theme, dark) : undefined), [theme, dark])
+  return useMemo(
+    () => (isPrivate ? PRIVATE_PALETTE : theme ? cachedPalette(theme, dark) : undefined),
+    [isPrivate, theme, dark],
+  )
 }
 
 /** CSS custom properties for a palette (shared by the shell driver and the overlay). */

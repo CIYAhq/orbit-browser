@@ -8,6 +8,7 @@ import {
   type WebContentsViewConstructorOptions,
 } from 'electron'
 import { isFolderId, isTabId, newId } from '../../shared/ids'
+import { isPrivateTab, privateTabMenu } from '../../shared/private'
 import type { ContainerRef, Folder, FolderId, ItemId, TabId, WindowId } from '../../shared/state'
 import {
   containerItems,
@@ -369,7 +370,9 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     const windowId = windowOf(c)
     const state = store.state
     const mo = menuOps(windowId)
-    const items = isFolderId(id) ? folderMenu(state, id, mo) : isTabId(id) ? tabMenu(state, id, selection, mo) : []
+    const all = isFolderId(id) ? folderMenu(state, id, mo) : isTabId(id) ? tabMenu(state, id, selection, mo) : []
+    // Private windows have no pinned tabs, Favorites, folders or other Spaces (NV-11, SB-25).
+    const items = isTabId(id) && isPrivateTab(state, id) ? privateTabMenu(all) : all
     if (items.length === 0) return
     lastMenu = items
     if (ctx.e2e) return
@@ -448,6 +451,12 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
         createWindow: (options) => {
           const windowId = windows.windowOfTab(openerTabId) ?? windows.focusedWindowId()
           const spaceId = windowId ? ops.spaceOfWindow(windowId) : opener.spaceId
+          if (!(options as { webContents?: unknown }).webContents) {
+            // ⇧⌘-click: the engine brings no page of its own (a view built from these options
+            // would throw), so an ordinary new tab loads the link (NV-08).
+            const id = ops.createTab({ url: details.url, spaceId, windowId, activate: true, openerTabId })
+            return (tabs.ensure(id) as WebContentsView).webContents
+          }
           const tab = makeTab({ spaceId, profileId: opener.profileId, url: details.url, openerTabId })
           // Add the tab, give it the real (opener-linked) view, and only then select it: selecting
           // first would make the layout pass create a second, orphan view (review M1).

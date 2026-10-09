@@ -1,5 +1,6 @@
 import { dialog, type Session, session } from 'electron'
 import { DEFAULT_PROFILE_ID } from '../shared/defaults'
+import { isPrivateProfileId, PRIVATE_PARTITION_PREFIX } from '../shared/private'
 import type { ProfileId } from '../shared/state'
 import type { Store } from './store'
 
@@ -67,7 +68,12 @@ export class Sessions {
 
   get(profileId: ProfileId): Session {
     const profiles = this.store.state.profiles
-    const profile = profiles[profileId] ?? profiles[DEFAULT_PROFILE_ID] ?? Object.values(profiles)[0]
+    // A private profile that is gone (its last window closed) never falls back to a normal one:
+    // whatever still asks for it gets a session that keeps nothing (NV-11).
+    const fallback = isPrivateProfileId(profileId)
+      ? { id: profileId, partition: `${PRIVATE_PARTITION_PREFIX}gone` }
+      : (profiles[DEFAULT_PROFILE_ID] ?? Object.values(profiles)[0])
+    const profile = profiles[profileId] ?? fallback
     if (!profile) throw new Error('No profiles')
     const ses = session.fromPartition(profile.partition)
     if (!this.configured.has(profile.partition)) {
@@ -81,6 +87,11 @@ export class Sessions {
   /** The user's decision for a permission on an origin in a profile, if they made one. */
   decision(partition: string, origin: string, permission: string): boolean | undefined {
     return this.decisions.get(permissionKey(partition, originOf(origin), permission))
+  }
+
+  /** Forgets every decision made in a profile (a private session ended, NV-11). */
+  forget(partition: string): void {
+    for (const key of [...this.decisions.keys()]) if (key.startsWith(`${partition}|`)) this.decisions.delete(key)
   }
 
   /** Records a decision (from the prompt; later from site controls). */

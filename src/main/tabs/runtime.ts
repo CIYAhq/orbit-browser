@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { type NavigationEntry, nativeImage, type WebContents, WebContentsView } from 'electron'
+import { isPrivateProfileId } from '../../shared/private'
 import type { Tab, TabId } from '../../shared/state'
 import { isAwayFromPinned, sameDocUrl } from '../../shared/tabs'
 import type { MainContext } from '../context'
@@ -117,6 +118,8 @@ export class TabRuntime {
   onControlUp?: () => void
   /** A page tried to open a tab or pop-up without a user gesture. */
   onPopupBlocked?: (tabId: TabId, url: string) => void
+  /** True when the tab's site may open pop-ups without a click (allowed in site controls, NV-09). */
+  allowsPopups?: (tabId: TabId) => boolean
   /** Last user gesture per tab, for the pop-up rule (NV-09). */
   private gestures = new Map<TabId, { at: number; used: boolean }>()
   /** Favicon URL → data URL, fetched in the tab's own session (no fetches from Orbit's UI). */
@@ -265,7 +268,7 @@ export class TabRuntime {
     contents.on('context-menu', (_e, params) => showPageContextMenu(this.ctx, tabId, contents, params))
     contents.setWindowOpenHandler((details) => {
       // No tabs or pop-ups without a user gesture, and one per gesture (NV-09).
-      if (!this.consumeGesture(tabId)) {
+      if (!this.consumeGesture(tabId) && !this.allowsPopups?.(tabId)) {
         this.onPopupBlocked?.(tabId, details.url)
         return { action: 'deny' }
       }
@@ -365,8 +368,9 @@ export class TabRuntime {
   /** A tab's icon, also remembered by origin (outside OrbitState) for archived pages and lists. */
   private setFavicon(tabId: TabId, data: string): void {
     this.update(tabId, { favicon: data })
-    const url = this.ctx.store.state.tabs[tabId]?.url
-    if (url) this.faviconStore?.set(url, data)
+    const tab = this.ctx.store.state.tabs[tabId]
+    // Private tabs' icons are not remembered (NV-11).
+    if (tab?.url && !isPrivateProfileId(tab.profileId)) this.faviconStore?.set(tab.url, data)
   }
 
   /** The remembered icon for a page's origin (archive, history, command bar). */

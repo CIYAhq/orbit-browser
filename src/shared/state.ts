@@ -63,6 +63,8 @@ export interface Tab {
   progress?: number
   /** Set when the page crashed or failed to load. */
   error?: { code: number; description: string }
+  /** Runtime-only: pop-ups the page tried to open without a click since it loaded (NV-09). */
+  blockedPopups?: number
 }
 
 export interface Folder {
@@ -154,7 +156,8 @@ export interface SidebarState {
 
 export interface WindowState {
   id: WindowId
-  kind: 'main' | 'mini'
+  /** `private`: a private window (NV-11), showing a Space of its own with an in-memory profile. */
+  kind: 'main' | 'mini' | 'private'
   spaceId: SpaceId
   /** Active (focused) tab per space, remembered across space switches. */
   activeTab: Record<SpaceId, TabId | null>

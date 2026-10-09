@@ -8,6 +8,7 @@ import { DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH } from '../
 import type { WindowState } from '../../../../shared/state'
 import { invoke } from '../../api'
 import { useOrbit } from '../../store'
+import { PrivateSidebar } from '../chrome/PrivateSidebar'
 import { SpaceStrip } from '../spaces/SpaceStrip'
 import { UndoToast } from '../spaces/UndoToast'
 import { SpaceBar } from './SpaceBar'
@@ -18,22 +19,30 @@ import { TopBar } from './TopBar'
  * (Favorites, title row, pinned, Today; swipeable between Spaces), then the
  * Space switcher. Space content lives in ../spaces/. `floating` is the hidden
  * sidebar's card shown over the page (SB-12), which has no resize edge.
+ * A private window's sidebar has only its own tabs under a "Private" label (SB-25).
  */
 export function Sidebar({ win, floating = false }: { win: WindowState; floating?: boolean }) {
   const exists = useOrbit((s) => !!s.spaces[win.spaceId])
   if (!exists) return null
+  const isPrivate = win.kind === 'private'
   return (
     <aside
-      className={`sidebar${floating ? ' sidebar--floating' : ''}`}
+      className={`sidebar${floating ? ' sidebar--floating' : ''}${isPrivate ? ' sidebar--private' : ''}`}
       data-testid="sidebar"
       aria-hidden={!floating && !win.sidebar.visible}
-      onMouseUp={onSideButtons}
+      onMouseUp={isPrivate ? undefined : onSideButtons}
       onAuxClick={preventSideButtons}
     >
       <TopBar win={win} floating={floating} />
-      <SpaceStrip windowId={win.id} spaceId={win.spaceId} />
-      <UndoToast />
-      <SpaceBar win={win} />
+      {isPrivate ? (
+        <PrivateSidebar spaceId={win.spaceId} />
+      ) : (
+        <>
+          <SpaceStrip windowId={win.id} spaceId={win.spaceId} />
+          <UndoToast />
+          <SpaceBar win={win} />
+        </>
+      )}
       {!floating && <ResizeHandle win={win} />}
     </aside>
   )

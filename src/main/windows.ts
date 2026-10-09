@@ -4,6 +4,7 @@ import { actionForInput, outsideTextActionFor } from '../shared/actions'
 import { createWindowState, DEFAULT_SIDEBAR_WIDTH } from '../shared/defaults'
 import type { Rect, RendererView } from '../shared/rpc'
 import type { ColorMode, OrbitState, SidebarState, SpaceId, TabId, WindowId, WindowState } from '../shared/state'
+import { isPrivateSpace, PRIVATE_PALETTE } from '../shared/private'
 import { paletteFor } from '../shared/theme'
 import { splitLeaves, splitOfTab } from '../shared/tree'
 import type { MainContext } from './context'
@@ -94,6 +95,8 @@ const FLOAT_PREWARM_MS = SIDEBAR_SLIDE_MS
 const FLOAT_DISPOSE_MS = 60_000
 
 const isMac = process.platform === 'darwin'
+/** How far a new window sits down and right of the one it was opened from (NV-10, SP-24). */
+const CASCADE = 28
 /** Isolated world for Orbit's own small page scripts (the page can't tamper with them). */
 const EXIT_FULLSCREEN_WORLD = 1001
 
@@ -263,6 +266,23 @@ export class WindowManager {
   }
 
   /**
+   * Where a window opened from `fromWindowId` goes: the same size, a step down and right of it,
+   * back at the screen's corner when that would leave the screen (NV-10, SP-24). Undefined when
+   * the source is in full screen or gone.
+   */
+  cascadeFrom(fromWindowId: WindowId | undefined): WindowState['bounds'] {
+    const source = fromWindowId ? this.get(fromWindowId) : undefined
+    if (!source || source.isDestroyed() || source.isFullScreen()) return undefined
+    const b = source.getNormalBounds()
+    const area = screen.getDisplayMatching(b).workArea
+    let x = b.x + CASCADE
+    let y = b.y + CASCADE
+    if (x + b.width > area.x + area.width) x = area.x + CASCADE
+    if (y + b.height > area.y + area.height) y = area.y + CASCADE
+    return { x, y, width: b.width, height: b.height }
+  }
+
+  /**
    * Opens a window for an existing window state, or a new one showing `spaceId`. With no main
    * window open, the last closed main window comes back (its bounds, Space and tabs).
    */
@@ -270,7 +290,9 @@ export class WindowManager {
     const state = this.ctx.store.state
     let winState = existing ?? this.takeClosedMain(spaceId)
     if (!winState) {
-      const space = spaceId ?? state.windows[this.focusedWindowId() ?? '']?.spaceId ?? state.spaceOrder[0]
+      // A window opened from a private one shows a normal Space (NV-11).
+      const focused = state.windows[this.focusedWindowId() ?? '']?.spaceId
+      const space = spaceId ?? (focused && !isPrivateSpace(state, focused) ? focused : undefined) ?? state.spaceOrder[0]
       if (!space) throw new Error('No spaces')
       winState = createWindowState(space)
       const created = winState
@@ -1192,6 +1214,8 @@ function syncAppearance(appearance: ColorMode): void {
 export function windowBackground(state: OrbitState, spaceId: SpaceId | undefined): string | undefined {
   const space = spaceId ? state.spaces[spaceId] : undefined
   if (!space) return undefined
+  // Private windows are near-black whatever the theme (AP-05).
+  if (isPrivateSpace(state, space.id)) return PRIVATE_PALETTE.windowBackground
   // The theme source follows settings.appearance, so this is the global light/dark choice.
   return paletteFor(space.theme, nativeTheme.shouldUseDarkColors).windowBackground
 }

@@ -67,6 +67,11 @@ export interface NavCommands {
   'find.step': { args: { forward: boolean }; result: void }
   /** Closes the find bar: highlights go, the page keeps the last match selected and gets focus. */
   'find.close': { args: Record<string, never>; result: void }
+  /**
+   * The address display's blocked pop-ups button: a menu at a point in window coordinates to open
+   * the active tab's blocked pop-ups or always allow them on its site (NV-09).
+   */
+  'nav.blockedPopupsMenu': { args: { x: number; y: number }; result: void }
   /** The active tab's page zoom as a percentage, and whether it differs from the default (NV-06, NV-16). */
   'zoom.get': { args: { tabId?: TabId }; result: { percent: number } }
 }

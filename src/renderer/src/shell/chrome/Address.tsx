@@ -1,8 +1,8 @@
-import { Check, Link2, SlidersHorizontal, TriangleAlert } from 'lucide-react'
+import { Check, Link2, ShieldBan, SlidersHorizontal, TriangleAlert } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { connectionOf } from '../../../../shared/nav'
 import { displayHost } from '../../../../shared/url'
-import { runAction } from '../../api'
+import { invoke, runAction } from '../../api'
 import { activeTabId } from '../../selectors'
 import { useOrbit } from '../../store'
 import { withShortcut } from './shortcut-label'
@@ -14,12 +14,17 @@ const COPIED_MS = 1200
  * The address display under the top row (SB-04): the active tab's host only (the focused pane
  * in split view), a site-controls button that turns into a warning on insecure pages (no padlock
  * on secure ones), and a copy-link button. Clicking the host edits the URL in the command bar.
+ * When the page tried to open pop-ups without a click, a button says so and offers them (NV-09).
  */
 export function Address({ windowId }: { windowId: string }) {
   // Only the URL: the display re-renders on navigations, not on title, favicon or progress changes.
   const url = useOrbit((s) => {
     const id = activeTabId(s, windowId)
     return id ? (s.tabs[id]?.url ?? '') : ''
+  })
+  const blockedPopups = useOrbit((s) => {
+    const id = activeTabId(s, windowId)
+    return id ? (s.tabs[id]?.blockedPopups ?? 0) : 0
   })
   const page = url && url !== 'about:blank' ? url : ''
   const connection = connectionOf(page)
@@ -65,6 +70,21 @@ export function Address({ windowId }: { windowId: string }) {
       >
         <span className="address__text">{page ? displayHost(page) : 'Search or enter address'}</span>
       </button>
+      {page && blockedPopups > 0 && (
+        <button
+          type="button"
+          className="address__button address__blocked"
+          data-testid="popups-blocked"
+          aria-label={blockedPopups === 1 ? 'Pop-up blocked' : `${blockedPopups} pop-ups blocked`}
+          title="Pop-ups blocked on this page"
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect()
+            void invoke('nav.blockedPopupsMenu', { x: r.left, y: r.bottom + 4 })
+          }}
+        >
+          <ShieldBan size={13} />
+        </button>
+      )}
       {page && (
         <button
           type="button"

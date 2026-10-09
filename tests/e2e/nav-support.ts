@@ -37,10 +37,13 @@ const escapeHtml = (text: string) => text.replace(/[&<>"]/g, (c) => `&#${c.charC
 /**
  * A page that records key presses (`window.__keys`) and mouse presses (`window.__clicks`: x, y,
  * button) and counts its loads in sessionStorage (`loads`), with a text box (#box), a link to the
- * next page (#next) and one that opens a new tab (#child). `background` is its CSS background;
- * `text` goes in a paragraph (#text).
+ * next page (#next), one that opens a new tab (#child) and one to a download (#download, in a new
+ * tab), and buttons that open a small pop-up window (#popup) and close it again (#closepopup).
+ * `background` is its CSS background; `text` goes in a paragraph (#text); `open` is a page it
+ * opens in a pop-up as soon as it loads, without a click.
  */
-function page(title: string, background = '#f2fbf5', text = ''): string {
+function page(title: string, background = '#f2fbf5', text = '', open = ''): string {
+  const name = encodeURIComponent(title)
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>${title}</title><link rel="icon" href="${ICON}">
 <style>body{font:16px system-ui;background:${background};margin:0;padding:40px}input{font:inherit}</style></head>
@@ -49,6 +52,9 @@ function page(title: string, background = '#f2fbf5', text = ''): string {
 <p><input id="box" autocomplete="off"></p>
 <p><a id="next" href="/page/${encodeURIComponent(`${title}-next`)}">Next page</a></p>
 <p><a id="child" href="/page/${encodeURIComponent(`${title}-child`)}" target="_blank">Child page</a></p>
+<p><a id="download" href="/download/${name}.txt" target="_blank">Download</a>
+<button id="popup" onclick="window.__popup = window.open('/page/${name}-popup', 'pop', 'width=420,height=360')">Pop-up</button>
+<button id="closepopup" onclick="window.__popup && window.__popup.close()">Close pop-up</button></p>
 <div style="height:2000px"></div>
 <script>
 window.__keys = []
@@ -56,6 +62,7 @@ addEventListener('keydown', (e) => window.__keys.push(e.key))
 window.__clicks = []
 addEventListener('mousedown', (e) => window.__clicks.push({ x: e.clientX, y: e.clientY, button: e.button }))
 sessionStorage.setItem('loads', String(Number(sessionStorage.getItem('loads') || 0) + 1))
+${open ? `window.open(${JSON.stringify(open)}, 'auto', 'width=400,height=300')` : ''}
 </script>
 </body></html>`
 }
@@ -66,6 +73,8 @@ sessionStorage.setItem('loads', String(Number(sessionStorage.getItem('loads') ||
  *   background and with some text.
  * - `/slow/<title>?ms=N`: the page after N ms (default 30 s): keeps a tab loading.
  * - `/slow-reload/<title>`: the page at once on the first request, then slowly (30 s) on reloads.
+ * - `/page/<title>?open=<path>`: the page, opening `<path>` in a pop-up as it loads (no click).
+ * - `/download/<name>`: a small text file sent as a download (Content-Disposition: attachment).
  */
 export async function startNavFixtures(): Promise<NavFixtures> {
   const hits = new Map<string, number>()
@@ -83,7 +92,14 @@ export async function startNavFixtures(): Promise<NavFixtures> {
       pending.delete(res)
       if (res.writableEnded || res.destroyed) return
       res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' })
-      res.end(page(title, u.searchParams.get('bg') ?? undefined, u.searchParams.get('text') ?? ''))
+      res.end(
+        page(
+          title,
+          u.searchParams.get('bg') ?? undefined,
+          u.searchParams.get('text') ?? '',
+          u.searchParams.get('open') ?? '',
+        ),
+      )
     }
     const later = (ms: number) => {
       pending.add(res)
@@ -94,6 +110,14 @@ export async function startNavFixtures(): Promise<NavFixtures> {
       })
     }
     if (kind === 'page') return send()
+    if (kind === 'download') {
+      res.writeHead(200, {
+        'content-type': 'text/plain',
+        'content-disposition': `attachment; filename="${title.replace(/[^\w.-]/g, '_')}"`,
+        'cache-control': 'no-store',
+      })
+      return res.end(`Downloaded ${title}\n`)
+    }
     if (kind === 'slow') return later(Number(u.searchParams.get('ms') ?? 30_000))
     if (kind === 'slow-reload') return count === 1 ? send() : later(30_000)
     res.writeHead(404, { 'content-type': 'text/plain' })

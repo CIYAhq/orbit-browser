@@ -35,12 +35,15 @@ export const SidebarItems = memo(function SidebarItems({
   spaceId,
   header,
   onContextMenu,
+  simple = false,
 }: {
   spaceId: SpaceId
   /** The Space title row (owned by the Spaces lane), drawn at the top of the scrolling list. */
   header?: ReactNode
   /** Right-click on empty list space (rows handle their own menus first). */
   onContextMenu?: (e: ReactMouseEvent) => void
+  /** A private window's list (SB-25): Today only, no Favorites or pinned section. */
+  simple?: boolean
 }) {
   const space = useOrbit((s) => s.spaces[spaceId])
   const active = useOrbit((s) => activeTabId(s))
@@ -81,9 +84,11 @@ export const SidebarItems = memo(function SidebarItems({
   return (
     <MotionConfig reducedMotion="user">
       <div className="sidebar-items" ref={rootRef}>
-        <div className="sidebar-items__favorites" data-favorites-layer>
-          <Favorites ref={favRef} profileId={space.profileId} />
-        </div>
+        {!simple && (
+          <div className="sidebar-items__favorites" data-favorites-layer>
+            <Favorites ref={favRef} profileId={space.profileId} />
+          </div>
+        )}
         <div
           className="sidebar__scroll"
           ref={scrollRef}
@@ -98,8 +103,8 @@ export const SidebarItems = memo(function SidebarItems({
             if (!e.defaultPrevented) onContextMenu?.(e)
           }}
         >
-          <SpaceHeader space={space}>{header}</SpaceHeader>
-          <PinnedSection space={space} />
+          {simple ? header : <SpaceHeader space={space}>{header}</SpaceHeader>}
+          {!simple && <PinnedSection space={space} />}
           <TodayBlock space={space} />
           <ItemList
             key={`today:${space.id}`}

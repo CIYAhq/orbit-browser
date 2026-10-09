@@ -64,7 +64,7 @@ export function registerSidebarReveal(ctx: MainContext): {
 
   const reveal = (windowId: WindowId) => {
     const win = store.state.windows[windowId]
-    if (win?.kind !== 'main' || win.sidebar.visible) return
+    if (!win || win.kind === 'mini' || win.sidebar.visible) return
     if (win.sidebar.peeking) {
       const hold = holdOf(windowId)
       hold.over = true
