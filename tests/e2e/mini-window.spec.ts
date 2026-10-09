@@ -165,14 +165,17 @@ test('[MW-05] ⌘O moves the live page into the most recent Space and closes the
   expect(main.activeTab[main.spaceId]).toBe(mini.tabId)
   expect(s.spaces[main.spaceId]?.today[0]).toBe(mini.tabId)
   expect(s.tabs[mini.tabId]?.floating).toBeUndefined()
-  // Not reloaded: the same web contents, still scrolled, now shown in the main window.
-  const moved = await orbit.app.evaluate((_e, id) => {
-    const ctx = (globalThis as unknown as OrbitGlobal).__orbit.ctx
-    const contents = ctx.tabs.contents(id)
-    return { id: contents?.id, window: ctx.windows.windowOfTab(id) }
-  }, mini.tabId)
-  expect(moved.id).toBe(contentsId)
-  expect(moved.window).toBe(main.id)
+  // Not reloaded: the same web contents, still scrolled, now shown in the main window (once the
+  // shell has laid it out).
+  const tabId = mini.tabId
+  const moved = () =>
+    orbit.app.evaluate((_e, id) => {
+      const ctx = (globalThis as unknown as OrbitGlobal).__orbit.ctx
+      const contents = ctx.tabs.contents(id)
+      return { id: contents?.id, window: ctx.windows.windowOfTab(id) }
+    }, tabId)
+  await expect.poll(async () => (await moved()).window).toBe(main.id)
+  expect((await moved()).id).toBe(contentsId)
   expect(await page.evaluate(() => Math.round(window.scrollY))).toBe(700)
   await expect(orbit.shell.getByTestId('tab-row').first()).toContainText('Triage')
   // Moved, not closed: nothing went to the Archive.
@@ -343,6 +346,24 @@ test('[MW-07] ⌘⌥-click on a Today row moves that tab, live, into a Mini Wind
   const after = await state(orbit.app)
   expect(after.spaces[main?.spaceId ?? '']?.pinned).toContain(pin)
   expect(after.tabs[pin]?.floating).toBeUndefined()
+})
+
+test('[MW-14][MW-08] the jump-list switches open a blank Mini Window and show or hide them all', async () => {
+  const before = await state(orbit.app)
+  // A launch from the Windows jump list reaches the running app as a second instance.
+  const launch = (arg: string) =>
+    orbit.app.evaluate(({ app }, a) => app.emit('second-instance', {}, ['orbit', a], '/'), arg)
+  await launch('--new-mini-window')
+  await expect.poll(async () => (await minis(orbit.app)).length).toBe(1)
+  await expect.poll(async () => (await minis(orbit.app))[0]?.visible).toBe(true)
+  expect((await minis(orbit.app))[0]?.tabId).toBeNull()
+  await launch('--toggle-mini-windows')
+  await expect.poll(async () => (await minis(orbit.app))[0]?.visible).toBe(false)
+  await launch('--toggle-mini-windows')
+  await expect.poll(async () => (await minis(orbit.app))[0]?.visible).toBe(true)
+  // Neither switch opened a link or touched the main window's tabs.
+  const after = await state(orbit.app)
+  expect(Object.keys(after.tabs).sort()).toEqual(Object.keys(before.tabs).sort())
 })
 
 test('[MW-10] a Mini Window can reopen its page in another profile, remembered for the site', async () => {

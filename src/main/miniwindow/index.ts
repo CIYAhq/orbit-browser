@@ -23,6 +23,7 @@ import { runPageAction } from '../peek/page-actions'
 import type { CallContext } from '../registry'
 import { activateInDraft, detachFromSplit, reselectAway, todayInsertIndex } from '../tabs/model'
 import { activeTabOf, loadRenderer, rendererEntry, uiWebPreferences } from '../windows'
+import { miniSwitchIn, NEW_MINI_SWITCH, TOGGLE_MINIS_SWITCH } from './switches'
 
 /**
  * Mini Windows (MW-*): small, separate windows holding one page, for links from other apps and
@@ -766,6 +767,31 @@ export function registerMiniWindow(ctx: MainContext): void {
     }
     app.on('will-quit', () => globalShortcut.unregister(electronAccel))
   }
+
+  // Windows taskbar jump list: the same two entries (MW-08, MW-14). Each launches Orbit again with
+  // a switch, which reaches the running app as a second instance.
+  if (process.platform === 'win32') {
+    const task = (args: string, title: string, description: string) => ({
+      program: process.execPath,
+      arguments: args,
+      iconPath: process.execPath,
+      iconIndex: 0,
+      title,
+      description,
+    })
+    app.setUserTasks([
+      task(NEW_MINI_SWITCH, 'New Mini Window', 'Open a blank Mini Window for a quick lookup'),
+      task(TOGGLE_MINIS_SWITCH, 'Show/Hide All Mini Windows', 'Show or hide every open Mini Window'),
+    ])
+  }
+  const onSwitch = (argv: readonly string[]) => {
+    const which = miniSwitchIn(argv)
+    if (which === 'new') open()
+    else if (which === 'toggle') toggleAll()
+  }
+  app.on('second-instance', (_event, argv) => onSwitch(argv))
+  // Launched from the jump list while Orbit was not running.
+  if (miniSwitchIn(process.argv)) setImmediate(() => onSwitch(process.argv))
 
   // macOS dock menu: a blank Mini Window, and show/hide them all (MW-08).
   if (isMac) {
