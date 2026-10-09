@@ -1,0 +1,39 @@
+appId: digital.ciya.orbit
+productName: Orbit
+copyright: Copyright © 2026 CIYA
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+asarUnpack: []
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  icon: build/icon.png
+  # Ad-hoc signature (no certificate): arm64 macOS refuses unsigned modified bundles as "damaged".
+  identity: '-'
+  hardenedRuntime: false
+  extendInfo:
+    CFBundleURLTypes:
+      - CFBundleURLName: Web site URL
+        CFBundleURLSchemes: [http, https]
+    CFBundleDocumentTypes:
+      - CFBundleTypeName: HTML document
+        CFBundleTypeRole: Viewer
+        LSItemContentTypes: [public.html]
+    NSCameraUsageDescription: Websites you visit can ask to use your camera.
+    NSMicrophoneUsageDescription: Websites you visit can ask to use your microphone.
+dmg:
+  sign: false
+linux:
+  target: [dir]
+  category: Network
+  icon: build/icon.png
+npmRebuild: false
+publish: null

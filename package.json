@@ -1,0 +1,60 @@
+{
+  "name": "orbit-browser",
+  "productName": "Orbit",
+  "version": "0.1.0",
+  "description": "Orbit: an open-source, Chromium-based browser with a vertical sidebar, Spaces and a command bar.",
+  "license": "MIT",
+  "private": true,
+  "author": "CIYA",
+  "homepage": "https://github.com/CIYAhq/orbit-browser",
+  "main": "out/main/index.js",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "lint": "biome check src tests scripts",
+    "format": "biome format --write src tests scripts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "perf": "node scripts/perf/run.mjs",
+    "package:mac": "electron-vite build && electron-builder --mac --publish never",
+    "package:linux": "electron-vite build && electron-builder --linux dir --publish never",
+    "capture": "node scripts/capture/record.mjs"
+  },
+  "dependencies": {
+    "immer": "11.1.21"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@dnd-kit/core": "6.3.1",
+    "@dnd-kit/sortable": "10.0.0",
+    "@dnd-kit/utilities": "3.2.2",
+    "@playwright/test": "1.64.0",
+    "@types/node": "24.19.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "5.2.0",
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3",
+    "electron-vite": "5.0.0",
+    "lucide-react": "1.53.0",
+    "motion": "14.0.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "typescript": "7.0.2",
+    "vite": "7.3.7",
+    "vitest": "5.0.3",
+    "zustand": "5.0.15"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true,
+    "electron-winstaller": false
+  }
+}

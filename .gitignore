@@ -1,0 +1,12 @@
+node_modules/
+out/
+dist/
+release/
+coverage/
+test-results/
+playwright-report/
+.vite/
+*.log
+.DS_Store
+.orbit-test-data/
+perf-results/
