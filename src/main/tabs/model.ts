@@ -3,7 +3,7 @@
  */
 import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
-import { groupOf, noteSplitFocus, removePane } from '../../shared/split'
+import { noteSplitFocus, removePane } from '../../shared/split'
 import type { ItemId, OrbitState, Space, SpaceId, Tab, TabId, WindowId } from '../../shared/state'
 import {
   containerItems,
@@ -63,15 +63,64 @@ export function activateInDraft(d: OrbitState, windowId: WindowId, tabId: TabId,
   win.activeTab[win.spaceId] = tabId
   tab.lastActiveAt = now
   noteSplitFocus(d, tabId)
-  // A page is live in one window at a time (TB-17): a window that was showing this tab, or any
-  // pane of its split view (a split is shown as one unit, SV-24), hands it over and shows its
-  // next most recent tab instead.
-  const group = new Set(groupOf(d, tabId))
-  for (const other of Object.values(d.windows)) {
-    const shown = other.activeTab[other.spaceId]
-    if (other.id === windowId || !shown || !group.has(shown)) continue
-    other.activeTab[other.spaceId] = mostRecentTab(d, other.spaceId, group)
+  // A page is live in one window at a time (TB-17): a window that was showing this tab (or a
+  // pane of its split) hands it over and shows another tab nobody else shows.
+  dedupeDisplayed(d, windowId)
+}
+
+/** The tabs one window draws: its selected tab, or every pane of the selected split view. */
+export function shownBy(state: OrbitState, windowId: WindowId): TabId[] {
+  const win = state.windows[windowId]
+  const id = win?.activeTab[win.spaceId]
+  if (!id || !state.tabs[id]) return []
+  const split = splitOfTab(state, id)
+  const s = split ? state.splits[split] : undefined
+  return s ? splitLeaves(s.layout).filter((t) => state.tabs[t]) : [id]
+}
+
+/** Tabs drawn by every window except `windowId`. */
+export function shownElsewhere(state: OrbitState, windowId: WindowId): Set<TabId> {
+  const out = new Set<TabId>()
+  for (const id of Object.keys(state.windows)) {
+    if (id === windowId) continue
+    for (const t of shownBy(state, id)) out.add(t)
   }
+  return out
+}
+
+/**
+ * No two windows draw the same tab (TB-17, review M4). The `winner` (the window the user just
+ * acted in) keeps its tab; then each other window in turn, if it overlaps a window already
+ * settled, picks again among tabs no settled window shows. Draft helper; run it after anything
+ * that changes a window's selected tab or Space.
+ */
+export function dedupeDisplayed(d: OrbitState, winner?: WindowId): void {
+  const ids = Object.keys(d.windows)
+  const order = winner && d.windows[winner] ? [winner, ...ids.filter((id) => id !== winner)] : ids
+  const taken = new Set<TabId>()
+  for (const id of order) {
+    const win = d.windows[id]
+    if (!win) continue
+    let shown = shownBy(d, id)
+    if (shown.some((t) => taken.has(t))) {
+      const current = win.activeTab[win.spaceId] as TabId
+      const excluding = new Set<TabId>([...taken, ...shown])
+      let next = nextAfterClose(d, win.spaceId, current, excluding)
+      // A split pick must not overlap either; fall back to the most recent clean tab, else none.
+      if (next && splitLeavesOf(d, next).some((t) => taken.has(t))) {
+        next = mostRecentTab(d, win.spaceId, excluding, (t) => !splitLeavesOf(d, t.id).some((x) => taken.has(x)))
+      }
+      win.activeTab[win.spaceId] = next
+      shown = shownBy(d, id)
+    }
+    for (const t of shown) taken.add(t)
+  }
+}
+
+function splitLeavesOf(state: OrbitState, tabId: TabId): TabId[] {
+  const split = splitOfTab(state, tabId)
+  const s = split ? state.splits[split] : undefined
+  return s ? splitLeaves(s.layout) : [tabId]
 }
 
 /** Tabs currently on screen: each window's selected tab, with all panes of its split view. */
@@ -137,20 +186,23 @@ export function nextAfterClose(
 export function reselectAway(
   d: OrbitState,
   tabIds: Set<TabId>,
-  pick: (spaceId: SpaceId, current: TabId) => TabId | null = (spaceId, current) =>
-    nextAfterClose(d, spaceId, current, tabIds),
+  pick: (spaceId: SpaceId, current: TabId, excluding: Set<TabId>) => TabId | null = (spaceId, current, excluding) =>
+    nextAfterClose(d, spaceId, current, excluding),
   now = Date.now(),
 ): void {
   for (const win of Object.values(d.windows)) {
     for (const [spaceId, active] of Object.entries(win.activeTab)) {
       if (!active || !tabIds.has(active)) continue
-      const next = pick(spaceId, active)
+      // Never a tab another window is drawing (TB-17).
+      const excluding = new Set<TabId>([...tabIds, ...shownElsewhere(d, win.id)])
+      const next = pick(spaceId, active, excluding)
       win.activeTab[spaceId] = next
       const tab = next ? d.tabs[next] : undefined
       if (tab && spaceId === win.spaceId) tab.lastActiveAt = now
       if (next) noteSplitFocus(d, next)
     }
   }
+  dedupeDisplayed(d)
 }
 
 /**

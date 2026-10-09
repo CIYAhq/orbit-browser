@@ -30,6 +30,10 @@ interface WindowRecord {
   /** Ignore renderer pane reports older than this state sequence (after a main-side fast switch). */
   minPaneSeq: number
   overlayShown: boolean
+  /** Pending hide after the overlay's exit animation. */
+  overlayHideTimer?: ReturnType<typeof setTimeout>
+  /** The overlay closed while the window was in the background: give the page focus when it returns. */
+  refocusPage?: boolean
   /** Tab whose page is in HTML fullscreen (video): its view fills the window. */
   htmlFullscreen?: TabId
 }
@@ -41,6 +45,9 @@ interface Attachment {
   /** Id of the view's web contents, taken while it was alive (a destroyed one can't be asked). */
   contentsId: number
 }
+
+/** How long the overlay view stays up after closing so its exit animation can play (FL-16). */
+const OVERLAY_EXIT_MS = 110
 
 const isMac = process.platform === 'darwin'
 /** Isolated world for Orbit's own small page scripts (the page can't tamper with them). */
@@ -272,10 +279,20 @@ export class WindowManager {
     win.on('focus', () => {
       this.lastFocused = id
       this.setRuntime(id, { focused: true })
+      if (rec.refocusPage && !rec.overlayShown) {
+        rec.refocusPage = false
+        this.focusActiveTab(id)
+      }
     })
     win.on('blur', () => this.setRuntime(id, { focused: false }))
-    win.on('enter-full-screen', () => this.setRuntime(id, { fullscreen: true }))
-    win.on('leave-full-screen', () => this.setRuntime(id, { fullscreen: false }))
+    win.on('enter-full-screen', () => {
+      this.setRuntime(id, { fullscreen: true })
+      this.settleHtmlFullscreen(rec)
+    })
+    win.on('leave-full-screen', () => {
+      this.setRuntime(id, { fullscreen: false })
+      this.settleHtmlFullscreen(rec)
+    })
     win.on('resize', () => {
       if (rec.overlayShown) this.fitOverlay(rec)
       if (rec.htmlFullscreen) this.applyPanes(id, rec.panes, rec.radius)
@@ -308,6 +325,7 @@ export class WindowManager {
       win.once('closed', () => clearTimeout(timer))
     }
     win.on('closed', () => {
+      clearTimeout(rec.overlayHideTimer)
       this.records.delete(id)
       for (const [tabId, entry] of [...this.attached]) {
         if (entry.windowId === id) {
@@ -439,9 +457,7 @@ export class WindowManager {
       if (other !== tabId) this.attached.get(other)?.view.setVisible(false)
     }
     const [width = 0, height = 0] = rec.win.getContentSize()
-    const children = rec.win.contentView.children
-    const overlayIndex = rec.overlay ? children.indexOf(rec.overlay) : -1
-    rec.win.contentView.addChildView(entry.view, overlayIndex >= 0 ? overlayIndex : undefined)
+    this.placeOnTop(rec, entry.view)
     entry.view.setBounds({ x: 0, y: 0, width, height })
     entry.view.setBorderRadius(0)
   }
@@ -459,6 +475,30 @@ export class WindowManager {
       if (rec.htmlFullscreen !== tabId) continue
       rec.htmlFullscreen = undefined
       this.applyPanes(rec.id, rec.panes, rec.radius)
+    }
+  }
+
+  /**
+   * A native fullscreen animation just ended (macOS animates; Linux and Windows don't). A page that
+   * left HTML fullscreen while it ran is told only when its view's size is next synced, so it can
+   * stay in fullscreen layout and its exitFullscreen() never resolves. Nudge the size of any page
+   * that still shows a fullscreen element but is no longer meant to be fullscreen.
+   */
+  settleHtmlFullscreen(rec: WindowRecord): void {
+    for (const tabId of rec.visible) {
+      if (tabId === rec.htmlFullscreen) continue
+      const entry = this.attached.get(tabId)
+      const contents = this.liveContents(tabId)
+      if (!entry || entry.windowId !== rec.id || !contents) continue
+      contents
+        .executeJavaScriptInIsolatedWorld(EXIT_FULLSCREEN_WORLD, [{ code: '!!document.fullscreenElement' }])
+        .then((stuck) => {
+          if (!stuck || this.attached.get(tabId) !== entry || rec.htmlFullscreen === tabId) return
+          const bounds = entry.view.getBounds()
+          entry.view.setBounds({ ...bounds, width: Math.max(0, bounds.width - 1) })
+          entry.view.setBounds(bounds)
+        })
+        .catch(() => {})
     }
   }
 
@@ -540,9 +580,7 @@ export class WindowManager {
         loser.visible.delete(tabId)
       }
     }
-    // Insert below the overlay so menus and the command bar stay on top.
-    const overlayIndex = rec.overlay ? children.indexOf(rec.overlay) : -1
-    rec.win.contentView.addChildView(view, overlayIndex >= 0 ? overlayIndex : undefined)
+    this.placeOnTop(rec, view)
     this.attached.set(tabId, { view, windowId: rec.id, contentsId: view.webContents.id })
     this.selfClosed.delete(tabId)
     if (loser && !loser.win.isDestroyed()) {
@@ -571,6 +609,25 @@ export class WindowManager {
       console.error('[windows] could not show tab', tabId, err)
       return undefined
     }
+  }
+
+  /**
+   * Puts a tab view above the other tab views but below the overlay, so the command bar and menus
+   * stay on top. Reads the children afresh (a stale view may just have been removed) and moves the
+   * view only when it is out of place. addChildView() reorders an existing child to the index
+   * given, so a view already below the overlay goes to the overlay's index minus one.
+   */
+  private placeOnTop(rec: WindowRecord, view: WebContentsView): void {
+    const parent = rec.win.contentView
+    const children = parent.children
+    const at = children.indexOf(view)
+    const overlayAt = rec.overlay ? children.indexOf(rec.overlay) : -1
+    if (overlayAt < 0) {
+      if (at < 0 || at !== children.length - 1) parent.addChildView(view)
+      return
+    }
+    if (at >= 0 && at === overlayAt - 1) return
+    parent.addChildView(view, at >= 0 && at < overlayAt ? overlayAt - 1 : overlayAt)
   }
 
   /** Removes a view from every window that holds it (no-op for windows that don't). */
@@ -693,6 +750,8 @@ export class WindowManager {
   }
 
   private showOverlay(rec: WindowRecord): void {
+    clearTimeout(rec.overlayHideTimer)
+    rec.refocusPage = false
     const overlay = this.ensureOverlay(rec)
     this.fitOverlay(rec)
     rec.win.contentView.addChildView(overlay)
@@ -703,9 +762,22 @@ export class WindowManager {
 
   private hideOverlay(rec: WindowRecord): void {
     if (!rec.overlayShown || !rec.overlay) return
-    rec.overlay.setVisible(false)
     rec.overlayShown = false
+    // Focus returns to the page at once (or when the window is next focused); the view stays up
+    // while the renderer animates out.
     if (rec.win.isFocused()) this.focusActiveTab(rec.id)
+    else rec.refocusPage = true
+    const overlay = rec.overlay
+    clearTimeout(rec.overlayHideTimer)
+    rec.overlayHideTimer = setTimeout(() => {
+      rec.overlayHideTimer = undefined
+      if (rec.overlayShown || rec.win.isDestroyed() || overlay.webContents.isDestroyed()) return
+      try {
+        overlay.setVisible(false)
+      } catch {
+        // The window is going away.
+      }
+    }, OVERLAY_EXIT_MS)
   }
 
   private fitOverlay(rec: WindowRecord): void {
@@ -752,7 +824,8 @@ function syncAppearance(appearance: ColorMode): void {
 export function windowBackground(state: OrbitState, spaceId: SpaceId | undefined): string | undefined {
   const space = spaceId ? state.spaces[spaceId] : undefined
   if (!space) return undefined
-  return paletteFor({ ...space.theme, mode: 'system' }, nativeTheme.shouldUseDarkColors).windowBackground
+  // The theme source follows settings.appearance, so this is the global light/dark choice.
+  return paletteFor(space.theme, nativeTheme.shouldUseDarkColors).windowBackground
 }
 
 function roundRect(r: Rect): Rect {

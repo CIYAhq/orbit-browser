@@ -92,17 +92,25 @@ export interface Split {
 
 export type ColorMode = 'system' | 'light' | 'dark'
 
+/**
+ * A Space's colours. Light/dark is not part of it: that is the one global
+ * `settings.appearance`, and every theme has a light and a dark rendition
+ * (see src/shared/theme.ts).
+ */
 export interface SpaceTheme {
-  /** Base colour as #rrggbb. */
-  color: string
-  /** Optional second colour for a gradient. */
-  color2?: string
-  mode: ColorMode
+  /** Zero to three colours (#rrggbb), blended top to bottom. Empty = the neutral default theme. */
+  colors: string[]
+  /** How strongly the colours show: 0 = faint wash … 1 = full. */
+  intensity: number
+  /** Static grain texture over the sidebar and frame: 0 = none … 1 = strong. */
+  grain: number
 }
 
 export interface Space {
   id: SpaceId
   name: string
+  /** True while `name` is an automatic placeholder ("Space 3") the user never chose. */
+  unnamed?: boolean
   /** Emoji or a short icon key. */
   icon: string
   theme: SpaceTheme
@@ -132,7 +140,7 @@ export type OverlayState =
   | { kind: 'none' }
   | { kind: 'commandbar'; mode: CommandBarMode; query: string; nonce: number }
   | { kind: 'peek'; tabId: TabId; nonce: number }
-  | { kind: 'panel'; panel: string; nonce: number }
+  | { kind: 'panel'; panel: string; nonce: number; params?: Record<string, string | number | boolean> }
 
 export interface SidebarState {
   /** Docked and visible (true) or hidden/auto-hiding (false). */
@@ -160,6 +168,15 @@ export interface WindowState {
 
 export type SearchEngineId = 'google' | 'duckduckgo' | 'bing' | 'brave' | 'ecosia' | 'kagi'
 
+/** Site search (CB-11, ST-06): type the keyword in the command bar, press Tab, then the query. */
+export interface SiteSearchEngine {
+  id: string
+  name: string
+  keyword: string
+  /** Results URL with %s where the query goes. */
+  url: string
+}
+
 export interface Settings {
   searchEngine: SearchEngineId
   /** Archive unpinned (Today) tabs not used for this long. 0 = never. */
@@ -174,6 +191,12 @@ export interface Settings {
   /** Links opened from other apps open in a Mini Window. */
   miniWindowForExternalLinks: boolean
   onboarded: boolean
+  /** Command bar site searches (CB-11); edited in Settings (ST-06). */
+  siteSearch: SiteSearchEngine[]
+  /** Ask the search engine for suggestions while typing in the command bar (CB-15). Off by default: it sends keystrokes to the engine. */
+  searchSuggestions: boolean
+  /** ⇧Enter on a search opens the engine's first result directly where the engine supports it (CB-16). Off by default. */
+  searchTopResult: boolean
   /** ⌘1–⌘8 count Favorites first (TB-04, FV-10). */
   countFavoritesInShortcuts: boolean
   /** ⌘9 selects the last tab (true) or the 9th item (false) (TB-04). */
@@ -184,8 +207,11 @@ export interface ArchivedTab {
   id: string
   url: string
   title: string
+  /** Not stored by the tabs lane (keeps state small): look icons up with `tabs.favicon`. */
   favicon?: string
   spaceId: SpaceId
+  /** Name of the Space at archive time (kept when the Space itself is deleted). */
+  spaceName?: string
   profileId: ProfileId
   archivedAt: number
   reason: 'auto' | 'closed' | 'cleared'

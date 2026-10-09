@@ -49,11 +49,13 @@ import {
 } from '../split/model'
 import {
   activateInDraft,
+  dedupeDisplayed,
   detachFromSplit,
   makeTab,
   mostRecentTab,
   nextAfterClose,
   reselectAway,
+  shownElsewhere,
   todayInsertIndex,
 } from './model'
 import type { SavedHistory } from './runtime'
@@ -201,7 +203,7 @@ export class TabOps {
       id,
       url: tab.url,
       title: tabTitle(tab),
-      favicon: tab.favicon,
+      // No favicon copy in OrbitState (lane review MF-2): look it up with tabs.favicon(url).
       spaceId: tab.spaceId,
       profileId: tab.profileId,
       archivedAt: this.now(),
@@ -250,13 +252,13 @@ export class TabOps {
       new Set((state.spaces[spaceId]?.today ?? []).flatMap((id) => tabsInItem(state, id)))
     const pick =
       opts.reselect === 'pinned'
-        ? (spaceId: SpaceId) => {
+        ? (spaceId: SpaceId, _current: TabId, excluding: Set<TabId>) => {
             const today = todayTabs(spaceId)
-            return mostRecentTab(state, spaceId, all, (t) => !today.has(t.id))
+            return mostRecentTab(state, spaceId, excluding, (t) => !today.has(t.id))
           }
         : // A closing pane hands focus to a pane of its split, so the split stays on screen (SV-17).
-          (spaceId: SpaceId, current: TabId) =>
-            paneAfterClose(state, current, all) ?? nextAfterClose(state, spaceId, current, all)
+          (spaceId: SpaceId, current: TabId, excluding: Set<TabId>) =>
+            paneAfterClose(state, current, excluding) ?? nextAfterClose(state, spaceId, current, excluding)
     this.ctx.store.update((d) => {
       reselectAway(d, all, pick, this.now())
       // Archive bottom-up so the first tab of a batch ends up newest (the top of the Archive list).
@@ -518,7 +520,12 @@ export class TabOps {
       .map((s) => structuredClone(s))
     const all = new Set(tabIds)
     this.ctx.store.update((d) => {
-      reselectAway(d, all, (spaceId, current) => nextAfterClose(state, spaceId, current, all), this.now())
+      reselectAway(
+        d,
+        all,
+        (spaceId, current, excluding) => nextAfterClose(state, spaceId, current, excluding),
+        this.now(),
+      )
       for (const rec of [...records].reverse()) {
         const tab = d.tabs[rec.tab.id]
         if (tab) rec.archiveId = this.archiveEntry(d, tab, 'closed', 'pinned')
@@ -676,6 +683,7 @@ export class TabOps {
         const w = d.windows[p.windowId]
         if (w) w.activeTab[p.spaceId] = p.next
       }
+      dedupeDisplayed(d)
     })
     for (const tid of reload) {
       this.ctx.tabs.sleep(tid)
@@ -699,8 +707,10 @@ export class TabOps {
         if (!active || !moving.has(active)) continue
         const space = destSpace(active)
         const staysVisible = space ? space === spaceId : state.spaces[spaceId]?.profileId === destProfile(active)
-        if (!staysVisible)
-          picks.push({ windowId: win.id, spaceId, next: nextAfterClose(state, spaceId, active, moving) })
+        if (!staysVisible) {
+          const excluding = new Set<TabId>([...moving, ...shownElsewhere(state, win.id)])
+          picks.push({ windowId: win.id, spaceId, next: nextAfterClose(state, spaceId, active, excluding) })
+        }
       }
     }
     return picks
@@ -790,6 +800,7 @@ export class TabOps {
         const w = d.windows[p.windowId]
         if (w) w.activeTab[p.spaceId] = p.next
       }
+      dedupeDisplayed(d)
     })
     // A different profile means a different session: the tab reloads there from its URL. Its old
     // history (with form state) stays behind so nothing leaks between profiles (PR-05).
@@ -975,12 +986,14 @@ export class TabOps {
       if (fromWindowId) {
         const from = d.windows[fromWindowId]
         if (from && from.activeTab[from.spaceId] === tabId) {
-          from.activeTab[from.spaceId] = nextAfterClose(state, from.spaceId, tabId, moving)
+          const excluding = new Set<TabId>([...moving, ...shownElsewhere(state, fromWindowId)])
+          from.activeTab[from.spaceId] = nextAfterClose(state, from.spaceId, tabId, excluding)
         }
       }
       d.windows[win.id] = win
       const t = d.tabs[tabId]
       if (t) t.lastActiveAt = this.now()
+      dedupeDisplayed(d, win.id)
     })
     const created = this.state.windows[win.id]
     if (created) this.ctx.windows.open(created)

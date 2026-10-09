@@ -59,17 +59,20 @@ export function registerCore(ctx: MainContext): void {
     const windowId = windowOf(c)
     if (!windowId) return
     const win = store.state.windows[windowId]
-    if (win?.overlay.kind === 'commandbar' && win.overlay.mode === mode) {
+    // KS-04 / CB-21: ⌘T or ⌘L while the bar is open closes it.
+    if (win?.overlay.kind === 'commandbar') {
       setOverlay(windowId, { kind: 'none' })
       return
     }
     const tabId = activeTabOf(store.state, windowId)
-    const query = mode === 'edit-url' && tabId ? (store.state.tabs[tabId]?.url ?? '') : ''
+    const url = tabId ? (store.state.tabs[tabId]?.url ?? '') : ''
+    // CB-23: with no current page, ⌘L behaves like ⌘T.
+    const effective = mode === 'edit-url' && (!url || url === 'about:blank') ? 'new-tab' : mode
     ctx.perf.mark('commandbar:open:start')
     setOverlay(windowId, {
       kind: 'commandbar',
-      mode,
-      query: query === 'about:blank' ? '' : query,
+      mode: effective,
+      query: effective === 'edit-url' ? url : '',
       nonce: ++overlayNonce,
     })
   }
@@ -86,8 +89,6 @@ export function registerCore(ctx: MainContext): void {
     if (!win) return
     void commands.run('window.setSidebar', { visible: !win.sidebar.visible }, { windowId })
   })
-  actions.register('window.new', () => {
-    windows.open()
-  })
+  // window.new is registered by the spaces lane (SP-24: same Space, command bar open, cascade).
   actions.register('app.settings', (c) => ctx.toast(windowOf(c), 'Settings are coming soon'))
 }

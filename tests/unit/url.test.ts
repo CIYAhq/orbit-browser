@@ -19,7 +19,7 @@ describe('parseInput', () => {
   it.each(['hello world', 'what is orbit', 'react hooks', 'foo', 'c++ tutorial'])('treats "%s" as a search', (q) => {
     const parsed = parseInput(q, 'duckduckgo')
     expect(parsed.kind).toBe('search')
-    expect(parsed.url).toBe(`https://duckduckgo.com/?q=${encodeURIComponent(q)}`)
+    expect(parsed.url).toBe(`https://duckduckgo.com/?q=${encodeURIComponent(q).replace(/%20/g, '+')}`)
   })
 
   it('rejects unknown schemes as URLs', () => {

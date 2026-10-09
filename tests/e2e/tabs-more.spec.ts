@@ -224,6 +224,9 @@ test('[PN-07][PN-04] edit the pinned URL inline, or replace it with the current 
   await field.fill(fx.url('/page/Home'))
   await field.press('Enter')
   await expect.poll(async () => (await tab(app, p))?.pinnedUrl).toContain('/page/Home')
+  // Something that isn't a web address is refused (the pinned URL stays).
+  await cmd(app, 'tabs.setPinnedUrl', { tabId: p, url: 'not a web address' })
+  expect((await tab(app, p))?.pinnedUrl).toContain('/page/Home')
   await act(app, 'tab.resetToPinned')
   await waitTab(app, p, '/page/Home')
 })
@@ -379,8 +382,9 @@ test('[FL-21][SB-23] 200 tabs: the sidebar mounts and scrolls without long main-
     for (let i = 0; i < 200; i++) await g.__orbit.run('tabs.create', { url: `about:blank#t${i}`, activate: false }, w)
   })
   await expect.poll(async () => (await space(app)).today.length).toBe(200)
-  await expect(shell.getByTestId('today-list').locator(':scope > [data-slot]')).toHaveCount(200)
-  await settled(shell)
+  await expect(shell.getByTestId('today-list').locator(':scope > [data-slot]')).toHaveCount(200, { timeout: 30_000 })
+  // Hosted CI runners have 2 slow cores: 200 rows can take longer than 10 s to finish entering.
+  await settled(shell, 30_000)
   const longTasks = await shell.evaluate(async () => {
     const tasks: number[] = []
     const obs = new PerformanceObserver((list) => {
@@ -402,11 +406,13 @@ test('[FL-21][SB-23] 200 tabs: the sidebar mounts and scrolls without long main-
   })
   // Guard against pathological stalls (e.g. every row animating at once). Frame-accurate numbers
   // come from the perf harness on a quiet machine; e2e may share the CPU with another worker.
+  // CI runners are 3–4× slower than a dev machine, so the stall limit scales there.
+  const stall = process.env.CI ? 300 : 120
   expect(
-    longTasks.filter((d) => d > 120),
+    longTasks.filter((d) => d > stall),
     `long tasks: ${longTasks.map((d) => Math.round(d)).join(', ')}`,
   ).toEqual([])
-  expect(longTasks.length).toBeLessThan(4)
+  expect(longTasks.length).toBeLessThan(process.env.CI ? 8 : 4)
   // A title change re-renders one row, not the list: measured as a single row's DOM update.
   const t = (await space(app)).today[100] as string
   await cmd(app, 'tabs.rename', { tabId: t, title: 'Renamed in place' })
@@ -560,4 +566,33 @@ test('[TB-02][TB-03] a Cmd/Ctrl-clicked link opens a background tab at the top o
   await expect.poll(async () => (await space(app)).today.length).toBe(3)
   await expect(shell.getByTestId('toast').last()).toContainText('Opened in a new tab')
   expect(await activeId(app)).toBe(t)
+})
+
+test('[TB-13][TB-06] a selection made in one Space never acts in another (lane review MF-3)', async () => {
+  const { app, shell } = orbit
+  const sA = (await space(app)).id
+  const sB = await cmd<string>(app, 'spaces.create', { name: 'B', activate: false })
+  const inB = await newTab(app, fx.url('/page/InB'), { spaceId: sB, activate: false })
+  const a2 = await newTab(app, fx.url('/page/A2'), { activate: false })
+  const a1 = await newTab(app, fx.url('/page/A1'))
+  await waitTab(app, a1, '/page/A1')
+  // Space A: Cmd-click a second row (the selected tab joins the selection).
+  await row(shell, a2).click({ modifiers: [MOD_KEY] })
+  await expect(shell.locator('.tab-row.is-selected')).toHaveCount(2)
+  // Switch to Space B and select its tab; the selection is gone.
+  await cmd(app, 'spaces.switch', { spaceId: sB })
+  await cmd(app, 'tabs.activate', { tabId: inB })
+  await expect(shell.locator('.tab-row.is-selected')).toHaveCount(0)
+  // Cmd+W closes only B's tab, never A's.
+  await act(app, 'tab.close')
+  await expect.poll(async () => (await state(app)).tabs[inB]).toBeUndefined()
+  const s = await state(app)
+  expect(s.spaces[sA]?.today).toEqual([a1, a2])
+  // Even if the sidebar's selection message is stale, main ignores a selection outside the view.
+  await cmd(app, 'tabs.setSelection', { tabIds: [a1, a2] })
+  const another = await newTab(app, fx.url('/page/B2'), { spaceId: sB })
+  await waitTab(app, another, '/page/B2')
+  await act(app, 'tab.close')
+  await expect.poll(async () => (await state(app)).tabs[another]).toBeUndefined()
+  expect((await state(app)).spaces[sA]?.today).toEqual([a1, a2])
 })
