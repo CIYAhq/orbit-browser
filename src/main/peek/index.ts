@@ -10,11 +10,12 @@ import { app, WebContentsView } from 'electron'
 import { decideLink, type LinkHow, type LinkSettings, type LinkSource, routeFor } from '../../shared/link-routing'
 import { PEEK_RADIUS, peekCard, peekStart } from '../../shared/peek-geometry'
 import type { Rect } from '../../shared/rpc'
-import type { OrbitState, Tab, TabId, WindowId } from '../../shared/state'
+import type { OrbitState, SpaceId, Tab, TabId, WindowId } from '../../shared/state'
 import { insertItem, sectionOf } from '../../shared/tree'
 import type { MainContext } from '../context'
 import { openMiniWindow } from '../miniwindow'
 import type { CallContext } from '../registry'
+import { activateInDraft, todayInsertIndex } from '../tabs/model'
 import type { SavedHistory } from '../tabs/runtime'
 import { activeTabOf } from '../windows'
 import { archiveFloating, floatingTab, keepFloatingPagesOutOfTabClose } from './floating'
@@ -312,21 +313,26 @@ export function registerPeek(ctx: MainContext): void {
     const url = tabs.contents(s.tabId)?.getURL() || tab.url
     // Routing rules also apply when a Peek opens as a tab (NV-18).
     const routed = routeFor(state.settings.linkRules ?? [], url)
-    const spaceId = routed && state.spaces[routed] ? routed : win.spaceId
-    const profileId = state.spaces[spaceId]?.profileId ?? tab.profileId
+    placeInToday(s, routed && state.spaces[routed] ? routed : win.spaceId)
+  }
+
+  /** Puts the (former) Peek page at the top of a Space's Today and selects it (TB-03). */
+  const placeInToday = (s: Session, spaceId: SpaceId) => {
+    const tab = store.state.tabs[s.tabId]
+    if (!tab) return
+    const profileId = store.state.spaces[spaceId]?.profileId ?? tab.profileId
     const otherProfile = profileId !== tab.profileId
     store.update((d) => {
       const t = d.tabs[s.tabId]
       const w = d.windows[s.windowId]
-      if (!t || !w) return
+      const space = d.spaces[spaceId]
+      if (!t || !w || !space) return
       delete t.floating
       t.spaceId = spaceId
       t.profileId = profileId
-      t.lastActiveAt = Date.now()
-      insertItem(d, { kind: 'today', spaceId }, 0, s.tabId)
-      w.overlay = { kind: 'none' }
-      w.spaceId = spaceId
-      w.activeTab[spaceId] = s.tabId
+      insertItem(d, { kind: 'today', spaceId }, todayInsertIndex(space, 'new'), s.tabId)
+      if (w.overlay.kind === 'peek' && w.overlay.nonce === s.nonce) w.overlay = { kind: 'none' }
+      activateInDraft(d, s.windowId, s.tabId)
     })
     if (otherProfile) {
       // Another profile is another session: the page reloads there.
@@ -350,27 +356,50 @@ export function registerPeek(ctx: MainContext): void {
     if (sessions.get(s.windowId) !== s) return
     const state = store.state
     const source = state.tabs[s.sourceTabId]
-    if (!source || !state.tabs[s.tabId]) {
+    const tab = state.tabs[s.tabId]
+    if (!source || !tab) {
       discard(s)
       return
     }
-    // The split lane's command, when present, puts the page beside the source in its place.
-    if (commands.has('split.addTab')) {
+    if (!commands.has('split.addTab')) {
+      // Without Split View the page opens as a tab instead.
       commitExpand(s)
-      const run = commands.run as unknown as (name: string, args: unknown, c?: CallContext) => Promise<unknown>
-      void run(
-        'split.addTab',
-        { tabId: s.tabId, target: s.sourceTabId, side: 'right', focus: true },
-        {
-          windowId: s.windowId,
-        },
-      ).catch((err) => console.error('[peek] split failed', err))
+      ctx.toast(s.windowId, 'Opened as a tab')
       return
     }
-    // Without split support, the page opens as a tab beside the source instead.
-    commitExpand(s)
-    ctx.toast(s.windowId, 'Opened as a tab')
+    sessions.delete(s.windowId)
+    const url = tabs.contents(s.tabId)?.getURL() || tab.url
+    // The page becomes an ordinary tab of the source's Space, live; the split then takes the
+    // source tab's place (a pinned source makes a pinned split, SV-20), the page on the right.
+    store.update((d) => {
+      const t = d.tabs[s.tabId]
+      if (t) {
+        delete t.floating
+        t.url = url
+        t.spaceId = source.spaceId
+        t.lastActiveAt = Date.now()
+      }
+      const w = d.windows[s.windowId]
+      if (w?.overlay.kind === 'peek' && w.overlay.nonce === s.nonce) w.overlay = { kind: 'none' }
+    })
+    // Typed loosely: the split lane's commands may not be part of this build's registry.
+    const run = commands.run as unknown as (name: string, args: unknown, c?: CallContext) => Promise<unknown>
+    const fallback = () => {
+      // Refused (the split is full): the page still opens, as a tab.
+      if (store.state.tabs[s.tabId] && !isPlaced(s.tabId)) placeInToday(s, source.spaceId)
+    }
+    run('split.addTab', { tabId: s.tabId, target: s.sourceTabId, side: 'right', focus: true }, { windowId: s.windowId })
+      .then((splitId) => {
+        if (!splitId) fallback()
+      })
+      .catch((err) => {
+        console.error('[peek] split failed', err)
+        fallback()
+      })
   }
+
+  /** Whether a tab has a place in the sidebar (a row or a split pane). */
+  const isPlaced = (tabId: TabId) => sectionOf(store.state, tabId) !== undefined
 
   /** Finishes a running transition right away (new input arrived), or removes a stale Peek. */
   const settleNow = (s: Session) => {
