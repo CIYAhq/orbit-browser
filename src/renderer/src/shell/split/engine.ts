@@ -105,13 +105,13 @@ export class PaneEngine {
   /** A page in HTML full screen covers the whole window until it leaves (SV-25). */
   private fullscreen: TabId | null = null
   private reportRaf = 0
+  /** True while running inside this frame's work (rAF tick, resize observer): reports go out at once. */
+  private inFrame = false
 
   attach(host: HTMLElement): void {
     this.host = host
     this.measure()
-    const onResize = () => {
-      if (this.measure()) this.relayout(false)
-    }
+    const onResize = () => this.inFrameDo(() => this.measure() && this.relayout(false))
     const observer = new ResizeObserver(onResize)
     observer.observe(host)
     window.addEventListener('resize', onResize)
@@ -127,9 +127,7 @@ export class PaneEngine {
     }
     const onEnd = (e: TransitionEvent) => {
       if (e.target !== content && e.target !== shell) return
-      requestAnimationFrame(() => {
-        if (this.measure()) this.relayout(false)
-      })
+      requestAnimationFrame(() => this.inFrameDo(() => this.measure() && this.relayout(false)))
     }
     document.addEventListener('transitionrun', onRun)
     document.addEventListener('transitionend', onEnd)
@@ -408,7 +406,20 @@ export class PaneEngine {
     if (!this.raf) this.raf = requestAnimationFrame((t) => this.tick(t))
   }
 
+  private inFrameDo(fn: () => void): void {
+    this.inFrame = true
+    try {
+      fn()
+    } finally {
+      this.inFrame = false
+    }
+  }
+
   private tick(now: number): void {
+    this.inFrameDo(() => this.step(now))
+  }
+
+  private step(now: number): void {
     this.raf = 0
     let moving = false
     for (const anim of this.anims.values()) {
@@ -496,9 +507,18 @@ export class PaneEngine {
   }
 
   /** Sends the live panes' rectangles (window coordinates, clipped to the frame) to main. */
-  /** Coalesces pane reports to at most one per animation frame (DOM writes stay immediate). */
+  /**
+   * At most one pane report per animation frame. Work already running in this frame (the
+   * animation tick, the resize observer) reports at once, so native views never trail the
+   * cards by an extra frame; event-driven changes are coalesced into the next frame.
+   */
   private report(): void {
-    if (!this.ready || this.reportRaf) return
+    if (!this.ready) return
+    if (this.inFrame) {
+      this.sendReport()
+      return
+    }
+    if (this.reportRaf) return
     this.reportRaf = requestAnimationFrame(() => {
       this.reportRaf = 0
       this.sendReport()
