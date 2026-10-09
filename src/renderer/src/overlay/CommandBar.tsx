@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { flushSync } from 'react-dom'
 import {
   findSiteSearch,
   mergeSuggestions,
@@ -32,9 +33,16 @@ const ROW_H = 40
 const INPUT_H = 56
 const MAX_ROWS = 9
 
-/** Keystroke → results-on-screen latencies (ms), newest last; read by e2e tests (CB-22). */
+/**
+ * Keystroke → results-on-screen latencies (ms, to the next frame), and keystroke → reply
+ * arrival (IPC + ranking), newest last; read by e2e tests (CB-22).
+ */
 const latencies: number[] = []
-;(window as unknown as { __orbitCommandBar: { latencies: number[] } }).__orbitCommandBar = { latencies }
+const replies: number[] = []
+;(window as unknown as { __orbitCommandBar: { latencies: number[]; replies: number[] } }).__orbitCommandBar = {
+  latencies,
+  replies,
+}
 
 /** Text that is (or starts like) an address: never sent to the search engine for suggestions (M3). */
 function looksLikeAddress(text: string): boolean {
@@ -220,6 +228,8 @@ export function CommandBar({
 
   function applyResponse(seq: number, sentAt: number, resp: SearchResponse) {
     if (seq !== st.seq || st.closed) return
+    replies.push(performance.now() - sentAt)
+    if (replies.length > 100) replies.shift()
     st.answered = seq
     applyCompletion(resp.autocomplete)
     // M3: the untouched ⌘L address (or any address) is never sent to the engine.
@@ -234,12 +244,16 @@ export function CommandBar({
       requestSuggestions(seq)
     }
     st.results = rows
-    setResults(rows)
     // F4: before anything is typed, only Paste and go or ⌘L's current page is pre-selected.
     const first = rows[0]
     const base = st.typed.trim() || first?.kind === 'paste' || first?.kind === 'current' ? 0 : -1
-    select(rows.length ? Math.max(-1, Math.min(rows.length - 1, base + st.pendingMove)) : -1)
+    const index = rows.length ? Math.max(-1, Math.min(rows.length - 1, base + st.pendingMove)) : -1
     st.pendingMove = 0
+    // Commit the rows in this task so they make the very next frame (FL-17).
+    flushSync(() => {
+      setResults(rows)
+      select(index)
+    })
     requestAnimationFrame(() => {
       latencies.push(performance.now() - sentAt)
       if (latencies.length > 100) latencies.shift()

@@ -245,6 +245,31 @@ describe('ranking', () => {
     )
   })
 
+  it('[CB-07] typing forward narrows to earlier matches without changing results', () => {
+    const h = historyOf([
+      ['https://organ.example/', 'Organ music'],
+      ['https://garden.example/', 'Garden tips'],
+      ['https://gallery.example/', 'Gallery'],
+    ])
+    const base = { history: h.entries(), hosts: h.hostList(), noAutocomplete: true }
+    const ids = (q: string) =>
+      rank(input(q, base))
+        .results.filter((r) => r.kind === 'history')
+        .map((r) => r.id)
+        .sort()
+    // "g" only matches word starts; "ga" matches inside words too ("organ"): no narrowing from one letter.
+    expect(ids('g')).toEqual(['history:https://gallery.example/', 'history:https://garden.example/'])
+    expect(ids('ga')).toEqual([
+      'history:https://gallery.example/',
+      'history:https://garden.example/',
+      'history:https://organ.example/',
+    ])
+    expect(ids('gar')).toEqual(['history:https://garden.example/'])
+    expect(ids('garden t')).toEqual(['history:https://garden.example/'])
+    // A new query (not an extension) searches everything again.
+    expect(ids('gal')).toEqual(['history:https://gallery.example/'])
+  })
+
   it('[CB-07] dedupes the same URL, preferring the open tab', () => {
     const tabs = [tab('t-1', 'Wiki page', 'https://wiki.example/x')]
     const h = historyOf([['https://wiki.example/x', 'Wiki page']])

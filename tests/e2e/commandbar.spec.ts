@@ -1,5 +1,8 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 import {
   activeTabId,
@@ -799,4 +802,94 @@ test('[CB-18] Enter on the untouched empty field runs no starter action (review 
   // Arrow down picks the first row explicitly.
   await overlay.keyboard.press('ArrowDown')
   await expect(rows(overlay).first()).toHaveAttribute('aria-selected', 'true')
+})
+
+test('[CB-22][CB-07][FL-17] at 500 tabs and 10,000 history entries: open ≤ 50 ms, results ≤ 30 ms per keystroke (review F3)', async () => {
+  // A seeded profile: 10,000 history entries on 800 hosts.
+  const words = ['alpha', 'budget', 'cloud', 'design', 'engine', 'forest', 'garden', 'harbor', 'island', 'jungle']
+  const userData = mkdtempSync(join(tmpdir(), 'orbit-e2e-perf-'))
+  mkdirSync(join(userData, 'history'), { recursive: true })
+  const now = Date.now()
+  const lines: string[] = []
+  for (let i = 0; i < 10_000; i++) {
+    const at = now - i * 60_000
+    lines.push(
+      JSON.stringify({
+        t: 'e',
+        u: `https://host${i % 800}.example/${words[i % 10]}/page-${i}`,
+        ti: `${words[(i * 3) % 10]} article number ${i} about ${words[(i * 7) % 10]}`,
+        vc: 1 + (i % 4),
+        tc: 0,
+        fv: at,
+        v: [at],
+      }),
+    )
+  }
+  writeFileSync(join(userData, 'history', 'p-default.jsonl'), `${lines.join('\n')}\n`)
+  await orbit.app.close()
+  orbit = await launchOrbit({ userData })
+  await blockNetwork(orbit.app)
+  await (await viewPage(orbit.app, 'overlay')).getByTestId('overlay').waitFor({ state: 'attached' })
+  // 500 sleeping tabs.
+  await orbit.app.evaluate(async (_e, ws) => {
+    const hooks = (
+      globalThis as unknown as {
+        __orbit: {
+          ctx: { commands: { run: (n: string, a: unknown, c: unknown) => Promise<unknown> } }
+          windowIds: () => string[]
+        }
+      }
+    ).__orbit
+    const windowId = hooks.windowIds()[0]
+    for (let i = 0; i < 500; i++) {
+      await hooks.ctx.commands.run(
+        'tabs.create',
+        { url: `http://127.0.0.1:9/${ws[i % 10]}/tab-${i}`, activate: false },
+        { windowId },
+      )
+    }
+  }, words)
+  await expect
+    .poll(async () => ((await run(orbit.app, 'history.search', { text: 'garden', limit: 1 })) as unknown[]).length)
+    .toBe(1)
+  await new Promise((r) => setTimeout(r, 1800)) // idle warm-up after history loads (as in the app)
+
+  const overlay = await viewPage(orbit.app, 'overlay')
+  const opens: number[] = []
+  const marks = async () =>
+    (await orbit.app.evaluate(() =>
+      (globalThis as unknown as { __orbit: { marks: () => { name: string; t: number }[] } }).__orbit.marks(),
+    )) as { name: string; t: number }[]
+  for (let k = 0; k < 4; k++) {
+    const before = (await marks()).filter((m) => m.name === 'commandbar:open:painted').length
+    await orbit.shell.keyboard.press(`${MOD}+T`)
+    await expect
+      .poll(async () => (await marks()).filter((m) => m.name === 'commandbar:open:painted').length)
+      .toBe(before + 1)
+    const m = await marks()
+    const start = m.filter((x) => x.name === 'commandbar:open:start').at(-1)?.t ?? 0
+    const painted = m.filter((x) => x.name === 'commandbar:open:painted').at(-1)?.t ?? 0
+    opens.push(painted - start)
+    await overlay.keyboard.type('garden article 4', { delay: 35 })
+    await expect(rows(overlay).first()).toBeVisible()
+    await overlay.keyboard.press('Escape')
+    await expect(bar(overlay)).toHaveCount(0)
+  }
+  const timings = await overlay.evaluate(
+    () => (window as unknown as { __orbitCommandBar: { latencies: number[]; replies: number[] } }).__orbitCommandBar,
+  )
+  const p95 = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length * 0.95)] ?? Number.POSITIVE_INFINITY
+  const replies = p95(timings.replies)
+  const painted = p95(timings.latencies)
+  const openMedian = [...opens].sort((a, b) => a - b)[Math.floor((opens.length - 1) / 2)] ?? Number.POSITIVE_INFINITY
+  console.info(
+    `[commandbar e2e perf] p95 keystroke→results ${replies.toFixed(1)} ms, →painted ${painted.toFixed(1)} ms (n=${timings.latencies.length}); open median ${openMedian.toFixed(1)} ms`,
+  )
+  expect(timings.replies.length).toBeGreaterThan(40)
+  // §8 budget: results ≤ 30 ms per keystroke (ranked in main and back in the bar).
+  expect(replies).toBeLessThanOrEqual(30)
+  // FL-17: on screen within 50 ms at worst (this includes waiting for the next frame).
+  expect(painted).toBeLessThanOrEqual(50)
+  // §8 budget: open ≤ 50 ms to a visible, focused input.
+  expect(openMedian).toBeLessThanOrEqual(50)
 })

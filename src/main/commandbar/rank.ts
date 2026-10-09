@@ -383,6 +383,25 @@ class TopN {
   }
 }
 
+// ---- Incremental narrowing ----
+
+/**
+ * The history entries that matched the previous query. When the next query only extends it (typing
+ * forward), its matches are a subset, so only these are re-scored. Not when the previous last term
+ * was a single letter: one letter only matches at word starts, two letters anywhere.
+ */
+let narrowing: { history: readonly IndexedEntry[]; lower: string; matched: IndexedEntry[] } | undefined
+
+function historyPool(history: readonly IndexedEntry[], lower: string): readonly IndexedEntry[] {
+  const n = narrowing
+  return n && n.history === history && lower.startsWith(n.lower) ? n.matched : history
+}
+
+function rememberMatches(history: readonly IndexedEntry[], lower: string, ts: string[], matched: IndexedEntry[]) {
+  const last = ts[ts.length - 1] ?? ''
+  narrowing = last.length >= 2 && !lower.includes('://') ? { history, lower, matched } : undefined
+}
+
 // ---- Main entry ----
 
 export function rank(input: RankInput): SearchResponse {
@@ -469,9 +488,11 @@ export function rank(input: RankInput): SearchResponse {
     }
 
     const seenQueries = new Set<string>([lower])
-    for (const e of input.history) {
+    const matched: IndexedEntry[] = []
+    for (const e of historyPool(input.history, lower)) {
       const m = matchDoc(ts, e.titleLower, e.urlKey)
       if (m.score === 0) continue
+      matched.push(e)
       const f = frecency(e, now)
       const past = pastSearchOf(e)
       if (past !== undefined) {
@@ -506,6 +527,7 @@ export function rank(input: RankInput): SearchResponse {
       if (key === activeKey) continue
       history.add({ r: historyRow(e, score), key, strong: m.strong, prio: 1 })
     }
+    rememberMatches(input.history, lower, ts, matched)
 
     for (const a of input.archive) {
       const m = matchDoc(ts, a.titleLower, a.urlKey)
