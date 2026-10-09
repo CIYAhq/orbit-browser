@@ -1,20 +1,17 @@
 import { ChevronDown, Lock, Search, UserRound } from 'lucide-react'
 import { type CSSProperties, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { THEME_PRESETS } from '../../../shared/defaults'
 import type { Tab } from '../../../shared/state'
-import { paletteFor } from '../../../shared/theme'
+import { NEUTRAL_THEME, paletteFor } from '../../../shared/theme'
 import { displayHost } from '../../../shared/url'
 import { invoke, isMac, perfMark } from '../api'
 import { activeTabId } from '../selectors'
 import { useOrbit, useWindow } from '../store'
-import { paletteVars, useSystemDark } from '../theme'
+import { paletteVars, useDark } from '../theme'
 import { Favicon } from '../ui/Favicon'
 import './mini.css'
 
 /** Kept in step with MINI_BAR / MINI_INSET / MINI_RADIUS in src/main/miniwindow. */
 const CARD_RADIUS = 10
-/** The neutral (non-Space) theme a Mini Window uses (MW-03). */
-const NEUTRAL = THEME_PRESETS[7] ?? THEME_PRESETS[0]
 
 /**
  * A Mini Window's chrome (MW-03): a slim top bar (window controls, the page's host which edits
@@ -29,13 +26,9 @@ export function MiniApp() {
   })
   const profileCount = useOrbit((s) => Object.keys(s.profiles).length)
   const profileName = useOrbit((s) => (tab ? s.profiles[tab.profileId]?.name : undefined))
-  const appearance = useOrbit((s) => s.settings.appearance)
-  const systemDark = useSystemDark()
-  const dark = appearance === 'dark' || (appearance === 'system' && systemDark)
-  const palette = useMemo(
-    () => paletteFor({ ...(NEUTRAL as NonNullable<typeof NEUTRAL>), mode: 'system' }, dark),
-    [dark],
-  )
+  // A Mini Window has no Space yet: the neutral theme, light or dark as the app is (MW-03).
+  const dark = useDark()
+  const palette = useMemo(() => paletteFor(NEUTRAL_THEME, dark), [dark])
   const frameRef = useRef<HTMLDivElement>(null)
   useCardReporter(frameRef)
   const [editing, setEditing] = useState(false)

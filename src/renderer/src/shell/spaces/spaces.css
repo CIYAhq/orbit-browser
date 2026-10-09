@@ -1,0 +1,962 @@
+/* Spaces lane: Space strip, title row, switcher, new-Space flow, theme picker and Space panels. */
+
+/* ---------- Theme surface (SP-16, SP-17) ---------- */
+
+/* Everything in the shell inherits the theme's text colour (light or dark rendition). */
+.shell {
+  color: var(--text);
+}
+
+/* Dark rendition: the empty page card is dark too (AP-04). */
+.shell[data-dark] .frame {
+  background: color-mix(in srgb, var(--frame-top) 40%, #19191c);
+}
+
+/*
+ * The theme's gradient and grain live on their own layer behind the sidebar and the
+ * frame. Its colour stops are non-inherited, so painting a frame of a Space swipe
+ * restyles this element only (review M5). The page card sits above it.
+ */
+@property --bg-top {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: #e7e7eb;
+}
+@property --bg-mid {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: #eaeaee;
+}
+@property --bg-bottom {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: #ededf0;
+}
+
+.shell-bg {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(180deg, var(--bg-top), var(--bg-mid), var(--bg-bottom));
+  will-change: transform;
+}
+
+.shell-bg__grain {
+  position: absolute;
+  inset: 0;
+  display: none;
+  background-image: var(--grain-image, none);
+  background-size: 96px 96px;
+  mix-blend-mode: soft-light;
+}
+
+.shell-bg[data-grain] .shell-bg__grain {
+  display: block;
+}
+
+.sidebar ::selection,
+.space-flow ::selection {
+  background: var(--selection);
+}
+
+/* Light/dark switches cross-fade the whole shell (AP-01, FL-14). */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 200ms;
+}
+
+/* ---------- Strip of Space pages (FL-13) ---------- */
+
+.space-strip {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  /* Pages span the full sidebar width so nothing is clipped short of its edges mid-swipe. */
+  margin: 0 -4px 0 -8px;
+  overflow: hidden;
+}
+
+.space-strip__track {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+
+.space-slot {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.space-slot--preview,
+.space-slot--new {
+  pointer-events: none;
+}
+
+.space-strip.is-flow .space-slot--new {
+  pointer-events: auto;
+}
+
+.space-page {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 0 4px 0 8px;
+}
+
+.space-slot__real {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.space-slot__real[hidden] {
+  display: none;
+}
+
+.space-page__favorites {
+  flex: none;
+  position: relative;
+  z-index: 2;
+}
+
+.space-page__preview-scroll {
+  overflow: hidden;
+}
+
+.space-page__fill {
+  min-height: 72px;
+}
+
+/* ---------- Title row (SP-04, SB-06) ---------- */
+
+/* Inside the tabs lane's header (with the pinned caret, PN-09). */
+.space-header .space-title {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Pinned collapsed with a pinned tab selected: the name is shown bold (SP-04, PN-09). */
+.space-header.has-hidden-active .space-title__name {
+  font-weight: 800;
+}
+
+/* A dragged tab hovering a switcher target (SP-21). */
+.space-dot.is-drop-target {
+  background: color-mix(in oklab, var(--accent) 22%, transparent);
+  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--accent) 60%, transparent);
+}
+
+.space-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  margin: 2px 0 2px;
+  padding: 0 2px 0 8px;
+  border-radius: var(--radius-row);
+}
+
+.space-title__icon {
+  flex: none;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.space-title__name {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 620;
+  letter-spacing: -0.005em;
+  color: var(--text);
+}
+
+.space-title__badge {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text);
+  background: color-mix(in oklab, var(--accent) 24%, transparent);
+  opacity: 0;
+  transition: opacity var(--dur-fast) ease;
+}
+
+.space-title__menu {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  opacity: 0;
+  transition:
+    opacity var(--dur-fast) ease,
+    background var(--dur-fast) ease;
+}
+
+.space-title:hover .space-title__menu,
+.space-title:hover .space-title__badge,
+.space-title__menu:focus-visible {
+  opacity: 1;
+}
+
+.space-title__menu:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.space-title__input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  margin-left: -6px;
+  border: 0;
+  border-radius: 6px;
+  outline: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 680;
+  color: var(--text);
+  background: var(--hover);
+  box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--accent) 60%, transparent);
+  user-select: text;
+}
+
+/* ---------- Bottom-bar switcher (SP-06, SB-09) ---------- */
+
+.spacebar {
+  flex: none;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 4px;
+  height: 40px;
+  padding-top: 4px;
+}
+
+.spacebar__spaces {
+  min-width: 0;
+  display: flex;
+  justify-content: safe center;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.spacebar__spaces.fade-left {
+  mask-image: linear-gradient(90deg, transparent, #000 18px);
+}
+
+.spacebar__spaces.fade-right {
+  mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent);
+}
+
+.spacebar__spaces.fade-left.fade-right {
+  mask-image: linear-gradient(90deg, transparent, #000 18px, #000 calc(100% - 18px), transparent);
+}
+
+.spacebar__row {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+}
+
+.spacebar__pill {
+  position: absolute;
+  top: 2px;
+  left: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--active);
+  box-shadow: var(--active-shadow);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.space-dot {
+  --p: 0;
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  transition: transform 200ms var(--ease-out);
+}
+
+.space-dot:hover {
+  background: color-mix(in srgb, var(--hover) calc((1 - var(--p)) * 100%), transparent);
+}
+
+.space-dot.is-dragging {
+  z-index: 3;
+  transition: none;
+  cursor: grabbing;
+}
+
+.space-dot__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--dot, var(--accent)) calc(var(--p) * 100%), var(--text-muted));
+  transform: scale(calc(1 + 0.4 * var(--p)));
+  /* Painted per frame from the swipe progress: no transitions (review F2). */
+  transition: none;
+}
+
+.space-dot__icon {
+  font-size: 15px;
+  line-height: 1;
+  opacity: calc(0.5 + 0.5 * var(--p));
+  filter: grayscale(calc(0.7 - 0.7 * var(--p)));
+  transform: scale(calc(0.9 + 0.1 * var(--p)));
+  transition: none;
+}
+
+.spacebar__plus {
+  width: 28px;
+  height: 28px;
+}
+
+/* ---------- Over-swipe hint and the new-Space flow (SP-02, SP-08) ---------- */
+
+/* Sits at the page's leading edge: that is the part an over-swipe reveals. */
+.new-space-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  padding-left: 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0;
+}
+
+.new-space-hint__plus {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1.5px dashed color-mix(in srgb, var(--text-muted) 70%, transparent);
+}
+
+.space-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: 100%;
+  padding: 4px 8px 12px 10px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.space-flow__title {
+  padding: 6px 2px 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.space-flow__step {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.space-flow__label {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.space-flow__name-row {
+  display: flex;
+  gap: 6px;
+}
+
+.space-flow__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  font-size: 18px;
+  color: var(--text-muted);
+  background: var(--hover);
+}
+
+.space-flow__icon:hover {
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--divider);
+}
+
+.space-flow__name,
+.space-dialog__input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  outline: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--hover);
+  box-shadow: inset 0 0 0 1px var(--divider);
+  user-select: text;
+}
+
+.space-flow__name:focus,
+.space-dialog__input:focus {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.space-flow__name::placeholder,
+.space-dialog__input::placeholder {
+  color: var(--text-muted);
+}
+
+.space-flow__emoji {
+  padding: 6px;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 0 0 0.5px var(--divider);
+}
+
+.space-flow__profiles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.space-flow__profile {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 8px;
+  text-align: left;
+}
+
+.space-flow__profile:hover {
+  background: var(--hover);
+}
+
+.space-flow__profile.is-selected {
+  background: var(--active);
+  box-shadow: var(--active-shadow);
+}
+
+.space-flow__profile.is-new {
+  color: var(--text-muted);
+}
+
+.space-flow__check {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  color: var(--accent);
+}
+
+.space-flow__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+.space-button {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--hover);
+  transition:
+    filter var(--dur-fast) ease,
+    transform var(--dur-fast) ease;
+}
+
+.space-button:hover:not(:disabled) {
+  filter: brightness(0.96);
+}
+
+.space-button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.space-button.is-primary {
+  color: #fff;
+  background: var(--accent);
+}
+
+.space-button.is-danger {
+  color: #fff;
+  background: #d6453b;
+}
+
+.space-button:disabled {
+  opacity: 0.5;
+}
+
+/* ---------- Theme editor (SP-14, SP-15, SP-17) ---------- */
+
+.theme-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.theme-editor__field {
+  position: relative;
+  height: 150px;
+  border-radius: 10px;
+  touch-action: none;
+  cursor: crosshair;
+  background:
+    linear-gradient(180deg, hsl(0 0% 74% / 0) 0%, hsl(0 0% 74% / 0.82) 100%),
+    linear-gradient(
+      90deg,
+      hsl(0 100% 50%),
+      hsl(60 100% 50%),
+      hsl(120 100% 50%),
+      hsl(180 100% 50%),
+      hsl(240 100% 50%),
+      hsl(300 100% 50%),
+      hsl(360 100% 50%)
+    );
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+}
+
+.theme-editor.is-compact .theme-editor__field {
+  height: 108px;
+}
+
+.theme-editor__handle {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  box-shadow:
+    0 1px 4px rgba(0, 0, 0, 0.35),
+    0 0 0 0.5px rgba(0, 0, 0, 0.3);
+  cursor: grab;
+  transition: transform 140ms var(--ease-spring);
+}
+
+.theme-editor__handle.is-selected {
+  transform: scale(1.18);
+}
+
+.theme-editor__field:active .theme-editor__handle.is-selected {
+  transform: scale(1.32);
+  cursor: grabbing;
+}
+
+.theme-editor__field-hint {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 650;
+  color: rgba(0, 0, 0, 0.62);
+  pointer-events: none;
+}
+
+.theme-editor__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.theme-editor__tool {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--hover);
+}
+
+.theme-editor__tool:disabled {
+  opacity: 0.4;
+}
+
+.theme-editor__stops {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.theme-editor__stop {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.14);
+}
+
+.theme-editor__stop.is-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.theme-editor__presets {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 7px;
+}
+
+.theme-editor__preset {
+  aspect-ratio: 1;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.14);
+  transition: transform 160ms var(--ease-spring);
+}
+
+.theme-editor__preset:hover {
+  transform: scale(1.08);
+}
+
+.theme-editor__preset.is-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.theme-editor__slider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.theme-editor__slider span {
+  width: 56px;
+}
+
+.theme-editor__slider input {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+.theme-renditions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.theme-renditions__card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  height: 58px;
+  padding: 9px 8px;
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+}
+
+.theme-renditions__row {
+  width: 70%;
+  height: 8px;
+  border-radius: 3px;
+  background: currentColor;
+  opacity: 0.16;
+}
+
+.theme-renditions__row.is-active {
+  width: 86%;
+  opacity: 0.34;
+}
+
+.theme-renditions__label {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  font-size: 10px;
+  font-weight: 650;
+  opacity: 0.75;
+}
+
+/* ---------- Floating Space surfaces (overlay renderer) ---------- */
+
+@keyframes space-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(-3px);
+  }
+}
+
+.space-menu,
+.space-panel,
+.space-dialog {
+  color: var(--text);
+  background: var(--surface, #fff);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.16),
+    0 14px 36px rgba(0, 0, 0, 0.22),
+    0 2px 8px rgba(0, 0, 0, 0.1);
+  outline: none;
+}
+
+.space-menu {
+  position: absolute;
+  min-width: 200px;
+  padding: 5px;
+  border-radius: 11px;
+  font-size: 13px;
+  animation: space-pop-in 130ms var(--ease-out);
+}
+
+.space-menu__wrap {
+  position: relative;
+}
+
+.space-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 7px;
+  text-align: left;
+}
+
+.space-menu__item.is-focused:not(:disabled),
+.space-menu--sub .space-menu__item:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 18%, transparent);
+}
+
+.space-menu__item:disabled {
+  opacity: 0.45;
+}
+
+.space-menu__item.is-danger {
+  color: #d23b31;
+}
+
+html[data-view] .space-menu__item.is-danger .space-menu__icon {
+  color: inherit;
+}
+
+.space-menu__icon {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  color: var(--text-muted);
+}
+
+.space-menu__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.space-menu__more {
+  color: var(--text-muted);
+}
+
+.space-menu__separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--divider);
+}
+
+.space-menu--sub {
+  top: -5px;
+  left: calc(100% + 2px);
+}
+
+.space-panel {
+  position: absolute;
+  width: 292px;
+  padding: 12px;
+  border-radius: 14px;
+  animation: space-pop-in 160ms var(--ease-out);
+}
+
+.space-panel__title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.space-panel__subtitle {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.mode-switch {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  margin-bottom: 12px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--hover);
+}
+
+.mode-switch__option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+  border-radius: 7px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.mode-switch__option.is-selected {
+  color: var(--text);
+  background: var(--active);
+  box-shadow: var(--active-shadow);
+}
+
+.icon-panel {
+  width: 300px;
+  padding: 8px;
+}
+
+.space-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(10, 10, 14, 0.24);
+  animation: overlay-in 140ms ease-out;
+}
+
+.space-dialog {
+  width: min(380px, calc(100vw - 32px));
+  padding: 18px;
+  border-radius: 14px;
+  animation: space-pop-in 160ms var(--ease-out);
+}
+
+.space-dialog__title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.space-dialog__text {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.space-dialog__input {
+  display: block;
+  width: 100%;
+  margin-bottom: 14px;
+}
+
+.space-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ---------- Undo after deleting a Space (SP-12) ---------- */
+
+.space-undo {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 0;
+  padding: 5px 5px 5px 10px;
+  border-radius: 9px;
+  font-size: 12px;
+  background: var(--surface);
+  box-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.12),
+    0 0 0 0.5px rgba(0, 0, 0, 0.1);
+  animation: space-pop-in 180ms var(--ease-out);
+}
+
+.space-undo__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.space-undo__button {
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-weight: 650;
+  color: var(--accent);
+}
+
+.space-undo__button:hover {
+  background: var(--hover);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .space-menu,
+  .space-panel,
+  .space-dialog,
+  .space-undo,
+  .space-dialog-backdrop {
+    animation: none;
+  }
+  .space-dot,
+  .theme-editor__handle,
+  .theme-editor__preset {
+    transition: none;
+  }
+}

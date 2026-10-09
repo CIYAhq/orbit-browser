@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 65 built (30 partial) · 95 tested · 0 feel right.
+**Totals:** 485 spec’d · 93 built (38 partial) · 131 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 42 | 53 |
-| P1 | 221 | 22 | 40 |
+| P0 | 174 | 64 | 81 |
+| P1 | 221 | 28 | 48 |
 | P2 | 83 | 1 | 2 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -26,10 +26,10 @@ Spec: `spec/sidebar.md`
 | SB-03 | Top row: window controls and navigation buttons | P0 | 🟡 partial | – | – | scaffold |
 | SB-04 | Address display at the top of the sidebar | P0 | 🟡 partial | – | – | scaffold |
 | SB-05 | Favorites grid placement | P0 | 🟡 partial | – | – | scaffold |
-| SB-06 | Space title row placement | P0 | 🟡 partial | – | – | scaffold |
+| SB-06 | Space title row placement | P0 | ✅ | ✅ e2e | – | title row: inline rename, hover profile badge and … menu (pinned caret is PN-09) |
 | SB-07 | "+ New Tab" row | P0 | ✅ | ✅ e2e | – | + New Tab row with press animation opens the command bar |
 | SB-08 | Empty sidebar area: double-click, drag, right-click | P1 | – | – | – |  |
-| SB-09 | Bottom bar: Library, Space switcher, "+" menu | P0 | 🟡 partial | ✅ e2e | – | scaffold |
+| SB-09 | Bottom bar: Library, Space switcher, "+" menu | P0 | 🟡 partial | ✅ e2e | – | switcher and + menu done; Library button arrives with the archive lane |
 | SB-10 | Transient trays above the bottom bar | P1 | – | – | – |  |
 | SB-11 | Show / hide the sidebar | P0 | 🟡 partial | – | – | scaffold |
 | SB-12 | Hover to reveal the hidden sidebar | P0 | – | – | – |  |
@@ -44,7 +44,7 @@ Spec: `spec/sidebar.md`
 | SB-21 | Dim the sidebar when the window is inactive | P1 | – | – | – |  |
 | SB-22 | Keyboard focus and navigation inside the sidebar | P2 | ✅ | ✅ e2e | – | Cmd/Ctrl+Shift+E focuses the sidebar; arrows, Enter, Escape, F2 |
 | SB-23 | Scrolling, auto-reveal of the active tab and overflow indicator | P1 | ✅ | ✅ e2e | – | selected tab scrolled into view (smooth, then settles); pill points to it while it is out of view; rows use content-visibility |
-| SB-24 | Sidebar colouring follows the Space theme | P0 | – | – | – |  |
+| SB-24 | Sidebar colouring follows the Space theme | P0 | 🟡 partial | ✅ e2e+unit | – | theme gradient + grain on sidebar and frame, tinted selection; the neutral theme is a solid soft grey/near-black, not a translucent material yet |
 | SB-25 | Incognito window sidebar | P1 | – | – | – |  |
 | SB-26 | Platform notes (Windows / Linux) | P2 | – | – | – |  |
 | SB-27 | Link status pill | P1 | – | – | – |  |
@@ -123,41 +123,41 @@ Spec: `spec/spaces.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| SP-01 | What a Space is | P0 | – | – | – |  |
-| SP-02 | Create a Space | P0 | – | – | – |  |
-| SP-03 | Rename a Space | P0 | – | – | – |  |
-| SP-04 | Space title row and its menu | P0 | – | – | – |  |
-| SP-05 | Space icon | P1 | – | – | – |  |
-| SP-06 | Bottom-bar Space switcher | P0 | – | – | – |  |
-| SP-07 | Click to switch, and the switcher icon menu | P0 | – | – | – |  |
-| SP-08 | Switch Spaces with a trackpad swipe | P0 | – | – | – |  |
-| SP-09 | Switch Spaces with the keyboard, mouse buttons and command bar | P0 | – | – | – |  |
-| SP-10 | What switching Space does | P0 | – | – | – |  |
-| SP-11 | Reorder Spaces | P1 | – | ✅ e2e | – |  |
-| SP-12 | Delete a Space | P0 | – | – | – |  |
+| SP-01 | What a Space is | P0 | ✅ | ✅ e2e+unit | – | Spaces own name, icon, theme, pinned and Today; Favorites belong to the profile |
+| SP-02 | Create a Space | P0 | 🟡 partial | ✅ e2e+unit | – | flow in the sidebar (name+icon, profile, theme with light/dark renditions), inserted after the active Space, matching placeholder; the hidden-sidebar toast has no Show action yet |
+| SP-03 | Rename a Space | P0 | ✅ | ✅ e2e+unit | – | inline rename; Escape cancels; empty name restores the placeholder |
+| SP-04 | Space title row and its menu | P0 | ✅ | ✅ e2e | – | … button and right-click (title row, switcher, empty area with New Tab/Folder/Space); bold name when pinned is collapsed over the selected tab; Manage Spaces disabled until the Library exists |
+| SP-05 | Space icon | P1 | ✅ | ✅ e2e | – | emoji picker: search, categories, recents, skin tones, remove |
+| SP-06 | Bottom-bar Space switcher | P0 | ✅ | ✅ e2e | – | icon or dot per Space, sliding emphasis pill, tooltips with profile and shortcut, overflow fades; hidden with one Space |
+| SP-07 | Click to switch, and the switcher icon menu | P0 | ✅ | ✅ e2e | – | click slides one page; right-click opens that Space's menu without switching; Rename brings it into view for the inline rename |
+| SP-08 | Switch Spaces with a trackpad swipe | P0 | ✅ | ✅ e2e+unit | – | wheel deltaX and touch/pen drags; 1:1 tracking, projected-velocity commit, motion springs, rubber-band, over-swipe opens the new-Space flow; momentum detected heuristically |
+| SP-09 | Switch Spaces with the keyboard, mouse buttons and command bar | P0 | ✅ | ✅ e2e+unit | – | Ctrl/Alt+1-9 and Cmd/Ctrl+Alt+arrows (rate-limited, nudge at the ends), mouse back/forward over the sidebar |
+| SP-10 | What switching Space does | P0 | ✅ | ✅ e2e+unit | – | per-window Space, remembered tab per Space, page swap at commit, scroll position per Space |
+| SP-11 | Reorder Spaces | P1 | 🟡 partial | ✅ e2e+unit | – | drag targets in the switcher to reorder; Cmd+Z for a reorder not yet |
+| SP-12 | Delete a Space | P0 | ✅ | ✅ e2e+unit | – | confirmation dialog, tabs archived with the Space name, Undo toast and Cmd+Z, last Space protected |
 | SP-13 | Spaces overview in the Library | P1 | – | – | – |  |
-| SP-14 | Open the theme picker | P0 | – | – | – |  |
-| SP-15 | Theme colours and gradients | P0 | – | – | – |  |
-| SP-16 | How the Space theme colours the sidebar, frame and other surfaces | P0 | – | – | – |  |
-| SP-17 | Grain, intensity, presets and reset | P1 | – | – | – |  |
-| SP-18 | Light / Dark / Automatic switch in the theme picker | P1 | – | ✅ e2e | – |  |
-| SP-19 | Theme transition between Spaces | P1 | – | – | – |  |
-| SP-20 | Per-Space pinned and Today sections | P0 | – | – | – |  |
-| SP-21 | Move tabs between Spaces | P0 | – | – | – |  |
-| SP-22 | Spaces in the command bar | P1 | – | – | – |  |
-| SP-23 | Spaces across windows | P0 | – | – | – |  |
-| SP-24 | What a new window shows | P0 | – | – | – |  |
+| SP-14 | Open the theme picker | P0 | 🟡 partial | ✅ e2e+unit | – | theme picker beside the sidebar (Space menu, Edit Theme action, new-Space flow); Cmd+Z after closing doesn't revert yet |
+| SP-15 | Theme colours and gradients | P0 | 🟡 partial | ✅ e2e+unit | – | colour area with up to three handles, gradients padded to three stops, light and dark renditions; neutral theme not translucent; no haptics API in Electron |
+| SP-16 | How the Space theme colours the sidebar, frame and other surfaces | P0 | 🟡 partial | ✅ e2e+unit | – | sidebar, frame margin and overlay surfaces (menus, pickers, dialogs) tinted; generic toasts are not tinted yet |
+| SP-17 | Grain, intensity, presets and reset | P1 | ✅ | ✅ e2e | – | intensity, grain, presets, reset to neutral |
+| SP-18 | Light / Dark / Automatic switch in the theme picker | P1 | ✅ | ✅ e2e+unit | – | one global Automatic/Light/Dark switch in the picker (D12) |
+| SP-19 | Theme transition between Spaces | P1 | ✅ | ✅ e2e+unit | – | OKLab blend driven by the swipe or switch spring, no neutral frame |
+| SP-20 | Per-Space pinned and Today sections | P0 | ✅ | ✅ e2e | – | per-Space pinned and Today containers (tab behaviour in the tabs lane) |
+| SP-21 | Move tabs between Spaces | P0 | ✅ | ✅ e2e | – | drop on a switcher target moves the tab (tabs lane drag); edge dwell slides the strip and measures once it settles |
+| SP-22 | Spaces in the command bar | P1 | 🟡 partial | – | – | New Space, Rename Space, Edit Theme, Change Space Icon and Delete Space actions; Move to/Pin to [Space] not yet |
+| SP-23 | Spaces across windows | P0 | ✅ | ✅ e2e+unit | – | each window keeps its own Space; all windows share Spaces |
+| SP-24 | What a new window shows | P0 | ✅ | ✅ e2e | – | Cmd/Ctrl+N: same Space, sidebar shown, cascaded, command bar open, full screen follows |
 | SP-25 | Spaces menu in the app menu | P2 | – | – | – |  |
 | SP-26 | Sharing a Space (out of scope) | P2 | – | – | – |  |
-| PR-01 | What a profile is | P0 | – | – | – |  |
-| PR-02 | Create a profile | P0 | – | – | – |  |
-| PR-03 | Assign a Space to a profile | P0 | – | – | – |  |
-| PR-04 | Profile step in the new-Space flow | P1 | – | – | – |  |
-| PR-05 | What each profile isolates | P0 | – | – | – |  |
-| PR-06 | Favorites per profile | P0 | – | – | – |  |
-| PR-07 | Profile indicator | P1 | – | – | – |  |
-| PR-08 | Delete a profile | P1 | – | – | – |  |
-| PR-09 | Rename a profile | P1 | – | – | – |  |
+| PR-01 | What a profile is | P0 | ✅ | ✅ e2e+unit | – | Default profile always exists and cannot be deleted |
+| PR-02 | Create a profile | P0 | ✅ | ✅ e2e+unit | – | Space menu → Profile → New Profile… assigns it at once; also in the new-Space flow |
+| PR-03 | Assign a Space to a profile | P0 | ✅ | ✅ e2e+unit | – | tabs move with the Space and restart in the new session |
+| PR-04 | Profile step in the new-Space flow | P1 | ✅ | ✅ e2e+unit | – | profile step when more than one profile exists, active Space's profile preselected, inline New Profile… |
+| PR-05 | What each profile isolates | P0 | ✅ | ✅ e2e+unit | – | one persistent session partition per profile; cookie isolation covered by e2e |
+| PR-06 | Favorites per profile | P0 | ✅ | ✅ e2e+unit | – | Favorites per profile; still during same-profile swipes, cross-fade between profiles |
+| PR-07 | Profile indicator | P1 | ✅ | ✅ e2e | – | hover badge on the title row, 'Space · Profile' tooltip, check mark in the Profile submenu |
+| PR-08 | Delete a profile | P1 | 🟡 partial | ✅ e2e+unit | – | profiles.delete refuses Default and profiles in use, erases the profile's Favorites and clears its stored data; the partition folder stays on disk and the Settings button is the settings lane's |
+| PR-09 | Rename a profile | P1 | 🟡 partial | – | – | profiles.rename command; the Settings UI is the settings lane's |
 | PR-10 | Profiles and other features | P1 | – | – | – |  |
 
 ## Command bar (prefix CB)
@@ -353,7 +353,7 @@ Spec: `spec/shortcuts.md`
 | KS-04 | Command bar and address | P0 | – | – | – |  |
 | KS-05 | Tabs and windows | P0 | – | – | – |  |
 | KS-06 | Switching tabs | P0 | – | – | – |  |
-| KS-07 | Spaces | P0 | – | – | – |  |
+| KS-07 | Spaces | P0 | ✅ | ✅ e2e | – | Space shortcuts wired through the action table |
 | KS-08 | Page navigation and page tools | P0 | – | – | – |  |
 | KS-09 | Split view | P0 | – | – | – |  |
 | KS-10 | Peek and Mini Window | P1 | – | – | – |  |
@@ -374,7 +374,7 @@ Spec: `spec/feel.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| FL-01 | Motion principles and shared tokens | P0 | – | – | – |  |
+| FL-01 | Motion principles and shared tokens | P0 | – | ✅ unit | – |  |
 | FL-02 | Sidebar show/hide (docked toggle) | P0 | – | – | – |  |
 | FL-03 | Sidebar hover-reveal overlay | P0 | – | – | – |  |
 | FL-04 | Tab row hover | P0 | – | – | – |  |
@@ -386,8 +386,8 @@ Spec: `spec/feel.md`
 | FL-10 | Drag and drop: lift, follow, spring, drop | P0 | – | – | – |  |
 | FL-11 | Clear Today: staggered sweep | P1 | – | – | – |  |
 | FL-12 | Folder and pinned-section expand/collapse | P1 | – | – | – |  |
-| FL-13 | Space switching: swipe physics, settle and rubber-band | P0 | – | – | – |  |
-| FL-14 | Theme-colour transition between Spaces | P0 | – | – | – |  |
+| FL-13 | Space switching: swipe physics, settle and rubber-band | P0 | ✅ | ✅ e2e+unit | – | strip of pages, 1:1 tracking, commit thresholds, settle/rubber-band springs, one-page slides for clicks and keys, reduced motion cross-fade |
+| FL-14 | Theme-colour transition between Spaces | P0 | ✅ | ✅ e2e+unit | – | theme blends with the gesture/spring in OKLab; 200 ms preset blends; light/dark cross-fade |
 | FL-15 | Button press micro-animations | P1 | – | – | – |  |
 | FL-16 | Command bar open and close | P0 | – | – | – |  |
 | FL-17 | Command bar typing and result updates | P0 | – | – | – |  |
@@ -415,8 +415,8 @@ Spec: `spec/appearance.md`
 |---|---|---|---|---|---|---|
 | AP-01 | Light, Dark or Match system | P0 | – | ✅ e2e | – |  |
 | AP-02 | Theme colours carry through the whole interface | P1 | – | – | – |  |
-| AP-03 | Restore the default (neutral) theme | P1 | – | – | – |  |
-| AP-04 | Dark mode quality | P1 | – | – | – |  |
+| AP-03 | Restore the default (neutral) theme | P1 | – | ✅ unit | – |  |
+| AP-04 | Dark mode quality | P1 | – | ✅ unit | – |  |
 | AP-05 | Private-window appearance | P1 | – | – | – |  |
 | AP-06 | Inactive-window dimming | P1 | – | – | – |  |
 | AP-07 | Optional top toolbar (look and placement) | P1 | – | – | – |  |

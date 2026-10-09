@@ -1,6 +1,7 @@
 import { newId } from './ids'
 import type { OrbitState, Profile, Settings, Space, SpaceTheme, WindowState } from './state'
 import { STATE_SCHEMA } from './state'
+import { DEFAULT_INTENSITY } from './theme'
 
 export const DEFAULT_PROFILE_ID = 'p-default'
 
@@ -25,17 +26,30 @@ export const DEFAULT_SETTINGS: Settings = {
 /** Favorites per profile (FV-02). */
 export const MAX_FAVORITES = 12
 
-/** Orbit's own palette of Space colours (original, not taken from any other product). */
+const preset = (...colors: string[]): SpaceTheme => ({ colors, intensity: DEFAULT_INTENSITY, grain: 0 })
+
+/**
+ * Orbit's own palette of Space themes (original, not taken from any other
+ * product). The first eight single colours are handed out in turn to new
+ * Spaces; the gradients after them are extra presets in the theme picker.
+ */
 export const THEME_PRESETS: SpaceTheme[] = [
-  { color: '#6b7cff', mode: 'system' },
-  { color: '#ff7a59', mode: 'system' },
-  { color: '#2fbf8f', mode: 'system' },
-  { color: '#e85d9a', mode: 'system' },
-  { color: '#f2b53a', mode: 'system' },
-  { color: '#3fa7e0', mode: 'system' },
-  { color: '#9b6bff', mode: 'system' },
-  { color: '#8a8f98', mode: 'system' },
+  preset('#6b7cff'),
+  preset('#ff7a59'),
+  preset('#2fbf8f'),
+  preset('#e85d9a'),
+  preset('#f2b53a'),
+  preset('#3fa7e0'),
+  preset('#9b6bff'),
+  preset('#8a8f98'),
+  preset('#6b7cff', '#e85d9a'),
+  preset('#2fbf8f', '#3fa7e0'),
+  preset('#ff7a59', '#f2b53a'),
+  preset('#9b6bff', '#3fa7e0', '#2fbf8f'),
 ]
+
+/** Number of single-colour presets new Spaces rotate through. */
+export const NEW_SPACE_PRESETS = 8
 
 export const DEFAULT_SIDEBAR_WIDTH = 248
 export const MIN_SIDEBAR_WIDTH = 180
@@ -52,7 +66,16 @@ export function createSpace(
   icon = '',
   now = Date.now(),
 ): Space {
-  return { id: newId('s'), name, icon, theme: { ...theme }, profileId, pinned: [], today: [], createdAt: now }
+  return {
+    id: newId('s'),
+    name,
+    icon,
+    theme: { ...theme, colors: [...theme.colors] },
+    profileId,
+    pinned: [],
+    today: [],
+    createdAt: now,
+  }
 }
 
 export function createWindowState(spaceId: string, kind: WindowState['kind'] = 'main'): WindowState {
@@ -70,8 +93,8 @@ export function createWindowState(spaceId: string, kind: WindowState['kind'] = '
 
 /** First-run state: one profile, one Space, no windows (the main process opens one). */
 export function createInitialState(now = Date.now()): OrbitState {
-  const profile = createProfile('Personal', DEFAULT_PROFILE_ID, now)
-  const space = createSpace('Personal', profile.id, THEME_PRESETS[0], '', now)
+  const profile = createProfile('Default', DEFAULT_PROFILE_ID, now)
+  const space = createSpace('Personal', profile.id, THEME_PRESETS[0] as SpaceTheme, '', now)
   return {
     schema: STATE_SCHEMA,
     windows: {},

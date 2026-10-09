@@ -810,7 +810,8 @@ function syncAppearance(appearance: ColorMode): void {
 export function windowBackground(state: OrbitState, spaceId: SpaceId | undefined): string | undefined {
   const space = spaceId ? state.spaces[spaceId] : undefined
   if (!space) return undefined
-  return paletteFor({ ...space.theme, mode: 'system' }, nativeTheme.shouldUseDarkColors).windowBackground
+  // The theme source follows settings.appearance, so this is the global light/dark choice.
+  return paletteFor(space.theme, nativeTheme.shouldUseDarkColors).windowBackground
 }
 
 /** Identifies one opening of an overlay (its kind and nonce): updates to it keep the same key. */

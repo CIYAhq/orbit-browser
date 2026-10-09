@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
 import { invoke } from '../api'
+import { isSpacePanel, SpacePanels } from '../shell/spaces/SpacePanels'
 import { useWindow } from '../store'
 import { paletteVars, usePalette } from '../theme'
 import { CommandBar } from './CommandBar'
@@ -27,6 +28,7 @@ export function OverlayApp() {
         <CommandBar key={overlay.nonce} mode={overlay.mode} initialQuery={overlay.query} />
       )}
       {overlay.kind === 'peek' && <PeekLayer key={overlay.nonce} overlay={overlay} />}
+      {overlay.kind === 'panel' && isSpacePanel(overlay.panel) && <SpacePanels key={overlay.nonce} overlay={overlay} />}
     </div>
   )
 }
