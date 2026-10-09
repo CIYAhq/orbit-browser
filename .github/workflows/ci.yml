@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Build the macOS .dmg/.zip artifact
+        type: boolean
+        default: true
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+  ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+
+jobs:
+  checks:
+    name: Typecheck, lint, unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+
+  e2e-linux:
+    name: E2E (Linux, Xvfb)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/cache@v4
+        with:
+          path: .cache/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: sudo apt-get update && sudo apt-get install -y xvfb libgbm1 libasound2t64
+      - run: npm ci
+      - run: npm run build
+      - run: xvfb-run -a -s "-screen 0 1440x900x24" npm run test:e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-linux
+          path: |
+            playwright-report
+            test-results
+          retention-days: 7
+
+  macos:
+    name: macOS build, E2E, package
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .cache/electron
+            .cache/electron-builder
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npm run test:e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-macos
+          path: |
+            playwright-report
+            test-results
+          retention-days: 7
+      - name: Package unsigned .dmg/.zip
+        if: github.event_name == 'push' || inputs.package || contains(github.event.pull_request.labels.*.name, 'package')
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder --mac --publish never
+      - if: github.event_name == 'push' || inputs.package || contains(github.event.pull_request.labels.*.name, 'package')
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbit-macos-${{ github.sha }}
+          path: |
+            release/*.dmg
+            release/*.zip
+          retention-days: 14

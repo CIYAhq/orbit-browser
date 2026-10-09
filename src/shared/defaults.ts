@@ -1,0 +1,79 @@
+import { newId } from './ids'
+import type { OrbitState, Profile, Settings, Space, SpaceTheme, WindowState } from './state'
+import { STATE_SCHEMA } from './state'
+
+export const DEFAULT_PROFILE_ID = 'p-default'
+
+export const DEFAULT_SETTINGS: Settings = {
+  searchEngine: 'google',
+  archiveAfterMs: 12 * 60 * 60 * 1000,
+  sleepAfterMs: 30 * 60 * 1000,
+  appearance: 'system',
+  peekExternalLinks: true,
+  autoPip: true,
+  miniWindowForExternalLinks: true,
+  onboarded: false,
+}
+
+/** Orbit's own palette of Space colours (original, not taken from any other product). */
+export const THEME_PRESETS: SpaceTheme[] = [
+  { color: '#6b7cff', mode: 'system' },
+  { color: '#ff7a59', mode: 'system' },
+  { color: '#2fbf8f', mode: 'system' },
+  { color: '#e85d9a', mode: 'system' },
+  { color: '#f2b53a', mode: 'system' },
+  { color: '#3fa7e0', mode: 'system' },
+  { color: '#9b6bff', mode: 'system' },
+  { color: '#8a8f98', mode: 'system' },
+]
+
+export const DEFAULT_SIDEBAR_WIDTH = 248
+export const MIN_SIDEBAR_WIDTH = 180
+export const MAX_SIDEBAR_WIDTH = 420
+
+export function createProfile(name: string, id = newId('p'), now = Date.now()): Profile {
+  return { id, name, partition: `persist:orbit-${id}`, favorites: [], createdAt: now }
+}
+
+export function createSpace(
+  name: string,
+  profileId: string,
+  theme: SpaceTheme = THEME_PRESETS[0] as SpaceTheme,
+  icon = '',
+  now = Date.now(),
+): Space {
+  return { id: newId('s'), name, icon, theme: { ...theme }, profileId, pinned: [], today: [], createdAt: now }
+}
+
+export function createWindowState(spaceId: string, kind: WindowState['kind'] = 'main'): WindowState {
+  return {
+    id: newId('w'),
+    kind,
+    spaceId,
+    activeTab: {},
+    sidebar: { visible: true, width: DEFAULT_SIDEBAR_WIDTH, peeking: false },
+    overlay: { kind: 'none' },
+    focused: false,
+    fullscreen: false,
+  }
+}
+
+/** First-run state: one profile, one Space, no windows (the main process opens one). */
+export function createInitialState(now = Date.now()): OrbitState {
+  const profile = createProfile('Personal', DEFAULT_PROFILE_ID, now)
+  const space = createSpace('Personal', profile.id, THEME_PRESETS[0], '', now)
+  return {
+    schema: STATE_SCHEMA,
+    windows: {},
+    spaces: { [space.id]: space },
+    spaceOrder: [space.id],
+    profiles: { [profile.id]: profile },
+    tabs: {},
+    folders: {},
+    splits: {},
+    archive: [],
+    settings: { ...DEFAULT_SETTINGS },
+    downloads: {},
+    tweaks: {},
+  }
+}
