@@ -11,7 +11,7 @@
  * `default async function (t)`; see helpers in `makeToolkit` below.
  */
 import { execFile, spawn } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, renameSync, rmSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -55,7 +55,13 @@ async function startFixtures() {
   const accents = ['#e5484d', '#3e63dd', '#30a46c', '#f76b15', '#8e4ec6', '#12a594', '#d6409f', '#ffb224']
   const esc = (t) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
   const server = createServer((req, res) => {
-    const name = decodeURIComponent((req.url ?? '/').split('/').pop() || 'Home')
+    const raw = (req.url ?? '/').split('/').pop() || 'Home'
+    let name = raw
+    try {
+      name = decodeURIComponent(raw)
+    } catch {
+      // A malformed escape: show the name as it came.
+    }
     const accent = accents[[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % accents.length]
     const icon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="${accent}"/><text x="16" y="22" font-family="Arial,sans-serif" font-size="17" font-weight="700" fill="#fff" text-anchor="middle">${esc(name[0] ?? '?')}</text></svg>`
     const cards = ['Overview', 'Recent', 'Shared with you', 'Starred', 'Activity', 'Ideas']
@@ -207,66 +213,102 @@ function makeToolkit(app, shell, fx) {
   }
 }
 
+/**
+ * Captures stay offline. Orbit runs behind a dead local proxy, which stops everything it and the engine
+ * would fetch (WebSockets, IP literals, Chromium's own downloads such as spell-check dictionaries),
+ * while loopback, where the fixture pages are served, bypasses proxies.
+ */
+const OFFLINE_PROXY = '127.0.0.1:9'
+
+/**
+ * Puts every session Orbit has, and every one it makes later, on the dead proxy, and cancels any request
+ * that isn't to the fixture server (WebSockets included) as a second layer. The command line's proxy
+ * alone can reach a new session a moment late. Returns how each session now resolves a web address.
+ */
+const sealOffline = (app) =>
+  app.evaluate(async ({ app: electronApp, session, webContents }, rules) => {
+    const local = /^(https?|wss?):\/\/(127\.0\.0\.1|localhost)(:\d+)?\//
+    const seal = (s) => {
+      s.webRequest.onBeforeRequest((d, done) => done({ cancel: /^(https?|wss?):/.test(d.url) && !local.test(d.url) }))
+      return s.setProxy({ proxyRules: rules })
+    }
+    if (!globalThis.__sealed) {
+      globalThis.__sealed = true
+      electronApp.on('session-created', (s) => void seal(s))
+    }
+    const all = new Set([session.defaultSession, ...webContents.getAllWebContents().map((wc) => wc.session)])
+    for (const p of Object.values(globalThis.__orbit?.state().profiles ?? {}))
+      all.add(session.fromPartition(p.partition))
+    await Promise.all([...all].map(seal))
+    return Promise.all([...all].map((s) => s.resolveProxy('https://example.com/')))
+  }, `http://${OFFLINE_PROXY}`)
+
 const fx = await startFixtures()
 const userData = mkdtempSync(join(tmpdir(), 'orbit-capture-'))
 const main = resolve('out/main/index.js')
-log('launching Orbit')
-const app = await electron.launch({
-  args: process.platform === 'linux' ? ['--no-sandbox', main] : [main],
-  env: { ...process.env, ORBIT_E2E: '1', ORBIT_USER_DATA: userData },
-})
-let shell
-for (let i = 0; i < 200 && !shell; i++) {
-  shell = app.windows().find((p) => p.url().includes('view=shell'))
-  if (!shell) await sleep(50)
-}
-await shell.getByTestId('sidebar').waitFor()
-// Fill the display so the capture shows the whole window.
-await app.evaluate(
-  ({ BrowserWindow }, [w, h]) => {
-    for (const win of BrowserWindow.getAllWindows()) win.setBounds({ x: 0, y: 0, width: w, height: h })
-  },
-  [W, H],
-)
-await sleep(800)
-origin = await app.evaluate(
-  ({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getContentBounds() ?? { x: 0, y: 0 },
-)
-// The pointer starts at rest over the page, in Playwright's input and on screen.
-pointer = { x: Math.round(W * 0.62), y: Math.round(H * 0.55) }
-await shell.mouse.move(pointer.x, pointer.y)
-await xPointer(pointer.x, pointer.y)
-// Captures stay offline: any http(s) request that isn't to the local fixture server is cancelled.
-await app.evaluate(({ app: electronApp, session, webContents }) => {
-  const local = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//
-  const guard = (s) =>
-    s.webRequest.onBeforeRequest((d, done) => done({ cancel: /^https?:/.test(d.url) && !local.test(d.url) }))
-  guard(session.defaultSession)
-  for (const wc of webContents.getAllWebContents()) guard(wc.session)
-  electronApp.on('session-created', guard)
-})
-
-const scenarioFile = scenario.endsWith('.mjs')
-  ? resolve(scenario)
-  : resolve(import.meta.dirname, 'scenarios', `${scenario}.mjs`)
-const { default: play, setup } = await import(pathToFileURL(scenarioFile).href)
-const toolkit = makeToolkit(app, shell, fx)
-// Optional unrecorded preparation (Spaces, tabs, history), so the clip starts on the demo itself.
-if (setup) {
-  log('setup')
-  await setup(toolkit)
-  await sleep(1200)
-}
-log('recording', OUT)
-const rec = startRecorder(OUT)
-await sleep(700)
+// Recorded under another name and renamed when the scenario is done, so a failed run keeps the last clip.
+const partial = OUT.replace(/(\.[^./]+)?$/, '.partial$1')
+let app
+let rec
+let saved = false
 try {
+  log('launching Orbit')
+  app = await electron.launch({
+    args: [...(process.platform === 'linux' ? ['--no-sandbox'] : []), `--proxy-server=http://${OFFLINE_PROXY}`, main],
+    env: { ...process.env, ORBIT_E2E: '1', ORBIT_USER_DATA: userData },
+  })
+  let shell
+  for (let i = 0; i < 200 && !shell; i++) {
+    shell = app.windows().find((p) => p.url().includes('view=shell'))
+    if (!shell) await sleep(50)
+  }
+  await shell.getByTestId('sidebar').waitFor()
+  // Fill the display so the capture shows the whole window.
+  await app.evaluate(
+    ({ BrowserWindow }, [w, h]) => {
+      for (const win of BrowserWindow.getAllWindows()) win.setBounds({ x: 0, y: 0, width: w, height: h })
+    },
+    [W, H],
+  )
+  await sleep(800)
+  origin = await app.evaluate(
+    ({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getContentBounds() ?? { x: 0, y: 0 },
+  )
+  // The pointer starts at rest over the page, in Playwright's input and on screen.
+  pointer = { x: Math.round(W * 0.62), y: Math.round(H * 0.55) }
+  await shell.mouse.move(pointer.x, pointer.y)
+  await xPointer(pointer.x, pointer.y)
+  // Every session on the dead proxy, checked, before anything is recorded.
+  const proxies = await sealOffline(app)
+  if (proxies.some((p) => p !== `PROXY ${OFFLINE_PROXY}`)) {
+    throw new Error(`not recording: requests would reach the network (${proxies.join(', ')})`)
+  }
+
+  const scenarioFile = scenario.endsWith('.mjs')
+    ? resolve(scenario)
+    : resolve(import.meta.dirname, 'scenarios', `${scenario}.mjs`)
+  const { default: play, setup } = await import(pathToFileURL(scenarioFile).href)
+  const toolkit = makeToolkit(app, shell, fx)
+  // Optional unrecorded preparation (Spaces, tabs, history), so the clip starts on the demo itself.
+  if (setup) {
+    log('setup')
+    await setup(toolkit)
+    await sleep(1200)
+  }
+  log('recording', OUT)
+  rec = startRecorder(partial)
+  await sleep(700)
   await play(toolkit)
   await sleep(800)
-} finally {
   await rec.stop()
-  await app.close().catch(() => {})
+  rec = null
+  renameSync(partial, OUT)
+  saved = true
+} finally {
+  if (rec) await rec.stop()
+  await app?.close().catch(() => {})
   fx.close()
   rmSync(userData, { recursive: true, force: true })
+  if (!saved) rmSync(partial, { force: true })
 }
 log('saved', OUT)

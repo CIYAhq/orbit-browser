@@ -1,5 +1,5 @@
 /**
- * Milestone 1 tour (about 50 s): the sidebar with Favorites, pinned and Today tabs,
+ * Milestone 1 tour (about 40 s): the sidebar with Favorites, pinned and Today tabs,
  * the command bar (switch to an open tab, reopen from history, run an action), pinning,
  * a two-finger swipe between themed Spaces, and a three-pane split view.
  */
