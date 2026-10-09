@@ -132,6 +132,8 @@ export function CommandBar({
     scope: null as Scope,
     maxRows,
     closed: false,
+    /** Closed by choosing a row: the exit is a little quicker (FL-16, about 80 ms). */
+    chosen: false,
     suggestOn,
     /** Latest engine suggestions (CB-15), kept while they still match so rows don't blink. */
     suggestions: [] as SearchResult[],
@@ -169,6 +171,7 @@ export function CommandBar({
     }
     if ((r.kind === 'search' || r.kind === 'url') && !r.url) return
     st.closed = true
+    st.chosen = true
     void invoke('search.open', { result: r, mode, disposition, ...(topResult ? { topResult } : {}) })
   }
 
@@ -479,7 +482,7 @@ export function CommandBar({
           exit={
             reduced
               ? { opacity: 0, transition: { duration: 0.08 } }
-              : { opacity: 0, scale: 0.98, transition: { duration: 0.1, ease: [0.2, 0, 0, 1] } }
+              : { opacity: 0, scale: 0.98, transition: { duration: st.chosen ? 0.08 : 0.1, ease: [0.2, 0, 0, 1] } }
           }
         >
           <div className="cmdbar__input-row">
