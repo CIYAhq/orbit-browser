@@ -1,103 +1,36 @@
-import { ArrowLeft, ArrowRight, Lock, PanelLeft, RotateCw, X } from 'lucide-react'
+import { PanelLeft } from 'lucide-react'
 import type { WindowState } from '../../../../shared/state'
-import { displayHost } from '../../../../shared/url'
-import { invoke, isMac, runAction } from '../../api'
-import { activeTabId } from '../../selectors'
-import { useOrbit } from '../../store'
+import { isMac, runAction } from '../../api'
+import { Address } from '../chrome/Address'
+import { NavButtons } from '../chrome/NavButtons'
+import { withShortcut } from '../chrome/shortcut-label'
+import { WindowControls } from '../chrome/WindowControls'
+import '../chrome/chrome.css'
 
-/** Window controls, navigation buttons and the address pill. */
+/**
+ * The top of the sidebar (SB-03, SB-04): window controls (traffic lights on macOS), the sidebar
+ * toggle, Back, Forward and Reload, then the address display. At narrow widths the toggle goes
+ * first; Back and Forward stay.
+ */
 export function TopBar({ win }: { win: WindowState }) {
-  const tab = useOrbit((s) => {
-    const id = activeTabId(s, win.id)
-    return id ? s.tabs[id] : undefined
-  })
-  const host = tab ? displayHost(tab.url) : ''
-  const secure = tab?.url.startsWith('https://')
   return (
-    <div className="topbar">
+    <div className={`topbar${isMac ? ' topbar--mac' : ''}`} data-testid="topbar">
       <div className="topbar__row">
-        {isMac ? <div className="topbar__traffic-space" /> : <WindowControls />}
+        {isMac ? <div className="topbar__traffic-space" data-testid="traffic-space" /> : <WindowControls />}
         <div className="topbar__spacer" />
-        <IconButton label="Toggle sidebar" testId="toggle-sidebar" onClick={() => runAction('sidebar.toggle')}>
+        <button
+          type="button"
+          className="icon-button topbar__toggle"
+          aria-label="Toggle sidebar"
+          title={withShortcut('Hide sidebar', 'sidebar.toggle')}
+          data-testid="toggle-sidebar"
+          onClick={() => runAction('sidebar.toggle')}
+        >
           <PanelLeft size={16} />
-        </IconButton>
-        <IconButton label="Back" testId="nav-back" disabled={!tab?.canGoBack} onClick={() => runAction('nav.back')}>
-          <ArrowLeft size={16} />
-        </IconButton>
-        <IconButton
-          label="Forward"
-          testId="nav-forward"
-          disabled={!tab?.canGoForward}
-          onClick={() => runAction('nav.forward')}
-        >
-          <ArrowRight size={16} />
-        </IconButton>
-        <IconButton
-          label={tab?.loading ? 'Stop' : 'Reload'}
-          testId="nav-reload"
-          disabled={!tab}
-          onClick={() => runAction(tab?.loading ? 'nav.stop' : 'nav.reload')}
-        >
-          {tab?.loading ? <X size={16} /> : <RotateCw size={15} />}
-        </IconButton>
+        </button>
+        <NavButtons windowId={win.id} />
       </div>
-      <button
-        type="button"
-        className={`address${tab?.loading ? ' address--loading' : ''}`}
-        data-testid="address-pill"
-        onClick={() => runAction('url.edit')}
-        title={tab?.url}
-      >
-        {secure && <Lock size={11} className="address__lock" />}
-        <span className="address__host">{host || 'Search or enter address'}</span>
-      </button>
-    </div>
-  )
-}
-
-function IconButton(props: {
-  label: string
-  testId?: string
-  disabled?: boolean
-  onClick: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      className="icon-button"
-      aria-label={props.label}
-      title={props.label}
-      data-testid={props.testId}
-      disabled={props.disabled}
-      onClick={props.onClick}
-    >
-      {props.children}
-    </button>
-  )
-}
-
-function WindowControls() {
-  return (
-    <div className="window-controls">
-      <button
-        type="button"
-        aria-label="Close window"
-        className="window-controls__btn window-controls__btn--close"
-        onClick={() => void invoke('window.control', { op: 'close' })}
-      />
-      <button
-        type="button"
-        aria-label="Minimize window"
-        className="window-controls__btn window-controls__btn--min"
-        onClick={() => void invoke('window.control', { op: 'minimize' })}
-      />
-      <button
-        type="button"
-        aria-label="Maximize window"
-        className="window-controls__btn window-controls__btn--max"
-        onClick={() => void invoke('window.control', { op: 'maximize' })}
-      />
+      <Address windowId={win.id} />
     </div>
   )
 }

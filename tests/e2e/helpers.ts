@@ -22,10 +22,15 @@ export interface Orbit {
   userData: string
 }
 
-/** Launches the built app (out/) with an isolated profile directory. */
-export async function launchOrbit(opts: { userData?: string; env?: Record<string, string> } = {}): Promise<Orbit> {
+/**
+ * Launches the built app (out/) with an isolated profile directory. `args` are extra Chromium
+ * switches (e.g. `--host-resolver-rules` to give the local fixture server another host name).
+ */
+export async function launchOrbit(
+  opts: { userData?: string; env?: Record<string, string>; args?: string[] } = {},
+): Promise<Orbit> {
   const userData = opts.userData ?? mkdtempSync(join(tmpdir(), 'orbit-e2e-'))
-  const args = [resolve('out/main/index.js')]
+  const args = [...(opts.args ?? []), resolve('out/main/index.js')]
   // Linux CI/dev boxes often lack the setuid sandbox helper; macOS runs fully sandboxed.
   if (process.platform === 'linux') args.unshift('--no-sandbox')
   const app = await electron.launch({

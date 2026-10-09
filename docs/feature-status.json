@@ -1,8 +1,8 @@
 {
   "SB-01": {"built": "partial", "note": "scaffold; audit vs spec"},
   "SB-02": {"built": "partial", "note": "scaffold; audit vs spec"},
-  "SB-03": {"built": "partial", "note": "scaffold"},
-  "SB-04": {"built": "partial", "note": "scaffold"},
+  "SB-03": {"built": "yes", "note": "traffic lights (Linux: window controls), sidebar toggle, Back/Forward/Reload with disabled and Stop states; long-press/right-click history menu; Cmd/middle-click into a new tab; Esc or double-click stops; toggle gives way first when narrow"},
+  "SB-04": {"built": "partial", "note": "host only (focused pane), click or Cmd+L edits the full URL, warning icon for plain http (no padlock), copy-link button; site-controls button shows a placeholder until NV-16"},
   "SB-05": {"built": "partial", "note": "scaffold"},
   "SB-06": {"built": "yes", "note": "title row: inline rename, hover profile badge and … menu (pinned caret is PN-09)"},
   "SB-07": {"built": "yes", "note": "+ New Tab row with press animation opens the command bar"},
@@ -153,5 +153,11 @@
   "PR-06": {"built": "yes", "note": "Favorites per profile; still during same-profile swipes, cross-fade between profiles"},
   "PR-07": {"built": "yes", "note": "hover badge on the title row, 'Space · Profile' tooltip, check mark in the Profile submenu"},
   "PR-08": {"built": "partial", "note": "profiles.delete refuses Default and profiles in use, erases the profile's Favorites and clears its stored data; the partition folder stays on disk and the Settings button is the settings lane's"},
-  "PR-09": {"built": "partial", "note": "profiles.rename command; the Settings UI is the settings lane's"}
+  "PR-09": {"built": "partial", "note": "profiles.rename command; the Settings UI is the settings lane's"},
+  "NV-01": {"built": "yes", "note": "buttons and keys (Cmd+Left/Right only outside text fields), history menu with favicons that closes on tab switch, Cmd/middle-click opens the entry in a background tab with its history; mouse side buttons are Chromium's; Backspace inert"},
+  "NV-03": {"built": "yes", "note": "Cmd/Ctrl+R, F5; hard reload Cmd+Shift+R, Ctrl+Shift+R, Shift+F5, Ctrl+F5; Cmd/middle-click Reload duplicates with history; keyboard focus goes to the page"},
+  "NV-04": {"built": "partial", "note": "Esc in the page while loading (overlays take it first), Cmd+. on macOS, double-click Reload, Stop (x) state; the address does not show a pending URL yet"},
+  "NV-17": {"built": "partial", "note": "copy button = Cmd+Shift+C (clean URL, Copied toast); one-time shortcut tip when the URL is copied from the command bar; the Win/Linux page-first offer waits on KS-02"},
+  "KS-08": {"built": "partial", "note": "Back, Forward, Reload, hard reload and Stop keys done; find, zoom indicator and the rest come with their NV items"},
+  "FL-15": {"built": "partial", "note": "top row: Back/Forward nudge, Reload glyph turns once, press to 0.94 with pop release, restarts on repeat, none when disabled or reduced motion"}
 }

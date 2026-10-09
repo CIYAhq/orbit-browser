@@ -295,7 +295,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   commands.register('tabs.archiveBelow', ({ tabId }) => ops.archiveBelow(tabId))
   commands.register('tabs.copyLinks', ({ tabIds, markdown = false }, c) => copyLinks(windowOf(c), tabIds, markdown))
 
-  commands.register('tabs.duplicate', ({ tabId, to, index }, c) => {
+  commands.register('tabs.duplicate', ({ tabId, to, index, activate }, c) => {
     const state = store.state
     const tab = state.tabs[tabId]
     if (!tab) throw new Error('No such tab')
@@ -312,7 +312,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
       container: to ?? loc?.container,
       index: to ? index : loc ? loc.index + 1 : undefined,
       // A copy dropped with ⌥ stays in the background; Duplicate from the menu selects it.
-      activate: !to,
+      activate: activate ?? !to,
       windowId: windowOf(c),
       history: targetProfile === tab.profileId ? ops.historyOf(tabId) : undefined,
     })
@@ -702,32 +702,12 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     send(windowId, 'sidebar:focus', {})
   })
 
-  // Navigation & page actions on the active tab.
+  // Page actions on the active tab. Back, Forward, Reload and Stop live in src/main/nav/.
   const onContents = (fn: (contents: Electron.WebContents) => void) =>
     withActive((tabId) => {
       const contents = tabs.contents(tabId)
       if (contents) fn(contents)
     })
-  actions.register(
-    'nav.back',
-    withActive((tabId) => goBack(tabId)),
-  )
-  actions.register(
-    'nav.forward',
-    onContents((w) => w.navigationHistory.goForward()),
-  )
-  actions.register(
-    'nav.reload',
-    onContents((w) => w.reload()),
-  )
-  actions.register(
-    'nav.hardReload',
-    onContents((w) => w.reloadIgnoringCache()),
-  )
-  actions.register(
-    'nav.stop',
-    onContents((w) => w.stop()),
-  )
   actions.register(
     'page.zoomIn',
     onContents((w) => w.setZoomLevel(Math.min(w.getZoomLevel() + 0.5, 5))),

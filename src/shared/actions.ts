@@ -21,6 +21,13 @@ export interface ActionDef {
   hidden?: boolean
   /** Extra search words for the command bar. */
   keywords?: string[]
+  /**
+   * Extra bindings that are text-editing keys inside a field (KS-16: ⌘← moves the caret to the
+   * line start). They run the action only when keyboard focus is not in an editable field, so
+   * they are matched separately (`outsideTextActionFor`), never by `actionForInput`.
+   */
+  macOutsideText?: string[]
+  otherOutsideText?: string[]
 }
 
 const numbered = (
@@ -154,18 +161,38 @@ export const ACTIONS: ActionDef[] = [
 
   // Navigation & page
   { id: 'url.edit', title: 'Edit URL', category: 'Navigation', mac: ['Cmd+L'], other: ['Ctrl+L', 'Alt+D'] },
-  { id: 'nav.back', title: 'Back', category: 'Navigation', mac: ['Cmd+['], other: ['Alt+Left'] },
-  { id: 'nav.forward', title: 'Forward', category: 'Navigation', mac: ['Cmd+]'], other: ['Alt+Right'] },
+  {
+    id: 'nav.back',
+    title: 'Back',
+    category: 'Navigation',
+    mac: ['Cmd+['],
+    other: ['Alt+Left'],
+    macOutsideText: ['Cmd+Left'],
+  },
+  {
+    id: 'nav.forward',
+    title: 'Forward',
+    category: 'Navigation',
+    mac: ['Cmd+]'],
+    other: ['Alt+Right'],
+    macOutsideText: ['Cmd+Right'],
+  },
   { id: 'nav.reload', title: 'Reload Page', category: 'Navigation', mac: ['Cmd+R'], other: ['Ctrl+R', 'F5'] },
   {
     id: 'nav.hardReload',
     title: 'Hard Reload',
     category: 'Navigation',
     mac: ['Cmd+Shift+R'],
-    other: ['Ctrl+Shift+R', 'Ctrl+F5'],
+    other: ['Ctrl+Shift+R', 'Shift+F5', 'Ctrl+F5'],
   },
   { id: 'nav.stop', title: 'Stop Loading', category: 'Navigation', mac: ['Cmd+.'], other: [] },
   { id: 'page.find', title: 'Find in Page', category: 'Page', mac: ['Cmd+F'], other: ['Ctrl+F'] },
+  {
+    id: 'site.controls',
+    title: 'Site Controls',
+    category: 'Page',
+    keywords: ['permissions', 'site settings', 'connection', 'zoom'],
+  },
   {
     id: 'page.zoomIn',
     title: 'Zoom In',
@@ -418,6 +445,18 @@ export function actionForInput(input: KeyInput, platform: string): ActionDef | u
     for (const accel of shortcutsFor(action, platform)) {
       if (matchesAccelerator(input, accel)) return action
     }
+  }
+  return undefined
+}
+
+/**
+ * The action bound to this key press only while focus is outside text fields (KS-16), if any.
+ * The caller checks where focus is before running it.
+ */
+export function outsideTextActionFor(input: KeyInput, platform: string): ActionDef | undefined {
+  for (const action of ACTIONS) {
+    const keys = (platform === 'darwin' ? action.macOutsideText : action.otherOutsideText) ?? []
+    if (keys.some((accel) => matchesAccelerator(input, accel))) return action
   }
   return undefined
 }

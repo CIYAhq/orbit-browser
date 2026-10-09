@@ -1,12 +1,13 @@
 import { join } from 'node:path'
 import { BrowserWindow, nativeTheme, screen, type WebContents, WebContentsView, webContents } from 'electron'
-import { actionForInput } from '../shared/actions'
+import { actionForInput, outsideTextActionFor } from '../shared/actions'
 import { createWindowState } from '../shared/defaults'
 import type { Rect, RendererView } from '../shared/rpc'
 import type { ColorMode, OrbitState, SpaceId, TabId, WindowId, WindowState } from '../shared/state'
 import { paletteFor } from '../shared/theme'
 import { splitLeaves, splitOfTab } from '../shared/tree'
 import type { MainContext } from './context'
+import { focusIsEditable } from './nav/focus'
 import { fastSwitchPanes } from './split/layout'
 
 interface Pane {
@@ -542,7 +543,10 @@ export class WindowManager {
     contents.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown') return
       const action = actionForInput(input, process.platform)
-      if (!action || !this.ctx.actions.has(action.id)) return
+      if (!action || !this.ctx.actions.has(action.id)) {
+        this.runOutsideText(contents, input)
+        return
+      }
       event.preventDefault()
       const windowId = this.windowIdFor(contents) ?? this.focusedWindowId()
       // Close Tab in a window that isn't an Orbit window (a page's popup) closes that window.
@@ -551,6 +555,20 @@ export class WindowManager {
         return
       }
       void this.ctx.actions.run(action.id, { windowId })
+    })
+  }
+
+  /**
+   * Keys that edit text inside a field but are Orbit actions elsewhere (⌘← and ⌘→ go back and
+   * forward on macOS, KS-16, NV-01). The key is never taken from the page: the action runs only
+   * once it is clear that focus is not in a text field.
+   */
+  private runOutsideText(contents: WebContents, input: Electron.Input): void {
+    const action = outsideTextActionFor(input, process.platform)
+    if (!action || !this.ctx.actions.has(action.id)) return
+    const windowId = this.windowIdFor(contents) ?? this.focusedWindowId()
+    void focusIsEditable(contents).then((editable) => {
+      if (!editable && !contents.isDestroyed()) void this.ctx.actions.run(action.id, { windowId })
     })
   }
 

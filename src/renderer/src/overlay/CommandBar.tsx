@@ -552,6 +552,14 @@ export function CommandBar({
               aria-activedescendant={selected >= 0 && results.length ? `cmdbar-option-${selected}` : undefined}
               onInput={onInput}
               onKeyDown={onKeyDown}
+              onCopy={(e) => {
+                // The whole page address copied the long way: tip about ⌘⇧C, once (NV-17).
+                const el = e.currentTarget
+                const whole = el.selectionStart === 0 && el.selectionEnd === el.value.length
+                if (mode === 'edit-url' && initialQuery && whole && el.value === initialQuery) {
+                  void invoke('nav.copyHint', {})
+                }
+              }}
               onCompositionStart={() => {
                 st.composing = true
               }}

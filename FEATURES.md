@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 115 built (40 partial) · 158 tested · 0 feel right.
+**Totals:** 485 spec’d · 118 built (43 partial) · 166 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 85 | 105 |
-| P1 | 221 | 27 | 49 |
+| P0 | 174 | 88 | 112 |
+| P1 | 221 | 27 | 50 |
 | P2 | 83 | 3 | 4 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -23,8 +23,8 @@ Spec: `spec/sidebar.md`
 |---|---|---|---|---|---|---|
 | SB-01 | Sidebar-first window layout | P0 | 🟡 partial | – | – | scaffold; audit vs spec |
 | SB-02 | Sidebar anatomy (top to bottom) | P0 | 🟡 partial | – | – | scaffold; audit vs spec |
-| SB-03 | Top row: window controls and navigation buttons | P0 | 🟡 partial | – | – | scaffold |
-| SB-04 | Address display at the top of the sidebar | P0 | 🟡 partial | – | – | scaffold |
+| SB-03 | Top row: window controls and navigation buttons | P0 | ✅ | ✅ e2e | – | traffic lights (Linux: window controls), sidebar toggle, Back/Forward/Reload with disabled and Stop states; long-press/right-click history menu; Cmd/middle-click into a new tab; Esc or double-click stops; toggle gives way first when narrow |
+| SB-04 | Address display at the top of the sidebar | P0 | 🟡 partial | ✅ e2e+unit | – | host only (focused pane), click or Cmd+L edits the full URL, warning icon for plain http (no padlock), copy-link button; site-controls button shows a placeholder until NV-16 |
 | SB-05 | Favorites grid placement | P0 | 🟡 partial | – | – | scaffold |
 | SB-06 | Space title row placement | P0 | ✅ | ✅ e2e | – | title row: inline rename, hover profile badge and … menu (pinned caret is PN-09) |
 | SB-07 | "+ New Tab" row | P0 | ✅ | ✅ e2e | – | + New Tab row with press animation opens the command bar |
@@ -229,14 +229,14 @@ Spec: `spec/navigation.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| NV-01 | Back and forward | P0 | – | – | – |  |
+| NV-01 | Back and forward | P0 | ✅ | ✅ e2e+unit | – | buttons and keys (Cmd+Left/Right only outside text fields), history menu with favicons that closes on tab switch, Cmd/middle-click opens the entry in a background tab with its history; mouse side buttons are Chromium's; Backspace inert |
 | NV-02 | Trackpad two-finger swipe back/forward | P1 | – | – | – |  |
-| NV-03 | Reload and hard reload | P0 | – | – | – |  |
-| NV-04 | Stop loading | P1 | – | – | – |  |
+| NV-03 | Reload and hard reload | P0 | ✅ | ✅ e2e+unit | – | Cmd/Ctrl+R, F5; hard reload Cmd+Shift+R, Ctrl+Shift+R, Shift+F5, Ctrl+F5; Cmd/middle-click Reload duplicates with history; keyboard focus goes to the page |
+| NV-04 | Stop loading | P1 | 🟡 partial | ✅ e2e+unit | – | Esc in the page while loading (overlays take it first), Cmd+. on macOS, double-click Reload, Stop (x) state; the address does not show a pending URL yet |
 | NV-05 | Find in page | P0 | – | – | – |  |
 | NV-06 | Page zoom | P0 | – | – | – |  |
 | NV-07 | Print | P1 | – | – | – |  |
-| NV-08 | Clicking links: plain and modified clicks | P0 | – | – | – |  |
+| NV-08 | Clicking links: plain and modified clicks | P0 | – | ✅ e2e | – |  |
 | NV-09 | Links with target=_blank and script-opened windows | P0 | – | ✅ e2e | – |  |
 | NV-10 | New window | P0 | – | – | – |  |
 | NV-11 | Private (incognito) window | P0 | – | – | – |  |
@@ -245,7 +245,7 @@ Spec: `spec/navigation.md`
 | NV-14 | Crashed or unresponsive tab | P1 | – | ✅ e2e | – |  |
 | NV-15 | Permission prompts | P0 | – | ✅ e2e | – |  |
 | NV-16 | Site controls panel | P0 | – | – | – |  |
-| NV-17 | Copy the current URL | P0 | – | – | – |  |
+| NV-17 | Copy the current URL | P0 | 🟡 partial | ✅ e2e | – | copy button = Cmd+Shift+C (clean URL, Copied toast); one-time shortcut tip when the URL is copied from the command bar; the Win/Linux page-first offer waits on KS-02 |
 | NV-18 | Links from other apps (Orbit as the default browser) | P0 | – | ✅ e2e | – |  |
 | NV-19 | Links that open other apps (external protocols) | P1 | – | – | – |  |
 | NV-20 | Full screen | P1 | – | ✅ e2e | – |  |
@@ -354,7 +354,7 @@ Spec: `spec/shortcuts.md`
 | KS-05 | Tabs and windows | P0 | – | – | – |  |
 | KS-06 | Switching tabs | P0 | – | – | – |  |
 | KS-07 | Spaces | P0 | ✅ | ✅ e2e | – | Space shortcuts wired through the action table |
-| KS-08 | Page navigation and page tools | P0 | – | – | – |  |
+| KS-08 | Page navigation and page tools | P0 | 🟡 partial | ✅ e2e+unit | – | Back, Forward, Reload, hard reload and Stop keys done; find, zoom indicator and the rest come with their NV items |
 | KS-09 | Split view | P0 | – | – | – |  |
 | KS-10 | Peek and Mini Window | P1 | – | – | – |  |
 | KS-11 | Media | P1 | – | – | – |  |
@@ -388,7 +388,7 @@ Spec: `spec/feel.md`
 | FL-12 | Folder and pinned-section expand/collapse | P1 | – | – | – |  |
 | FL-13 | Space switching: swipe physics, settle and rubber-band | P0 | ✅ | ✅ e2e+unit | – | strip of pages, 1:1 tracking, commit thresholds, settle/rubber-band springs, one-page slides for clicks and keys, reduced motion cross-fade |
 | FL-14 | Theme-colour transition between Spaces | P0 | ✅ | ✅ e2e+unit | – | theme blends with the gesture/spring in OKLab; 200 ms preset blends; light/dark cross-fade |
-| FL-15 | Button press micro-animations | P1 | – | – | – |  |
+| FL-15 | Button press micro-animations | P1 | 🟡 partial | – | – | top row: Back/Forward nudge, Reload glyph turns once, press to 0.94 with pop release, restarts on repeat, none when disabled or reduced motion |
 | FL-16 | Command bar open and close | P0 | ✅ | ✅ e2e | – | motion spring (0.97→1, 4 px drop), 100 ms exit (80 ms after choosing a row) while focus returns at once; fade only with reduced motion; centred in the window |
 | FL-17 | Command bar typing and result updates | P0 | ✅ | ✅ e2e+unit | – | per-keystroke local results, identity-keyed memoized rows, instant highlight; engine suggestions fill free rows without moving the highlight |
 | FL-18 | Split view create and resize | P1 | – | – | – |  |
