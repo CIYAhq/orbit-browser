@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 127 built (38 partial) · 175 tested · 0 feel right.
+**Totals:** 485 spec’d · 129 built (38 partial) · 177 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 97 | 121 |
+| P0 | 174 | 99 | 123 |
 | P1 | 221 | 27 | 50 |
 | P2 | 83 | 3 | 4 |
 
@@ -233,8 +233,8 @@ Spec: `spec/navigation.md`
 | NV-02 | Trackpad two-finger swipe back/forward | P1 | – | – | – |  |
 | NV-03 | Reload and hard reload | P0 | ✅ | ✅ e2e+unit | – | Cmd/Ctrl+R, F5; hard reload Cmd+Shift+R, Ctrl+Shift+R, Shift+F5, Ctrl+F5; Cmd/middle-click Reload duplicates with history; keyboard focus goes to the page |
 | NV-04 | Stop loading | P1 | 🟡 partial | ✅ e2e+unit | – | Esc in the page while loading (overlays take it first), Cmd+. on macOS, double-click Reload, Stop (x) state; the address does not show a pending URL yet |
-| NV-05 | Find in page | P0 | – | – | – |  |
-| NV-06 | Page zoom | P0 | – | – | – |  |
+| NV-05 | Find in page | P0 | ✅ | ✅ e2e+unit | – | floating bar over the active page's top-right corner; finds as you type, n/m count, No matches; Enter/Cmd+G/F3 next, Shift+Enter/Shift+Cmd+G/Shift+F3 previous, buttons; Esc closes and keeps the match selected; per tab (hidden on switch, back with text and place); starts from the selection, else the last search; IME commits; Cmd+J jumps to the selection (macOS); Edit > Find menu |
+| NV-06 | Page zoom | P0 | ✅ | ✅ e2e+unit | – | Chromium steps 25-500% on Cmd+=/Cmd+-/Cmd+0 and Ctrl+wheel (Win/Linux); per host in each profile (all its tabs), remembered across launches; indicator with Reset over the page for 1.5 s (longer while hovered); pinch is visual zoom and Cmd+0 undoes it too |
 | NV-07 | Print | P1 | – | – | – |  |
 | NV-08 | Clicking links: plain and modified clicks | P0 | – | ✅ e2e | – |  |
 | NV-09 | Links with target=_blank and script-opened windows | P0 | – | ✅ e2e | – |  |
@@ -354,7 +354,7 @@ Spec: `spec/shortcuts.md`
 | KS-05 | Tabs and windows | P0 | – | – | – |  |
 | KS-06 | Switching tabs | P0 | – | – | – |  |
 | KS-07 | Spaces | P0 | ✅ | ✅ e2e | – | Space shortcuts wired through the action table |
-| KS-08 | Page navigation and page tools | P0 | 🟡 partial | ✅ e2e+unit | – | Back, Forward, Reload, hard reload and Stop keys done; find, zoom indicator and the rest come with their NV items |
+| KS-08 | Page navigation and page tools | P0 | 🟡 partial | ✅ e2e+unit | – | Back, Forward, Reload, hard reload, Stop, find (Cmd+F, Cmd+G, Shift+Cmd+G, F3, Ctrl+G), Cmd+J and zoom keys done; print, save page, reader mode and the rest come with their NV items |
 | KS-09 | Split view | P0 | – | – | – |  |
 | KS-10 | Peek and Mini Window | P1 | – | – | – |  |
 | KS-11 | Media | P1 | – | – | – |  |

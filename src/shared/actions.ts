@@ -187,6 +187,16 @@ export const ACTIONS: ActionDef[] = [
   },
   { id: 'nav.stop', title: 'Stop Loading', category: 'Navigation', mac: ['Cmd+.'], other: [] },
   { id: 'page.find', title: 'Find in Page', category: 'Page', mac: ['Cmd+F'], other: ['Ctrl+F'] },
+  { id: 'page.findNext', title: 'Find Next', category: 'Page', mac: ['Cmd+G'], other: ['F3', 'Ctrl+G'] },
+  {
+    id: 'page.findPrevious',
+    title: 'Find Previous',
+    category: 'Page',
+    mac: ['Cmd+Shift+G'],
+    other: ['Shift+F3', 'Ctrl+Shift+G'],
+  },
+  // Scrolls the page to its selection (KS-08: macOS only, the Edit menu convention).
+  { id: 'page.jumpToSelection', title: 'Jump to Selection', category: 'Page', mac: ['Cmd+J'], other: [] },
   {
     id: 'site.controls',
     title: 'Site Controls',

@@ -32,16 +32,20 @@ export interface NavFixtures {
 const ICON =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%2338a169'/%3E%3C/svg%3E"
 
+const escapeHtml = (text: string) => text.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`)
+
 /**
  * A page that records key presses (`window.__keys`) and mouse presses (`window.__clicks`: x, y,
  * button) and counts its loads in sessionStorage (`loads`), with a text box (#box), a link to the
- * next page (#next) and one that opens a new tab (#child). `background` is its CSS background.
+ * next page (#next) and one that opens a new tab (#child). `background` is its CSS background;
+ * `text` goes in a paragraph (#text).
  */
-function page(title: string, background = '#f2fbf5'): string {
+function page(title: string, background = '#f2fbf5', text = ''): string {
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>${title}</title><link rel="icon" href="${ICON}">
 <style>body{font:16px system-ui;background:${background};margin:0;padding:40px}input{font:inherit}</style></head>
 <body><h1 id="title">${title}</h1>
+<p id="text">${escapeHtml(text)}</p>
 <p><input id="box" autocomplete="off"></p>
 <p><a id="next" href="/page/${encodeURIComponent(`${title}-next`)}">Next page</a></p>
 <p><a id="child" href="/page/${encodeURIComponent(`${title}-child`)}" target="_blank">Child page</a></p>
@@ -58,7 +62,8 @@ sessionStorage.setItem('loads', String(Number(sessionStorage.getItem('loads') ||
 
 /**
  * Routes:
- * - `/page/<title>?bg=<css colour>`: a page (see `page()`), optionally in another background.
+ * - `/page/<title>?bg=<css colour>&text=<words>`: a page (see `page()`), optionally in another
+ *   background and with some text.
  * - `/slow/<title>?ms=N`: the page after N ms (default 30 s): keeps a tab loading.
  * - `/slow-reload/<title>`: the page at once on the first request, then slowly (30 s) on reloads.
  */
@@ -78,7 +83,7 @@ export async function startNavFixtures(): Promise<NavFixtures> {
       pending.delete(res)
       if (res.writableEnded || res.destroyed) return
       res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' })
-      res.end(page(title, u.searchParams.get('bg') ?? undefined))
+      res.end(page(title, u.searchParams.get('bg') ?? undefined, u.searchParams.get('text') ?? ''))
     }
     const later = (ms: number) => {
       pending.add(res)
@@ -132,7 +137,52 @@ type Hooks = {
     chooseMenu: (label: string, newTab?: boolean) => boolean
     floating: (windowId?: string) => FloatingInfo
     corner: (tabId: string) => number | null
+    tools: (windowId?: string) => ToolsInfo
   }
+}
+
+/** A window's page tools (NV-05, NV-06): what the find bar and the zoom indicator show, and where. */
+export interface ToolsInfo {
+  find: {
+    tabId: string | null
+    open: boolean
+    query: string
+    active: number
+    matches: number
+    searched: boolean
+  }
+  zoom: { percent: number } | null
+  hovered: boolean
+  placed: boolean
+  bounds?: { x: number; y: number; width: number; height: number }
+}
+
+/** The first window's page tools. */
+export function toolsInfo(app: ElectronApplication): Promise<ToolsInfo> {
+  return app.evaluate(() => (globalThis as unknown as Hooks).__orbitNav.tools())
+}
+
+/** The page tools' page (their own renderer, `view=tools`), once it has started. */
+export async function toolsPage(app: ElectronApplication): Promise<Page> {
+  const deadline = Date.now() + 20_000
+  while (Date.now() < deadline) {
+    const found = app.windows().find((p) => p.url().includes('view=tools'))
+    if (found) return found
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  throw new Error('No page tools page')
+}
+
+/** The zoom factor of the web contents whose URL contains `part`. */
+export function zoomOf(app: ElectronApplication, part: string): Promise<number | undefined> {
+  return app.evaluate(
+    ({ webContents }, p) =>
+      webContents
+        .getAllWebContents()
+        .find((w) => w.getURL().includes(p))
+        ?.getZoomFactor(),
+    part,
+  )
 }
 
 /** A window's floating sidebar (SB-12): whether its view exists, is placed in the window and is out. */

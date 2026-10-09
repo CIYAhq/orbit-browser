@@ -54,6 +54,13 @@ interface WindowRecord {
   floatingDispose?: ReturnType<typeof setTimeout>
   /** macOS: pending return of the traffic lights once a docking sidebar has slid in. */
   buttonsTimer?: ReturnType<typeof setTimeout>
+  /**
+   * The page tools (find bar, zoom indicator; NV-05, NV-06): a small view over the active page's
+   * top-right corner, started a little after the window opens and placed only while it shows something.
+   */
+  tools?: WebContentsView
+  toolsShown: boolean
+  toolsPrewarm?: ReturnType<typeof setTimeout>
 }
 
 /** A tab view placed in a window. */
@@ -66,6 +73,8 @@ interface Attachment {
 
 /** How long the overlay view stays up after closing so its exit animation can play (FL-16). */
 const OVERLAY_EXIT_MS = 110
+/** The page tools' renderer starts this long after the window shows (NV-05: ⌘F finds the bar ready). */
+const TOOLS_PREWARM_MS = 1500
 
 /** The floating sidebar's card sits this far from the window's edges (SB-12, SB-19). */
 export const FLOAT_INSET = 6
@@ -146,6 +155,7 @@ export class WindowManager {
   private uiContents = new Map<number, WindowId>()
   /** Each tab's view that is placed in a window, and which window. Compared by view, not tab id. */
   private attached = new Map<TabId, Attachment>()
+  private layoutListeners: ((windowId: WindowId) => void)[] = []
   /** Tabs whose page closed its own web contents (window.close()): not reopened until selected again. */
   private selfClosed = new Set<TabId>()
   /** Main window that most recently had focus (fallback when no window has focus). */
@@ -302,6 +312,7 @@ export class WindowManager {
       minPaneSeq: 0,
       overlayShown: false,
       floatingShown: false,
+      toolsShown: false,
     }
     this.records.set(id, rec)
     // macOS: the traffic lights live in the sidebar's top row (SB-20).
@@ -315,6 +326,11 @@ export class WindowManager {
         if (!win.isDestroyed()) this.ensureOverlay(rec)
       }, 120)
       if (!this.ctx.store.state.windows[id]?.sidebar.visible) this.prewarmFloating(rec, 600)
+      // The page tools start once the window has settled, so ⌘F finds a ready bar.
+      rec.toolsPrewarm = setTimeout(() => {
+        rec.toolsPrewarm = undefined
+        if (!win.isDestroyed()) this.ensureTools(rec)
+      }, TOOLS_PREWARM_MS)
     })
     win.on('focus', () => {
       this.lastFocused = id
@@ -374,7 +390,9 @@ export class WindowManager {
       clearTimeout(rec.floatingPrewarm)
       clearTimeout(rec.floatingDispose)
       clearTimeout(rec.buttonsTimer)
+      clearTimeout(rec.toolsPrewarm)
       if (rec.floating && !rec.floating.webContents.isDestroyed()) rec.floating.webContents.close()
+      if (rec.tools && !rec.tools.webContents.isDestroyed()) rec.tools.webContents.close()
       this.records.delete(id)
       for (const [tabId, entry] of [...this.attached]) {
         if (entry.windowId === id) {
@@ -542,6 +560,59 @@ export class WindowManager {
     if (panes.length === 1) rec.lastSingleRect = panes[0]?.rect
     if (rec.htmlFullscreen) this.layoutHtmlFullscreen(rec, wanted)
     this.focusIfNewlyShown(rec, shownBefore)
+    for (const listener of this.layoutListeners) listener(windowId)
+  }
+
+  /** Runs after a window's pages were laid out again (tab switch, resize, split, full screen). */
+  onLayout(listener: (windowId: WindowId) => void): void {
+    this.layoutListeners.push(listener)
+  }
+
+  /** The page tools' web contents (NV-05, NV-06), started if it wasn't yet. */
+  toolsContents(windowId: WindowId): WebContents | undefined {
+    const rec = this.records.get(windowId)
+    if (!rec || rec.win.isDestroyed()) return undefined
+    const contents = this.ensureTools(rec).webContents
+    return contents.isDestroyed() ? undefined : contents
+  }
+
+  /** Places the page tools at `bounds` (window coordinates): above the pages, under the floating sidebar and the overlay. */
+  showTools(windowId: WindowId, bounds: Rect): void {
+    const rec = this.records.get(windowId)
+    if (!rec || rec.win.isDestroyed()) return
+    const view = this.ensureTools(rec)
+    view.setBounds(roundRect(bounds))
+    rec.toolsShown = true
+    const parent = rec.win.contentView
+    const children = parent.children
+    const at = children.indexOf(view)
+    const above = [rec.overlay, rec.floating].map((v) => (v ? children.indexOf(v) : -1)).filter((i) => i >= 0)
+    const ceiling = above.length > 0 ? Math.min(...above) : -1
+    if (ceiling < 0) {
+      if (at !== children.length - 1) parent.addChildView(view)
+    } else if (at !== ceiling - 1) {
+      parent.addChildView(view, at >= 0 && at < ceiling ? ceiling - 1 : ceiling)
+    }
+    view.setVisible(true)
+  }
+
+  /** Takes the page tools out of the window; keyboard focus in them goes back to the page. */
+  hideTools(windowId: WindowId): void {
+    const rec = this.records.get(windowId)
+    const view = rec?.tools
+    if (!rec || !view || !rec.toolsShown) return
+    rec.toolsShown = false
+    const focused = !view.webContents.isDestroyed() && webContents.getFocusedWebContents() === view.webContents
+    if (focused && !rec.overlayShown && rec.win.isFocused()) this.focusActiveTab(rec.id)
+    this.removeChild(rec, view)
+  }
+
+  /** Test/debug view of a window's page tools. */
+  toolsInfo(windowId: WindowId): { exists: boolean; placed: boolean; bounds?: Rect } {
+    const rec = this.records.get(windowId)
+    const view = rec?.tools
+    if (!rec || !view || view.webContents.isDestroyed()) return { exists: false, placed: false }
+    return { exists: true, placed: rec.win.contentView.children.includes(view), bounds: view.getBounds() }
   }
 
   /** A page that just appeared for the focused tab or pane (e.g. a split pane filled late) takes keyboard focus. */
@@ -761,8 +832,10 @@ export class WindowManager {
     const parent = rec.win.contentView
     const children = parent.children
     const at = children.indexOf(view)
-    // The overlay and the floating sidebar (SB-12) stay above every page.
-    const above = [rec.overlay, rec.floating].map((v) => (v ? children.indexOf(v) : -1)).filter((i) => i >= 0)
+    // The overlay, the floating sidebar (SB-12) and the page tools (NV-05) stay above every page.
+    const above = [rec.overlay, rec.floating, rec.tools]
+      .map((v) => (v ? children.indexOf(v) : -1))
+      .filter((i) => i >= 0)
     const overlayAt = above.length > 0 ? Math.min(...above) : -1
     if (overlayAt < 0) {
       if (at < 0 || at !== children.length - 1) parent.addChildView(view)
@@ -1009,6 +1082,23 @@ export class WindowManager {
     rec.floating = undefined
     if (!rec.win.isDestroyed()) this.removeChild(rec, view)
     if (!view.webContents.isDestroyed()) view.webContents.close()
+  }
+
+  /** The page tools' view (NV-05, NV-06): transparent, sized by the nav module to what it shows. */
+  private ensureTools(rec: WindowRecord): WebContentsView {
+    if (rec.tools && !rec.tools.webContents.isDestroyed()) return rec.tools
+    clearTimeout(rec.toolsPrewarm)
+    rec.toolsPrewarm = undefined
+    const view = new WebContentsView({ webPreferences: uiWebPreferences(rec.id, 'tools') })
+    view.setBackgroundColor('#00000000')
+    this.registerUi(view.webContents, rec.id)
+    this.reloadUiOnCrash(view.webContents, 'tools')
+    this.attachShortcuts(view.webContents)
+    this.hardenUi(view.webContents)
+    loadRenderer(view.webContents, 'tools')
+    rec.tools = view
+    rec.toolsShown = false
+    return view
   }
 
   /** The transparent overlay view (command bar, Peek chrome, menus), created on first need. */

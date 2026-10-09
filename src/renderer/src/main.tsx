@@ -29,6 +29,14 @@ async function boot(): Promise<void> {
         <FloatingSidebarApp />
       </StrictMode>,
     )
+  } else if (view === 'tools') {
+    // The page tools over the active page's corner (chrome lane, NV-05, NV-06): find bar and zoom indicator.
+    const { PageToolsApp } = await import('./overlay/find/PageToolsApp')
+    root.render(
+      <StrictMode>
+        <PageToolsApp />
+      </StrictMode>,
+    )
   } else if (view === 'strip') {
     // Split view pane strip (split lane, SV-12): a tiny transparent view over a pane's top edge.
     const { PaneStripApp } = await import('./shell/split/PaneStripApp')

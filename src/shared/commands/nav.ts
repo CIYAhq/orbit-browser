@@ -1,3 +1,4 @@
+import type { FindState, ZoomIndicator } from '../nav'
 import type { TabId } from '../state'
 
 /** One entry of a tab's back/forward history, as the history menu lists it (NV-01). */
@@ -56,4 +57,16 @@ export interface NavCommands {
   'sidebar.peekState': { args: { over?: boolean; editing?: boolean }; result: void }
   /** A click beside the floating sidebar's card: the card hides at once and the click goes on to the page. */
   'sidebar.peekDismiss': { args: { x: number; y: number; button: 'left' | 'middle' | 'right' }; result: void }
+  /** What the page tools view shows for its window: the find bar and the zoom indicator (NV-05, NV-06). */
+  'pageTools.state': { args: Record<string, never>; result: { find: FindState; zoom: ZoomIndicator | null } }
+  /** The pointer is over the page tools (the zoom indicator stays while it is). */
+  'pageTools.hover': { args: { over: boolean }; result: void }
+  /** The find bar's text changed: highlight its matches in the active tab's page (NV-05). */
+  'find.update': { args: { query: string }; result: void }
+  /** Next (`forward`) or previous match (Enter, ⇧Enter, ⌘G, ⇧⌘G). */
+  'find.step': { args: { forward: boolean }; result: void }
+  /** Closes the find bar: highlights go, the page keeps the last match selected and gets focus. */
+  'find.close': { args: Record<string, never>; result: void }
+  /** The active tab's page zoom as a percentage, and whether it differs from the default (NV-06, NV-16). */
+  'zoom.get': { args: { tabId?: TabId }; result: { percent: number } }
 }

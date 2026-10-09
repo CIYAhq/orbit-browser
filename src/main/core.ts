@@ -78,10 +78,7 @@ export function registerCore(ctx: MainContext): void {
   }
   actions.register('tab.new', openCommandBar('new-tab'))
   actions.register('url.edit', openCommandBar('edit-url'))
-  actions.register('page.find', (c) => {
-    // Placeholder until the find-in-page bar lands: forward to the command bar lane's find UI when present.
-    ctx.toast(windowOf(c), 'Find in page is coming soon')
-  })
+  // page.find (the find bar, NV-05) is registered by src/main/nav/page-tools.ts.
 
   actions.register('sidebar.toggle', (c) => {
     const windowId = windowOf(c)

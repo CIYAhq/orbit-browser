@@ -9,6 +9,7 @@ import type { CallContext } from '../registry'
 import type { TabOps } from '../tabs/ops'
 import { activeTabOf } from '../windows'
 import { registerPageColor } from './page-color'
+import { type PageToolsInfo, registerPageTools } from './page-tools'
 import { type RevealHoldInfo, registerSidebarReveal } from './sidebar-reveal'
 import { SitePrefs } from './site-prefs'
 
@@ -18,6 +19,8 @@ export interface NavTestHooks {
   menu: () => { windowId: WindowId; direction: NavDirection; labels: string[]; icons: boolean[] } | null
   /** Chooses an item of the open history menu by label; `newTab` is a ⌘-click (Ctrl-click). */
   chooseMenu: (label: string, newTab?: boolean) => boolean
+  /** A window's page tools (default: the first): what the find bar and zoom indicator show, and where (NV-05, NV-06). */
+  tools: (windowId?: WindowId) => PageToolsInfo
   /** The corner radius of a shown page's card (0 without a frame: full screen) (SB-19). */
   corner: (tabId: TabId) => number | null
   /** The floating sidebar of a window (default: the first): its view, and what keeps it out (SB-12). */
@@ -253,6 +256,8 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
   // The hidden sidebar's hover reveal (SB-12, FL-03).
   const reveal = registerSidebarReveal(ctx)
   registerPageColor(ctx)
+  // Find in page and page zoom (NV-05, NV-06). Registered after the tabs lane, so its zoom actions are replaced.
+  const pageTools = registerPageTools(ctx, prefs)
 
   // Placeholder until the site controls panel (NV-16) lands.
   actions.register('site.controls', (c) => ctx.toast(windowOf(c), 'Site controls are coming soon'))
@@ -292,6 +297,7 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
         return true
       },
       corner: (tabId) => windows.cornerOf(tabId) ?? null,
+      tools: (windowId) => pageTools.info(windowId ?? windows.ids()[0] ?? ''),
       floating: (windowId) => {
         const id = windowId ?? windows.ids()[0] ?? ''
         return { ...windows.floatingInfo(id), hold: reveal.hold(id) ?? null }
