@@ -10,7 +10,7 @@
  * Scenarios live in scripts/capture/scenarios/<name>.mjs and export
  * `default async function (t)`; see helpers in `makeToolkit` below.
  */
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -36,6 +36,18 @@ const FFMPEG = process.env.ORBIT_FFMPEG ?? 'ffmpeg'
 const DISPLAY = process.env.DISPLAY
 if (!DISPLAY) throw new Error('No DISPLAY: run under xvfb-run')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+/** Where the window's content starts on the display, and where the pointer is (page coordinates). */
+let origin = { x: 0, y: 0 }
+let pointer = { x: 0, y: 0 }
+/**
+ * The recording shows the X pointer, which Playwright's input never moves, so xdotool moves it along
+ * (skipped quietly where xdotool isn't installed).
+ */
+const xPointer = (x, y) =>
+  new Promise((r) =>
+    execFile('xdotool', ['mousemove', String(Math.round(origin.x + x)), String(Math.round(origin.y + y))], () => r()),
+  )
 const log = (...m) => console.error(`[capture ${new Date().toISOString().slice(11, 19)}]`, ...m)
 
 /** Local pages for demos that must not depend on the network. */
@@ -171,10 +183,20 @@ function makeToolkit(app, shell, fx) {
         await sleep(delay * (0.6 + Math.random() * 0.8))
       }
     },
-    /** Moves the pointer smoothly to the centre of a locator. */
+    /** Moves the pointer smoothly (eased) to the centre of a locator, on screen too. */
     point: async (locator, steps = 18) => {
       const box = await locator.boundingBox()
-      if (box) await shell.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps })
+      if (!box) return
+      const from = pointer
+      const to = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+      for (let i = 1; i <= steps; i++) {
+        const k = 0.5 - 0.5 * Math.cos((Math.PI * i) / steps)
+        const x = from.x + (to.x - from.x) * k
+        const y = from.y + (to.y - from.y) * k
+        await shell.mouse.move(x, y)
+        await xPointer(x, y)
+      }
+      pointer = to
     },
     shot: async (name) => {
       if (!SHOTS) return
@@ -207,6 +229,13 @@ await app.evaluate(
   [W, H],
 )
 await sleep(800)
+origin = await app.evaluate(
+  ({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getContentBounds() ?? { x: 0, y: 0 },
+)
+// The pointer starts at rest over the page, in Playwright's input and on screen.
+pointer = { x: Math.round(W * 0.62), y: Math.round(H * 0.55) }
+await shell.mouse.move(pointer.x, pointer.y)
+await xPointer(pointer.x, pointer.y)
 // Captures stay offline: any http(s) request that isn't to the local fixture server is cancelled.
 await app.evaluate(({ app: electronApp, session, webContents }) => {
   const local = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//

@@ -8,6 +8,31 @@ const PERSONAL = { colors: ['#7c9cff', '#c7b6ff'], intensity: 0.85, grain: 0.15 
 const WORK = { colors: ['#ff9a62', '#ff6f91'], intensity: 0.85, grain: 0.15 }
 const SIDE = { colors: ['#4cc38a', '#9be4c3'], intensity: 0.8, grain: 0.15 }
 
+/**
+ * A two-finger swipe over the sidebar: `count` wheel steps of `dx` px, 16 ms apart. They are sent from
+ * inside the page and stamped with that cadence (`orbitTimeStamp`), so a busy machine that delivers
+ * input late can't split one swipe into two (which would move two Spaces).
+ */
+async function swipe(t, dx, count) {
+  await t.shell.evaluate(
+    ([dx, count]) =>
+      new Promise((resolve) => {
+        const target = document.querySelector('[data-testid="sidebar-scroll"]')
+        const t0 = performance.now()
+        let i = 0
+        const step = () => {
+          const e = new WheelEvent('wheel', { deltaX: dx, deltaY: 0, bubbles: true, cancelable: true })
+          Object.defineProperty(e, 'orbitTimeStamp', { value: t0 + i * 16 })
+          target?.dispatchEvent(e)
+          if (++i < count) setTimeout(step, 16)
+          else resolve()
+        }
+        step()
+      }),
+    [dx, count],
+  )
+}
+
 /** Opens each tab once so it has its title and icon, as in a browser that has been used. */
 async function visit(t, tabIds) {
   for (const tabId of tabIds) {
@@ -98,10 +123,7 @@ export default async function milestone1(t) {
   // Two-finger swipe over the sidebar to the next Space: the theme blends as it slides.
   await t.point(row('Trip planning'))
   await t.sleep(300)
-  for (let i = 0; i < 26; i++) {
-    await shell.mouse.wheel(13, 0)
-    await t.sleep(16)
-  }
+  await swipe(t, 13, 15)
   await t.sleep(1800)
   await t.shot('space-work')
 
@@ -128,10 +150,7 @@ export default async function milestone1(t) {
   await t.shot('space-side-project')
   await t.point(shell.getByTestId('space-strip'))
   for (let pass = 0; pass < 2; pass++) {
-    for (let i = 0; i < 26; i++) {
-      await shell.mouse.wheel(-13, 0)
-      await t.sleep(16)
-    }
+    await swipe(t, -13, 15)
     await t.sleep(1500)
   }
 
