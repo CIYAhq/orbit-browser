@@ -1,0 +1,466 @@
+import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
+import {
+  activeTabId,
+  type Fixtures,
+  launchOrbit,
+  MOD,
+  type Orbit,
+  run,
+  startFixtures,
+  state,
+  tabPage,
+  viewPage,
+} from './helpers'
+
+let fx: Fixtures
+let orbit: Orbit
+
+test.beforeAll(async () => {
+  fx = await startFixtures()
+})
+test.afterAll(async () => {
+  await fx.close()
+})
+test.beforeEach(async () => {
+  orbit = await launchOrbit()
+  await blockNetwork(orbit.app)
+  // The overlay renderer is pre-warmed shortly after launch (CB-22); start once it is up.
+  const overlay = await viewPage(orbit.app, 'overlay')
+  await overlay.getByTestId('overlay').waitFor({ state: 'attached' })
+})
+test.afterEach(async () => {
+  await orbit.app.close()
+})
+
+/** Tests never reach the network: anything but the local fixture server is cancelled. */
+async function blockNetwork(app: ElectronApplication): Promise<void> {
+  await app.evaluate(({ session }) => {
+    const allow = /^(https?:\/\/(localhost|127\.0\.0\.1)[:/]|data:|blob:|devtools:|chrome)/
+    const install = (ses: Electron.Session) =>
+      ses.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (d, cb) => cb({ cancel: !allow.test(d.url) }))
+    install(session.fromPartition('persist:orbit-p-default'))
+    ;(globalThis as unknown as { __blockNet: typeof install }).__blockNet = install
+  })
+}
+
+async function openBar(key: 'T' | 'L' = 'T'): Promise<Page> {
+  await orbit.shell.keyboard.press(`${MOD}+${key}`)
+  const overlay = await viewPage(orbit.app, 'overlay')
+  await expect(input(overlay)).toBeFocused()
+  return overlay
+}
+
+/** The live bar (a closing one may still be animating out). */
+const bar = (overlay: Page) => overlay.getByTestId('command-bar')
+const input = (overlay: Page) => bar(overlay).getByTestId('command-input')
+const rows = (overlay: Page) => bar(overlay).getByTestId('command-result')
+
+/** Opens a fixture page titled `name` in a new tab and waits until it has loaded. */
+async function newTab(name: string): Promise<string> {
+  const path = `/page/${encodeURIComponent(name)}`
+  const id = (await run(orbit.app, 'tabs.create', { url: fx.url(path) })) as string
+  const page = await tabPage(orbit.app, path)
+  await page.waitForLoadState('load')
+  await expect.poll(async () => (await state(orbit.app)).tabs[id]?.title).toBe(name)
+  return id
+}
+
+/** Waits until main shows the command bar (a real ⌘T opens it synchronously in main). */
+async function barOpenInMain(): Promise<void> {
+  await expect
+    .poll(async () => Object.values((await state(orbit.app)).windows)[0]?.overlay.kind, { intervals: [5] })
+    .toBe('commandbar')
+}
+
+async function tabCount(): Promise<number> {
+  return Object.keys((await state(orbit.app)).tabs).length
+}
+
+async function selectionOf(overlay: Page) {
+  return input(overlay).evaluate((el: HTMLInputElement) => ({
+    value: el.value,
+    start: el.selectionStart,
+    end: el.selectionEnd,
+  }))
+}
+
+const hostOfFixtures = () => new URL(fx.url('/')).host
+
+test('[CB-01][CB-21][KS-04] ⌘T then Esc creates nothing, and the next ⌘T opens empty', async () => {
+  const overlay = await openBar()
+  await overlay.keyboard.type('abc')
+  await expect(input(overlay)).toHaveValue('abc')
+  await overlay.keyboard.press('Escape')
+  await expect(overlay.getByTestId('command-bar')).toHaveCount(0)
+  expect(await tabCount()).toBe(0)
+  await openBar()
+  await expect(input(overlay)).toHaveValue('')
+  // ⌘T again closes it (CB-21).
+  await overlay.keyboard.press(`${MOD}+T`)
+  await expect(overlay.getByTestId('command-bar')).toHaveCount(0)
+  expect(await tabCount()).toBe(0)
+})
+
+test('[CB-02][CB-08][CB-07] typing a domain and Enter opens exactly one new selected Today tab', async () => {
+  const overlay = await openBar()
+  await overlay.keyboard.type(`${hostOfFixtures()}/page/Alpha`)
+  await expect(rows(overlay).first()).toHaveAttribute('data-kind', 'url')
+  await overlay.keyboard.press('Enter')
+  await expect.poll(tabCount).toBe(1)
+  const s = await state(orbit.app)
+  const id = (await activeTabId(orbit.app)) as string
+  const space = s.spaces[s.spaceOrder[0] as string]
+  expect(space?.today[0]).toBe(id)
+  // Scheme added: http for localhost.
+  expect(s.tabs[id]?.url).toBe(fx.url('/page/Alpha'))
+  await expect(orbit.shell.getByTestId('tab-row').first()).toHaveClass(/is-active/)
+})
+
+test('[CB-03] ⌘L edits the current URL in place, and ⌘L then Enter reloads', async () => {
+  const id = await newTab('Alpha')
+  const overlay = await openBar('L')
+  const sel = await selectionOf(overlay)
+  expect(sel.value).toBe(fx.url('/page/Alpha'))
+  expect(sel.start).toBe(0)
+  expect(sel.end).toBe(sel.value.length)
+  await expect(rows(overlay).first()).toHaveAttribute('data-kind', 'current')
+  await overlay.keyboard.type(fx.url('/page/Beta'))
+  await expect(rows(overlay).first()).toHaveAttribute('data-kind', 'url')
+  await overlay.keyboard.press('Enter')
+  await expect.poll(async () => (await state(orbit.app)).tabs[id]?.url).toBe(fx.url('/page/Beta'))
+  expect(await tabCount()).toBe(1)
+
+  // ⌘L, Enter: the page reloads (a marker set in the page is gone).
+  const page = await tabPage(orbit.app, '/page/Beta')
+  await page.waitForLoadState('load')
+  await page.evaluate(() => {
+    ;(window as unknown as { marker: number }).marker = 1
+  })
+  const again = await openBar('L')
+  await expect(rows(again).first()).toHaveAttribute('data-kind', 'current')
+  const reloaded = page.waitForEvent('load')
+  await again.keyboard.press('Enter')
+  await reloaded
+  expect(await page.evaluate(() => (window as unknown as { marker?: number }).marker ?? null)).toBeNull()
+  expect(await tabCount()).toBe(1)
+})
+
+test('[CB-04] the bar is centred in the window with the sidebar shown or hidden', async () => {
+  const overlay = await openBar()
+  const centre = async () => {
+    const box = await overlay.getByTestId('command-bar').boundingBox()
+    const width = await overlay.evaluate(() => window.innerWidth)
+    return { delta: (box?.x ?? 0) + (box?.width ?? 0) / 2 - width / 2, top: box?.y ?? 0 }
+  }
+  await expect.poll(async () => Math.abs((await centre()).delta)).toBeLessThanOrEqual(1)
+  const before = await centre()
+  await run(orbit.app, 'window.setSidebar', { visible: false })
+  await expect(overlay.getByTestId('command-bar')).toBeVisible()
+  const after = await centre()
+  expect(Math.abs(after.delta)).toBeLessThanOrEqual(1)
+  expect(Math.abs(after.top - before.top)).toBeLessThanOrEqual(1)
+  // The input sits a little above the middle of the window.
+  const height = await overlay.evaluate(() => window.innerHeight)
+  expect(before.top / height).toBeGreaterThan(0.2)
+  expect(before.top / height).toBeLessThan(0.45)
+})
+
+test('[CB-05][CB-06][CB-07] an open tab, an archived tab and a history page all match, each labelled', async () => {
+  await newTab('Budget')
+  const archivedId = await newTab('Budget 2025')
+  await run(orbit.app, 'tabs.close', { tabId: archivedId })
+  const historyId = await newTab('Budgeting tips')
+  await run(orbit.app, 'tabs.navigate', { tabId: historyId, url: fx.url('/page/Elsewhere') })
+  await expect.poll(async () => (await state(orbit.app)).tabs[historyId]?.title).toBe('Elsewhere')
+
+  const overlay = await openBar()
+  await overlay.keyboard.type('budg')
+  const labels = rows(overlay).locator('.cmdbar__label')
+  await expect(labels.filter({ hasText: /^Tab$/ })).toHaveCount(1)
+  await expect(labels.filter({ hasText: 'Archived' })).toHaveCount(1)
+  await expect(labels.filter({ hasText: 'History' })).toHaveCount(1)
+  await expect(rows(overlay).filter({ hasText: 'Budget 2025' })).toHaveAttribute('data-kind', 'archived')
+  await expect(rows(overlay).filter({ hasText: 'Budgeting tips' })).toHaveAttribute('data-kind', 'history')
+})
+
+test('[CB-09][CB-07] choosing an open tab in another Space switches there instead of duplicating', async () => {
+  const alpha = await newTab('Alpha')
+  const spaceA = (await state(orbit.app)).spaceOrder[0] as string
+  const spaceB = (await run(orbit.app, 'spaces.create', { name: 'Work' })) as string
+  await expect.poll(async () => Object.values((await state(orbit.app)).windows)[0]?.spaceId).toBe(spaceB)
+
+  const overlay = await openBar()
+  await overlay.keyboard.type('alph')
+  const top = rows(overlay).first()
+  await expect(top).toHaveAttribute('data-kind', 'tab')
+  await expect(top).toContainText('Alpha')
+  await overlay.keyboard.press('Enter')
+  await expect.poll(async () => Object.values((await state(orbit.app)).windows)[0]?.spaceId).toBe(spaceA)
+  expect(await activeTabId(orbit.app)).toBe(alpha)
+  expect(await tabCount()).toBe(1)
+})
+
+test('[CB-10] arrows move the highlight, hovering highlights, Enter runs the highlighted row', async () => {
+  const ids = [await newTab('Gamma one'), await newTab('Gamma two'), await newTab('Gamma three')]
+  await run(orbit.app, 'tabs.activate', { tabId: ids[2] })
+  const overlay = await openBar()
+  await overlay.keyboard.type('gamma')
+  await expect(rows(overlay)).toHaveCount(3) // two other tabs + the web search
+  await expect(rows(overlay).nth(0)).toHaveAttribute('aria-selected', 'true')
+  await overlay.keyboard.press('ArrowDown')
+  await overlay.keyboard.press('ArrowDown')
+  const third = rows(overlay).nth(2)
+  await expect(third).toHaveAttribute('aria-selected', 'true')
+  await expect(rows(overlay).nth(0)).toHaveAttribute('aria-selected', 'false')
+  // Hover moves it too.
+  await rows(overlay).nth(1).hover()
+  await expect(rows(overlay).nth(1)).toHaveAttribute('aria-selected', 'true')
+  await overlay.keyboard.press('ArrowDown')
+  const chosen = (await third.getAttribute('data-id')) as string
+  expect(chosen).toMatch(/^tab:/)
+  await overlay.keyboard.press('Enter')
+  await expect.poll(() => activeTabId(orbit.app)).toBe(chosen.slice(4))
+})
+
+test('[CB-11][KS-04] site search: keyword, Tab, query, Enter opens the site’s results; Backspace leaves', async () => {
+  const overlay = await openBar()
+  await overlay.keyboard.type('yt')
+  await expect(rows(overlay).filter({ hasText: 'Search YouTube' })).toHaveCount(1)
+  await overlay.keyboard.press('Tab')
+  await expect(bar(overlay).getByTestId('command-chip')).toHaveText('YouTube')
+  await expect(input(overlay)).toHaveValue('')
+  // Backspace on the empty query removes the chip, Tab brings it back.
+  await overlay.keyboard.press('Backspace')
+  await expect(bar(overlay).getByTestId('command-chip')).toHaveCount(0)
+  await overlay.keyboard.type('yt')
+  await overlay.keyboard.press('Tab')
+  await expect(bar(overlay).getByTestId('command-chip')).toHaveText('YouTube')
+  await overlay.keyboard.type('cats')
+  await expect(rows(overlay).first()).toContainText('Search YouTube')
+  await overlay.keyboard.press('Enter')
+  await expect.poll(tabCount).toBe(1)
+  const s = await state(orbit.app)
+  expect(Object.values(s.tabs)[0]?.url).toBe('https://www.youtube.com/results?search_query=cats')
+})
+
+test('[CB-15][CB-07] plain text searches the default engine and the row names it', async () => {
+  await orbit.app.evaluate(() => {
+    const ctx = (globalThis as unknown as { __orbit: { ctx: { store: { update: (fn: (d: never) => void) => void } } } })
+      .__orbit.ctx
+    ctx.store.update((d: { settings: { searchEngine: string } }) => {
+      d.settings.searchEngine = 'duckduckgo'
+    })
+  })
+  const overlay = await openBar()
+  await overlay.keyboard.type('orbit test')
+  const top = rows(overlay).first()
+  await expect(top).toHaveAttribute('data-kind', 'search')
+  await expect(top).toContainText('Search DuckDuckGo')
+  await overlay.keyboard.press('Enter')
+  await expect.poll(tabCount).toBe(1)
+  const s = await state(orbit.app)
+  expect(Object.values(s.tabs)[0]?.url.startsWith('https://duckduckgo.com/?q=orbit+test')).toBe(true)
+})
+
+test('[CB-08] a visited domain completes inline; Backspace removes the completion; Enter opens the site', async () => {
+  await newTab('Alpha')
+  const host = hostOfFixtures()
+  const overlay = await openBar()
+  await overlay.keyboard.type('loc')
+  await expect.poll(() => selectionOf(overlay)).toEqual({ value: host, start: 3, end: host.length })
+  await overlay.keyboard.press('Backspace')
+  await expect.poll(() => selectionOf(overlay)).toEqual({ value: 'loc', start: 3, end: 3 })
+  await overlay.keyboard.type('a')
+  await expect.poll(async () => (await selectionOf(overlay)).value).toBe(host)
+  await overlay.keyboard.press('Enter')
+  await expect.poll(tabCount).toBe(2)
+  const s = await state(orbit.app)
+  const id = (await activeTabId(orbit.app)) as string
+  expect(s.tabs[id]?.url).toBe(fx.url('/'))
+})
+
+test('[CB-13][CB-06] actions show their shortcut; "pin" and Enter pins the current tab', async () => {
+  const id = await newTab('Alpha')
+  const overlay = await openBar()
+  await overlay.keyboard.type('pin')
+  const top = rows(overlay).first()
+  await expect(top).toHaveAttribute('data-kind', 'action')
+  await expect(top.getByTestId('command-shortcut')).toHaveText(process.platform === 'darwin' ? '⌘D' : 'Ctrl+D')
+  await overlay.keyboard.press('Enter')
+  await expect
+    .poll(async () => (await state(orbit.app)).spaces[(await state(orbit.app)).spaceOrder[0] as string]?.pinned)
+    .toContain(id)
+})
+
+test('[CB-18] a fresh profile shows suggestions before typing, with no history', async () => {
+  const overlay = await openBar()
+  await expect(rows(overlay).first()).toBeVisible()
+  expect(await rows(overlay).count()).toBeLessThanOrEqual(6)
+  await expect(rows(overlay).filter({ has: overlay.locator('[data-kind="history"]') })).toHaveCount(0)
+  await expect(overlay.locator('[data-kind="history"]')).toHaveCount(0)
+})
+
+test('[CB-19][SP-22] switching Space with the bar open keeps it open; the new tab lands in the new Space and profile', async () => {
+  const profile = (await run(orbit.app, 'profiles.create', { name: 'Work profile' })) as string
+  await orbit.app.evaluate(({ session }, p) => {
+    ;(globalThis as unknown as { __blockNet: (s: Electron.Session) => void }).__blockNet(
+      session.fromPartition(`persist:orbit-${p}`),
+    )
+  }, profile)
+  const spaceA = (await state(orbit.app)).spaceOrder[0] as string
+  const spaceB = (await run(orbit.app, 'spaces.create', {
+    name: 'Work',
+    profileId: profile,
+    activate: false,
+  })) as string
+  const overlay = await openBar()
+  await run(orbit.app, 'spaces.switch', { spaceId: spaceB })
+  await expect(overlay.getByTestId('command-bar')).toBeVisible()
+  await overlay.keyboard.type(fx.url('/page/InB'))
+  await overlay.keyboard.press('Enter')
+  await expect.poll(tabCount).toBe(1)
+  const s = await state(orbit.app)
+  const tab = Object.values(s.tabs)[0]
+  expect(tab?.spaceId).toBe(spaceB)
+  expect(tab?.profileId).toBe(profile)
+  expect(s.spaces[spaceA]?.today).toHaveLength(0)
+})
+
+test('[CB-21] clicking outside the bar closes it and creates nothing', async () => {
+  const overlay = await openBar()
+  await overlay.keyboard.type('abc')
+  await overlay.mouse.click(20, 20)
+  await expect(overlay.getByTestId('command-bar')).toHaveCount(0)
+  expect(await tabCount()).toBe(0)
+  await openBar()
+  await expect(input(overlay)).toHaveValue('')
+})
+
+test('[CB-22][FL-16][FL-17] keys typed right after ⌘T are kept and results follow each keystroke', async () => {
+  const overlay = await viewPage(orbit.app, 'overlay')
+  await orbit.shell.keyboard.press(`${MOD}+T`)
+  await barOpenInMain()
+  await overlay.keyboard.type('qwertyuiop', { delay: 30 })
+  await expect(input(overlay)).toHaveValue('qwertyuiop')
+  await expect(rows(overlay).first()).toHaveAttribute('data-kind', 'search')
+  await expect(rows(overlay).first().getByTestId('command-result-title')).toHaveText('qwertyuiop')
+  const latencies = await overlay.evaluate(
+    () => (window as unknown as { __orbitCommandBar: { latencies: number[] } }).__orbitCommandBar.latencies,
+  )
+  expect(latencies.length).toBeGreaterThan(0)
+  expect(Math.max(...latencies.slice(-10))).toBeLessThan(50)
+  // The open itself is measured too (budget: 50 ms to a painted, focused input).
+  const marks = (await orbit.app.evaluate(() =>
+    (globalThis as unknown as { __orbit: { marks: () => { name: string; t: number }[] } }).__orbit.marks(),
+  )) as { name: string; t: number }[]
+  const start = marks.filter((m) => m.name === 'commandbar:open:start').at(-1)?.t ?? 0
+  const painted = marks.filter((m) => m.name === 'commandbar:open:painted').at(-1)?.t ?? 0
+  expect(painted).toBeGreaterThan(start)
+  expect(painted - start).toBeLessThan(150)
+})
+
+test('[CB-22] typing a whole action name and Enter right after ⌘T runs it (no lost keys)', async () => {
+  await newTab('Alpha')
+  const overlay = await viewPage(orbit.app, 'overlay')
+  await orbit.shell.keyboard.press(`${MOD}+T`)
+  await barOpenInMain()
+  await overlay.keyboard.type('new space')
+  await overlay.keyboard.press('Enter')
+  await expect.poll(async () => (await state(orbit.app)).spaceOrder.length).toBe(2)
+})
+
+test('[KS-19] ⌘W closes the bar, not the tab', async () => {
+  await newTab('Alpha')
+  const overlay = await openBar()
+  await overlay.keyboard.press(`${MOD}+W`)
+  await expect(overlay.getByTestId('command-bar')).toHaveCount(0)
+  expect(await tabCount()).toBe(1)
+})
+
+test('[CB-23][CB-05] history is kept per profile and never recorded in private sessions', async () => {
+  // A profile on a non-persistent session behaves like a private window.
+  const priv = (await run(orbit.app, 'profiles.create', { name: 'Private' })) as string
+  await orbit.app.evaluate(({ session }, p) => {
+    const ctx = (
+      globalThis as unknown as {
+        __orbit: {
+          ctx: { store: { update: (fn: (d: { profiles: Record<string, { partition: string }> }) => void) => void } }
+        }
+      }
+    ).__orbit.ctx
+    ctx.store.update((d) => {
+      const profile = d.profiles[p]
+      if (profile) profile.partition = `orbit-private-${p}`
+    })
+    ;(globalThis as unknown as { __blockNet: (s: Electron.Session) => void }).__blockNet(
+      session.fromPartition(`orbit-private-${p}`),
+    )
+  }, priv)
+  const spaceP = (await run(orbit.app, 'spaces.create', {
+    name: 'Private',
+    profileId: priv,
+    activate: false,
+  })) as string
+  await newTab('Normal visit')
+  const privTab = (await run(orbit.app, 'tabs.create', {
+    url: fx.url('/page/Secret visit'),
+    spaceId: spaceP,
+  })) as string
+  await tabPage(orbit.app, '/page/Secret%20visit')
+  await expect.poll(async () => (await state(orbit.app)).tabs[privTab]?.title).toBe('Secret visit')
+  const search = (profileId: string, text: string) =>
+    run(orbit.app, 'history.search', { profileId, text }) as Promise<{ url: string; title: string }[]>
+  await expect.poll(async () => (await search('p-default', 'normal')).map((e) => e.title)).toEqual(['Normal visit'])
+  expect(await search(priv, 'secret')).toEqual([])
+  expect(await search('p-default', 'secret')).toEqual([])
+})
+
+// ---- P1 ----
+
+test('[CB-14] Tab on an empty field lists only actions', async () => {
+  await newTab('Alpha')
+  const overlay = await openBar()
+  await overlay.keyboard.press('Tab')
+  await expect(bar(overlay).getByTestId('command-chip')).toHaveText('Actions')
+  await overlay.keyboard.type('zoom')
+  await expect(rows(overlay).first()).toHaveAttribute('data-kind', 'action')
+  await expect(rows(overlay).first()).toContainText('Zoom')
+  const kinds = await rows(overlay).evaluateAll((els) => els.map((e) => e.getAttribute('data-kind')))
+  expect(new Set(kinds)).toEqual(new Set(['action']))
+  await overlay.keyboard.press('Escape')
+  await expect(bar(overlay).getByTestId('command-chip')).toHaveCount(0)
+})
+
+test('[CB-17] a history row can be removed from the keyboard and stays gone', async () => {
+  const id = await newTab('Removable page')
+  await run(orbit.app, 'tabs.navigate', { tabId: id, url: fx.url('/page/Other') })
+  await expect.poll(async () => (await state(orbit.app)).tabs[id]?.title).toBe('Other')
+  const overlay = await openBar()
+  await overlay.keyboard.type('removable')
+  const row = rows(overlay).filter({ hasText: 'Removable page' })
+  await expect(row).toHaveAttribute('data-kind', 'history')
+  const index = await rows(overlay).evaluateAll((els) =>
+    els.findIndex((e) => e.textContent?.includes('Removable page')),
+  )
+  for (let i = 0; i < index; i++) await overlay.keyboard.press('ArrowDown')
+  await overlay.keyboard.press(process.platform === 'darwin' ? 'Meta+Alt+Backspace' : 'Shift+Delete')
+  await expect(rows(overlay).filter({ hasText: 'Removable page' })).toHaveCount(0)
+  await overlay.keyboard.press('Escape')
+  const again = await openBar()
+  await again.keyboard.type('removable')
+  await expect(rows(again).first()).toBeVisible()
+  await expect(rows(again).filter({ hasText: 'Removable page' })).toHaveCount(0)
+})
+
+test('[CB-12] a URL on the clipboard is offered first as Paste and go', async () => {
+  const url = fx.url('/page/Clip')
+  await orbit.app.evaluate(async ({ clipboard }, u) => {
+    await clipboard.writeText(u)
+  }, url)
+  const overlay = await openBar()
+  const top = rows(overlay).first()
+  await expect(top).toHaveAttribute('data-kind', 'paste')
+  await overlay.keyboard.press('Enter')
+  await expect.poll(tabCount).toBe(1)
+  expect(Object.values((await state(orbit.app)).tabs)[0]?.url).toBe(url)
+})
