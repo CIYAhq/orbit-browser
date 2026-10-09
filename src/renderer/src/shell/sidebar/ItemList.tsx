@@ -11,7 +11,7 @@ import {
 import { isFolderId, isSplitId, isTabId } from '../../../../shared/ids'
 import type { ItemId, OrbitState, TabId } from '../../../../shared/state'
 import { isAwayFromPinned, rowTitle } from '../../../../shared/tabs'
-import { splitLeaves, tabsInItem, visibleTabOrder } from '../../../../shared/tree'
+import { splitLeaves, splitOfTab, tabsInItem, visibleTabOrder } from '../../../../shared/tree'
 import { invoke, isMac } from '../../api'
 import { activeTabId } from '../../selectors'
 import { getOrbitState, useMirror, useOrbit } from '../../store'
@@ -317,7 +317,9 @@ function onRowPointerDown(e: ReactPointerEvent<HTMLElement>, tabId: TabId) {
   const inSelection = useSelection.getState().ids.includes(tabId)
   if (!inSelection) clearSelection()
   void invoke('tabs.activate', { tabId })
-  pressItem(e, tabId, 'list', inSelection ? clearSelection : undefined)
+  // A pane of a split view drags the whole split row.
+  const item = splitOfTab(getOrbitState(), tabId) ?? tabId
+  pressItem(e, item, 'list', inSelection ? clearSelection : undefined)
 }
 
 function openContextMenu(e: ReactMouseEvent, id: ItemId) {
@@ -342,7 +344,11 @@ export const TabRow = memo(function TabRow({
 
 /** The row itself (TB-01): icon, title (or breadcrumb, PN-03), audio, close. */
 export const TabRowBody = memo(function TabRowBody({ tabId, depth }: { tabId: string; depth: number }) {
-  const tab = useOrbit((s) => s.tabs[tabId])
+  const live = useOrbit((s) => s.tabs[tabId])
+  // A closed tab's row keeps drawing its last look while it animates out (FL-09).
+  const last = useRef(live)
+  if (live) last.current = live
+  const tab = live ?? last.current
   const active = useOrbit((s) => activeTabId(s) === tabId)
   const selected = useSelection((s) => s.ids.includes(tabId))
   const focused = useKeyboardFocus((s) => s.id === tabId)
@@ -453,7 +459,10 @@ const FolderRow = memo(function FolderRow({
   index,
   ancestors,
 }: { folderId: string } & SlotProps) {
-  const folder = useOrbit((s) => s.folders[folderId])
+  const liveFolder = useOrbit((s) => s.folders[folderId])
+  const lastFolder = useRef(liveFolder)
+  if (liveFolder) lastFolder.current = liveFolder
+  const folder = liveFolder ?? lastFolder.current
   // FD-04: the selected tab stays visible under a closed folder ("peeking").
   const peek = useOrbit((s) => {
     const f = s.folders[folderId]

@@ -152,3 +152,21 @@ describe('[FV-05] Favorites grid drop index', () => {
     expect(gridDropIndex([], 0, 0)).toBe(0)
   })
 })
+
+describe('[TB-10][PN-09] review fixes in drop targets', () => {
+  it('keeps the index of the list as it is for an Alt-drag copy', () => {
+    const slots = layout({ pinned: [], today: ['a', 'b', 'c', 'd'] })
+    const t = computeDropTarget(slots, center(slots, 'c', 0.8), new Set(['b']), opts)
+    expect(t).toMatchObject({ type: 'between', index: 2, rawIndex: 3 })
+  })
+
+  it('drops at the real end of a collapsed pinned section', () => {
+    // Pinned rows are hidden (collapsed): only the divider and Today are measured.
+    const slots = layout({ pinned: [], today: ['a', 'b'] })
+    const t = computeDropTarget(slots, center(slots, 'divider', 0.1), new Set(['b']), {
+      ...opts,
+      counts: { 'pinned:s': { length: 3, dragged: 0 }, 'today:s': { length: 2, dragged: 1 } },
+    })
+    expect(t).toMatchObject({ container: 'pinned:s', index: 3, rawIndex: 3 })
+  })
+})

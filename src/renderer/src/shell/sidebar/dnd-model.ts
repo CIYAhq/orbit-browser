@@ -32,6 +32,8 @@ export type DropTarget =
       container: string
       /** Index in the target list without the dragged items (what tabs.move expects). */
       index: number
+      /** Index in the target list as it is now, dragged items included (for an ⌥-drag copy). */
+      rawIndex: number
       depth: number
       /** Position in the remaining slots where the gap opens. */
       at: number
@@ -68,27 +70,40 @@ export function computeDropTarget(
   slots: Slot[],
   y: number,
   dragged: Set<string>,
-  opts: { pinnedContainer: string; todayContainer: string },
+  opts: {
+    pinnedContainer: string
+    todayContainer: string
+    /** Real list lengths and how many dragged items they hold (rows of a collapsed section aren't measured). */
+    counts?: Record<string, { length: number; dragged: number }>
+  },
 ): DropTarget {
   const remaining = slots.filter((s) => !isDragged(s, dragged))
   const between = (container: string, rawIndex: number, depth: number, at: number): DropTarget => ({
     type: 'between',
     container,
     index: rawIndex - draggedBefore(slots, dragged, container, rawIndex),
+    rawIndex,
     depth,
     at,
     gapTop: gapTopAt(slots, remaining, at, dragged),
   })
-  const rootCount = (container: string) =>
-    remaining.filter((s) => s.kind === 'item' && s.depth === 0 && s.container === container).length
-  const endOf = (container: string, at: number): DropTarget => ({
-    type: 'between',
-    container,
-    index: rootCount(container),
-    depth: 0,
-    at,
-    gapTop: gapTopAt(slots, remaining, at, dragged),
-  })
+  const endOf = (container: string, at: number): DropTarget => {
+    const known = opts.counts?.[container]
+    const measuredRaw = slots.filter((s) => s.kind === 'item' && s.depth === 0 && s.container === container).length
+    const raw = known?.length ?? measuredRaw
+    const draggedHere =
+      known?.dragged ??
+      slots.filter((s) => s.kind === 'item' && s.depth === 0 && s.container === container && dragged.has(s.key)).length
+    return {
+      type: 'between',
+      container,
+      index: raw - draggedHere,
+      rawIndex: raw,
+      depth: 0,
+      at,
+      gapTop: gapTopAt(slots, remaining, at, dragged),
+    }
+  }
   const i = remaining.findIndex((s) => y < s.top + s.height + ROW_GAP)
   if (i < 0) return endOf(opts.todayContainer, remaining.length)
   const s = remaining[i] as Slot

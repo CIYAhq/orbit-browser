@@ -219,6 +219,8 @@ export function canMoveTo(state: OrbitState, id: ItemId, to: ContainerRef): bool
     if (to.kind === 'favorites' || to.kind === 'today') return false
     if (to.kind === 'folder' && isWithin(state, to.folderId, id)) return false
   }
+  // The Favorites grid holds tabs only (a split pane can't be favorited on its own).
+  if (isSplitId(id) && to.kind === 'favorites') return false
   if (to.kind === 'folder') {
     // A folder must itself sit in a pinned area.
     const root = rootContainerOf(state, { kind: 'folder', folderId: to.folderId })
@@ -361,12 +363,20 @@ export function repairTree(state: OrbitState): void {
     }
     return out
   }
+  // Folders may only sit in the pinned area: drop them from Favorites/Today *before* walking,
+  // so the folder is deleted and its tabs are re-homed below rather than lost.
   for (const profile of Object.values(state.profiles)) {
-    profile.favorites = clean(profile.favorites, 0).filter((id) => !isFolderId(id))
+    profile.favorites = clean(
+      profile.favorites.filter((id) => isTabId(id)),
+      0,
+    )
   }
   for (const space of Object.values(state.spaces)) {
     space.pinned = clean(space.pinned, 0)
-    space.today = clean(space.today, 0).filter((id) => !isFolderId(id))
+    space.today = clean(
+      space.today.filter((id) => !isFolderId(id)),
+      0,
+    )
   }
   for (const id of Object.keys(state.folders)) if (!seen.has(id)) delete state.folders[id]
   for (const id of Object.keys(state.splits)) if (!seen.has(id)) delete state.splits[id]

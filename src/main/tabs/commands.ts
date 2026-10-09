@@ -13,6 +13,7 @@ import {
   containerItems,
   insertItem,
   locate,
+  profileOfContainer,
   repairTree,
   sectionOf,
   sidebarTabOrder,
@@ -257,6 +258,8 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     const item = splitOfTab(state, tabId) ?? tabId
     const loc = locate(state, item)
     const pinned = !to && !!tab.pinnedUrl && sectionOf(state, tabId) !== 'today'
+    // A copy dropped into another profile's Space starts fresh there (no history across profiles).
+    const targetProfile = to ? (profileOfContainer(state, to) ?? tab.profileId) : tab.profileId
     const id = ops.createTab({
       url: tab.url,
       title: tab.title,
@@ -267,7 +270,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
       // A copy dropped with ⌥ stays in the background; Duplicate from the menu selects it.
       activate: !to,
       windowId: windowOf(c),
-      history: ops.historyOf(tabId),
+      history: targetProfile === tab.profileId ? ops.historyOf(tabId) : undefined,
     })
     store.update((d) => {
       const copy = d.tabs[id]
@@ -332,25 +335,8 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
 
   commands.register('folders.create', ({ container, index, name = 'New Folder', items = [] }, c) => {
     const windowId = windowOf(c)
-    const state = store.state
-    const spaceId = ops.spaceOfWindow(windowId)
-    // With a selection, the folder takes the first selected item's place in the pinned area (FD-02).
-    const first = items.map((i) => locate(state, i)).find((l) => !!l)
-    let target: ContainerRef = container ?? { kind: 'pinned', spaceId }
-    let at = index ?? state.spaces[spaceId]?.pinned.length ?? 0
-    if (!container && first && (first.container.kind === 'pinned' || first.container.kind === 'folder')) {
-      target = first.container
-      at = first.index
-    }
-    const id = newId('f')
-    store.update((d) => {
-      d.folders[id] = { id, name, children: [], collapsed: false, createdAt: Date.now() }
-      insertItem(d, target, at, id)
-    })
-    if (items.length > 0) ops.moveItems(items, { kind: 'folder', folderId: id }, 0, { windowId, undoLabel: false })
-    else send(windowId, 'sidebar:rename', { id, isNew: true })
-    const created = id
-    ops.undo.push('New Folder', () => ops.deleteFolder(created, true))
+    const id = ops.createFolder({ container, index, name, items, windowId })
+    if (items.length === 0) send(windowId, 'sidebar:rename', { id, isNew: true })
     return id
   })
 

@@ -65,7 +65,7 @@ Spec: `spec/tabs.md`
 | TB-07 | Reopen the last closed tab | P0 | ✅ | ✅ e2e | – | Cmd+Shift+T stack with full history; Cmd+Z reopens too |
 | TB-08 | Reorder tabs by drag and drop | P0 | ✅ | ✅ e2e+unit | – | pointer drag, 4px threshold, rows spring apart, ghost lift/settle, auto-scroll, Escape cancel, undo; no haptics |
 | TB-09 | Drag and drop to other destinations | P0 | 🟡 partial | ✅ e2e | – | Space switcher drop, edge dwell to the next Space, drag out to a new window, Alt-drag copy; no split or URL-to-page drops |
-| TB-10 | Duplicate a tab | P1 | ✅ | ✅ e2e | – | menu/action Duplicate (selected, below the original) and Alt-drag copy, both with history; Cmd-click Reload is the top bar's |
+| TB-10 | Duplicate a tab | P1 | ✅ | ✅ e2e+unit | – | menu/action Duplicate (selected, below the original) and Alt-drag copy, both with history; Cmd-click Reload is the top bar's |
 | TB-11 | Move a tab to another Space | P0 | ✅ | ✅ e2e | – | Move to > Space > Pinned/Today/folder (menu + tabs.moveToSpace); command-bar entry is the commandbar lane's |
 | TB-12 | Rename a tab and set a custom icon | P1 | ✅ | ✅ e2e | – | double-click/menu rename, empty reverts; emoji icon picker |
 | TB-13 | Multi-select tabs | P1 | 🟡 partial | ✅ e2e | – | Cmd-click, Shift-click, menu actions, group drag; Escape clears |
@@ -86,10 +86,10 @@ Spec: `spec/tabs.md`
 | PN-06 | Closing a pinned tab vs unpinning vs deleting | P0 | ✅ | ✅ e2e | – | close unloads and resets, unpin, Delete from Sidebar (archived, undoable) |
 | PN-07 | Edit the pinned URL | P1 | ✅ | ✅ e2e | – | Pinned URL > Replace with Current / Edit (inline field) |
 | PN-08 | Rename pinned tabs | P1 | ✅ | ✅ e2e | – | custom name kept through resets; breadcrumb 'Name / page' |
-| PN-09 | Collapse the pinned section | P1 | ✅ | ✅ e2e | – | caret on the Space title, peeking selected tab, bold title, Collapse/Expand Pinned action |
+| PN-09 | Collapse the pinned section | P1 | ✅ | ✅ e2e+unit | – | caret on the Space title, peeking selected tab, bold title, Collapse/Expand Pinned action |
 | FV-01 | What Favorites are and how they're shared | P0 | ✅ | ✅ e2e | – | per-profile grid above the Space title |
 | FV-02 | Capacity and grid layout | P0 | ✅ | ✅ e2e | – | max 12 (13th refused with toast), up to 4 per row, fewer stretch |
-| FV-03 | Add a Favorite | P0 | ✅ | ✅ e2e | – | drag to grid (drop zone when empty), menu, Favorite This Tab action |
+| FV-03 | Add a Favorite | P0 | ✅ | ✅ e2e+unit | – | drag to grid (drop zone when empty), menu, Favorite This Tab action |
 | FV-04 | Remove a Favorite | P0 | ✅ | ✅ e2e | – | drag tile into pinned/Today, menu, action toggle |
 | FV-05 | Reorder Favorites | P0 | ✅ | ✅ e2e+unit | – | drag within grid with spring reflow; order persists |
 | FV-06 | Favorites always reset to their URL | P0 | ✅ | ✅ e2e | – | double-click resets, away dot + tooltip, close unloads |

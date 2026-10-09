@@ -317,3 +317,37 @@ describe('[TB-03] cheap patches for sidebar lists (review F2)', () => {
     expect(removal).toHaveLength(1)
   })
 })
+
+describe('[FV-03][FD-01][TB-22] review fixes in the tree rules', () => {
+  it('refuses a split view in the Favorites grid', () => {
+    const { state, s1, add } = world()
+    const a = add(s1, 'today')
+    const b = add(s1, 'today')
+    state.spaces[s1]!.today = ['v-1']
+    state.splits['v-1'] = {
+      id: 'v-1',
+      createdAt: 0,
+      layout: {
+        type: 'row',
+        sizes: [0.5, 0.5],
+        children: [
+          { type: 'leaf', tabId: a },
+          { type: 'leaf', tabId: b },
+        ],
+      },
+    }
+    expect(canMoveTo(state, 'v-1', { kind: 'favorites', profileId: DEFAULT_PROFILE_ID })).toBe(false)
+    // A pane is not an item of its own.
+    expect(canMoveTo(state, a, { kind: 'pinned', spaceId: s1 })).toBe(false)
+  })
+
+  it('a folder found in Today on load is removed and its tabs come back to Today', () => {
+    const { state, s1, add } = world()
+    const a = add(s1, 'today')
+    state.spaces[s1]!.today = ['f-bad']
+    state.folders['f-bad'] = { id: 'f-bad', name: 'x', children: [a], collapsed: false, createdAt: 0 }
+    repairTree(state)
+    expect(state.folders['f-bad']).toBeUndefined()
+    expect(state.spaces[s1]!.today).toEqual([a])
+  })
+})

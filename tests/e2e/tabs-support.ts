@@ -121,15 +121,21 @@ export async function center(
   return { x: box.x + box.width / 2, y: box.y + box.height / 2, box }
 }
 
-/** Waits until rows have finished growing in (positions are stable). */
+/** Waits until rows have finished growing in or out (row heights stable across frames). */
 export async function settled(page: Page): Promise<void> {
   await expect
     .poll(() =>
-      page.evaluate(() =>
-        [...document.querySelectorAll<HTMLElement>('.row-slot:not(.row-slot--split)')]
-          .filter((el) => !el.dataset.exiting)
-          .every((el) => el.offsetHeight === 32),
-      ),
+      page.evaluate(async () => {
+        const sample = () =>
+          [...document.querySelectorAll<HTMLElement>('.row-slot')]
+            .map((el) => `${el.dataset.exiting ? 'x' : ''}${el.offsetHeight}`)
+            .join(',')
+        const a = sample()
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+        const b = sample()
+        const rows = [...document.querySelectorAll<HTMLElement>('.row-slot:not(.row-slot--split)')]
+        return a === b && rows.every((el) => !!el.dataset.exiting || el.offsetHeight === 32)
+      }),
     )
     .toBe(true)
 }

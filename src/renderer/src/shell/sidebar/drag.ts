@@ -9,8 +9,8 @@
  */
 import { animate, motionValue } from 'motion/react'
 import { isFolderId, isTabId } from '../../../../shared/ids'
-import type { ItemId, SpaceId } from '../../../../shared/state'
-import { parseContainerKey, visibleTabOrder } from '../../../../shared/tree'
+import type { ItemId, OrbitState, SpaceId } from '../../../../shared/state'
+import { locate, parseContainerKey, visibleTabOrder } from '../../../../shared/tree'
 import { invoke } from '../../api'
 import { activeTabId } from '../../selectors'
 import { getOrbitState, getSeq, useMirror } from '../../store'
@@ -130,6 +130,7 @@ function dividerSplit(block: HTMLElement): number | undefined {
 
 /** Selected tabs in sidebar order, when the pressed row is part of a multi-selection. */
 function dragIds(id: ItemId): ItemId[] {
+  if (!isTabId(id)) return [id]
   const sel = useSelection.getState().ids
   if (sel.length < 2 || !sel.includes(id)) return [id]
   const state = getOrbitState()
@@ -291,10 +292,20 @@ function listTarget(s: Session, prev: DropTarget | null): DropTarget | null {
   const scroll = ctx.scroll
   if (!scroll) return null
   const y = s.lastY - scroll.getBoundingClientRect().top + scroll.scrollTop
+  const space = getOrbitState().spaces[ctx.spaceId]
+  const count = (list: string[] | undefined) => ({
+    length: list?.length ?? 0,
+    dragged: (list ?? []).filter((id) => s.dragged.has(id)).length,
+  })
+  const counts = {
+    [`pinned:${ctx.spaceId}`]: count(space?.pinned),
+    [`today:${ctx.spaceId}`]: count(space?.today),
+  }
   const at = (yy: number) =>
     computeDropTarget(s.slots, yy, s.dragged, {
       pinnedContainer: `pinned:${ctx.spaceId}`,
       todayContainer: `today:${ctx.spaceId}`,
+      counts,
     })
   let target = at(y)
   // Hysteresis: keep the current slot until the pointer is a few pixels past the boundary.
@@ -505,11 +516,12 @@ async function drop(s: Session, ev: PointerEvent): Promise<void> {
           : target
             ? parseContainerKey(target.container)
             : undefined
+    // The original stays where it is, so a copy uses the index of the list as it is now.
     const index =
       zone.kind === 'favorites'
         ? (state.favIndex ?? 0)
         : target?.type === 'between'
-          ? target.index
+          ? target.rawIndex
           : Number.MAX_SAFE_INTEGER
     commit = to ? () => invoke('tabs.duplicate', { tabId: first, to, index }) : null
     landing = 'away'
@@ -519,6 +531,9 @@ async function drop(s: Session, ev: PointerEvent): Promise<void> {
     }
   }
   const seqAtDrop = getSeq()
+  // Land when the dropped item actually moved (not on an unrelated title or loading patch).
+  const locKey = (st: OrbitState) => JSON.stringify(locate(st, first) ?? null)
+  const locAtDrop = locKey(getOrbitState())
   useDrag.setState({ phase: 'committing' })
   let landed = false
   const land = () => {
@@ -539,7 +554,7 @@ async function drop(s: Session, ev: PointerEvent): Promise<void> {
     requestAnimationFrame(() => settle(s, landing, state.intoFolder))
   }
   const unsubscribe = useMirror.subscribe((m) => {
-    if (m.seq > seqAtDrop) land()
+    if (m.seq > seqAtDrop && locKey(m.state) !== locAtDrop) land()
   })
   let ok: unknown = false
   try {

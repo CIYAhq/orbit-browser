@@ -13,7 +13,7 @@ import {
 } from 'react'
 import { isFolderId, isTabId } from '../../../../shared/ids'
 import type { Space, SpaceId } from '../../../../shared/state'
-import { containerKey, locate, sectionOf } from '../../../../shared/tree'
+import { containerKey, locate, sectionOf, splitOfTab } from '../../../../shared/tree'
 import { parseInput } from '../../../../shared/url'
 import { invoke, isMac, runAction } from '../../api'
 import { activeTabId } from '../../selectors'
@@ -350,8 +350,12 @@ function useScrollMemory(scrollRef: React.RefObject<HTMLDivElement | null>, spac
  * Scrolls a newly selected tab into view and, while the selected tab is scrolled out of
  * sight, shows a small pill pointing to it (SB-23).
  */
-function useAutoReveal(scrollRef: React.RefObject<HTMLDivElement | null>, active: string | null) {
+function useAutoReveal(scrollRef: React.RefObject<HTMLDivElement | null>, selected: string | null) {
   const [side, setSide] = useState<'above' | 'below' | null>(null)
+  // The row that stands for the selected tab: its split view's row; none for a Favorite.
+  const active = useOrbit((s) =>
+    selected && sectionOf(s, selected) !== 'favorite' ? (splitOfTab(s, selected) ?? selected) : null,
+  )
   const rowOf = (id: string) => rowIn(scrollRef.current, id)
   useEffect(() => {
     if (!active) return
@@ -386,10 +390,12 @@ function useAutoReveal(scrollRef: React.RefObject<HTMLDivElement | null>, active
       return
     }
     let observer: IntersectionObserver | undefined
+    let tries = 0
     let raf = requestAnimationFrame(function attach() {
       const el = rowIn(scroll, active)
       if (!el) {
-        raf = requestAnimationFrame(attach)
+        // The row may mount a frame later; give up after a few frames (e.g. a collapsed section).
+        if (++tries < 10) raf = requestAnimationFrame(attach)
         return
       }
       observer = new IntersectionObserver(

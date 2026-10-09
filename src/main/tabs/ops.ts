@@ -297,17 +297,26 @@ export class TabOps {
     for (const rec of live) if (rec.history) this.ctx.tabs.savedHistory.set(rec.tab.id, rec.history)
     const now = this.now()
     const sorted = [...live].sort((a, b) => (a.location?.index ?? 0) - (b.location?.index ?? 0))
+    const profileChanged: TabId[] = []
     this.ctx.store.update((d) => {
       for (const rec of sorted) {
         const tab: Tab = { ...rec.tab, asleep: true, loading: false, audible: false, lastActiveAt: now }
         if (!d.spaces[tab.spaceId]) tab.spaceId = d.spaceOrder[0] as string
         d.tabs[tab.id] = tab
         const where = rec.location && containerItems(d, rec.location.container) ? rec.location : undefined
-        if (where) insertItem(d, where.container, where.index, tab.id)
-        else {
+        let landed: ContainerRef | undefined
+        if (where) {
+          insertItem(d, where.container, where.index, tab.id)
+          landed = where.container
+        } else {
           const space = d.spaces[tab.spaceId]
-          if (space) insertItem(d, { kind: 'today', spaceId: space.id }, todayInsertIndex(space, 'reopen'), tab.id)
+          if (space) {
+            landed = { kind: 'today', spaceId: space.id }
+            insertItem(d, landed, todayInsertIndex(space, 'reopen'), tab.id)
+          }
         }
+        // Where it lands decides its Space, profile and pinned fields (the folder may have moved).
+        if (landed) profileChanged.push(...this.fixupTabs(d, [tab.id], landed))
         if (rec.archiveId) {
           const i = d.archive.findIndex((a) => a.id === rec.archiveId)
           if (i >= 0) d.archive.splice(i, 1)
@@ -316,6 +325,8 @@ export class TabOps {
       const last = live[live.length - 1]
       if (opts.select && opts.windowId && last) activateInDraft(d, opts.windowId, last.tab.id, now)
     })
+    // History from another profile's session stays behind (PR-05).
+    for (const id of profileChanged) this.ctx.tabs.savedHistory.delete(id)
     return live.map((r) => r.tab.id)
   }
 
@@ -394,9 +405,11 @@ export class TabOps {
       })
       this.undo.push('Delete Folder', () => {
         this.ctx.store.update((d) => {
+          if (d.folders[folderId]) return
           d.folders[folderId] = { ...structuredClone(snapshot), children: [] }
+          if (containerItems(d, loc.container)) insertItem(d, loc.container, loc.index, folderId)
         })
-        this.restorePlacement(before)
+        this.restorePlacement(before.filter((b) => b.id !== folderId))
       })
       return
     }
@@ -451,6 +464,50 @@ export class TabOps {
     })
   }
 
+  // ---- Folders ----
+
+  /**
+   * New Folder (FD-02): at the end of the pinned section, or — with selected items — in the
+   * first item's place, holding them (Today tabs get pinned). Undo puts the items back where
+   * they were and removes the folder.
+   */
+  createFolder(opts: {
+    container?: ContainerRef
+    index?: number
+    name?: string
+    items?: ItemId[]
+    windowId?: WindowId
+  }): FolderId {
+    const state = this.state
+    const items = opts.items ?? []
+    const spaceId = this.spaceOfWindow(opts.windowId)
+    const first = items.map((i) => locate(state, i)).find((l) => !!l)
+    let target: ContainerRef = opts.container ?? { kind: 'pinned', spaceId }
+    let at = opts.index ?? state.spaces[spaceId]?.pinned.length ?? 0
+    if (!opts.container && first && (first.container.kind === 'pinned' || first.container.kind === 'folder')) {
+      target = first.container
+      at = first.index
+    }
+    const before = this.capture(items)
+    const id = newId('f')
+    this.ctx.store.update((d) => {
+      d.folders[id] = { id, name: opts.name ?? 'New Folder', children: [], collapsed: false, createdAt: this.now() }
+      insertItem(d, target, at, id)
+    })
+    if (items.length > 0)
+      this.moveItems(items, { kind: 'folder', folderId: id }, 0, { windowId: opts.windowId, undoLabel: false })
+    this.undo.push('New Folder', () => {
+      this.restorePlacement(before)
+      this.ctx.store.update((d) => {
+        const f = d.folders[id]
+        if (!f || f.children.length > 0) return
+        removeItem(d, id)
+        delete d.folders[id]
+      })
+    })
+    return id
+  }
+
   // ---- Moves ----
 
   /** Records where items are and how their tabs are placed, for undo. */
@@ -481,12 +538,31 @@ export class TabOps {
 
   private restorePlacement(before: Placement[]): void {
     const reload: TabId[] = []
+    const state = this.state
+    // Windows keep their Space: a selected tab going back elsewhere hands over selection (TB-11).
+    const moving = new Set(before.flatMap((b) => Object.keys(b.tabs)))
+    const placementOf = (tabId: TabId) => before.find((x) => tabId in x.tabs)
+    const picks = this.selectionPicks(
+      state,
+      moving,
+      (tabId) => {
+        const b = placementOf(tabId)
+        return b ? spaceOfContainer(state, b.loc.container) : undefined
+      },
+      (tabId) => {
+        const b = placementOf(tabId)
+        return b ? profileOfContainer(state, b.loc.container) : undefined
+      },
+    )
     this.ctx.store.update((d) => {
       const present = before.filter((b) => (isTabId(b.id) ? d.tabs[b.id] : true) && locate(d, b.id))
       for (const b of present) removeItem(d, b.id)
-      const sorted = [...present].sort((a, b) =>
-        containerKey(a.loc.container) === containerKey(b.loc.container) ? a.loc.index - b.loc.index : 0,
-      )
+      // Same container: ascending index, so each item lands where it was.
+      const sorted = [...present].sort((a, b) => {
+        const ka = containerKey(a.loc.container)
+        const kb = containerKey(b.loc.container)
+        return ka < kb ? -1 : ka > kb ? 1 : a.loc.index - b.loc.index
+      })
       for (const b of sorted) {
         if (containerItems(d, b.loc.container)) insertItem(d, b.loc.container, b.loc.index, b.id)
         else {
@@ -511,11 +587,38 @@ export class TabOps {
           }
         }
       }
+      for (const p of picks) {
+        const w = d.windows[p.windowId]
+        if (w) w.activeTab[p.spaceId] = p.next
+      }
     })
     for (const tid of reload) {
       this.ctx.tabs.sleep(tid)
       this.ctx.tabs.savedHistory.delete(tid)
     }
+  }
+
+  /**
+   * For tabs about to move, the windows/Spaces whose selection must move on: a selected tab
+   * leaving the Space a window remembers it in hands selection to its neighbour (TB-11).
+   */
+  private selectionPicks(
+    state: OrbitState,
+    moving: Set<TabId>,
+    destSpace: (tabId: TabId) => SpaceId | undefined,
+    destProfile: (tabId: TabId) => string | undefined,
+  ): { windowId: WindowId; spaceId: SpaceId; next: TabId | null }[] {
+    const picks: { windowId: WindowId; spaceId: SpaceId; next: TabId | null }[] = []
+    for (const win of Object.values(state.windows)) {
+      for (const [spaceId, active] of Object.entries(win.activeTab)) {
+        if (!active || !moving.has(active)) continue
+        const space = destSpace(active)
+        const staysVisible = space ? space === spaceId : state.spaces[spaceId]?.profileId === destProfile(active)
+        if (!staysVisible)
+          picks.push({ windowId: win.id, spaceId, next: nextAfterClose(state, spaceId, active, moving) })
+      }
+    }
+    return picks
   }
 
   /** Keeps pinned URL, Space and profile consistent after tabs moved into `to`. Returns tabs to reload. */
@@ -568,8 +671,12 @@ export class TabOps {
     // Never move a folder into one of the other moving folders' subtrees.
     if (to.kind === 'folder' && items.includes(to.folderId)) return false
     if (to.kind === 'favorites') {
+      const target = containerKey(to)
       const incoming = items
-        .filter((id) => locate(state, id)?.container.kind !== 'favorites')
+        .filter((id) => {
+          const from = locate(state, id)
+          return !from || containerKey(from.container) !== target
+        })
         .flatMap((id) => tabsInItem(state, id)).length
       if (incoming > 0 && this.favoriteCount(to.profileId) + incoming > MAX_FAVORITES) {
         this.ctx.toast(opts.windowId, `Favorites are full (${MAX_FAVORITES} max)`)
@@ -581,15 +688,12 @@ export class TabOps {
     const destSpace = spaceOfContainer(state, to)
     const destProfile = profileOfContainer(state, to)
     // Windows keep their Space; a selected tab that leaves it hands selection to its neighbour (TB-11).
-    const picks: { windowId: WindowId; spaceId: SpaceId; next: TabId | null }[] = []
-    for (const win of Object.values(state.windows)) {
-      for (const [spaceId, active] of Object.entries(win.activeTab)) {
-        if (!active || !moving.has(active)) continue
-        const staysVisible = destSpace ? destSpace === spaceId : state.spaces[spaceId]?.profileId === destProfile
-        if (!staysVisible)
-          picks.push({ windowId: win.id, spaceId, next: nextAfterClose(state, spaceId, active, moving) })
-      }
-    }
+    const picks = this.selectionPicks(
+      state,
+      moving,
+      () => destSpace,
+      () => destProfile,
+    )
     let reload: TabId[] = []
     this.ctx.store.update((d) => {
       for (const id of items) removeItem(d, id)

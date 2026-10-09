@@ -3,7 +3,7 @@
  */
 import { expect, test } from '@playwright/test'
 import { type Fixtures, launchOrbit, type Orbit, startFixtures, state, tabPage, tabView } from './helpers'
-import { act, activeId, cmd, liveTabs, newTab, row, space, waitTab } from './tabs-support'
+import { act, activeId, center, cmd, drag, liveTabs, newTab, row, setState, space, waitTab } from './tabs-support'
 
 let fx: Fixtures
 let orbit: Orbit
@@ -197,4 +197,87 @@ test('[TB-01] favicons are fetched in the tab session and stored as small data U
   } finally {
     await new Promise((r) => server.close(() => r(null)))
   }
+})
+
+test('[FD-02][FD-10][TB-18] undoing New Folder puts its tabs back unpinned; undoing a folder delete restores it in place', async () => {
+  const { app } = orbit
+  const sp = (await space(app)).id
+  const pinned = await newTab(app, fx.url('/page/P'), { container: { kind: 'pinned', spaceId: sp }, activate: false })
+  const a = await newTab(app, fx.url('/page/A'), { activate: false })
+  const b = await newTab(app, fx.url('/page/B'), { activate: false })
+  const folderId = await cmd<string>(app, 'folders.create', { items: [b, a] })
+  expect((await state(app)).folders[folderId]?.children).toEqual([b, a])
+  expect((await state(app)).tabs[a]?.pinnedUrl).toBeTruthy()
+  await cmd(app, 'tabs.undo')
+  let s = await state(app)
+  expect(s.folders[folderId]).toBeUndefined()
+  expect(s.spaces[sp]?.today).toEqual([b, a])
+  expect(s.spaces[sp]?.pinned).toEqual([pinned])
+  expect(s.tabs[a]?.pinnedUrl).toBeUndefined()
+  // Delete a folder but keep its tabs, then undo: the folder is back where it was, holding them.
+  const box = await cmd<string>(app, 'folders.create', { name: 'Box', items: [pinned] })
+  await cmd(app, 'folders.delete', { folderId: box, keepChildren: true })
+  expect((await space(app)).pinned).toEqual([pinned])
+  await cmd(app, 'tabs.undo')
+  s = await state(app)
+  expect(s.spaces[sp]?.pinned).toEqual([box])
+  expect(s.folders[box]?.children).toEqual([pinned])
+})
+
+test('[TB-11][TB-18] undoing a move to another Space hands that Space’s selection on', async () => {
+  const { app } = orbit
+  const sA = (await space(app)).id
+  const sB = await cmd<string>(app, 'spaces.create', { name: 'B', activate: false })
+  const stay = await newTab(app, fx.url('/page/StayB'), { spaceId: sB, activate: false })
+  const t = await newTab(app, fx.url('/page/T'), { activate: false })
+  await cmd(app, 'tabs.moveToSpace', { ids: [t], spaceId: sB, section: 'today' })
+  await cmd(app, 'spaces.switch', { spaceId: sB })
+  await cmd(app, 'tabs.activate', { tabId: t })
+  expect(Object.values((await state(app)).windows)[0]?.activeTab[sB]).toBe(t)
+  await cmd(app, 'tabs.undo')
+  const s = await state(app)
+  expect(s.spaces[sA]?.today).toEqual([t])
+  const win = Object.values(s.windows)[0]
+  expect(win?.activeTab[sB]).toBe(stay)
+})
+
+test('[TB-08][TB-13][TB-18] undo of a multi-tab move restores each tab to its exact slot', async () => {
+  const { app } = orbit
+  const sp = (await space(app)).id
+  const ids: string[] = []
+  for (const n of [1, 2, 3, 4, 5, 6]) ids.unshift(await newTab(app, fx.url(`/page/U${n}`), { activate: false }))
+  const pinned = await newTab(app, fx.url('/page/P1'), { container: { kind: 'pinned', spaceId: sp }, activate: false })
+  const folderId = await cmd<string>(app, 'folders.create', {
+    name: 'F',
+    container: { kind: 'pinned', spaceId: sp },
+    index: 1,
+  })
+  const picked = [ids[4], pinned, ids[1]] as string[]
+  await cmd(app, 'tabs.move', { id: picked[0], ids: picked, to: { kind: 'folder', folderId }, index: 0 })
+  expect((await state(app)).folders[folderId]?.children).toEqual(picked)
+  await cmd(app, 'tabs.undo')
+  const s = await state(app)
+  expect(s.spaces[sp]?.today).toEqual(ids)
+  expect(s.spaces[sp]?.pinned).toEqual([pinned, folderId])
+})
+
+test('[TB-08] dragging a split view row moves the whole split to the drop slot', async () => {
+  const { app, shell } = orbit
+  const ids: string[] = []
+  for (const n of [1, 2, 3, 4]) ids.unshift(await newTab(app, fx.url(`/page/S${n}`), { activate: false }))
+  const [a, s1, s2, c] = ids as [string, string, string, string]
+  // Put the middle two into a split view (state only; the split lane owns its UI).
+  await setState(
+    app,
+    `const sp = d.spaces[d.spaceOrder[0]]; d.splits['v-test'] = { id: 'v-test', createdAt: 0, layout: { type: 'row', sizes: [0.5, 0.5], children: [{ type: 'leaf', tabId: arg[0] }, { type: 'leaf', tabId: arg[1] }] } }; sp.today = [arg[2], 'v-test', arg[3]]`,
+    [s1, s2, a, c],
+  )
+  const split = shell.locator('[data-slot][data-key="v-test"]')
+  await expect(split).toBeVisible()
+  const last = await center(row(shell, c))
+  await drag(shell, split.locator('[data-testid="tab-row"]').first(), {
+    x: last.x,
+    y: last.box.y + last.box.height - 4,
+  })
+  await expect.poll(async () => (await space(app)).today).toEqual([a, c, 'v-test'])
 })

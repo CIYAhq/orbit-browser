@@ -16,7 +16,10 @@ export const MAINTENANCE_INTERVAL_MS = 60_000
 
 export class TabMaintenance {
   private timer: NodeJS.Timeout | undefined
+  private launch: NodeJS.Timeout | undefined
+  private unsubscribe: (() => void) | undefined
   private shown = new Set<TabId>()
+  private onResume = () => this.run()
 
   constructor(
     private ctx: MainContext,
@@ -27,7 +30,7 @@ export class TabMaintenance {
   start(): void {
     this.shown = displayedTabs(this.ctx.store.state)
     // A tab stops being "viewed" when it leaves the screen: that moment starts its idle clock.
-    this.ctx.store.subscribe((next) => {
+    this.unsubscribe = this.ctx.store.subscribe((next) => {
       const shown = displayedTabs(next)
       const left = [...this.shown].filter((id) => !shown.has(id) && next.tabs[id])
       this.shown = shown
@@ -44,14 +47,20 @@ export class TabMaintenance {
     })
     this.timer = setInterval(() => this.run(), MAINTENANCE_INTERVAL_MS)
     this.timer.unref?.()
-    powerMonitor.on('resume', () => this.run())
+    powerMonitor.on('resume', this.onResume)
     // Launch counts too: idle time accrues while the app is closed.
-    setTimeout(() => this.run(), 2_000).unref?.()
+    this.launch = setTimeout(() => this.run(), 2_000)
+    this.launch.unref?.()
   }
 
   stop(): void {
     if (this.timer) clearInterval(this.timer)
+    if (this.launch) clearTimeout(this.launch)
     this.timer = undefined
+    this.launch = undefined
+    this.unsubscribe?.()
+    this.unsubscribe = undefined
+    powerMonitor.off('resume', this.onResume)
   }
 
   /** One pass: archive idle Today items, then put idle background tabs to sleep. */
