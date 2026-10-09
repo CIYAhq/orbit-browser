@@ -283,7 +283,12 @@ export class PaneEngine {
     const targets = layout ? layoutBoxes(layout, local, PANE_GAP).panes : []
     const keep = new Set(targets.map((t) => t.tabId))
     const previous = new Map([...this.anims].map(([id, a]) => [id, rectOf(a)]))
-    for (const id of [...this.anims.keys()]) if (!keep.has(id)) this.anims.delete(id)
+    for (const [id, rect] of previous) {
+      if (keep.has(id)) continue
+      this.anims.delete(id)
+      // A pane closing within the same split fades and shrinks while its neighbours grow (SV-26).
+      if (animate && id !== DROP_PANE && targets.length > 0) this.ghost(rect)
+    }
     for (const { tabId, rect } of targets) {
       let anim = this.anims.get(tabId)
       if (!anim) {
@@ -313,6 +318,26 @@ export class PaneEngine {
     if ([...this.anims.values()].some((a) => a.x.animating || a.y.animating || a.w.animating || a.h.animating)) {
       this.schedule()
     }
+  }
+
+  /** A short-lived card where a closed pane was; the page view is already gone. */
+  private ghost(r: Box): void {
+    if (!this.host || r.width < 1 || r.height < 1) return
+    const el = document.createElement('div')
+    el.className = 'pane pane--ghost'
+    el.dataset.testid = 'split-ghost'
+    this.writePane(el, r)
+    this.host.prepend(el)
+    const at = `translate(${r.x}px, ${r.y}px)`
+    const fade = el.animate(
+      [
+        { opacity: 1, transform: `${at} scale(1)` },
+        { opacity: 0, transform: `${at} scale(0.96)` },
+      ],
+      { duration: 200, easing: 'cubic-bezier(0.2, 0, 0, 1)', fill: 'forwards' },
+    )
+    fade.onfinish = () => el.remove()
+    fade.oncancel = () => el.remove()
   }
 
   /**

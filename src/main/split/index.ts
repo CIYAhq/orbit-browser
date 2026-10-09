@@ -557,6 +557,16 @@ export function registerSplit(ctx: MainContext): void {
     return ok
   }
 
+  commands.register('split.rename', ({ splitId, name }) => {
+    store.update((d) => {
+      const split = d.splits[splitId]
+      if (!split) return
+      const clean = name?.trim().slice(0, 120)
+      if (clean) split.name = clean
+      else delete split.name
+    })
+  })
+
   commands.register('split.move', ({ splitId, to, index }) => moveSplit(splitId, to, index ?? Number.MAX_SAFE_INTEGER))
 
   // ---- Menus ----
@@ -642,6 +652,13 @@ export function registerSplit(ctx: MainContext): void {
     })
     items.push(
       { type: 'separator' },
+      {
+        label: 'Rename…',
+        click: () => windowId && windows.sendToWindow(windowId, 'sidebar:rename', { id: splitId }),
+      },
+      ...(split.name
+        ? [{ label: 'Show Pane Titles', click: () => void commands.run('split.rename', { splitId, name: null }) }]
+        : []),
       { label: 'Flip Orientation', click: () => void commands.run('split.flip', { splitId }) },
       { label: 'Equalize Sizes', click: () => void commands.run('split.equalize', { splitId }) },
       { label: 'Duplicate', click: () => void commands.run('split.duplicate', { splitId }) },
@@ -686,6 +703,10 @@ export function registerSplit(ctx: MainContext): void {
   })
 
   commands.register('split.stripHover', ({ hovered }, c) => strip.setHovered(windowOf(c), hovered))
+  commands.register('split.stripTarget', (_args, c) => {
+    const windowId = windowOf(c)
+    return { tabId: windowId ? strip.info(windowId).tabId : null }
+  })
 
   // ---- Focus follows the pane the user clicks into (SV-14) ----
 

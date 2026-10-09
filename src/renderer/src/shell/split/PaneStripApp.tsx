@@ -14,14 +14,17 @@ export function PaneStripApp() {
   const palette = usePalette(win?.spaceId)
   const [tabId, setTabId] = useState<string | null>(null)
   const [nonce, setNonce] = useState(0)
-  useEffect(
-    () =>
-      window.orbit.on('strip:show', (payload) => {
-        setTabId((payload as { tabId: string }).tabId)
-        setNonce((n) => n + 1)
-      }),
-    [],
-  )
+  useEffect(() => {
+    const off = window.orbit.on('strip:show', (payload) => {
+      setTabId((payload as { tabId: string }).tabId)
+      setNonce((n) => n + 1)
+    })
+    // The first show can arrive before this page has loaded: ask which pane the strip is for.
+    void invoke('split.stripTarget', {}).then(({ tabId: current }) => {
+      if (current) setTabId((existing) => existing ?? current)
+    })
+    return off
+  }, [])
   if (!tabId) return null
   return (
     <div

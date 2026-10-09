@@ -72,6 +72,8 @@ export interface Split {
   id: SplitId
   layout: SplitLayout
   createdAt: number
+  /** User-chosen name; when set, the sidebar row shows it instead of the pane titles (SV-21, SV-22). */
+  name?: string
 }
 
 export type ColorMode = 'system' | 'light' | 'dark'

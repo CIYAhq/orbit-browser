@@ -42,10 +42,14 @@ export interface SplitCommands {
   'split.duplicate': { args: { splitId: SplitId }; result: SplitId | null }
   /** Moves a whole split (pin/unpin, Favorites, another Space), keeping panes, sizes and orientation (SV-23). */
   'split.move': { args: { splitId: SplitId; to: ContainerRef; index?: number }; result: boolean }
+  /** Names a split (null or blank clears it, showing the pane titles again) (SV-22). */
+  'split.rename': { args: { splitId: SplitId; name: string | null }; result: void }
   /** Right-click menu of a split row (SV-22). */
   'split.contextMenu': { args: { splitId: SplitId }; result: void }
   /** The split-controls menu of a pane (SV-12). */
   'split.paneMenu': { args: { tabId: TabId }; result: void }
+  /** The pane the strip currently belongs to (the strip asks once its page has loaded). */
+  'split.stripTarget': { args: Record<string, never>; result: { tabId: TabId | null } }
   /** The pane strip reports pointer hover so it stays while used (SV-12). */
   'split.stripHover': { args: { hovered: boolean }; result: void }
 }

@@ -598,6 +598,55 @@ html.is-resizing * {
   opacity: 1;
 }
 
+.split-row__named {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 6px;
+}
+
+.split-row__icons {
+  flex: none;
+  display: flex;
+}
+
+.split-row__icon {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+}
+
+.split-row__icon + .split-row__icon {
+  margin-left: -4px;
+}
+
+.split-row__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.split-row__rename {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  margin-left: 4px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  outline: none;
+  font: inherit;
+  color: var(--text);
+  background: var(--active);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent);
+  user-select: text;
+}
+
 .split-row__close:hover,
 .split-segment__audio:hover {
   background: var(--hover);
@@ -645,6 +694,11 @@ html.is-resizing * {
   color: var(--text-muted);
   font-size: 13px;
   white-space: nowrap;
+}
+
+.pane--ghost {
+  pointer-events: none;
+  transform-origin: 50% 50%;
 }
 
 /* Drop indicator (SV-04, AP-03): translucent, theme-coloured. */

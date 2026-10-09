@@ -116,8 +116,11 @@ test('[SV-13][SV-24] dragging a divider resizes the native views and the sizes p
   await orbit.shell.mouse.move(x, y)
   await orbit.shell.mouse.down()
   for (let i = 1; i <= 10; i++) await orbit.shell.mouse.move(x + i * 12, y)
-  // Mid-drag the views already follow the pointer.
+  // Mid-drag the views already follow the pointer, while the stored layout (and so every
+  // state subscriber, e.g. the sidebar) is untouched until the drag ends.
   await expect.poll(async () => (await tabView(orbit.app, a))?.bounds.width).toBeGreaterThan(before.width + 100)
+  const midDrag = (await splitOf(orbit.app, a))?.layout
+  expect(midDrag?.type === 'row' && midDrag.sizes).toEqual([0.5, 0.5])
   await orbit.shell.mouse.up()
   await expectViewsOverPanes(orbit, [a, b])
   const after = (await tabView(orbit.app, a))?.bounds as Box
@@ -320,6 +323,10 @@ test('[SV-12][SV-14] hovering a pane top shows its strip; clicking a pane focuse
   expect(Math.abs(bounds.x + bounds.width / 2 - (pb.x + pb.width / 2))).toBeLessThanOrEqual(1)
   expect(bounds.y).toBeGreaterThanOrEqual(pb.y)
   expect(bounds.y).toBeLessThan(pb.y + 20)
+  // Its buttons are there on the very first show.
+  const stripPage = await viewPage(orbit.app, 'strip' as 'overlay')
+  await expect(stripPage.getByTestId('pane-strip-close')).toBeVisible()
+  await expect(stripPage.getByTestId('pane-strip-menu')).toBeVisible()
   // Moving down into the page hides it again.
   await second.mouse.move(160, 300)
   await expect.poll(async () => (await stripInfo(orbit.app)).visible).toBe(false)
@@ -514,4 +521,27 @@ test('[SV-25][SV-04] a tab dropped on a full split is refused with a toast', asy
   await orbit.shell.mouse.up()
   await expect(orbit.shell.getByTestId('split-pane')).toHaveCount(4)
   await expect(orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${extra}"]`)).toHaveCount(1)
+})
+
+test('[SV-22][SV-21] a split can be named; the name replaces the pane titles', async () => {
+  const b = await openTab(orbit.app, 'Docs')
+  const a = await openTab(orbit.app, 'Mail')
+  const splitId = (await run(orbit.app, 'split.create', { tabIds: [a, b] })) as string
+  const row = orbit.shell.getByTestId('split-row')
+  await expect(row.getByTestId('split-segment')).toHaveCount(2)
+  await row.dblclick()
+  const field = row.getByTestId('split-rename')
+  await expect(field).toBeFocused()
+  await field.fill('Morning')
+  await field.press('Enter')
+  await expect(row.getByTestId('split-name')).toHaveText('Morning')
+  await expect(row.getByTestId('split-segment')).toHaveCount(0)
+  expect((await state(orbit.app)).splits[splitId]?.name).toBe('Morning')
+  // Escape cancels an edit; clearing the name shows the pane titles again.
+  await row.dblclick()
+  await row.getByTestId('split-rename').fill('Nope')
+  await row.getByTestId('split-rename').press('Escape')
+  await expect(row.getByTestId('split-name')).toHaveText('Morning')
+  await run(orbit.app, 'split.rename', { splitId, name: null })
+  await expect(row.getByTestId('split-segment')).toHaveCount(2)
 })

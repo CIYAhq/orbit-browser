@@ -1,5 +1,5 @@
 import { Volume2, VolumeX, X } from 'lucide-react'
-import { memo } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { layoutLeaves, paneOrder } from '../../../../shared/split'
 import type { OrbitState } from '../../../../shared/state'
 import { invoke } from '../../api'
@@ -35,8 +35,21 @@ export function SplitRow({ splitId, depth }: { splitId: string; depth: number })
     return split ? paneOrder(split.layout).join(',') : ''
   })
   const focused = useOrbit((s) => focusedPaneOf(s, splitId))
+  const name = useOrbit((s) => s.splits[splitId]?.name ?? '')
+  const [renaming, setRenaming] = useState(false)
+  useEffect(
+    () =>
+      window.orbit.on('sidebar:rename', (payload) => {
+        if ((payload as { id?: string }).id === splitId) setRenaming(true)
+      }),
+    [splitId],
+  )
   if (!order) return null
   const panes = order.split(',')
+  const commitName = (value: string | null) => {
+    setRenaming(false)
+    if (value !== null && value.trim() !== name) void invoke('split.rename', { splitId, name: value })
+  }
   return (
     <div
       role="button"
@@ -59,16 +72,32 @@ export function SplitRow({ splitId, depth }: { splitId: string; depth: number })
       onAuxClick={(e) => {
         if (e.button === 1) void invoke('split.close', { splitId })
       }}
+      onDoubleClick={(e) => {
+        if (!(e.target as Element).closest('button')) setRenaming(true)
+      }}
       onContextMenu={(e) => {
         e.preventDefault()
         void invoke('split.contextMenu', { splitId })
       }}
     >
-      <span className="split-row__segments">
-        {panes.map((tabId) => (
-          <Segment key={tabId} tabId={tabId} focused={focused === tabId && panes.length > 1} />
-        ))}
-      </span>
+      {renaming ? (
+        <RenameField initial={name} onDone={commitName} />
+      ) : name ? (
+        <span className="split-row__named" data-testid="split-name">
+          <span className="split-row__icons">
+            {panes.map((tabId) => (
+              <PaneIcon key={tabId} tabId={tabId} />
+            ))}
+          </span>
+          <span className="split-row__name">{name}</span>
+        </span>
+      ) : (
+        <span className="split-row__segments">
+          {panes.map((tabId) => (
+            <Segment key={tabId} tabId={tabId} focused={focused === tabId && panes.length > 1} />
+          ))}
+        </span>
+      )}
       <button
         type="button"
         className="split-row__close"
@@ -83,6 +112,43 @@ export function SplitRow({ splitId, depth }: { splitId: string; depth: number })
     </div>
   )
 }
+
+function RenameField({ initial, onDone }: { initial: string; onDone: (value: string | null) => void }) {
+  // Enter/Escape end the edit once; a blur from the field unmounting must not commit again.
+  const ended = useRef(false)
+  const end = (value: string | null) => {
+    if (ended.current) return
+    ended.current = true
+    onDone(value)
+  }
+  return (
+    <input
+      className="split-row__rename"
+      data-testid="split-rename"
+      defaultValue={initial}
+      placeholder="Name this split"
+      // biome-ignore lint/a11y/noAutofocus: the field opens on an explicit rename request
+      autoFocus
+      onFocus={(e) => e.currentTarget.select()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        e.stopPropagation()
+        if (e.key === 'Enter') end(e.currentTarget.value)
+        else if (e.key === 'Escape') end(null)
+      }}
+      onBlur={(e) => end(e.currentTarget.value)}
+    />
+  )
+}
+
+const PaneIcon = memo(function PaneIcon({ tabId }: { tabId: string }) {
+  const favicon = useOrbit((s) => s.tabs[tabId]?.favicon)
+  return (
+    <span className="split-row__icon">
+      <Favicon src={favicon} size={14} />
+    </span>
+  )
+})
 
 const Segment = memo(function Segment({ tabId, focused }: { tabId: string; focused: boolean }) {
   const tab = useOrbit((s) => s.tabs[tabId])
