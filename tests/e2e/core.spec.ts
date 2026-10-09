@@ -290,3 +290,90 @@ test('[NV-18] links and files from other apps open as tabs in the current Space 
   expect(s.spaces[spaceId]?.today).toHaveLength(3)
   expect(Object.values(s.tabs).every((t) => t.spaceId === spaceId)).toBe(true)
 })
+
+test('[NV-20] HTML fullscreen fills the window and restores the pane on exit (review F11)', async () => {
+  const tabId = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/Video') })) as string
+  await tabPage(orbit.app, '/page/Video')
+  await expect.poll(async () => (await viewPlacement(orbit.app, tabId))?.visible).toBe(true)
+  const bounds = () =>
+    orbit.app.evaluate((_e, id) => {
+      const ctx = (globalThis as unknown as OrbitGlobal).__orbit.ctx
+      const [width, height] = ctx.windows.get(ctx.windows.ids()[0] as string)?.getContentSize() ?? [0, 0]
+      return { view: ctx.tabs.get(id)?.getBounds(), content: { x: 0, y: 0, width, height } }
+    }, tabId)
+  const framed = (await bounds()).view
+  expect(framed?.x).toBeGreaterThan(0)
+  const fullscreen = (on: boolean) =>
+    orbit.app.evaluate(
+      (_e, [id, enter]) =>
+        (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs
+          .contents(id)
+          ?.executeJavaScript(
+            enter ? 'document.documentElement.requestFullscreen().then(() => true)' : 'document.exitFullscreen()',
+            true,
+          ),
+      [tabId, on] as const,
+    )
+  await fullscreen(true)
+  await expect
+    .poll(async () => {
+      const b = await bounds()
+      return JSON.stringify(b.view) === JSON.stringify(b.content)
+    })
+    .toBe(true)
+  await fullscreen(false)
+  await expect.poll(async () => (await bounds()).view?.x).toBe(framed?.x)
+})
+
+test('[NV-14] a crashed shell renderer reloads, and a crashed tab reloads when shown (review F11)', async () => {
+  const a = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/Crashy') })) as string
+  await tabPage(orbit.app, '/page/Crashy')
+  const b = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/Calm') })) as string
+  await tabPage(orbit.app, '/page/Calm')
+  // A background tab crashes; selecting it reloads the page.
+  await orbit.app.evaluate(
+    (_e, id) => (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id)?.forcefullyCrashRenderer(),
+    a,
+  )
+  const crashed = (id: string) =>
+    orbit.app.evaluate(
+      (_e, t) => (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(t)?.isCrashed() ?? null,
+      id,
+    )
+  await expect.poll(() => crashed(a)).toBe(true)
+  await run(orbit.app, 'tabs.activate', { tabId: a })
+  await expect.poll(() => crashed(a)).toBe(false)
+  await expect
+    .poll(() =>
+      orbit.app.evaluate(
+        (_e, t) =>
+          (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs
+            .contents(t)
+            ?.executeJavaScript('document.getElementById("title")?.textContent'),
+        a,
+      ),
+    )
+    .toBe('Crashy')
+  expect(b).toBeTruthy()
+  // The window's own UI renderer crashes: it comes back with the sidebar.
+  await orbit.app.evaluate(() => {
+    const ctx = (globalThis as unknown as OrbitGlobal).__orbit.ctx
+    ctx.windows.get(ctx.windows.ids()[0] as string)?.webContents.forcefullyCrashRenderer()
+  })
+  await expect
+    .poll(
+      () =>
+        orbit.app.evaluate(() => {
+          const ctx = (globalThis as unknown as OrbitGlobal).__orbit.ctx
+          const shell = ctx.windows.get(ctx.windows.ids()[0] as string)?.webContents
+          if (!shell || shell.isCrashed() || shell.isLoading()) return false
+          // A renderer that is just dying never answers: give each probe a deadline.
+          return Promise.race([
+            shell.executeJavaScript('!!document.querySelector("[data-testid=sidebar]")'),
+            new Promise((r) => setTimeout(() => r(false), 500)),
+          ])
+        }),
+      { timeout: 15_000 },
+    )
+    .toBe(true)
+})

@@ -27,6 +27,8 @@ interface WindowRecord {
   /** Ignore renderer pane reports older than this state sequence (after a main-side fast switch). */
   minPaneSeq: number
   overlayShown: boolean
+  /** Tab whose page is in HTML fullscreen (video): its view fills the window. */
+  htmlFullscreen?: TabId
 }
 
 /** A tab view placed in a window. */
@@ -36,6 +38,8 @@ interface Attachment {
 }
 
 const isMac = process.platform === 'darwin'
+/** Isolated world for Orbit's own small page scripts (the page can't tamper with them). */
+const EXIT_FULLSCREEN_WORLD = 1001
 
 export function rendererEntry(): { url?: string; file: string } {
   return {
@@ -232,6 +236,7 @@ export class WindowManager {
     })
     if (winState.maximized) win.maximize()
     this.registerUi(win.webContents, id)
+    this.reloadUiOnCrash(win.webContents, 'shell')
     this.attachShortcuts(win.webContents)
     this.hardenUi(win.webContents)
 
@@ -263,6 +268,7 @@ export class WindowManager {
     win.on('leave-full-screen', () => this.setRuntime(id, { fullscreen: false }))
     win.on('resize', () => {
       if (rec.overlayShown) this.fitOverlay(rec)
+      if (rec.htmlFullscreen) this.applyPanes(id, rec.panes, rec.radius)
     })
     const saveBounds = () => {
       if (win.isDestroyed() || win.isFullScreen() || win.isMinimized()) return
@@ -383,9 +389,81 @@ export class WindowManager {
       view.setBounds(roundRect(pane.rect))
       view.setBorderRadius(radius)
       view.setVisible(true)
+      // A tab whose page crashed while in the background reloads when it is shown again.
+      if (!rec.visible.has(pane.tabId) && view.webContents.isCrashed()) view.webContents.reload()
     }
     rec.visible = wanted
     if (panes.length === 1) rec.lastSingleRect = panes[0]?.rect
+    if (rec.htmlFullscreen) this.layoutHtmlFullscreen(rec, wanted)
+  }
+
+  /**
+   * HTML fullscreen (a video's fullscreen button): the page's view covers the whole window,
+   * over the sidebar and other panes, without rounded corners. Leaving the tab ends it.
+   */
+  private layoutHtmlFullscreen(rec: WindowRecord, shown: Set<TabId>): void {
+    const tabId = rec.htmlFullscreen
+    const entry = tabId ? this.attached.get(tabId) : undefined
+    if (!tabId || !entry || entry.windowId !== rec.id || !shown.has(tabId)) {
+      rec.htmlFullscreen = undefined
+      const contents = tabId ? this.ctx.tabs.contents(tabId) : undefined
+      contents
+        ?.executeJavaScriptInIsolatedWorld(EXIT_FULLSCREEN_WORLD, [
+          { code: 'document.fullscreenElement && document.exitFullscreen()' },
+        ])
+        .catch(() => {})
+      return
+    }
+    for (const other of shown) {
+      if (other !== tabId) this.attached.get(other)?.view.setVisible(false)
+    }
+    const [width = 0, height = 0] = rec.win.getContentSize()
+    const children = rec.win.contentView.children
+    const overlayIndex = rec.overlay ? children.indexOf(rec.overlay) : -1
+    rec.win.contentView.addChildView(entry.view, overlayIndex >= 0 ? overlayIndex : undefined)
+    entry.view.setBounds({ x: 0, y: 0, width, height })
+    entry.view.setBorderRadius(0)
+  }
+
+  private setHtmlFullscreen(tabId: TabId, contents: WebContents, on: boolean): void {
+    if (on) {
+      const entry = this.attached.get(tabId)
+      const rec = entry && entry.view.webContents === contents ? this.records.get(entry.windowId) : undefined
+      if (!rec) return
+      rec.htmlFullscreen = tabId
+      this.applyPanes(rec.id, rec.panes, rec.radius)
+      return
+    }
+    for (const rec of this.records.values()) {
+      if (rec.htmlFullscreen !== tabId) continue
+      rec.htmlFullscreen = undefined
+      this.applyPanes(rec.id, rec.panes, rec.radius)
+    }
+  }
+
+  /** Reloads a tab whose page crashed (e.g. when the user selects it again). True if it did. */
+  reloadIfCrashed(tabId: TabId): boolean {
+    const contents = this.ctx.tabs.contents(tabId)
+    if (!contents?.isCrashed()) return false
+    contents.reload()
+    return true
+  }
+
+  /** Orbit's own UI must never stay blank: reload a shell or overlay renderer that died (a few times). */
+  private reloadUiOnCrash(contents: WebContents, view: RendererView): void {
+    const crashes: number[] = []
+    contents.on('render-process-gone', (_event, details) => {
+      if (this.quitting || contents.isDestroyed() || details.reason === 'clean-exit') return
+      const now = Date.now()
+      while (crashes.length > 0 && now - (crashes[0] as number) > 60_000) crashes.shift()
+      crashes.push(now)
+      if (crashes.length > 3) {
+        console.error(`[windows] the ${view} renderer keeps crashing (${details.reason}); not reloading again`)
+        return
+      }
+      console.error(`[windows] the ${view} renderer is gone (${details.reason}); reloading`)
+      loadRenderer(contents, view)
+    })
   }
 
   /** Removes a (sleeping, closing or replaced) tab view from whatever window holds it. Safe for destroyed views. */
@@ -469,8 +547,10 @@ export class WindowManager {
     }
   }
 
-  /** Follows a tab's live web contents: a page that closes itself leaves no dead view behind. */
+  /** Follows a tab's live web contents: fullscreen requests, and pages that close themselves. */
   private watchTab(tabId: TabId, contents: WebContents): void {
+    contents.on('enter-html-full-screen', () => this.setHtmlFullscreen(tabId, contents, true))
+    contents.on('leave-html-full-screen', () => this.setHtmlFullscreen(tabId, contents, false))
     contents.once('destroyed', () => {
       const entry = this.attached.get(tabId)
       if (!entry || entry.view.webContents !== contents) return // slept or closed by Orbit: already detached
@@ -545,6 +625,7 @@ export class WindowManager {
     overlay.setVisible(false)
     rec.win.contentView.addChildView(overlay)
     this.registerUi(overlay.webContents, rec.id)
+    this.reloadUiOnCrash(overlay.webContents, 'overlay')
     this.attachShortcuts(overlay.webContents)
     this.hardenUi(overlay.webContents)
     loadRenderer(overlay.webContents, 'overlay')
