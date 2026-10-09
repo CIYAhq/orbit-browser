@@ -52,6 +52,14 @@ interface ClosedPeek {
   at: number
 }
 
+/** Opens a link from a page in that window's Peek (set once the feature is registered). */
+let peekLink: ((tabId: TabId, url: string) => void) | undefined
+
+/** "Open Link in Peek" from a page's context menu (PK-03). */
+export function openLinkInPeek(tabId: TabId, url: string): void {
+  peekLink?.(tabId, url)
+}
+
 /** ⌘Z reopens a Peek only right after it closed. */
 const UNDO_WINDOW_MS = 10_000
 /** How long a transition may run before main commits it anyway (overlay gone, reduced motion…). */
@@ -411,6 +419,11 @@ export function registerPeek(ctx: MainContext): void {
       .catch(() => {})
   }
 
+  peekLink = (tabId, url) => {
+    const windowId = windows.windowOfTab(tabId)
+    if (canPeek(windowId)) openPeek(windowId, url)
+  }
+
   // ---- Wiring ----
 
   commands.register('peek.open', ({ url }, c) => {
@@ -485,11 +498,18 @@ export function registerPeek(ctx: MainContext): void {
   })
 
   // Selecting another tab, switching Space or replacing the overlay dismisses the Peek (PK-13).
-  store.subscribe((next, _prev, patches) => {
+  store.subscribe((next, prev, patches) => {
     for (const p of patches) {
       if (p.op === 'remove' && p.path[0] === 'tabs' && p.path.length === 2) {
-        const gone = _prev.tabs[String(p.path[1])]
+        const gone = prev.tabs[String(p.path[1])]
         if (gone && !gone.floating) lastTabCloseAt = Date.now()
+      }
+    }
+    // Switching to another main window dismisses the Peek too (PK-13).
+    for (const [id, w] of Object.entries(next.windows)) {
+      if (w.kind !== 'main' || !w.focused || prev.windows[id]?.focused) continue
+      for (const s of sessions.values()) {
+        if (s.windowId !== id && s.phase === 'open') queueMicrotask(() => closePeek(s.windowId, { animate: false }))
       }
     }
     for (const s of [...sessions.values()]) {
