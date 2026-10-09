@@ -1089,62 +1089,116 @@ html[data-view="overlay"] body {
 .overlay {
   position: fixed;
   inset: 0;
-  animation: overlay-in 140ms ease-out;
 }
 
-.overlay--commandbar {
-  background: rgba(10, 10, 14, 0.18);
+/* ---------- Command bar (CB-04, FL-16/17) ---------- */
+
+/* Hidden warm-up instance (rendered once at overlay start-up). */
+.cmdbar-warm {
+  position: fixed;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
-@keyframes overlay-in {
-  from {
-    opacity: 0;
-  }
+/* A very light scrim: the page stays readable behind the bar. */
+.cmdbar-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 10, 14, 0.07);
+  pointer-events: none;
+}
+
+/* Centred in the window; the input sits about 36% down so the list grows downward without moving it. */
+.cmdbar-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: max(24px, calc(36vh - 28px));
+  pointer-events: none;
 }
 
 .cmdbar {
-  position: absolute;
-  top: 18vh;
-  left: 50%;
-  width: min(680px, calc(100vw - 48px));
-  transform: translateX(-50%);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--frame-top) 18%, rgba(255, 255, 255, 0.96));
-  color: #1c1c1f;
+  --cmd-bg: color-mix(in srgb, var(--frame-top) 14%, rgba(255, 255, 255, 0.97));
+  --cmd-text: #1c1c1f;
+  --cmd-muted: rgba(28, 28, 31, 0.5);
+  --cmd-line: rgba(0, 0, 0, 0.07);
+  --cmd-select: color-mix(in srgb, var(--accent) 15%, transparent);
+  --cmd-kbd: rgba(0, 0, 0, 0.05);
+  pointer-events: auto;
+  width: min(660px, calc(100vw - 48px));
+  border-radius: 12px;
+  background: var(--cmd-bg);
+  color: var(--cmd-text);
   box-shadow:
-    0 0 0 0.5px rgba(0, 0, 0, 0.14),
-    0 24px 60px rgba(0, 0, 0, 0.28),
-    0 4px 14px rgba(0, 0, 0, 0.12);
+    0 0 0 0.5px rgba(0, 0, 0, 0.16),
+    0 22px 56px rgba(0, 0, 0, 0.24),
+    0 4px 14px rgba(0, 0, 0, 0.1);
   overflow: hidden;
-  animation: cmdbar-in 170ms var(--ease-spring);
   transform-origin: 50% 0;
+  will-change: transform, opacity;
 }
 
-@media (prefers-color-scheme: dark) {
-  .cmdbar {
-    background: color-mix(in srgb, var(--frame-top) 30%, rgba(28, 28, 32, 0.97));
-    color: #f3f3f5;
-  }
-}
-
-@keyframes cmdbar-in {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) scale(0.97) translateY(-4px);
-  }
+.cmdbar--dark {
+  --cmd-bg: color-mix(in srgb, var(--frame-top) 26%, rgba(30, 30, 34, 0.98));
+  --cmd-text: #f2f2f4;
+  --cmd-muted: rgba(242, 242, 244, 0.52);
+  --cmd-line: rgba(255, 255, 255, 0.08);
+  --cmd-select: color-mix(in srgb, var(--accent) 30%, transparent);
+  --cmd-kbd: rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 0 0 0.5px rgba(255, 255, 255, 0.12),
+    0 22px 56px rgba(0, 0, 0, 0.5),
+    0 4px 14px rgba(0, 0, 0, 0.3);
 }
 
 .cmdbar__input-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   height: 56px;
-  padding: 0 18px;
+  padding: 0 16px;
 }
 
-.cmdbar__search-icon {
+.cmdbar__lead {
   flex: none;
-  opacity: 0.5;
+  display: grid;
+  place-items: center;
+  width: 20px;
+}
+
+.cmdbar__lead--search {
+  color: var(--cmd-muted);
+}
+
+.cmdbar__chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 4px 0 8px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.cmdbar__chip-x {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  opacity: 0.7;
+}
+
+.cmdbar__chip-x:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .cmdbar__input {
@@ -1157,63 +1211,135 @@ html[data-view="overlay"] body {
   font: inherit;
   font-size: 18px;
   color: inherit;
+  caret-color: var(--accent);
+}
+
+.cmdbar__input::selection {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 .cmdbar__input::placeholder {
-  color: currentColor;
-  opacity: 0.38;
+  color: var(--cmd-muted);
 }
 
 .cmdbar__results {
-  list-style: none;
-  margin: 0;
   padding: 6px;
-  border-top: 1px solid rgba(127, 127, 127, 0.16);
-  max-height: 420px;
-  overflow-y: auto;
+  border-top: 1px solid var(--cmd-line);
+  overflow: hidden;
 }
 
-.cmdbar__result {
+/* The highlight moves instantly (no transition): FL-17. */
+.cmdbar__row {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   height: 40px;
-  padding: 0 12px;
-  border-radius: 9px;
+  padding: 0 10px;
+  border-radius: 8px;
+  white-space: nowrap;
 }
 
-.cmdbar__result.is-selected {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+.cmdbar__row.is-selected {
+  background: var(--cmd-select);
 }
 
-.cmdbar__result-icon {
+.cmdbar__icon {
   flex: none;
   display: grid;
   place-items: center;
   width: 20px;
-  opacity: 0.8;
+  height: 20px;
+  color: var(--cmd-muted);
 }
 
-.cmdbar__result-title {
+.cmdbar__row.is-selected .cmdbar__icon {
+  color: var(--accent);
+}
+
+.cmdbar__emoji {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.cmdbar__split {
+  display: grid;
+  grid-template-columns: repeat(2, 9px);
+  gap: 1px;
+}
+
+.cmdbar__split .favicon {
+  width: 9px;
+  height: 9px;
+}
+
+.cmdbar__text {
   flex: 1 1 auto;
   min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   overflow: hidden;
-  white-space: nowrap;
+}
+
+.cmdbar__title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   font-size: 14px;
 }
 
-.cmdbar__result-subtitle {
-  flex: none;
-  max-width: 40%;
+.cmdbar__subtitle {
+  flex: 1 1 0;
+  min-width: 60px;
   overflow: hidden;
-  white-space: nowrap;
   text-overflow: ellipsis;
   font-size: 12px;
-  opacity: 0.55;
+  color: var(--cmd-muted);
 }
 
-.cmdbar__result-enter {
+.cmdbar__hint {
   flex: none;
-  opacity: 0.5;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.cmdbar__shortcut,
+.cmdbar__hint kbd {
+  flex: none;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 0;
+  background: var(--cmd-kbd);
+  color: var(--cmd-muted);
+}
+
+.cmdbar__label {
+  flex: none;
+  min-width: 52px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--cmd-muted);
+}
+
+.cmdbar__remove {
+  position: absolute;
+  right: 4px;
+  display: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--cmd-muted);
+  background: var(--cmd-bg);
+}
+
+.cmdbar__row:hover .cmdbar__remove {
+  display: grid;
+}
+
+.cmdbar__remove:hover {
+  color: var(--cmd-text);
 }

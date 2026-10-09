@@ -204,7 +204,8 @@ describe('automatic picture-in-picture (MD-01, MD-08)', () => {
     expect(siteOf('file:///tmp/a.html')).toBe('')
     const s = settings()
     applySitePip(s, 'about:blank', 'always', NOW)
-    expect(s.pipOffSites).toBeUndefined()
+    expect(s.pipOffSites ?? []).toEqual([])
+    expect(s.pipSnoozed ?? {}).toEqual({})
   })
 })
 
