@@ -399,6 +399,36 @@ export function siblingOf(layout: SplitLayout, tabId: TabId): TabId | undefined 
   return neighbor ? layoutLeaves(neighbor)[0] : undefined
 }
 
+/**
+ * Where a pane sits relative to a neighbour, so it can be put back after closing:
+ * e.g. { target: 'b', side: 'left' } means "left of b". Prefers the next sibling.
+ */
+export function anchorOf(layout: SplitLayout, tabId: TabId): { target: TabId; side: PaneSide } | undefined {
+  const path = leafPath(layout, tabId)
+  if (!path || path.length === 0) return undefined
+  const parent = nodeAt(layout, path.slice(0, -1))
+  const index = path[path.length - 1] as number
+  if (!parent || parent.type === 'leaf') return undefined
+  const row = parent.type === 'row'
+  const next = parent.children[index + 1]
+  if (next) return { target: layoutLeaves(next)[0] as TabId, side: row ? 'left' : 'top' }
+  const prev = parent.children[index - 1]
+  if (prev) return { target: layoutLeaves(prev).at(-1) as TabId, side: row ? 'right' : 'bottom' }
+  return undefined
+}
+
+/**
+ * Which half of a sidebar row a dragged tab is over (SV-05): the middle band of the row
+ * (by height) combines into a split on that side; the top and bottom quarters are left for
+ * reordering. Returns null outside the band.
+ */
+export function rowDropSide(row: Box, x: number, y: number): 'left' | 'right' | null {
+  if (x < row.x || x > row.x + row.width) return null
+  const fy = row.height > 0 ? (y - row.y) / row.height : 0
+  if (fy < 0.25 || fy > 0.75) return null
+  return x < row.x + row.width / 2 ? 'left' : 'right'
+}
+
 export interface DropTarget {
   /** Pane the new tab goes next to. */
   target: TabId

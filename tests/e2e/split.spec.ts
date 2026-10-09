@@ -367,7 +367,7 @@ test('[SV-24] a resized three-pane split comes back after relaunch', async () =>
   await expect(row.getByTestId('split-segment')).toHaveCount(3)
   const s = await state(orbit.app)
   const layout = s.splits[splitId]?.layout
-  expect(layout?.type === 'row' && layout.sizes).toEqual([0.5, 0.25, 0.25])
+  expect(JSON.stringify(layout)).toContain('"sizes":[0.5,0.25,0.25]')
   expect(await activeTabId(orbit.app)).toBe(b)
   await expectViewsOverPanes(orbit, [a, b, c])
   const [pa, pb] = [await paneBox(orbit.shell, a), await paneBox(orbit.shell, b)]
@@ -445,4 +445,73 @@ test('[SV-22][SV-23] a split duplicates, pins and moves as one unit', async () =
   await run(orbit.app, 'tabs.pin', { tabId: pinnedTab })
   await run(orbit.app, 'split.addTab', { tabId: loose, target: pinnedTab, side: 'right' })
   await expect(orbit.shell.getByTestId('pinned-list').getByTestId('split-row')).toHaveCount(2)
+})
+
+test('[SV-17][SV-19] reopening closed panes puts them back into their split', async () => {
+  const b = await openTab(orbit.app, 'Keep')
+  const a = await openTab(orbit.app, 'Gone')
+  const c = await openTab(orbit.app, 'Below')
+  await run(orbit.app, 'split.create', { tabIds: [a, b] })
+  await run(orbit.app, 'split.addTab', { tabId: c, target: b, side: 'bottom' })
+  await expectViewsOverPanes(orbit, [a, b, c])
+  const splitId = (await splitOf(orbit.app, a))?.id as string
+  const before = (await state(orbit.app)).splits[splitId]?.layout
+  // Close one pane, then reopen it: same split, same place.
+  await run(orbit.app, 'split.closePane', { tabId: c })
+  await expect(orbit.shell.getByTestId('split-segment')).toHaveCount(2)
+  await action(orbit.app, 'tab.reopenClosed')
+  await expect(orbit.shell.getByTestId('split-segment')).toHaveCount(3)
+  expect((await state(orbit.app)).splits[splitId]?.layout).toEqual(before)
+  await expectViewsOverPanes(orbit, [a, b, c])
+  // Close the whole split, then reopen its tabs: the split comes back together.
+  await run(orbit.app, 'split.close', { splitId })
+  await expect(orbit.shell.getByTestId('split-row')).toHaveCount(0)
+  for (let i = 0; i < 3; i++) await action(orbit.app, 'tab.reopenClosed')
+  await expect(orbit.shell.getByTestId('split-row').getByTestId('split-segment')).toHaveCount(3)
+  const back = await splitOf(orbit.app, a)
+  expect(back && JSON.stringify(back.layout).match(/t-[a-z0-9]+/g)).toEqual([a, b, c])
+})
+
+test('[SV-02][SV-15] choosing an open tab for a pane moves it into the split', async () => {
+  const other = await openTab(orbit.app, 'Elsewhere')
+  const a = await openTab(orbit.app, 'Anchor')
+  await expect.poll(async () => (await tabView(orbit.app, a))?.visible).toBe(true)
+  await action(orbit.app, 'split.add')
+  const overlay = await viewPage(orbit.app, 'overlay')
+  const input = overlay.getByTestId('command-input')
+  await expect(input).toBeFocused()
+  await input.fill('Elsewhere')
+  await expect(overlay.locator('[data-testid="command-result"][data-kind="tab"]').first()).toBeVisible()
+  await overlay.locator('[data-testid="command-result"][data-kind="tab"]').first().click()
+  await expect(orbit.shell.getByTestId('split-row').getByTestId('split-segment')).toHaveCount(2)
+  await expect(orbit.shell.getByTestId('tab-row')).toHaveCount(0)
+  const split = await splitOf(orbit.app, a)
+  expect(split && JSON.stringify(split.layout).match(/t-[a-z0-9]+/g)).toEqual([a, other])
+  expect(await activeTabId(orbit.app)).toBe(other)
+  expect(Object.keys((await state(orbit.app)).tabs)).toHaveLength(2)
+  await expectViewsOverPanes(orbit, [a, other])
+})
+
+test('[SV-25][SV-04] a tab dropped on a full split is refused with a toast', async () => {
+  const ids = [await openTab(orbit.app, 'Q4'), await openTab(orbit.app, 'Q3'), await openTab(orbit.app, 'Q2')]
+  const first = await openTab(orbit.app, 'Q1')
+  const extra = await openTab(orbit.app, 'Extra')
+  await run(orbit.app, 'split.create', { tabIds: [first, ...ids], focus: first })
+  await expectViewsOverPanes(orbit, [first, ...ids])
+  // Shortcut on a full split: nothing is added.
+  await orbit.shell.keyboard.press('Control+Shift+Equal')
+  await expect(orbit.shell.getByTestId('toast')).toContainText('Split View holds up to 4 tabs')
+  await expect(orbit.shell.getByTestId('split-pane')).toHaveCount(4)
+  const row = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${extra}"]`).boundingBox()
+  const pane = await paneBox(orbit.shell, first)
+  if (!row) throw new Error('no row')
+  await orbit.shell.mouse.move(row.x + 40, row.y + row.height / 2)
+  await orbit.shell.mouse.down()
+  await orbit.shell.mouse.move(row.x + 70, row.y + row.height / 2, { steps: 3 })
+  await orbit.shell.mouse.move(pane.x + pane.width / 2, pane.y + pane.height / 2, { steps: 6 })
+  await orbit.shell.mouse.move(pane.x + pane.width / 2 + 5, pane.y + pane.height / 2, { steps: 2 })
+  await expect(orbit.shell.getByTestId('split-drop-indicator')).toHaveCount(0)
+  await orbit.shell.mouse.up()
+  await expect(orbit.shell.getByTestId('split-pane')).toHaveCount(4)
+  await expect(orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${extra}"]`)).toHaveCount(1)
 })

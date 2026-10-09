@@ -1,6 +1,7 @@
 import { clipboard, Menu, type MenuItemConstructorOptions, nativeTheme } from 'electron'
 import { newId } from '../../shared/ids'
 import {
+  anchorOf,
   equalizeLayout,
   flipLayout,
   layoutLeaves,
@@ -320,11 +321,45 @@ export function registerSplit(ctx: MainContext): void {
     }
   })
 
+  /** Closed panes and the neighbour they sat beside (most recent last). */
+  const closedPanes = new Map<TabId, { target: TabId; side: PaneSide }>()
+  const rememberClosed = (layout: SplitLayout, tabId: TabId) => {
+    const anchor = anchorOf(layout, tabId)
+    if (!anchor) return
+    closedPanes.delete(tabId)
+    closedPanes.set(tabId, anchor)
+    if (closedPanes.size > 50) closedPanes.delete(closedPanes.keys().next().value as TabId)
+  }
+  /** A reopened tab that was a pane goes back beside its old neighbour (re-forming the split if needed). */
+  const putBack = (tabId: TabId) => {
+    const anchor = closedPanes.get(tabId)
+    closedPanes.delete(tabId)
+    const state = store.state
+    const tab = state.tabs[tabId]
+    const target = anchor ? state.tabs[anchor.target] : undefined
+    if (!anchor || !tab || !target || splitOfTab(state, tabId) || tab.profileId !== target.profileId) return
+    if (leavesOf(state, splitOfTab(state, anchor.target)).length >= MAX_PANES) return
+    store.update((d) => {
+      addPaneInDraft(d, tabId, anchor.target, anchor.side)
+    })
+  }
+
   // When the tab model closes a pane (e.g. ⌘W on the focused pane, SV-17), keep the remaining panes'
   // arrangement and sizes, and keep the split on screen with a neighbouring pane focused. Runs in a
   // microtask queued before the patch flush, so renderers only ever see the repaired state.
   const leafSet = (layout: SplitLayout) => layoutLeaves(layout).sort().join()
   store.subscribe((next, prev) => {
+    // Remember where closed panes sat; bring reopened ones back into place (⌘⇧T, SV-17/SV-19).
+    if (next.tabs !== prev.tabs) {
+      for (const split of Object.values(prev.splits)) {
+        for (const id of layoutLeaves(split.layout)) {
+          if (!next.tabs[id] && !isBlankPane(prev.tabs[id])) rememberClosed(split.layout, id)
+        }
+      }
+      for (const id of closedPanes.keys()) {
+        if (next.tabs[id] && !prev.tabs[id]) queueMicrotask(() => putBack(id))
+      }
+    }
     const arrangements: { splitId: SplitId; layout: SplitLayout }[] = []
     for (const [splitId, split] of Object.entries(prev.splits)) {
       const now = next.splits[splitId]
@@ -381,6 +416,7 @@ export function registerSplit(ctx: MainContext): void {
     }
     const sibling = siblingOf(split.layout, tabId) ?? layoutLeaves(split.layout).find((id) => id !== tabId)
     const blank = isBlankPane(state.tabs[tabId])
+    if (!blank) rememberClosed(split.layout, tabId)
     for (const [windowId, s] of sessions) if (s.tabId === tabId) sessions.delete(windowId)
     store.update((d) => {
       const now = Date.now()
@@ -582,7 +618,6 @@ export function registerSplit(ctx: MainContext): void {
     const first = leaves[0]
     const section = first ? sectionOf(state, first) : undefined
     const spaceId = first ? state.tabs[first]?.spaceId : undefined
-    const profileId = spaceId ? state.spaces[spaceId]?.profileId : undefined
     const items: MenuItemConstructorOptions[] = leaves.map((tabId) => {
       const tab = state.tabs[tabId]
       return {
@@ -621,12 +656,7 @@ export function registerSplit(ctx: MainContext): void {
     if (spaceId && section === 'pinned') {
       items.push({ label: 'Unpin Split', click: () => moveSplit(splitId, { kind: 'today', spaceId }, 0) })
     }
-    if (profileId && section !== 'favorite') {
-      items.push({
-        label: 'Add to Favorites',
-        click: () => moveSplit(splitId, { kind: 'favorites', profileId }, Number.MAX_SAFE_INTEGER),
-      })
-    }
+    // "Add to Favorites" waits until the Favorites grid can draw a split tile (it lists tabs only).
     if (spaceId && section === 'favorite') {
       items.push({
         label: 'Remove from Favorites',
@@ -676,7 +706,6 @@ export function registerSplit(ctx: MainContext): void {
       if (mouse.type === 'mouseDown') focusFromPage(tabId)
       strip.onPageMouse(tabId, mouse)
     })
-    contents.on('focus', () => focusFromPage(tabId))
     placeholderUntilLoaded(tabId, contents)
   })
 

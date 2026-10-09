@@ -11,6 +11,7 @@ import {
 import { makeTab } from '../../src/main/tabs/model'
 import { createInitialState, createWindowState, DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
 import {
+  anchorOf,
   dragSizes,
   dropTargetAt,
   equalizeLayout,
@@ -26,6 +27,7 @@ import {
   PANE_GAP,
   paneOrder,
   removePane,
+  rowDropSide,
   setSizesAt,
   siblingOf,
   swapPanes,
@@ -139,6 +141,23 @@ describe('split layout tree', () => {
     const { panes } = layoutBoxes(row([L('a'), L('b')]), { x: 0, y: 0, width: 1008, height: 800 })
     expect(dropTargetAt(panes, 900, 400)).toEqual({ target: 'b', side: 'right' })
     expect(dropTargetAt(panes, 750, 20)).toEqual({ target: 'b', side: 'top' })
+  })
+
+  it('remembers where a pane sat so it can be put back', () => {
+    const layout = row([L('a'), col([L('b'), L('c')])])
+    expect(anchorOf(layout, 'a')).toEqual({ target: 'b', side: 'left' })
+    expect(anchorOf(layout, 'c')).toEqual({ target: 'b', side: 'bottom' })
+    expect(anchorOf(layout, 'b')).toEqual({ target: 'c', side: 'top' })
+    const back = insertPane(removePane(layout, 'c') as SplitLayout, 'b', 'c', 'bottom')
+    expect(back).toEqual(layout)
+  })
+
+  it('splits a sidebar row drop into left/right halves, leaving edges for reordering', () => {
+    const r = { x: 0, y: 0, width: 200, height: 32 }
+    expect(rowDropSide(r, 50, 16)).toBe('left')
+    expect(rowDropSide(r, 150, 16)).toBe('right')
+    expect(rowDropSide(r, 150, 2)).toBeNull()
+    expect(rowDropSide(r, 150, 30)).toBeNull()
   })
 
   it('builds even layouts', () => {
