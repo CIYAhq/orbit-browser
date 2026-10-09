@@ -86,8 +86,6 @@ export function registerCore(ctx: MainContext): void {
     if (!win) return
     void commands.run('window.setSidebar', { visible: !win.sidebar.visible }, { windowId })
   })
-  actions.register('window.new', () => {
-    windows.open()
-  })
+  // window.new is registered by the spaces lane (SP-24: same Space, command bar open, cascade).
   actions.register('app.settings', (c) => ctx.toast(windowOf(c), 'Settings are coming soon'))
 }
