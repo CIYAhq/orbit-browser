@@ -8,7 +8,7 @@ import {
   systemPreferences,
   type WebContents,
 } from 'electron'
-import { ACTIONS_BY_ID, shortcutsFor, toElectronAccelerator } from '../../shared/actions'
+import { toElectronAccelerator } from '../../shared/actions'
 import { createWindowState } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
 import { routeFor } from '../../shared/link-routing'
@@ -23,7 +23,7 @@ import { runPageAction } from '../peek/page-actions'
 import type { CallContext } from '../registry'
 import { activateInDraft, detachFromSplit, reselectAway, todayInsertIndex } from '../tabs/model'
 import { activeTabOf, loadRenderer, rendererEntry, uiWebPreferences } from '../windows'
-import { miniSwitchIn, NEW_MINI_SWITCH, TOGGLE_MINIS_SWITCH } from './switches'
+import { miniSwitchIn, NEW_MINI_SWITCH, systemWideShortcut, TOGGLE_MINIS_SWITCH } from './switches'
 
 /**
  * Mini Windows (MW-*): small, separate windows holding one page, for links from other apps and
@@ -776,9 +776,8 @@ export function registerMiniWindow(ctx: MainContext): void {
   if (!ctx.e2e) spareSoon(1500)
   commands.register('mini.prepare', () => ensureSpare())
 
-  // ⌘⌥N from anywhere (MW-06), where the system allows a global shortcut (MW-14).
-  const def = ACTIONS_BY_ID['window.newMini']
-  const accel = def ? shortcutsFor(def, process.platform)[0] : undefined
+  // ⌘⌥N from any app, on macOS only (MW-06); elsewhere the shortcut works inside Orbit.
+  const accel = systemWideShortcut(process.platform)
   if (accel && !ctx.e2e) {
     const electronAccel = toElectronAccelerator(accel)
     try {
