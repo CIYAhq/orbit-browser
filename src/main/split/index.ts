@@ -72,12 +72,24 @@ export function registerSplit(ctx: MainContext): void {
     if (result === 'full') ctx.toast(windowId, SPLIT_FULL_MESSAGE)
   }
 
-  /** Sleeps tabs whose profile changed so they reload in the right session. */
+  /** Sleeps tabs whose profile changed so they reload in the right session (without the old session's history). */
   const reloadMoved = (tabIds: TabId[]) => {
     for (const id of tabIds) {
-      ctx.tabs.savedHistory.delete(id)
       ctx.tabs.sleep(id)
+      ctx.tabs.savedHistory.delete(id)
     }
+  }
+
+  /** Applies a change that moves tabs into a split, reloading any that changed profile. */
+  const updateMoving = (tabIds: TabId[], recipe: (d: OrbitState) => void) => {
+    const before = new Map(tabIds.map((id) => [id, store.state.tabs[id]?.profileId]))
+    store.update(recipe)
+    reloadMoved(
+      tabIds.filter((id) => {
+        const now = store.state.tabs[id]?.profileId
+        return !!now && !!before.get(id) && now !== before.get(id)
+      }),
+    )
   }
 
   const activeSplit = (windowId: WindowId | undefined): { splitId: SplitId; tabId: TabId } | undefined => {
@@ -108,7 +120,7 @@ export function registerSplit(ctx: MainContext): void {
     }
     const active = windowId ? activeTabOf(state, windowId) : null
     let result: ReturnType<typeof createSplitInDraft> = 'invalid'
-    store.update((d) => {
+    updateMoving(ordered, (d) => {
       result = createSplitInDraft(d, ordered, { axis: orientation, at: ordered[0] })
       if (isFailure(result) || !windowId) return
       const target = focus && ordered.includes(focus) ? focus : active && ordered.includes(active) ? active : ordered[0]
@@ -128,7 +140,7 @@ export function registerSplit(ctx: MainContext): void {
     const split = store.state.splits[target]
     const order = split ? paneOrder(split.layout) : []
     const anchor = split ? ((side === 'left' || side === 'top' ? order[0] : order[order.length - 1]) ?? target) : target
-    store.update((d) => {
+    updateMoving([tabId], (d) => {
       result = addPaneInDraft(d, tabId, anchor, side)
       if (!isFailure(result) && focus && windowId) focusInDraft(d, windowId, tabId)
     })
@@ -222,7 +234,7 @@ export function registerSplit(ctx: MainContext): void {
     if (!session.blank) {
       // ⌘L on a pane, then an open Today tab was chosen: it takes the pane's place (SV-15).
       if (!chosen || !chosenIsToday) return
-      store.update((d) => {
+      updateMoving([chosen], (d) => {
         if (!swapIntoPaneInDraft(d, session.tabId, chosen)) return
         restoreOtherSpaces(d, session, chosen)
         focusInDraft(d, windowId, chosen)
@@ -240,7 +252,7 @@ export function registerSplit(ctx: MainContext): void {
 
     if (chosen && chosenIsToday) {
       // An open tab was chosen: it moves into the new pane (SV-02).
-      store.update((d) => {
+      updateMoving([chosen], (d) => {
         detachTab(d, chosen)
         const split = d.splits[splitId]
         if (!split) return
@@ -340,7 +352,7 @@ export function registerSplit(ctx: MainContext): void {
     const target = anchor ? state.tabs[anchor.target] : undefined
     if (!anchor || !tab || !target || splitOfTab(state, tabId) || tab.profileId !== target.profileId) return
     if (leavesOf(state, splitOfTab(state, anchor.target)).length >= MAX_PANES) return
-    store.update((d) => {
+    updateMoving([tabId], (d) => {
       addPaneInDraft(d, tabId, anchor.target, anchor.side)
     })
   }

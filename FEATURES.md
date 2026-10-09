@@ -200,10 +200,10 @@ Spec: `spec/split-view.md`
 | SV-02 | Create with the keyboard shortcut | P0 | ✅ | ✅ e2e | – | Ctrl+Shift+= adds an empty pane and opens the command bar; a URL or open tab fills it, Escape removes it; refused in an empty window |
 | SV-03 | Create from the command bar | P0 | ✅ | ✅ e2e | – | Add Split Right/Left/Above/Below and New Split View actions; the command bar stays open for the new pane |
 | SV-04 | Create by dragging a tab onto the page | P0 | ✅ | ✅ e2e | – | drag a tab row over the page: theme-coloured drop indicator, the page makes room, release adds the pane |
-| SV-05 | Create by dropping a tab onto another tab row | P0 | 🟡 partial | – | – | split.addTab + rowDropSide helper ready; the row-drop gesture belongs to the tabs lane's sidebar drag-and-drop |
-| SV-06 | Create from a multi-selection | P0 | 🟡 partial | ✅ e2e | – | split.create (sidebar order, >4 refused with toast); the 'Open in Split View' item goes in the tabs lane's multi-select menu |
-| SV-07 | Create from the "+" menu or the window's split button | P1 | 🟡 partial | – | – | New Split View action only; '+' menu and title-bar split button belong to the sidebar chrome |
-| SV-08 | Open a link into a split | P1 | 🟡 partial | – | – | split.openUrl command only; link context menu item and Option-click on links not wired |
+| SV-05 | Create by dropping a tab onto another tab row | P0 | 🟡 partial | – | – | split.addTab (tab or split row target) and rowDropSide ready; the row-drop gesture goes in the tabs lane's sidebar drag-and-drop |
+| SV-06 | Create from a multi-selection | P0 | 🟡 partial | ✅ e2e | – | split.create (sidebar order, >4 refused with toast) and tabSplitMenuItems() for the tabs lane's multi-select menu (one line to wire) |
+| SV-07 | Create from the "+" menu or the window's split button | P1 | 🟡 partial | – | – | New Split View + Add Split Right/Left/Above/Below actions and newSplitMenuItems(); the '+' menu and title-bar button are sidebar chrome |
+| SV-08 | Open a link into a split | P1 | 🟡 partial | – | – | split.openUrl and linkSplitMenuItem() for the page context menu (tabs lane); Option-click and dragging links not built |
 | SV-09 | Option-click a tab row | P1 | ✅ | ✅ e2e | – | Alt-click a tab row joins it (the selected tab duplicates beside itself); Alt-click a split row separates |
 | SV-10 | Notes and canvases in a split | P2 | – | – | – |  |
 | SV-11 | Layouts and flipping orientation | P0 | ✅ | ✅ e2e | – | row/column trees, 3-4 pane arrangements from where panes are added, flip transposes keeping ratios |
