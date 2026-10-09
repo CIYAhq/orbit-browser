@@ -250,6 +250,7 @@ export function registerSplit(ctx: MainContext): void {
         restoreOtherSpaces(d, session, chosen)
         focusInDraft(d, windowId, chosen)
       })
+      ctx.tabs.destroy(session.tabId)
       return
     }
     if (chosen && !leavesOf(state, splitId).includes(chosen)) {

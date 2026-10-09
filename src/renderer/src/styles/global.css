@@ -653,6 +653,11 @@ html.is-resizing * {
   color: var(--text);
 }
 
+.split-favorite__icons {
+  display: flex;
+  gap: 3px;
+}
+
 /* ---------- Content frame and split view panes (split lane) ---------- */
 
 .frame-host {

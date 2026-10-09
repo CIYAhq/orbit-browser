@@ -1,28 +1,9 @@
 import { Volume2, VolumeX, X } from 'lucide-react'
 import { memo, useEffect, useRef, useState } from 'react'
-import { layoutLeaves, paneOrder } from '../../../../shared/split'
-import type { OrbitState } from '../../../../shared/state'
 import { invoke } from '../../api'
-import { activeTabId } from '../../selectors'
 import { getOrbitState, useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
-
-/** The pane of a split the window currently focuses, or '' when the split isn't shown. */
-function focusedPaneOf(s: OrbitState, splitId: string): string {
-  const active = activeTabId(s)
-  const split = s.splits[splitId]
-  return active && split && layoutLeaves(split.layout).includes(active) ? active : ''
-}
-
-/** The pane focused most recently (selecting the row returns to it, SV-14). */
-function lastFocusedPane(s: OrbitState, panes: string[]): string | undefined {
-  let best: string | undefined
-  for (const id of panes) {
-    const t = s.tabs[id]
-    if (t && (!best || t.lastActiveAt > (s.tabs[best]?.lastActiveAt ?? 0))) best = id
-  }
-  return best
-}
+import { focusedPaneOf, lastFocusedPane, paneOrderKey } from '../split/selectors'
 
 /**
  * A split view as one sidebar row (SV-21): one favicon + title segment per pane, in reading
@@ -30,10 +11,7 @@ function lastFocusedPane(s: OrbitState, panes: string[]): string | undefined {
  * whole split (SV-19); ⌥/Alt-click separates it (SV-18); right-click opens the split menu (SV-22).
  */
 export function SplitRow({ splitId, depth }: { splitId: string; depth: number }) {
-  const order = useOrbit((s) => {
-    const split = s.splits[splitId]
-    return split ? paneOrder(split.layout).join(',') : ''
-  })
+  const order = useOrbit((s) => paneOrderKey(s, splitId))
   const focused = useOrbit((s) => focusedPaneOf(s, splitId))
   const name = useOrbit((s) => s.splits[splitId]?.name ?? '')
   const [renaming, setRenaming] = useState(false)
