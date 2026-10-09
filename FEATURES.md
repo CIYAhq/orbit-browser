@@ -4,18 +4,16 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 290 spec’d · 0 built (26 partial) · 0 tested · 0 feel right.
+**Totals:** 485 spec’d · 42 built (22 partial) · 43 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 72 | 0 | 0 |
-| P1 | 146 | 0 | 0 |
-| P2 | 65 | 0 | 0 |
+| P0 | 174 | 30 | 35 |
+| P1 | 221 | 11 | 7 |
+| P2 | 83 | 1 | 1 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
-
-Spec files still being written (rows appear when they land): `spaces.md`, `commandbar.md`, `navigation.md`, `peek.md`, `mini-window.md`, `media.md`, `shortcuts.md`, `feel.md`.
 
 ## Sidebar, window frame and toolbar (prefix SB)
 
@@ -29,9 +27,9 @@ Spec: `spec/sidebar.md`
 | SB-04 | Address display at the top of the sidebar | P0 | 🟡 partial | – | – | scaffold |
 | SB-05 | Favorites grid placement | P0 | 🟡 partial | – | – | scaffold |
 | SB-06 | Space title row placement | P0 | 🟡 partial | – | – | scaffold |
-| SB-07 | "+ New Tab" row | P0 | – | – | – |  |
+| SB-07 | "+ New Tab" row | P0 | ✅ | ✅ e2e | – | + New Tab row with press animation opens the command bar |
 | SB-08 | Empty sidebar area: double-click, drag, right-click | P1 | – | – | – |  |
-| SB-09 | Bottom bar: Library, Space switcher, "+" menu | P0 | 🟡 partial | – | – | scaffold |
+| SB-09 | Bottom bar: Library, Space switcher, "+" menu | P0 | 🟡 partial | ✅ e2e | – | scaffold |
 | SB-10 | Transient trays above the bottom bar | P1 | – | – | – |  |
 | SB-11 | Show / hide the sidebar | P0 | 🟡 partial | – | – | scaffold |
 | SB-12 | Hover to reveal the hidden sidebar | P0 | – | – | – |  |
@@ -44,8 +42,8 @@ Spec: `spec/sidebar.md`
 | SB-19 | Inset rounded page frame ("card" look) | P0 | 🟡 partial | – | – | scaffold |
 | SB-20 | Top-of-window behaviour and window dragging | P1 | – | – | – |  |
 | SB-21 | Dim the sidebar when the window is inactive | P1 | – | – | – |  |
-| SB-22 | Keyboard focus and navigation inside the sidebar | P2 | – | – | – |  |
-| SB-23 | Scrolling, auto-reveal of the active tab and overflow indicator | P1 | – | – | – |  |
+| SB-22 | Keyboard focus and navigation inside the sidebar | P2 | ✅ | ✅ e2e | – | Cmd/Ctrl+Shift+E focuses the sidebar; arrows, Enter, Escape, F2 |
+| SB-23 | Scrolling, auto-reveal of the active tab and overflow indicator | P1 | 🟡 partial | ✅ e2e | – | auto-reveal of the selected tab and a pill pointing to it; no indicator while scrolling |
 | SB-24 | Sidebar colouring follows the Space theme | P0 | – | – | – |  |
 | SB-25 | Incognito window sidebar | P1 | – | – | – |  |
 | SB-26 | Platform notes (Windows / Linux) | P2 | – | – | – |  |
@@ -58,66 +56,139 @@ Spec: `spec/tabs.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| TB-01 | Tab row anatomy and states | P0 | – | – | – |  |
-| TB-02 | Create a new tab | P0 | 🟡 partial | – | – | scaffold |
-| TB-03 | Where new tabs are inserted | P0 | – | – | – |  |
-| TB-04 | Switching between tabs (pointer and keyboard) | P0 | 🟡 partial | – | – | scaffold |
+| TB-01 | Tab row anatomy and states | P0 | ✅ | ✅ e2e | – | row: favicon/emoji, title or breadcrumb, hover close, audio, selected pill, dimmed when asleep |
+| TB-02 | Create a new tab | P0 | ✅ | ✅ e2e | – | Cmd+T / + New Tab / link drop / Cmd+Alt+V paste; background link tabs gesture-gated |
+| TB-03 | Where new tabs are inserted | P0 | ✅ | ✅ e2e+unit | – | single rule todayInsertIndex(): top of Today |
+| TB-04 | Switching between tabs (pointer and keyboard) | P0 | ✅ | ✅ e2e+unit | – | click, Cmd+1-9 (Favorites setting, Cmd+9 last), Cmd+Alt+Up/Down skip collapsed rows |
 | TB-05 | Recent-tab switcher (Ctrl+Tab) | P1 | – | – | – |  |
-| TB-06 | Closing a tab | P0 | 🟡 partial | – | – | scaffold |
-| TB-07 | Reopen the last closed tab | P0 | 🟡 partial | – | – | scaffold |
-| TB-08 | Reorder tabs by drag and drop | P0 | – | – | – |  |
-| TB-09 | Drag and drop to other destinations | P0 | – | – | – |  |
-| TB-10 | Duplicate a tab | P1 | 🟡 partial | – | – | scaffold |
-| TB-11 | Move a tab to another Space | P0 | – | – | – |  |
-| TB-12 | Rename a tab and set a custom icon | P1 | 🟡 partial | – | – | scaffold |
-| TB-13 | Multi-select tabs | P1 | – | – | – |  |
-| TB-14 | Tab context menu | P0 | 🟡 partial | – | – | scaffold |
-| TB-15 | Audio, mute, microphone/camera and screen-share indicators | P1 | – | – | – |  |
-| TB-16 | Tab sleeping and background resource limits | P1 | 🟡 partial | – | – | sleep/wake runtime; no timer yet |
-| TB-17 | Tabs across multiple windows | P1 | – | – | – |  |
-| TB-18 | Undo sidebar actions | P1 | – | – | – |  |
-| TB-19 | Back on a fresh child tab returns to its opener | P2 | – | – | – |  |
-| TB-20 | Copy a tab's URL | P1 | – | – | – |  |
+| TB-06 | Closing a tab | P0 | ✅ | ✅ e2e+unit | – | Today -> Archive, pinned/Favorites unload; next selection below/above/MRU; middle-click; Cmd+W closes window when empty |
+| TB-07 | Reopen the last closed tab | P0 | ✅ | ✅ e2e | – | Cmd+Shift+T stack with full history; Cmd+Z reopens too |
+| TB-08 | Reorder tabs by drag and drop | P0 | ✅ | ✅ e2e+unit | – | pointer drag, 4px threshold, rows spring apart, ghost lift/settle, auto-scroll, Escape cancel, undo; no haptics |
+| TB-09 | Drag and drop to other destinations | P0 | 🟡 partial | ✅ e2e | – | Space switcher drop, edge dwell to next Space, drag out to new window; no split/option-drag/URL-to-page drops |
+| TB-10 | Duplicate a tab | P1 | 🟡 partial | – | – | Duplicate (menu/action) copies history, lands below; no option-drag or Cmd-click reload |
+| TB-11 | Move a tab to another Space | P0 | ✅ | ✅ e2e | – | Move to > Space > Pinned/Today/folder (menu + tabs.moveToSpace); command-bar entry is the commandbar lane's |
+| TB-12 | Rename a tab and set a custom icon | P1 | ✅ | – | – | double-click/menu rename, empty reverts; emoji icon picker |
+| TB-13 | Multi-select tabs | P1 | 🟡 partial | – | – | Cmd-click, Shift-click, menu actions, group drag; Escape clears |
+| TB-14 | Tab context menu | P0 | 🟡 partial | ✅ e2e | – | native menus with all tab/pinned/Favorite items; not theme-coloured; no split or share items yet |
+| TB-15 | Audio, mute, microphone/camera and screen-share indicators | P1 | 🟡 partial | – | – | audio icon toggles mute; no mic/camera/screen-share indicators |
+| TB-16 | Tab sleeping and background resource limits | P1 | 🟡 partial | ✅ unit | – | sleep timer (settings.sleepAfterMs), Favorites warm 4x, audible/selected never sleep |
+| TB-17 | Tabs across multiple windows | P1 | – | ✅ e2e | – |  |
+| TB-18 | Undo sidebar actions | P1 | 🟡 partial | ✅ e2e+unit | – | undo for moves, close, clear, archive below, rename, icon, folders; no redo |
+| TB-19 | Back on a fresh child tab returns to its opener | P2 | 🟡 partial | – | – | Back with no history closes a link-opened Today tab and selects its opener (shortcut/command) |
+| TB-20 | Copy a tab's URL | P1 | ✅ | ✅ unit | – | Cmd+Shift+C clean URL, Cmd+Shift+Alt+C Markdown, multi-select and folder Copy Links |
 | TB-21 | Hover cards for known web apps | P2 | – | – | – |  |
-| TB-22 | Session restore on relaunch | P0 | 🟡 partial | – | – | scaffold |
-| PN-01 | What a pinned tab is | P0 | – | – | – |  |
-| PN-02 | Pin and unpin | P0 | 🟡 partial | – | – | scaffold |
-| PN-03 | Pinned URL memory and the "navigated away" indicator | P0 | – | – | – |  |
-| PN-04 | Reset a pinned tab to its pinned URL | P0 | 🟡 partial | – | – | scaffold |
+| TB-22 | Session restore on relaunch | P0 | ✅ | ✅ e2e+unit | – | Spaces, Favorites, pinned, Today, folders, selection restored; only the selected tab loads; Linux bound saving is core's |
+| PN-01 | What a pinned tab is | P0 | ✅ | ✅ e2e | – | per-Space pinned tabs with pinned URL; never auto-archived |
+| PN-02 | Pin and unpin | P0 | ✅ | ✅ e2e | – | Cmd+D, drag above/below divider, menu, Pin to [Space] command |
+| PN-03 | Pinned URL memory and the "navigated away" indicator | P0 | ✅ | ✅ e2e+unit | – | breadcrumb 'Pinned / Current', redirects count as home, hover shows reset glyph and hint |
+| PN-04 | Reset a pinned tab to its pinned URL | P0 | ✅ | ✅ e2e | – | favicon click resets, Cmd/Ctrl-click keeps the page as a Today tab, Reset Tab action |
 | PN-05 | Links clicked inside pinned tabs and Favorites | P1 | – | – | – |  |
-| PN-06 | Closing a pinned tab vs unpinning vs deleting | P0 | – | – | – |  |
-| PN-07 | Edit the pinned URL | P1 | – | – | – |  |
-| PN-08 | Rename pinned tabs | P1 | – | – | – |  |
-| PN-09 | Collapse the pinned section | P1 | – | – | – |  |
-| FV-01 | What Favorites are and how they're shared | P0 | – | – | – |  |
-| FV-02 | Capacity and grid layout | P0 | – | – | – |  |
-| FV-03 | Add a Favorite | P0 | – | – | – |  |
-| FV-04 | Remove a Favorite | P0 | – | – | – |  |
-| FV-05 | Reorder Favorites | P0 | – | – | – |  |
-| FV-06 | Favorites always reset to their URL | P0 | – | – | – |  |
-| FV-07 | Favorite context menu and hover | P1 | – | – | – |  |
-| FV-08 | Favorites stay warm in the background | P1 | – | – | – |  |
+| PN-06 | Closing a pinned tab vs unpinning vs deleting | P0 | ✅ | ✅ e2e | – | close unloads and resets, unpin, Delete from Sidebar (archived, undoable) |
+| PN-07 | Edit the pinned URL | P1 | ✅ | – | – | Pinned URL > Replace with Current / Edit (inline field) |
+| PN-08 | Rename pinned tabs | P1 | ✅ | – | – | custom name kept through resets; breadcrumb 'Name / page' |
+| PN-09 | Collapse the pinned section | P1 | ✅ | – | – | caret on the Space title, peeking selected tab, bold title, Collapse/Expand Pinned action |
+| FV-01 | What Favorites are and how they're shared | P0 | ✅ | ✅ e2e | – | per-profile grid above the Space title |
+| FV-02 | Capacity and grid layout | P0 | ✅ | ✅ e2e | – | max 12 (13th refused with toast), up to 4 per row, fewer stretch |
+| FV-03 | Add a Favorite | P0 | ✅ | ✅ e2e | – | drag to grid (drop zone when empty), menu, Favorite This Tab action |
+| FV-04 | Remove a Favorite | P0 | ✅ | ✅ e2e | – | drag tile into pinned/Today, menu, action toggle |
+| FV-05 | Reorder Favorites | P0 | ✅ | ✅ e2e+unit | – | drag within grid with spring reflow; order persists |
+| FV-06 | Favorites always reset to their URL | P0 | ✅ | ✅ e2e | – | double-click resets, away dot + tooltip, close unloads |
+| FV-07 | Favorite context menu and hover | P1 | ✅ | – | – | Favorite menu (icon, pinned URL, reset, move, mute, copy, close), title tooltip |
+| FV-08 | Favorites stay warm in the background | P1 | ✅ | ✅ unit | – | Favorites sleep only after 4x the sleep period |
 | FV-09 | Live badges and states on Favorite tiles | P2 | – | – | – |  |
-| FV-10 | Favorites and numeric shortcuts | P1 | – | – | – |  |
-| TD-01 | The Today section | P0 | – | – | – |  |
-| TD-02 | Auto-archive rule | P0 | – | – | – |  |
-| TD-03 | Archive timing setting (per profile, so per Space) | P0 | – | – | – |  |
-| TD-04 | Clear all Today tabs | P0 | 🟡 partial | – | – | scaffold |
-| TD-05 | Archive tabs below | P1 | – | – | – |  |
-| TD-06 | Per-Space scope of Today actions | P0 | – | – | – |  |
+| FV-10 | Favorites and numeric shortcuts | P1 | ✅ | ✅ e2e+unit | – | see TB-04 |
+| TD-01 | The Today section | P0 | ✅ | ✅ e2e | – |  |
+| TD-02 | Auto-archive rule | P0 | ✅ | ✅ e2e+unit | – | maintenance timer (1 min, launch, resume) with injected clock; media/selected exempt; splits as one |
+| TD-03 | Archive timing setting (per profile, so per Space) | P0 | 🟡 partial | ✅ e2e+unit | – | settings.archiveAfterMs plus optional profile.archiveAfterMs; settings UI is the settings lane's |
+| TD-04 | Clear all Today tabs | P0 | ✅ | ✅ e2e | – | Clear on divider hover, Cmd+Shift+K, keeps media tabs, cascade exit, Cmd+Z restores in order |
+| TD-05 | Archive tabs below | P1 | ✅ | – | – | menu Archive Tabs Below, undoable |
+| TD-06 | Per-Space scope of Today actions | P0 | ✅ | ✅ e2e+unit | – | Clear/archive-below/auto-archive per Space |
 | TD-07 | First-run explanation of auto-archive | P2 | – | – | – |  |
 | TD-08 | AI "tidy" of Today tabs | P2 | – | – | – |  |
-| FD-01 | What folders are and where they can live | P0 | – | – | – |  |
-| FD-02 | Create a folder | P0 | 🟡 partial | – | – | scaffold |
-| FD-03 | Rename a folder | P0 | 🟡 partial | – | – | scaffold |
-| FD-04 | Collapse and expand folders | P0 | 🟡 partial | – | – | scaffold |
-| FD-05 | Drag into and out of folders | P0 | – | – | – |  |
-| FD-06 | Nested folders | P1 | – | – | – |  |
-| FD-07 | Folder icon | P1 | – | – | – |  |
+| FD-01 | What folders are and where they can live | P0 | ✅ | ✅ e2e+unit | – | folders only in the pinned area (tree.canMoveTo) |
+| FD-02 | Create a folder | P0 | ✅ | ✅ e2e | – | New Folder at end of pinned in rename mode; New Folder with selected tabs |
+| FD-03 | Rename a folder | P0 | ✅ | ✅ e2e | – | menu or double-click; Enter/blur saves, Escape cancels, empty keeps name |
+| FD-04 | Collapse and expand folders | P0 | ✅ | ✅ e2e | – | click toggles with height reveal; selected child peeks under a closed folder |
+| FD-05 | Drag into and out of folders | P0 | ✅ | ✅ e2e+unit | – | drop into closed folder (no expand, peeks) or between children; folders drag/nest |
+| FD-06 | Nested folders | P1 | ✅ | – | – | nesting by drag or New Folder from children; 14px indent per level |
+| FD-07 | Folder icon | P1 | 🟡 partial | – | – | emoji icon via Change Icon; open/closed glyphs; not full-colour |
 | FD-08 | Folder hover preview and search | P1 | – | – | – |  |
-| FD-09 | Folder context menu | P1 | – | – | – |  |
-| FD-10 | Delete a folder | P1 | 🟡 partial | – | – | scaffold |
+| FD-09 | Folder context menu | P1 | 🟡 partial | – | – | Rename, Change Icon, Duplicate, Copy All Links, Paste URL, Move to, Delete; no Open [Folder] command |
+| FD-10 | Delete a folder | P1 | ✅ | – | – | confirm when non-empty, contents to Archive, Cmd+Z restores all |
 | FD-11 | Auto-updating folders | P2 | – | – | – |  |
+
+## Spaces and Profiles (prefixes SP, PR)
+
+Spec: `spec/spaces.md`
+
+| ID | Feature | P | Built | Tested | Feels right | Notes |
+|---|---|---|---|---|---|---|
+| SP-01 | What a Space is | P0 | – | – | – |  |
+| SP-02 | Create a Space | P0 | – | – | – |  |
+| SP-03 | Rename a Space | P0 | – | – | – |  |
+| SP-04 | Space title row and its menu | P0 | – | – | – |  |
+| SP-05 | Space icon | P1 | – | – | – |  |
+| SP-06 | Bottom-bar Space switcher | P0 | – | – | – |  |
+| SP-07 | Click to switch, and the switcher icon menu | P0 | – | – | – |  |
+| SP-08 | Switch Spaces with a trackpad swipe | P0 | – | – | – |  |
+| SP-09 | Switch Spaces with the keyboard, mouse buttons and command bar | P0 | – | – | – |  |
+| SP-10 | What switching Space does | P0 | – | – | – |  |
+| SP-11 | Reorder Spaces | P1 | – | – | – |  |
+| SP-12 | Delete a Space | P0 | – | – | – |  |
+| SP-13 | Spaces overview in the Library | P1 | – | – | – |  |
+| SP-14 | Open the theme picker | P0 | – | – | – |  |
+| SP-15 | Theme colours and gradients | P0 | – | – | – |  |
+| SP-16 | How the Space theme colours the sidebar, frame and other surfaces | P0 | – | – | – |  |
+| SP-17 | Grain, intensity, presets and reset | P1 | – | – | – |  |
+| SP-18 | Light / Dark / Automatic switch in the theme picker | P1 | – | – | – |  |
+| SP-19 | Theme transition between Spaces | P1 | – | – | – |  |
+| SP-20 | Per-Space pinned and Today sections | P0 | – | – | – |  |
+| SP-21 | Move tabs between Spaces | P0 | – | – | – |  |
+| SP-22 | Spaces in the command bar | P1 | – | – | – |  |
+| SP-23 | Spaces across windows | P0 | – | – | – |  |
+| SP-24 | What a new window shows | P0 | – | – | – |  |
+| SP-25 | Spaces menu in the app menu | P2 | – | – | – |  |
+| SP-26 | Sharing a Space (out of scope) | P2 | – | – | – |  |
+| PR-01 | What a profile is | P0 | – | – | – |  |
+| PR-02 | Create a profile | P0 | – | – | – |  |
+| PR-03 | Assign a Space to a profile | P0 | – | – | – |  |
+| PR-04 | Profile step in the new-Space flow | P1 | – | – | – |  |
+| PR-05 | What each profile isolates | P0 | – | – | – |  |
+| PR-06 | Favorites per profile | P0 | – | – | – |  |
+| PR-07 | Profile indicator | P1 | – | – | – |  |
+| PR-08 | Delete a profile | P1 | – | – | – |  |
+| PR-09 | Rename a profile | P1 | – | – | – |  |
+| PR-10 | Profiles and other features | P1 | – | – | – |  |
+
+## Command bar (prefix CB)
+
+Spec: `spec/commandbar.md`
+
+| ID | Feature | P | Built | Tested | Feels right | Notes |
+|---|---|---|---|---|---|---|
+| CB-01 | One bar replaces the omnibox and the new-tab page | P0 | – | – | – |  |
+| CB-02 | Open in new-tab mode (⌘T) | P0 | – | – | – |  |
+| CB-03 | Open in edit-current-URL mode (⌘L) | P0 | – | – | – |  |
+| CB-04 | Position, size and look: a floating centred panel | P0 | – | – | – |  |
+| CB-05 | What it searches (sources) | P0 | – | – | – |  |
+| CB-06 | Result kinds and their row labels | P0 | – | – | – |  |
+| CB-07 | Ranking and grouping | P0 | – | – | – |  |
+| CB-08 | Typed URLs and inline autocompletion | P0 | – | – | – |  |
+| CB-09 | Switch to an open tab instead of duplicating | P0 | – | – | – |  |
+| CB-10 | Keyboard navigation inside the bar | P0 | – | – | – |  |
+| CB-11 | Site search with Tab (search a site directly) | P0 | – | – | – |  |
+| CB-12 | Paste and go | P1 | – | – | – |  |
+| CB-13 | Actions (browser commands by name) | P0 | – | – | – |  |
+| CB-14 | Actions-only mode (Tab on an empty field) | P1 | – | – | – |  |
+| CB-15 | Default search engine fallback | P0 | – | – | – |  |
+| CB-16 | Open the top web result directly (Shift+Enter) | P2 | – | – | – |  |
+| CB-17 | Remove a suggestion | P1 | – | – | – |  |
+| CB-18 | Empty state (bar opened with nothing typed) | P0 | – | – | – |  |
+| CB-19 | Space and profile awareness | P0 | – | – | – |  |
+| CB-20 | Sidebar stays interactive while the bar is open | P1 | – | – | – |  |
+| CB-21 | Closing the bar and what happens to typed text | P0 | – | – | – |  |
+| CB-22 | Feel: open/close animation, latency and live updates | P0 | – | – | – |  |
+| CB-23 | The bar in other contexts (split pane, private window, Mini Window) | P1 | – | – | – |  |
 
 ## Split View (prefix SV)
 
@@ -126,19 +197,131 @@ Spec: `spec/split-view.md`
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
 | SV-01 | What a split view is | P0 | – | – | – |  |
-| SV-02 | Create a split with the keyboard shortcut | P0 | – | – | – |  |
-| SV-03 | Create a split from the command bar (directional) | P0 | – | – | – |  |
-| SV-04 | Create a split by dragging a tab onto the page | P0 | – | – | – |  |
-| SV-05 | Create a split by dropping a tab onto another tab row | P0 | – | – | – |  |
-| SV-06 | Create a split from a multi-selection | P0 | – | – | – |  |
-| SV-07 | Layouts: side by side and stacked | P0 | – | – | – |  |
-| SV-08 | Resize panes with the dividers | P0 | – | – | – |  |
-| SV-09 | Focused pane | P0 | – | – | – |  |
-| SV-10 | Change what a pane shows | P0 | – | – | – |  |
-| SV-11 | Close one pane | P0 | – | – | – |  |
-| SV-12 | Separate a split back into tabs | P0 | – | – | – |  |
-| SV-13 | The split row in the sidebar | P0 | – | – | – |  |
-| SV-14 | Splits persist | P0 | – | – | – |  |
+| SV-02 | Create with the keyboard shortcut | P0 | – | – | – |  |
+| SV-03 | Create from the command bar | P0 | – | – | – |  |
+| SV-04 | Create by dragging a tab onto the page | P0 | – | – | – |  |
+| SV-05 | Create by dropping a tab onto another tab row | P0 | – | – | – |  |
+| SV-06 | Create from a multi-selection | P0 | – | – | – |  |
+| SV-07 | Create from the "+" menu or the window's split button | P1 | – | – | – |  |
+| SV-08 | Open a link into a split | P1 | – | – | – |  |
+| SV-09 | Option-click a tab row | P1 | – | – | – |  |
+| SV-10 | Notes and canvases in a split | P2 | – | – | – |  |
+| SV-11 | Layouts and flipping orientation | P0 | – | – | – |  |
+| SV-12 | Pane chrome: the hover strip | P0 | – | – | – |  |
+| SV-13 | Resize panes with the dividers | P0 | – | – | – |  |
+| SV-14 | The focused pane | P0 | – | – | – |  |
+| SV-15 | Change what a pane shows | P0 | – | – | – |  |
+| SV-16 | Keyboard navigation between panes | P1 | – | – | – |  |
+| SV-17 | Close one pane | P0 | – | – | – |  |
+| SV-18 | Separate a split into tabs | P0 | – | – | – |  |
+| SV-19 | Close the whole split | P0 | – | – | – |  |
+| SV-20 | Swap and move panes | P2 | – | – | – |  |
+| SV-21 | The split row in the sidebar | P0 | – | – | – |  |
+| SV-22 | The split as one unit: context menu | P1 | – | – | – |  |
+| SV-23 | Pinned and Favorite splits | P1 | – | – | – |  |
+| SV-24 | Splits persist | P0 | – | – | – |  |
+| SV-25 | Limits and edge cases | P1 | – | – | – |  |
+| SV-26 | Feel: create, resize, close | P1 | – | – | – |  |
+
+## Page navigation, windows, links and page-level controls (prefix NV)
+
+Spec: `spec/navigation.md`
+
+| ID | Feature | P | Built | Tested | Feels right | Notes |
+|---|---|---|---|---|---|---|
+| NV-01 | Back and forward | P0 | – | – | – |  |
+| NV-02 | Trackpad two-finger swipe back/forward | P1 | – | – | – |  |
+| NV-03 | Reload and hard reload | P0 | – | – | – |  |
+| NV-04 | Stop loading | P1 | – | – | – |  |
+| NV-05 | Find in page | P0 | – | – | – |  |
+| NV-06 | Page zoom | P0 | – | – | – |  |
+| NV-07 | Print | P1 | – | – | – |  |
+| NV-08 | Clicking links: plain and modified clicks | P0 | – | – | – |  |
+| NV-09 | Links with target=_blank and script-opened windows | P0 | – | ✅ e2e | – |  |
+| NV-10 | New window | P0 | – | – | – |  |
+| NV-11 | Private (incognito) window | P0 | – | – | – |  |
+| NV-12 | Page context menu | P0 | – | – | – |  |
+| NV-13 | Load-error pages | P1 | – | – | – |  |
+| NV-14 | Crashed or unresponsive tab | P1 | – | – | – |  |
+| NV-15 | Permission prompts | P0 | – | – | – |  |
+| NV-16 | Site controls panel | P0 | – | – | – |  |
+| NV-17 | Copy the current URL | P0 | – | – | – |  |
+| NV-18 | Links from other apps (Orbit as the default browser) | P0 | – | – | – |  |
+| NV-19 | Links that open other apps (external protocols) | P1 | – | – | – |  |
+| NV-20 | Full screen | P1 | – | – | – |  |
+| NV-21 | Save page and view source | P2 | – | – | – |  |
+| NV-22 | Translate a page | P2 | – | – | – |  |
+| NV-23 | Reader mode | P2 | – | – | – |  |
+| NV-24 | Page dialogs (alert, confirm, prompt, leave-page, sign-in, file pickers) | P1 | – | – | – |  |
+| NV-25 | Share the current page | P2 | – | – | – |  |
+
+## Peek link preview (prefix PK)
+
+Spec: `spec/peek.md`
+
+| ID | Feature | P | Built | Tested | Feels right | Notes |
+|---|---|---|---|---|---|---|
+| PK-01 | What Peek is | P0 | – | – | – |  |
+| PK-02 | Which links open in Peek: other-site links in pinned tabs and Favorites | P0 | – | – | – |  |
+| PK-03 | Shift-click opens any link in Peek | P1 | – | – | – |  |
+| PK-04 | Exceptions: meeting links and link-routing rules | P1 | – | – | – |  |
+| PK-05 | The Peek card's look | P0 | – | – | – |  |
+| PK-06 | Open and close animation, and the dismiss gesture | P1 | – | – | – |  |
+| PK-07 | Expand a Peek into a full tab | P0 | – | – | – |  |
+| PK-08 | Open a Peek in Split View | P1 | – | – | – |  |
+| PK-09 | Close a Peek | P0 | – | – | – |  |
+| PK-10 | Reopen a Peek closed by mistake | P1 | – | – | – |  |
+| PK-11 | Navigating and acting inside a Peek | P1 | – | – | – |  |
+| PK-12 | Peek settings | P1 | – | – | – |  |
+| PK-13 | Peek and the sidebar | P0 | – | – | – |  |
+| PK-14 | Canvases, notes and Library items open in Peek | P2 | – | – | – |  |
+| PK-15 | Peek is not the hover preview | P2 | – | – | – |  |
+| PK-16 | Peek and the Mini Window are different | P1 | – | – | – |  |
+
+## Mini Window (prefix MW)
+
+Spec: `spec/mini-window.md`
+
+| ID | Feature | P | Built | Tested | Feels right | Notes |
+|---|---|---|---|---|---|---|
+| MW-01 | What the Mini Window is | P0 | – | – | – |  |
+| MW-02 | Links from other apps open in a Mini Window by default | P0 | – | – | – |  |
+| MW-03 | Look and anatomy | P0 | – | – | – |  |
+| MW-04 | Opening animation and window placement | P1 | – | – | – |  |
+| MW-05 | Move the page into a Space ("Open in…") | P0 | – | – | – |  |
+| MW-06 | Open a blank Mini Window for a quick lookup | P0 | – | – | – |  |
+| MW-07 | Open a link or a tab in a Mini Window on purpose | P1 | – | – | – |  |
+| MW-08 | Several Mini Windows at once | P1 | – | – | – |  |
+| MW-09 | Closing, auto-archive and the Archive | P0 | – | – | – |  |
+| MW-10 | Profiles | P1 | – | – | – |  |
+| MW-11 | Turning the Mini Window off | P1 | – | – | – |  |
+| MW-12 | What works inside a Mini Window | P2 | – | – | – |  |
+| MW-13 | Menu-bar / tray button | P2 | – | – | – |  |
+| MW-14 | Platforms | P1 | – | – | – |  |
+| MW-15 | Feel | P1 | – | – | – |  |
+
+## Picture-in-picture, sidebar media player and call controls (prefix MD)
+
+Spec: `spec/media.md`
+
+| ID | Feature | P | Built | Tested | Feels right | Notes |
+|---|---|---|---|---|---|---|
+| MD-01 | Automatic picture-in-picture when leaving a video tab | P0 | – | – | – |  |
+| MD-02 | Open picture-in-picture manually | P1 | – | – | – |  |
+| MD-03 | The floating player's look and placement | P0 | – | – | – |  |
+| MD-04 | Floating player controls | P0 | – | – | – |  |
+| MD-05 | Keyboard and media keys for the floating player | P1 | – | – | – |  |
+| MD-06 | Move, resize and zoom the floating player | P1 | – | – | – |  |
+| MD-07 | Ending picture-in-picture | P0 | – | – | – |  |
+| MD-08 | Turning automatic picture-in-picture off | P0 | – | – | – |  |
+| MD-09 | Sidebar media controls for background audio | P0 | – | – | – |  |
+| MD-10 | Several players: the media tray | P1 | – | – | – |  |
+| MD-11 | Audio and recording indicators, mute | P0 | – | – | – |  |
+| MD-12 | Media and the tab lifecycle | P0 | – | – | – |  |
+| MD-13 | Video calls: automatic call picture-in-picture | P1 | – | – | – |  |
+| MD-14 | Call controls in the sidebar | P1 | – | – | – |  |
+| MD-15 | Switch which tab is being screen-shared | P2 | – | – | – |  |
+| MD-16 | Feel: entering and leaving picture-in-picture | P1 | – | – | – |  |
 
 ## Archive, recently closed, history and sidebar backups (prefix AR)
 
@@ -157,6 +340,72 @@ Spec: `spec/archive.md`
 | AR-09 | Reopen recently closed tabs | P0 | – | – | – |  |
 | AR-10 | Browsing history view | P1 | – | – | – |  |
 | AR-11 | Sidebar backups and "Restore Data" | P2 | – | – | – |  |
+
+## Keyboard shortcuts and pointer bindings (prefix KS)
+
+Spec: `spec/shortcuts.md`
+
+| ID | Feature | P | Built | Tested | Feels right | Notes |
+|---|---|---|---|---|---|---|
+| KS-01 | One keymap, remapping and persistence | P0 | – | – | – |  |
+| KS-02 | Conflicts with web pages ("prefer websites" vs "prefer Orbit") | P0 | – | – | – |  |
+| KS-03 | Platform mapping rules | P0 | – | – | – |  |
+| KS-04 | Command bar and address | P0 | – | – | – |  |
+| KS-05 | Tabs and windows | P0 | – | – | – |  |
+| KS-06 | Switching tabs | P0 | – | – | – |  |
+| KS-07 | Spaces | P0 | – | – | – |  |
+| KS-08 | Page navigation and page tools | P0 | – | – | – |  |
+| KS-09 | Split view | P0 | – | – | – |  |
+| KS-10 | Peek and Mini Window | P1 | – | – | – |  |
+| KS-11 | Media | P1 | – | – | – |  |
+| KS-12 | Library, history, downloads, settings, extensions, help | P1 | – | – | – |  |
+| KS-13 | Developer tools | P1 | – | – | – |  |
+| KS-14 | Canvases, notes, capture and Tweaks | P2 | – | – | – |  |
+| KS-15 | Standard app and window keys | P1 | – | – | – |  |
+| KS-16 | Text-editing keys keep their meaning | P0 | – | – | – |  |
+| KS-17 | Mouse, trackpad and modifier-click bindings | P0 | – | – | – |  |
+| KS-18 | Shortcut hints everywhere | P1 | – | – | – |  |
+| KS-19 | Keys inside overlays | P0 | – | – | – |  |
+| KS-20 | Shortcuts in special windows | P1 | – | – | – |  |
+
+## Interaction feel and motion targets (prefix FL)
+
+Spec: `spec/feel.md`
+
+| ID | Feature | P | Built | Tested | Feels right | Notes |
+|---|---|---|---|---|---|---|
+| FL-01 | Motion principles and shared tokens | P0 | – | – | – |  |
+| FL-02 | Sidebar show/hide (docked toggle) | P0 | – | – | – |  |
+| FL-03 | Sidebar hover-reveal overlay | P0 | – | – | – |  |
+| FL-04 | Tab row hover | P0 | – | – | – |  |
+| FL-05 | Tab selection | P0 | – | – | – |  |
+| FL-06 | New-tab insertion | P0 | – | – | – |  |
+| FL-07 | Rows moving between sections without a drag | P1 | – | – | – |  |
+| FL-08 | Row buttons (close ×, folder search, reset) | P1 | – | – | – |  |
+| FL-09 | Close and archive exit | P0 | – | – | – |  |
+| FL-10 | Drag and drop: lift, follow, spring, drop | P0 | – | – | – |  |
+| FL-11 | Clear Today: staggered sweep | P1 | – | – | – |  |
+| FL-12 | Folder and pinned-section expand/collapse | P1 | – | – | – |  |
+| FL-13 | Space switching: swipe physics, settle and rubber-band | P0 | – | – | – |  |
+| FL-14 | Theme-colour transition between Spaces | P0 | – | – | – |  |
+| FL-15 | Button press micro-animations | P1 | – | – | – |  |
+| FL-16 | Command bar open and close | P0 | – | – | – |  |
+| FL-17 | Command bar typing and result updates | P0 | – | – | – |  |
+| FL-18 | Split view create and resize | P1 | – | – | – |  |
+| FL-19 | Link preview open, expand, close | P1 | – | – | – |  |
+| FL-20 | Favorites tiles | P1 | – | – | – |  |
+| FL-21 | Sidebar scrolling and large-sidebar performance | P0 | – | – | – |  |
+| FL-22 | Toasts | P1 | – | – | – |  |
+| FL-23 | Page loading indicator | P1 | – | – | – |  |
+| FL-24 | Library and Archive motion | P2 | – | – | – |  |
+| FL-25 | Menus, popovers and tooltips | P1 | – | – | – |  |
+| FL-26 | Recent-tab switcher (Ctrl+Tab) | P1 | – | – | – |  |
+| FL-27 | Window-level motion | P1 | – | – | – |  |
+| FL-28 | Reduced motion | P0 | – | – | – |  |
+| FL-29 | Responsiveness budgets (input to visual) | P0 | – | – | – |  |
+| FL-30 | What makes it feel native and smooth | P0 | – | – | – |  |
+| FL-31 | Haptics (macOS trackpads) | P2 | – | – | – |  |
+| FL-32 | Picture-in-picture and media tray motion | P2 | – | – | – |  |
 
 ## Appearance (global)
 
