@@ -355,6 +355,34 @@ test('[MW-07] ⌘⌥-click on a Today row moves that tab, live, into a Mini Wind
   expect(after.tabs[pin]?.floating).toBeUndefined()
 })
 
+test('[MW-07] ⌘⌥-click on a Favorite tile opens a copy in a Mini Window; the Favorite stays and is not selected', async () => {
+  const before = await state(orbit.app)
+  const main = Object.values(before.windows).find((w) => w.kind === 'main')
+  const spaceId = main?.spaceId ?? ''
+  const profileId = before.spaces[spaceId]?.profileId ?? ''
+  const fav = (await run(orbit.app, 'tabs.create', {
+    url: sites.url('/site/FavTile'),
+    container: { kind: 'favorites', profileId },
+  })) as string
+  const today = (await run(orbit.app, 'tabs.create', { url: sites.url('/site/Current') })) as string
+  const tile = orbit.shell.locator(`[data-testid="favorite-tile"][data-tab-id="${fav}"]`)
+  await expect(tile).toBeVisible()
+  await expect
+    .poll(async () => {
+      const s = await state(orbit.app)
+      return s.windows[main?.id ?? '']?.activeTab[spaceId]
+    })
+    .toBe(today)
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
+  await tile.click({ modifiers: [mod, 'Alt'] })
+  await expect.poll(async () => (await minis(orbit.app))[0]?.url).toBe(sites.url('/site/FavTile'))
+  expect((await minis(orbit.app))[0]?.tabId).not.toBe(fav)
+  const after = await state(orbit.app)
+  expect(after.profiles[profileId]?.favorites).toContain(fav)
+  expect(after.tabs[fav]?.floating).toBeUndefined()
+  expect(after.windows[main?.id ?? '']?.activeTab[spaceId]).toBe(today)
+})
+
 test('[MW-14][MW-08] the jump-list switches open a blank Mini Window and show or hide them all', async () => {
   const before = await state(orbit.app)
   // A launch from the Windows jump list reaches the running app as a second instance.

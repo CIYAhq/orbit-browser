@@ -3,7 +3,7 @@ import { forwardRef, memo, useMemo, useState } from 'react'
 import { MAX_FAVORITES } from '../../../../shared/defaults'
 import { isSplitId, isTabId } from '../../../../shared/ids'
 import { isAwayFromPinned, tabTitle } from '../../../../shared/tabs'
-import { invoke } from '../../api'
+import { invoke, isMac } from '../../api'
 import { activeTabId } from '../../selectors'
 import { useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
@@ -100,6 +100,12 @@ const FavoriteTile = memo(function FavoriteTile({ tabId }: { tabId: string }) {
       aria-label={title}
       onPointerDown={(e) => {
         if (e.button !== 0) return
+        if ((isMac ? e.metaKey : e.ctrlKey) && e.altKey && !e.shiftKey) {
+          // ⌘⌥-click opens a copy in a Mini Window (MW-07; owned by the peek lane).
+          e.preventDefault()
+          void invoke('mini.fromTab', { tabId })
+          return
+        }
         clearSelection()
         void invoke('tabs.activate', { tabId })
         pressItem(e, tabId, 'favorites')
