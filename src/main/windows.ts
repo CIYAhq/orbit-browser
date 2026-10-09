@@ -3,7 +3,7 @@ import { BrowserWindow, nativeTheme, screen, type WebContents, WebContentsView, 
 import { actionForInput } from '../shared/actions'
 import { createWindowState } from '../shared/defaults'
 import type { Rect, RendererView } from '../shared/rpc'
-import type { OrbitState, TabId, WindowId, WindowState } from '../shared/state'
+import type { ColorMode, OrbitState, SpaceId, TabId, WindowId, WindowState } from '../shared/state'
 import { paletteFor } from '../shared/theme'
 import { splitLeaves, splitOfTab } from '../shared/tree'
 import type { MainContext } from './context'
@@ -117,6 +117,7 @@ export class WindowManager {
       if (!rec || seq < rec.minPaneSeq) return
       this.applyPanes(windowId, panes, radius)
     })
+    syncAppearance(ctx.store.state.settings.appearance)
     nativeTheme.on('updated', () => {
       for (const rec of this.records.values()) this.applyBackground(rec)
     })
@@ -222,15 +223,13 @@ export class WindowManager {
       x: Math.round(display.x + display.width * 0.07),
       y: Math.round(display.y + display.height * 0.05),
     }
-    const space = this.ctx.store.state.spaces[winState.spaceId]
-    const palette = space ? paletteFor(space.theme, nativeTheme.shouldUseDarkColors) : undefined
     const win = new BrowserWindow({
       ...bounds,
       minWidth: 520,
       minHeight: 380,
       show: false,
       title: 'Orbit',
-      backgroundColor: palette?.windowBackground ?? '#e9eaf5',
+      backgroundColor: windowBackground(this.ctx.store.state, winState.spaceId) ?? '#e9eaf5',
       ...(isMac ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 17 } } : { frame: false }),
       webPreferences: { ...uiWebPreferences(id, 'shell'), backgroundThrottling: false },
     })
@@ -563,6 +562,10 @@ export class WindowManager {
   }
 
   private onState(next: OrbitState, prev: OrbitState): void {
+    if (next.settings.appearance !== prev.settings.appearance) {
+      syncAppearance(next.settings.appearance)
+      for (const rec of this.records.values()) this.applyBackground(rec)
+    }
     for (const tabId of this.selfClosed) if (!next.tabs[tabId]) this.selfClosed.delete(tabId)
     for (const rec of this.records.values()) {
       const now = next.windows[rec.id]
@@ -654,11 +657,11 @@ export class WindowManager {
     rec.overlay?.setBounds({ x: 0, y: 0, width, height })
   }
 
+  /** The native background shows at the window's edges while resizing: keep it the frame's colour. */
   private applyBackground(rec: WindowRecord): void {
-    const winState = this.ctx.store.state.windows[rec.id]
-    const space = winState ? this.ctx.store.state.spaces[winState.spaceId] : undefined
-    if (!space || rec.win.isDestroyed()) return
-    rec.win.setBackgroundColor(paletteFor(space.theme, nativeTheme.shouldUseDarkColors).windowBackground)
+    const state = this.ctx.store.state
+    const colour = windowBackground(state, state.windows[rec.id]?.spaceId)
+    if (colour && !rec.win.isDestroyed()) rec.win.setBackgroundColor(colour)
   }
 
   private setRuntime(id: WindowId, fields: Partial<Pick<WindowState, 'focused' | 'fullscreen'>>): void {
@@ -678,6 +681,22 @@ export class WindowManager {
     })
     contents.setWindowOpenHandler(() => ({ action: 'deny' }))
   }
+}
+
+/**
+ * Light/Dark/Automatic is one global setting (SP-18, AP-01; decision D12). Chromium's theme
+ * source follows it, so Orbit's UI and web pages get the matching prefers-color-scheme.
+ */
+function syncAppearance(appearance: ColorMode): void {
+  const source = appearance === 'light' || appearance === 'dark' ? appearance : 'system'
+  if (nativeTheme.themeSource !== source) nativeTheme.themeSource = source
+}
+
+/** A window's background: its Space's colour in the global appearance (a per-Space mode is ignored, D12). */
+export function windowBackground(state: OrbitState, spaceId: SpaceId | undefined): string | undefined {
+  const space = spaceId ? state.spaces[spaceId] : undefined
+  if (!space) return undefined
+  return paletteFor({ ...space.theme, mode: 'system' }, nativeTheme.shouldUseDarkColors).windowBackground
 }
 
 function roundRect(r: Rect): Rect {

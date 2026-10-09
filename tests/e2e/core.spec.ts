@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { expect, test } from '@playwright/test'
 import type { MainContext } from '../../src/main/context'
+import type { SpaceTheme } from '../../src/shared/state'
+import { paletteFor } from '../../src/shared/theme'
 import {
   type Fixtures,
   launchOrbit,
@@ -376,4 +378,33 @@ test('[NV-14] a crashed shell renderer reloads, and a crashed tab reloads when s
       { timeout: 15_000 },
     )
     .toBe(true)
+})
+
+test('[AP-01][SP-18] the window background and colour scheme follow the global appearance (review F14)', async () => {
+  const s = await state(orbit.app)
+  const windowId = Object.keys(s.windows)[0] as string
+  const theme = s.spaces[s.windows[windowId]?.spaceId as string]?.theme
+  const setAppearance = (appearance: 'light' | 'dark' | 'system') =>
+    orbit.app.evaluate((_e, a) => {
+      ;(globalThis as unknown as OrbitGlobal).__orbit.ctx.store.update((d) => {
+        d.settings.appearance = a
+      })
+    }, appearance)
+  const native = () =>
+    orbit.app.evaluate(({ nativeTheme }, w) => {
+      const win = (globalThis as unknown as OrbitGlobal).__orbit.ctx.windows.get(w)
+      return { source: nativeTheme.themeSource, background: win?.getBackgroundColor().toLowerCase() }
+    }, windowId)
+  // Playwright pins pages to a light colour scheme unless told not to.
+  await orbit.shell.emulateMedia({ colorScheme: null })
+  for (const appearance of ['dark', 'light'] as const) {
+    await setAppearance(appearance)
+    const expected = paletteFor({ ...(theme as SpaceTheme), mode: 'system' }, appearance === 'dark').windowBackground
+    await expect.poll(native).toEqual({ source: appearance, background: expected.toLowerCase() })
+    await expect
+      .poll(() => orbit.shell.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches))
+      .toBe(appearance === 'dark')
+  }
+  await setAppearance('system')
+  await expect.poll(async () => (await native()).source).toBe('system')
 })
