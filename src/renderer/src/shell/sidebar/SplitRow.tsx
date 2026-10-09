@@ -1,5 +1,6 @@
 import { Volume2, VolumeX, X } from 'lucide-react'
 import { memo, useEffect, useRef, useState } from 'react'
+import { sectionOf } from '../../../../shared/tree'
 import { invoke } from '../../api'
 import { getOrbitState, useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
@@ -14,6 +15,8 @@ export function SplitRow({ splitId, depth }: { splitId: string; depth: number })
   const order = useOrbit((s) => paneOrderKey(s, splitId))
   const focused = useOrbit((s) => focusedPaneOf(s, splitId))
   const name = useOrbit((s) => s.splits[splitId]?.name ?? '')
+  // Pinned and Favorite splits unload instead of closing (SV-19).
+  const closeLabel = useOrbit((s) => (sectionOf(s, splitId) === 'today' ? 'Close split' : 'Unload split'))
   const [renaming, setRenaming] = useState(false)
   useEffect(
     () =>
@@ -79,8 +82,8 @@ export function SplitRow({ splitId, depth }: { splitId: string; depth: number })
       <button
         type="button"
         className="split-row__close"
-        aria-label="Close split"
-        title="Close split"
+        aria-label={closeLabel}
+        title={closeLabel}
         data-testid="split-close"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={() => void invoke('split.close', { splitId })}
