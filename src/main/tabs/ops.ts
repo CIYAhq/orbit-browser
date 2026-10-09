@@ -36,6 +36,7 @@ import {
   splitOfTab,
   tabsInItem,
 } from '../../shared/tree'
+import { noteArchiveHistory } from '../archive/inbox'
 import type { MainContext } from '../context'
 import {
   addPaneInDraft,
@@ -210,6 +211,9 @@ export class TabOps {
       archivedAt: this.now(),
       reason,
       section,
+      // The tab's id (a restore reuses it) and its Space's name, kept if the Space goes (AR-01).
+      tabId: tab.id,
+      spaceName: d.spaces[tab.spaceId]?.name,
     })
     // Trim the oldest entries in chunks so the full-list rewrite happens rarely.
     if (d.archive.length > MAX_ARCHIVE + ARCHIVE_TRIM_CHUNK) d.archive.splice(0, d.archive.length - MAX_ARCHIVE)
@@ -285,6 +289,8 @@ export class TabOps {
         delete tab.error
       }
     })
+    // The Archive keeps each tab's back/forward history outside OrbitState (AR-01).
+    for (const rec of records) noteArchiveHistory(rec.archiveId, rec.history)
     for (const rec of records) this.ctx.tabs.destroy(rec.tab.id)
     for (const id of unloading) {
       this.ctx.tabs.sleep(id)
@@ -536,6 +542,7 @@ export class TabOps {
       for (const s of splits) delete d.splits[s.id]
       for (const tid of tabIds) delete d.tabs[tid]
     })
+    for (const rec of records) noteArchiveHistory(rec.archiveId, rec.history)
     for (const tid of tabIds) this.ctx.tabs.destroy(tid)
     this.undo.push('Delete Folder', () => {
       for (const rec of records) if (rec.history) this.ctx.tabs.savedHistory.set(rec.tab.id, rec.history)

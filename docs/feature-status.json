@@ -48,6 +48,7 @@
   "TD-04": {"built": "yes", "note": "Clear on divider hover, Cmd+Shift+K, keeps media tabs, cascade exit, Cmd+Z restores in order"},
   "TD-05": {"built": "yes", "note": "menu Archive Tabs Below, undoable"},
   "TD-06": {"built": "yes", "note": "Clear/archive-below/auto-archive per Space"},
+  "AR-01": {"built": "yes", "note": "close, auto-archive, Clear, archive-below, pinned/folder/Space delete, Mini Window and Peek pages; entries carry tab, Space name, section, reason; back/forward history kept outside OrbitState (userData/archive, page state in memory only); private and empty tabs never archived; state keeps the newest ~200-300, the rest lives in the Archive store"},
   "FD-01": {"built": "yes", "note": "folders only in the pinned area (tree.canMoveTo)"},
   "FD-02": {"built": "yes", "note": "New Folder at end of pinned in rename mode; New Folder with selected tabs"},
   "FD-03": {"built": "yes", "note": "menu or double-click; Enter/blur saves, Escape cancels, empty keeps name"},

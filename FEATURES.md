@@ -4,14 +4,14 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 140 built (45 partial) · 189 tested · 0 feel right.
+**Totals:** 485 spec’d · 141 built (45 partial) · 193 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 97 | 118 |
+| P0 | 174 | 98 | 121 |
 | P1 | 221 | 39 | 66 |
-| P2 | 83 | 4 | 5 |
+| P2 | 83 | 4 | 6 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -329,10 +329,10 @@ Spec: `spec/archive.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| AR-01 | What goes into the Archive | P0 | – | – | – |  |
+| AR-01 | What goes into the Archive | P0 | ✅ | ✅ e2e+unit | – | close, auto-archive, Clear, archive-below, pinned/folder/Space delete, Mini Window and Peek pages; entries carry tab, Space name, section, reason; back/forward history kept outside OrbitState (userData/archive, page state in memory only); private and empty tabs never archived; state keeps the newest ~200-300, the rest lives in the Archive store |
 | AR-02 | Where the Archive lives and how to open it | P0 | – | – | – |  |
-| AR-03 | Archive list layout | P0 | – | – | – |  |
-| AR-04 | Search the Archive | P0 | – | – | – |  |
+| AR-03 | Archive list layout | P0 | – | ✅ unit | – |  |
+| AR-04 | Search the Archive | P0 | – | ✅ unit | – |  |
 | AR-05 | Restore an archived tab | P0 | – | – | – |  |
 | AR-06 | Preview an archived item without restoring | P2 | – | – | – |  |
 | AR-07 | Clear the Archive | P1 | – | – | – |  |
@@ -397,7 +397,7 @@ Spec: `spec/feel.md`
 | FL-21 | Sidebar scrolling and large-sidebar performance | P0 | – | ✅ e2e | – |  |
 | FL-22 | Toasts | P1 | – | – | – |  |
 | FL-23 | Page loading indicator | P1 | – | – | – |  |
-| FL-24 | Library and Archive motion | P2 | – | – | – |  |
+| FL-24 | Library and Archive motion | P2 | – | ✅ unit | – |  |
 | FL-25 | Menus, popovers and tooltips | P1 | – | – | – |  |
 | FL-26 | Recent-tab switcher (Ctrl+Tab) | P1 | – | – | – |  |
 | FL-27 | Window-level motion | P1 | – | – | – |  |

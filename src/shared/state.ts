@@ -243,6 +243,8 @@ export interface LinkRule {
 
 export interface ArchivedTab {
   id: string
+  /** The tab it was (AR-01): a restore reuses the id; a tab that comes back takes its entry along. */
+  tabId?: TabId
   url: string
   title: string
   /** Not stored by the tabs lane (keeps state small): look icons up with `tabs.favicon`. */
