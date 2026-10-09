@@ -1,4 +1,4 @@
-import { type PointerEvent as ReactPointerEvent, useRef } from 'react'
+import { type PointerEvent as ReactPointerEvent, useMemo, useRef } from 'react'
 import type { WindowState } from '../../../../shared/state'
 import { invoke } from '../../api'
 import { useOrbit } from '../../store'
@@ -8,20 +8,23 @@ import { TopBar } from './TopBar'
 
 /** The vertical sidebar: top bar, address, favorites, pinned + Today lists, Space switcher. */
 export function Sidebar({ win }: { win: WindowState }) {
-  const space = useOrbit((s) => s.spaces[win.spaceId])
-  if (!space) return null
+  const name = useOrbit((s) => s.spaces[win.spaceId]?.name)
+  const icon = useOrbit((s) => s.spaces[win.spaceId]?.icon)
+  // A stable header element, so the memoized tab lists skip window-only changes (review F5).
+  const header = useMemo(
+    () => (
+      <div className="sidebar__space-name" data-testid="space-name">
+        {icon ? <span className="sidebar__space-icon">{icon}</span> : null}
+        {name}
+      </div>
+    ),
+    [name, icon],
+  )
+  if (name === undefined) return null
   return (
     <aside className="sidebar" data-testid="sidebar" aria-hidden={!win.sidebar.visible}>
       <TopBar win={win} />
-      <SidebarItems
-        spaceId={space.id}
-        header={
-          <div className="sidebar__space-name" data-testid="space-name">
-            {space.icon ? <span className="sidebar__space-icon">{space.icon}</span> : null}
-            {space.name}
-          </div>
-        }
-      />
+      <SidebarItems spaceId={win.spaceId} header={header} />
       <SpaceBar win={win} />
       <ResizeHandle width={win.sidebar.width} />
     </aside>

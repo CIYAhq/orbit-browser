@@ -28,9 +28,12 @@ export class UndoStack {
   }
 
   /** Reverts the most recent change. Returns its label, or undefined when there is nothing to undo. */
-  undo(): string | undefined {
-    let entry = this.entries.pop()
-    while (entry?.isStale?.()) entry = this.entries.pop()
+  undo(maxAgeMs = Number.POSITIVE_INFINITY, now = Date.now()): string | undefined {
+    while (this.peek()?.isStale?.()) this.entries.pop()
+    const top = this.peek()
+    // From a page, only a recent change is undone (an old one would surprise; the sidebar can).
+    if (!top || now - top.at > maxAgeMs) return undefined
+    const entry = this.entries.pop()
     if (!entry) return undefined
     const redo = entry.undo()
     if (typeof redo === 'function') this.redos.push({ label: entry.label, redo: redo as () => void })

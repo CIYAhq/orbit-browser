@@ -65,5 +65,5 @@
   "FD-09": { "built": "partial", "note": "Rename, Change Icon, Duplicate, Copy All Links, Paste URL, Move to, Delete; no Open [Folder] command" },
   "TB-05": { "built": "partial", "note": "Ctrl+Tab / Ctrl+Shift+Tab step through the 5 most recent tabs while Ctrl is held (keyboard only); no overlay list yet" },
   "FD-08": { "built": "yes", "note": "magnifier on folder hover opens a search popover (custom names, first match selected, Enter opens and peeks)" },
-  "TB-17": { "built": "partial", "note": "tab handoff: selecting a tab another window shows moves it there and that window shows its next tab; no blank window yet" }
+  "TB-17": { "built": "partial", "note": "tab handoff; no two windows ever show the same tab (close, Clear, archive, moves, undo, drag-out); no blank window yet" }
 }

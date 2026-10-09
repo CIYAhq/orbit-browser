@@ -142,7 +142,8 @@ test('[NV-09] pages cannot open tabs or pop-ups without a user gesture, and only
     }
     document.body.prepend(b)
   }, url)
-  await page.click('#two')
+  // A real click holds the button for a moment: mouse up must not count as a second gesture.
+  await page.locator('#two').click({ delay: 120 })
   await expect.poll(async () => (await space(app)).today.length).toBe(2)
   await page.waitForTimeout(300)
   expect((await space(app)).today).toHaveLength(2)

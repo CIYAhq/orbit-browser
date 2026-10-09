@@ -56,7 +56,7 @@ Spec: `spec/tabs.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| TB-01 | Tab row anatomy and states | P0 | ✅ | ✅ e2e | – | row: favicon/emoji, title or breadcrumb, hover close, audio, selected pill, dimmed when asleep |
+| TB-01 | Tab row anatomy and states | P0 | ✅ | ✅ e2e+unit | – | row: favicon/emoji, title or breadcrumb, hover close, audio, selected pill, dimmed when asleep |
 | TB-02 | Create a new tab | P0 | ✅ | ✅ e2e | – | Cmd+T / + New Tab / link drop / Cmd+Alt+V paste; background link tabs gesture-gated |
 | TB-03 | Where new tabs are inserted | P0 | ✅ | ✅ e2e+unit | – | single rule todayInsertIndex(): top of Today |
 | TB-04 | Switching between tabs (pointer and keyboard) | P0 | ✅ | ✅ e2e+unit | – | click, Cmd+1-9 (Favorites setting, Cmd+9 last), Cmd+Alt+Up/Down skip collapsed rows |
@@ -72,7 +72,7 @@ Spec: `spec/tabs.md`
 | TB-14 | Tab context menu | P0 | 🟡 partial | ✅ e2e | – | native menus with every tab, pinned, Favorite, folder and multi-selection item; not theme-coloured; split/share items belong to other lanes |
 | TB-15 | Audio, mute, microphone/camera and screen-share indicators | P1 | 🟡 partial | ✅ e2e | – | audio icon toggles mute; no mic/camera/screen-share indicators |
 | TB-16 | Tab sleeping and background resource limits | P1 | 🟡 partial | ✅ e2e+unit | – | sleep timer (settings.sleepAfterMs), Favorites warm 4x, audible/selected never sleep |
-| TB-17 | Tabs across multiple windows | P1 | 🟡 partial | ✅ e2e | – | tab handoff: selecting a tab another window shows moves it there and that window shows its next tab; no blank window yet |
+| TB-17 | Tabs across multiple windows | P1 | 🟡 partial | ✅ e2e+unit | – | tab handoff; no two windows ever show the same tab (close, Clear, archive, moves, undo, drag-out); no blank window yet |
 | TB-18 | Undo sidebar actions | P1 | ✅ | ✅ e2e+unit | – | Cmd+Z undoes moves, close, Clear, archive below, renames, icons and folder changes (page text fields keep their own undo); Cmd+Shift+Z redoes moves, closes and renames |
 | TB-19 | Back on a fresh child tab returns to its opener | P2 | 🟡 partial | ✅ e2e | – | Back with no history closes a link-opened Today tab and selects its opener (shortcut/command) |
 | TB-20 | Copy a tab's URL | P1 | ✅ | ✅ e2e+unit | – | Cmd+Shift+C clean URL, Cmd+Shift+Alt+C Markdown, multi-select and folder Copy Links |

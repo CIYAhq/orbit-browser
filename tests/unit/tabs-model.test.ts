@@ -263,6 +263,22 @@ describe('[TB-18] undo stack', () => {
     expect(stack.undo()).toBeUndefined()
   })
 
+  it('from a page, only a recent change is undone', () => {
+    const stack = new UndoStack()
+    let undone = false
+    stack.push(
+      'close',
+      () => {
+        undone = true
+      },
+      1_000,
+    )
+    expect(stack.undo(60_000, 1_000 + 120_000)).toBeUndefined()
+    expect(undone).toBe(false)
+    expect(stack.undo(60_000, 1_000 + 30_000)).toBe('close')
+    expect(undone).toBe(true)
+  })
+
   it('redoes what undo returned, and a new change ends the redo chain', () => {
     const stack = new UndoStack()
     const log: string[] = []

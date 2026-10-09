@@ -37,6 +37,9 @@ export interface TabTestHooks {
   recentlyClosed: () => string[]
 }
 
+/** ⌘Z pressed in a page only undoes sidebar changes this recent (lane review FU-4). */
+const PAGE_UNDO_MAX_AGE_MS = 60_000
+
 export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabMaintenance } {
   const { store, commands, actions, tabs, windows } = ctx
   const ops = new TabOps(ctx)
@@ -176,7 +179,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     rename: (id) => send(windowId, 'sidebar:rename', { id }),
     changeIcon: (id) => send(windowId, 'sidebar:icon', { id }),
     copyLinks: (tabIds, markdown) => void copyLinks(windowId, tabIds, markdown),
-    duplicate: (tabId) => void commands.run('tabs.duplicate', { tabId }, { windowId }),
+    duplicate: (tabId) => void commands.run('tabs.duplicate', { tabId }, { windowId }).catch(() => {}),
     setMuted: (tabId, muted) => void commands.run('tabs.setMuted', { tabId, muted }, { windowId }),
     moveTo: (ids, to) => {
       const target = containerItems(store.state, to)
@@ -270,7 +273,19 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   commands.register('tabs.resetToPinned', ({ tabId, keepCurrent }, c) =>
     ops.resetToPinned(tabId, { keepCurrent, windowId: windowOf(c) }),
   )
-  commands.register('tabs.setPinnedUrl', ({ tabId, url }) => ops.setPinnedUrl(tabId, url))
+  commands.register('tabs.setPinnedUrl', ({ tabId, url }, c) => {
+    if (url === undefined) {
+      ops.setPinnedUrl(tabId)
+      return
+    }
+    // What was typed goes through the address parser; only web addresses can be pinned (PN-07).
+    const parsed = parseInput(url, store.state.settings.searchEngine)
+    if (parsed.kind !== 'url' || !/^https?:\/\//i.test(parsed.url)) {
+      toast(windowOf(c), 'Enter a web address to pin')
+      return
+    }
+    ops.setPinnedUrl(tabId, parsed.url)
+  })
   commands.register('tabs.rename', ({ tabId, title }) => ops.rename(tabId, title))
   commands.register('tabs.setIcon', ({ tabId, icon }) => ops.setIcon(tabId, icon))
   commands.register('tabs.delete', ({ id }) => ops.deleteItem(id))
@@ -409,10 +424,8 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
       if (!opener) return undefined
       const isPopup = details.disposition === 'new-window' && !!details.features
       if (isPopup) {
-        return {
-          action: 'allow',
-          overrideBrowserWindowOptions: { width: 560, height: 700, autoHideMenuBar: true, title: '' },
-        }
+        // The size and position the page asked for (features) are kept.
+        return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true, title: '' } }
       }
       const background = details.disposition === 'background-tab'
       if (background) {
@@ -489,7 +502,14 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     })
   }
 
-  tabs.onPopupBlocked = (tabId) => toast(windows.windowOfTab(tabId) ?? windows.focusedWindowId(), 'Pop-up blocked')
+  // One "Pop-up blocked" per tab every few seconds, however often a page tries.
+  const blockedAt = new Map<TabId, number>()
+  tabs.onPopupBlocked = (tabId) => {
+    const now = Date.now()
+    if (now - (blockedAt.get(tabId) ?? 0) < 3000) return
+    blockedAt.set(tabId, now)
+    toast(windows.windowOfTab(tabId) ?? windows.focusedWindowId(), 'Pop-up blocked')
+  }
   // A page that closes itself (window.close()) closes its tab (review M3).
   tabs.onPageClosed = (tabId) => {
     if (store.state.tabs[tabId]) ops.closeTabs([tabId], 'closed', { undoLabel: 'Close Tab' })
@@ -498,7 +518,8 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   // ⌘Z from a page (outside text fields) undoes the last sidebar change (TB-18, TB-07).
   tabs.onUndoShortcut = (_tabId, redo) => {
     if (redo) ops.undo.redo()
-    else ops.undo.undo()
+    // From a page (outside text fields) only a recent sidebar change is undone (TB-07 "just closed").
+    else ops.undo.undo(PAGE_UNDO_MAX_AGE_MS)
   }
 
   /** Back on a tab opened from a link with no earlier history closes it and returns to its opener (TB-19). */
@@ -632,7 +653,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   )
   actions.register(
     'tab.duplicate',
-    withActive((tabId, windowId) => void commands.run('tabs.duplicate', { tabId }, { windowId })),
+    withActive((tabId, windowId) => void commands.run('tabs.duplicate', { tabId }, { windowId }).catch(() => {})),
   )
   actions.register(
     'tab.resetToPinned',

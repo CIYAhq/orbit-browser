@@ -16,8 +16,17 @@ function liveContents(view: WebContentsView | undefined): WebContents | undefine
   return contents && !contents.isDestroyed() ? contents : undefined
 }
 
-/** Input that counts as a user gesture for opening tabs and pop-ups (NV-09). */
-const GESTURE_INPUTS = new Set(['mouseDown', 'mouseUp', 'keyDown', 'rawKeyDown', 'gestureTap', 'touchEnd'])
+/** Keys that never count as a user activation (HTML: Escape and lone modifiers). */
+const NON_ACTIVATING_KEYS = new Set(['Escape', 'Shift', 'Control', 'Alt', 'Meta', 'Command', 'Cmd', 'CapsLock'])
+
+/** Input that counts as a user activation for opening tabs and pop-ups (NV-09, HTML user activation). */
+function isActivation(input: Electron.InputEvent): boolean {
+  if (input.type === 'mouseDown' || input.type === 'touchEnd' || input.type === 'gestureTap') return true
+  if (input.type !== 'rawKeyDown' && input.type !== 'keyDown') return false
+  if (input.modifiers?.includes('isautorepeat')) return false
+  const key = (input as { keyCode?: string }).keyCode ?? ''
+  return !NON_ACTIVATING_KEYS.has(key)
+}
 const GESTURE_WINDOW_MS = 1000
 /** Every stored favicon is a data URL of at most this many characters (lane review MF-2). */
 const MAX_FAVICON_DATA_URL = 16 * 1024
@@ -227,7 +236,7 @@ export class TabRuntime {
       contents
         .executeJavaScriptInIsolatedWorld(999, [{ code: FOCUS_IS_EDITABLE }])
         .then((editable) => {
-          if (!editable) this.onUndoShortcut?.(tabId, input.shift)
+          if (!editable) this.onUndoShortcut?.(tabId, !!input.shift)
         })
         .catch(() => {})
     })
@@ -237,7 +246,12 @@ export class TabRuntime {
     })
     // Pop-ups need a recent user gesture in the opener (NV-09).
     contents.on('input-event', (_e, input) => {
-      if (GESTURE_INPUTS.has(input.type)) this.gestures.set(tabId, { at: Date.now(), used: false })
+      if (!isActivation(input)) return
+      const now = Date.now()
+      const last = this.gestures.get(tabId)
+      // One physical press can arrive as two events (raw key down + key down): one activation.
+      if (last && now - last.at < 30) last.at = now
+      else this.gestures.set(tabId, { at: now, used: false })
     })
     contents.on('audio-state-changed', (e) => this.update(tabId, { audible: e.audible }))
     contents.on('did-fail-load', (_e, code, description, _url, isMainFrame) => {

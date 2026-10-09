@@ -224,6 +224,9 @@ test('[PN-07][PN-04] edit the pinned URL inline, or replace it with the current 
   await field.fill(fx.url('/page/Home'))
   await field.press('Enter')
   await expect.poll(async () => (await tab(app, p))?.pinnedUrl).toContain('/page/Home')
+  // Something that isn't a web address is refused (the pinned URL stays).
+  await cmd(app, 'tabs.setPinnedUrl', { tabId: p, url: 'not a web address' })
+  expect((await tab(app, p))?.pinnedUrl).toContain('/page/Home')
   await act(app, 'tab.resetToPinned')
   await waitTab(app, p, '/page/Home')
 })

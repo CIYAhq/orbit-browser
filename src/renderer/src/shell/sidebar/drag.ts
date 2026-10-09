@@ -71,6 +71,8 @@ interface Session {
   lastX: number
   lastY: number
   prevY: number
+  measuredSeq: number
+  measuredAt: number
   raf: number
   dwell: { side: 'left' | 'right'; since: number } | null
   spaceAtStart: SpaceId
@@ -166,6 +168,8 @@ export function pressItem(
     lastX: e.clientX,
     lastY: e.clientY,
     prevY: e.clientY,
+    measuredSeq: -1,
+    measuredAt: 0,
     raf: 0,
     dwell: null,
     spaceAtStart: ctx.spaceId,
@@ -234,6 +238,8 @@ function begin(s: Session, rect: DOMRect): void {
   s.ids = dragIds(s.ids[0] as ItemId)
   s.dragged = new Set(s.ids)
   s.slots = measureSlots()
+  s.measuredSeq = getSeq()
+  s.measuredAt = performance.now()
   s.blockHeight = s.slots
     .filter((sl) => s.dragged.has(sl.key) || sl.ancestors.some((a) => s.dragged.has(a)))
     .reduce((h, sl) => h + sl.height + ROW_GAP, 0)
@@ -325,9 +331,13 @@ function sameTarget(a: DropTarget | null, b: DropTarget | null): boolean {
 }
 
 function update(s: Session): void {
-  // Re-measure every move: rows may still be growing in, or the list may have changed under the
-  // drag. Layout offsets ignore the drag transforms, so this is cheap and always current.
-  if (ctx.spaceId === s.spaceAtStart) s.slots = measureSlots()
+  // Re-measure when the list may have changed under the drag (new state, rows still growing in
+  // right after the drag began); otherwise reuse the slots. Offsets ignore the drag transforms.
+  const now = performance.now()
+  if (ctx.spaceId === s.spaceAtStart && (getSeq() !== s.measuredSeq || now - s.measuredAt < 400)) {
+    s.slots = measureSlots()
+    s.measuredSeq = getSeq()
+  }
   const zone = zoneAt(s.lastX, s.lastY)
   // The row stays in the sidebar's column (FL-10) unless it heads for the grid, a Space or out of the window.
   const free = zone.kind === 'favorites' || zone.kind === 'space' || zone.kind === 'outside'
@@ -356,8 +366,8 @@ function update(s: Session): void {
   const prev = useDrag.getState()
   if (prev.spaceTarget !== (patch.spaceTarget ?? null)) markSpaceTarget(patch.spaceTarget ?? null)
   if (
-    prev.target?.type !== target?.type ||
-    JSON.stringify(prev.target) !== JSON.stringify(target) ||
+    !sameTarget(prev.target, target) ||
+    prev.target?.gapTop !== target?.gapTop ||
     prev.favIndex !== patch.favIndex ||
     prev.spaceTarget !== patch.spaceTarget ||
     prev.outside !== patch.outside ||
