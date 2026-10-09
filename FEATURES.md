@@ -77,7 +77,7 @@ Spec: `spec/tabs.md`
 | TB-19 | Back on a fresh child tab returns to its opener | P2 | 🟡 partial | ✅ e2e | – | Back with no history closes a link-opened Today tab and selects its opener (shortcut/command) |
 | TB-20 | Copy a tab's URL | P1 | ✅ | ✅ e2e+unit | – | Cmd+Shift+C clean URL, Cmd+Shift+Alt+C Markdown, multi-select and folder Copy Links |
 | TB-21 | Hover cards for known web apps | P2 | – | – | – |  |
-| TB-22 | Session restore on relaunch | P0 | ✅ | ✅ e2e+unit | – | Spaces, Favorites, pinned, Today, folders, selection restored; only the selected tab loads; Linux bound saving is core's |
+| TB-22 | Session restore on relaunch | P0 | ✅ | ✅ e2e | – | Spaces, Favorites, pinned, Today, folders, selection restored; only the selected tab loads; Linux bound saving is core's |
 | PN-01 | What a pinned tab is | P0 | ✅ | ✅ e2e | – | per-Space pinned tabs with pinned URL; never auto-archived |
 | PN-02 | Pin and unpin | P0 | ✅ | ✅ e2e | – | Cmd+D, drag above/below divider, menu, Pin to [Space] command |
 | PN-03 | Pinned URL memory and the "navigated away" indicator | P0 | ✅ | ✅ e2e+unit | – | breadcrumb 'Pinned / Current', redirects count as home, hover shows reset glyph and hint |

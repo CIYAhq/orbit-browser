@@ -11,7 +11,7 @@ import {
 import { isFolderId, isSplitId, isTabId } from '../../../../shared/ids'
 import type { ItemId, OrbitState, TabId } from '../../../../shared/state'
 import { isAwayFromPinned, rowTitle } from '../../../../shared/tabs'
-import { splitLeaves, splitOfTab, tabsInItem, visibleTabOrder } from '../../../../shared/tree'
+import { splitOfTab, tabsInItem, visibleTabOrder } from '../../../../shared/tree'
 import { invoke, isMac } from '../../api'
 import { activeTabId } from '../../selectors'
 import { getOrbitState, useMirror, useOrbit } from '../../store'
@@ -19,6 +19,7 @@ import { Favicon } from '../../ui/Favicon'
 import { pressItem } from './drag'
 import { QUICK_EASE, reducedMotion, SNAPPY, SNAPPY_EASE, STANDARD } from './motion-tokens'
 import { RenameField } from './RenameField'
+import { SplitRow } from './SplitRow'
 import {
   clearSelection,
   startRename,
@@ -174,7 +175,7 @@ export const ItemList = memo(function ItemList({
             )
           if (isSplitId(id))
             return (
-              <SplitRow
+              <SplitSlot
                 key={id}
                 splitId={id}
                 depth={depth}
@@ -223,7 +224,14 @@ function RowSlot({
   index,
   ancestors,
   className = 'row-slot',
-}: SlotProps & { id: string; folder?: 'open' | 'closed'; children: React.ReactNode; className?: string }) {
+  onPointerDown,
+}: SlotProps & {
+  id: string
+  folder?: 'open' | 'closed'
+  children: React.ReactNode
+  className?: string
+  onPointerDown?: (e: ReactPointerEvent<HTMLDivElement>) => void
+}) {
   const y = useRowShift(id)
   const x = useMotionValue(0)
   const ref = useRef<HTMLDivElement>(null)
@@ -274,6 +282,7 @@ function RowSlot({
       initial={instant ? false : 'hidden'}
       animate="shown"
       exit="exit"
+      onPointerDown={onPointerDown}
       data-slot="item"
       data-key={id}
       data-container={containerKey}
@@ -623,18 +632,16 @@ const FolderRow = memo(function FolderRow({
   )
 })
 
-const SplitRow = memo(function SplitRow({
+/** A split view: one slot (dragged and animated as one item) around the split row. */
+const SplitSlot = memo(function SplitSlot({
   splitId,
   depth,
   containerKey,
   index,
   ancestors,
 }: { splitId: string } & SlotProps) {
-  const leaves = useOrbit((s) => {
-    const split = s.splits[splitId]
-    return split ? splitLeaves(split.layout).join(',') : ''
-  })
-  if (!leaves) return null
+  const exists = useOrbit((s) => !!s.splits[splitId])
+  if (!exists) return null
   return (
     <RowSlot
       id={splitId}
@@ -643,17 +650,12 @@ const SplitRow = memo(function SplitRow({
       index={index}
       ancestors={ancestors}
       className="row-slot row-slot--split"
+      onPointerDown={(e) => {
+        // The split row selects its panes itself; the slot turns a press into a drag of the split.
+        if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) pressItem(e, splitId, 'list')
+      }}
     >
-      <div
-        className="split-row"
-        data-testid="split-row"
-        data-split-id={splitId}
-        onContextMenu={(e) => openContextMenu(e, leaves.split(',')[0] as string)}
-      >
-        {leaves.split(',').map((tabId) => (
-          <TabRowBody key={tabId} tabId={tabId} depth={depth} />
-        ))}
-      </div>
+      <SplitRow splitId={splitId} depth={depth} />
     </RowSlot>
   )
 })
