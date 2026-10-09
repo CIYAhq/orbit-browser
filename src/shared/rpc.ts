@@ -13,6 +13,7 @@ import type { CommandBarCommands } from './commands/commandbar'
 import type { CoreCommands, CoreEvents } from './commands/core'
 import type { DownloadCommands } from './commands/downloads'
 import type { ExtensionCommands } from './commands/extensions'
+import type { HistoryCommands } from './commands/history'
 import type { ImportCommands } from './commands/import'
 import type { PeekCommands } from './commands/peek'
 import type { SettingsCommands } from './commands/settings'
@@ -26,6 +27,7 @@ export interface OrbitCommands
     TabCommands,
     SpaceCommands,
     CommandBarCommands,
+    HistoryCommands,
     SplitCommands,
     ArchiveCommands,
     PeekCommands,
