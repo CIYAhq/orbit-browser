@@ -725,3 +725,40 @@ test('[SP-02][SP-09] switching Space while the new-Space flow is open abandons t
   await expect(shell.getByTestId('space-rename-input')).toBeFocused()
   expect(await names(app)).toEqual(['Personal', 'Beta'])
 })
+
+test('[FL-13][SP-07] jumping several Spaces slides one page with the destination next to the current one', async () => {
+  const { app, shell } = orbit
+  const [a] = await order(app)
+  const b = await createSpace(app, { name: 'Two', activate: false })
+  const c = await createSpace(app, { name: 'Three', activate: false, afterSpaceId: b })
+  const d = await createSpace(app, { name: 'Four', activate: false, afterSpaceId: c })
+  await settled(shell)
+  const seen = shell.evaluate(
+    () =>
+      new Promise<string[]>((done) => {
+        const ids = new Set<string>()
+        let maxShift = 0
+        const t0 = performance.now()
+        const tick = () => {
+          for (const el of document.querySelectorAll<HTMLElement>('[data-preview-space]')) {
+            ids.add(el.dataset.previewSpace as string)
+          }
+          const m = /translate3d\((-?[\d.]+)px/.exec(
+            document.querySelector<HTMLElement>('.space-strip__track')?.style.transform ?? '',
+          )
+          if (m) maxShift = Math.max(maxShift, Math.abs(Number(m[1])))
+          if (performance.now() - t0 < 600) requestAnimationFrame(tick)
+          else done([...ids, `shift:${Math.round(maxShift)}`])
+        }
+        requestAnimationFrame(tick)
+      }),
+  )
+  await shell.locator(`[data-testid="space-dot"][data-space-id="${d}"]`).click()
+  const result = await seen
+  const width = await stripWidth(shell)
+  // Only the Space we left is shown beside the destination; Two and Three never flash.
+  expect(result.filter((r) => !r.startsWith('shift:'))).toEqual([a])
+  const shift = Number(result.find((r) => r.startsWith('shift:'))?.slice(6))
+  expect(shift).toBeLessThanOrEqual(width + 1)
+  await expect.poll(() => activeSpace(app)).toBe(d)
+})
