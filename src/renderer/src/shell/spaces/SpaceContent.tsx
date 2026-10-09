@@ -2,7 +2,7 @@ import { type MouseEvent, memo, useCallback, useLayoutEffect, useMemo, useRef } 
 import type { SpaceId } from '../../../../shared/state'
 import { SidebarItems } from '../sidebar/SidebarItems'
 import { scrollMemory } from './scroll-memory'
-import { openSpaceMenu, TitleRow } from './TitleRow'
+import { openSpaceMenu, StaleContext, TitleRow } from './TitleRow'
 
 /**
  * The active Space's real, interactive sidebar content (SB-02 regions 3–9), in
@@ -11,7 +11,14 @@ import { openSpaceMenu, TitleRow } from './TitleRow'
  * row as its header. Favorites sit in SidebarItems' `data-favorites-layer`,
  * which the switcher holds still or cross-fades during a swipe (PR-06).
  */
-export const SpaceContent = memo(function SpaceContent({ spaceId }: { spaceId: SpaceId }) {
+export const SpaceContent = memo(function SpaceContent({
+  spaceId,
+  stale = false,
+}: {
+  spaceId: SpaceId
+  /** Hidden behind the stand-in while the new Space renders: its title steps aside (one space-name). */
+  stale?: boolean
+}) {
   const rootRef = useRef<HTMLDivElement>(null)
 
   // The swipe previews draw a Space at the scroll position it had here (SP-10). SidebarItems
@@ -39,7 +46,10 @@ export const SpaceContent = memo(function SpaceContent({ spaceId }: { spaceId: S
 
   return (
     <div className="space-page" ref={rootRef} data-testid="space-page" data-page-space={spaceId}>
-      <SidebarItems spaceId={spaceId} header={header} onContextMenu={onContextMenu} />
+      {/* Context, not props: the stale flag reaches the title row without re-rendering the list. */}
+      <StaleContext.Provider value={stale}>
+        <SidebarItems spaceId={spaceId} header={header} onContextMenu={onContextMenu} />
+      </StaleContext.Provider>
     </div>
   )
 })

@@ -1,5 +1,5 @@
 import { Plus } from 'lucide-react'
-import { memo, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
+import { memo, useDeferredValue, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
 import type { SpaceId } from '../../../../shared/state'
 import { useOrbit } from '../../store'
 import { NewSpaceFlow } from './NewSpaceFlow'
@@ -20,6 +20,11 @@ export const SpaceStrip = memo(function SpaceStrip({ windowId, spaceId }: { wind
   const { slots, newPage } = useSyncExternalStore(switcher.subscribe, switcher.getSnapshot)
   const viewportRef = useRef<HTMLDivElement>(null)
   const trackRef = useRef<HTMLDivElement>(null)
+  // The real page follows a deferred Space id: after a switch a light stand-in paints the
+  // destination at once and the full list (hundreds of rows) renders concurrently while the
+  // strip slides, so a switch never blocks a frame on mounting rows (review M5).
+  const shownSpace = useDeferredValue(spaceId)
+  const standIn = shownSpace !== spaceId
 
   useLayoutEffect(() => {
     switcher.syncActive(spaceId, order)
@@ -34,7 +39,9 @@ export const SpaceStrip = memo(function SpaceStrip({ windowId, spaceId }: { wind
   useLayoutEffect(() => {
     const viewport = viewportRef.current
     if (!viewport) return
-    switcher.attach(trackRef.current, () => viewport.querySelector<HTMLElement>('[data-slot="0"] .sidebar__scroll'))
+    switcher.attach(trackRef.current, () =>
+      viewport.querySelector<HTMLElement>('[data-slot="0"] .space-slot__real .sidebar__scroll'),
+    )
     switcher.setSize(viewport.clientWidth, viewport.clientHeight)
     const observer = new ResizeObserver(() => switcher.setSize(viewport.clientWidth, viewport.clientHeight))
     observer.observe(viewport)
@@ -72,7 +79,10 @@ export const SpaceStrip = memo(function SpaceStrip({ windowId, spaceId }: { wind
     <div className={`space-strip${flowOpen ? ' is-flow' : ''}`} ref={viewportRef} data-testid="space-strip">
       <div className="space-strip__track" ref={trackRef}>
         <div className="space-slot" data-slot="0" inert={flowOpen}>
-          <SpaceContent spaceId={spaceId} />
+          {standIn ? <SpacePreview spaceId={spaceId} windowId={windowId} height={switcher.height} standIn /> : null}
+          <div className="space-slot__real" hidden={standIn}>
+            <SpaceContent spaceId={shownSpace} stale={standIn} />
+          </div>
         </div>
         {slots
           .filter((s) => s.k !== 0)

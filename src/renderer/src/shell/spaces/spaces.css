@@ -111,6 +111,17 @@
   padding: 0 4px 0 8px;
 }
 
+.space-slot__real {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.space-slot__real[hidden] {
+  display: none;
+}
+
 .space-page__favorites {
   flex: none;
   position: relative;

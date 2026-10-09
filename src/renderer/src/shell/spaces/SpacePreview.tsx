@@ -20,11 +20,14 @@ export const SpacePreview = memo(function SpacePreview({
   spaceId,
   windowId,
   height,
+  standIn = false,
 }: {
   spaceId: SpaceId
   windowId: string
   /** The strip's height, measured once by the strip (no layout read per preview; review M5). */
   height: number
+  /** Standing in for the active Space's real page for a moment after a switch. */
+  standIn?: boolean
 }) {
   const space = useOrbit((s) => s.spaces[spaceId])
   const favorites = useOrbit((s) => (space ? s.profiles[space.profileId]?.favorites : undefined))
@@ -37,7 +40,7 @@ export const SpacePreview = memo(function SpacePreview({
   const pinnedRows = collectRows(state, space.pinned, 0, budget, active)
   const todayRows = collectRows(state, space.today, 0, Math.max(0, budget - pinnedRows.length - 2), active)
   return (
-    <div className="space-page space-page--preview" aria-hidden>
+    <div className={`space-page space-page--preview${standIn ? ' is-stand-in' : ''}`} aria-hidden={!standIn}>
       <div className="space-page__favorites" data-favorites-layer>
         {favorites && favorites.length > 0 ? (
           <div className="favorites">
@@ -57,7 +60,9 @@ export const SpacePreview = memo(function SpacePreview({
           {single && space.unnamed ? null : (
             <div className="space-title">
               {space.icon ? <span className="space-title__icon">{space.icon}</span> : null}
-              <span className="space-title__name">{space.name}</span>
+              <span className="space-title__name" data-testid={standIn ? 'space-name' : undefined}>
+                {space.name}
+              </span>
             </div>
           )}
           <div className="item-list">{pinnedRows}</div>

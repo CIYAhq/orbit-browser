@@ -1,11 +1,14 @@
 import { MoreHorizontal } from 'lucide-react'
-import { type KeyboardEvent, memo, useLayoutEffect, useRef, useState } from 'react'
+import { createContext, type KeyboardEvent, memo, useContext, useLayoutEffect, useRef, useState } from 'react'
 import type { SpacePanel } from '../../../../shared/commands/spaces'
 import { DEFAULT_PROFILE_ID } from '../../../../shared/defaults'
 import type { SpaceId } from '../../../../shared/state'
 import { invoke } from '../../api'
 import { useOrbit } from '../../store'
 import { consumeRename, usePendingRename } from './rename-request'
+
+/** True while the page behind a stand-in still shows the previous Space (see SpaceStrip). */
+export const StaleContext = createContext(false)
 
 export function openSpacePanel(panel: SpacePanel, params: Record<string, string | number | boolean>): void {
   void invoke('overlay.open', { overlay: { kind: 'panel', panel, params } })
@@ -36,13 +39,15 @@ export const TitleRow = memo(function TitleRow({ spaceId }: { spaceId: SpaceId }
   })
   const [editing, setEditing] = useState(false)
   const pendingRename = usePendingRename()
+  const stale = useContext(StaleContext)
 
   // Rename requested from a menu or the command bar (possibly with a switch to this Space).
   useLayoutEffect(() => {
     if (pendingRename === spaceId && consumeRename(spaceId)) setEditing(true)
   }, [pendingRename, spaceId])
 
-  if (name === undefined) return null
+  // Hidden behind the stand-in that already shows the new Space's title: step aside.
+  if (name === undefined || stale) return null
   // A single Space that was never named shows no title row until it gets a name (SP-04).
   if (hidden && !editing) return null
 
