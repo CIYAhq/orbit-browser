@@ -32,13 +32,18 @@ export function isPrivateProfileId(id: string | undefined): boolean {
   return !!id && id.startsWith(PRIVATE_PROFILE_PREFIX)
 }
 
+/** A profile whose data stays in memory: a private window's, or any profile without a persistent session. */
 export function isPrivateProfile(profile: Profile | undefined): boolean {
   return !!profile && (isPrivateProfileId(profile.id) || !profile.partition.startsWith('persist:'))
 }
 
+/**
+ * A private window's Space. Windows keep apart by this (and `isPrivateTab`): only private windows'
+ * own profiles count, so another profile on an in-memory session still shows in normal windows.
+ */
 export function isPrivateSpace(state: OrbitState, spaceId: SpaceId | undefined): boolean {
   const space = spaceId ? state.spaces[spaceId] : undefined
-  return !!space && (isPrivateProfileId(space.profileId) || isPrivateProfile(state.profiles[space.profileId]))
+  return !!space && isPrivateProfileId(space.profileId)
 }
 
 export function isPrivateWindow(state: OrbitState, windowId: WindowId | undefined): boolean {
@@ -46,9 +51,10 @@ export function isPrivateWindow(state: OrbitState, windowId: WindowId | undefine
   return !!win && (win.kind === 'private' || isPrivateSpace(state, win.spaceId))
 }
 
+/** A private window's tab. */
 export function isPrivateTab(state: OrbitState, tabId: TabId | undefined): boolean {
   const tab = tabId ? state.tabs[tabId] : undefined
-  return !!tab && (isPrivateProfileId(tab.profileId) || isPrivateProfile(state.profiles[tab.profileId]))
+  return !!tab && isPrivateProfileId(tab.profileId)
 }
 
 /**
@@ -150,12 +156,8 @@ function layoutLeaves(layout: SplitLayout): TabId[] {
  * when there is nothing private.
  */
 export function withoutPrivate(state: OrbitState): OrbitState {
-  const profiles = new Set(
-    Object.values(state.profiles)
-      .filter(isPrivateProfile)
-      .map((p) => p.id),
-  )
-  const isPrivate = (profileId: ProfileId) => profiles.has(profileId) || isPrivateProfileId(profileId)
+  const profiles = new Set(Object.keys(state.profiles).filter(isPrivateProfileId))
+  const isPrivate = (profileId: ProfileId) => isPrivateProfileId(profileId)
   const spaces = new Set(
     Object.values(state.spaces)
       .filter((s) => isPrivate(s.profileId))
