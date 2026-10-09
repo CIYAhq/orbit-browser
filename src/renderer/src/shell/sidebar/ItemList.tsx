@@ -322,6 +322,23 @@ function onRowPointerDown(e: ReactPointerEvent<HTMLElement>, tabId: TabId) {
   pressItem(e, item, 'list', inSelection ? clearSelection : undefined)
 }
 
+/**
+ * Hover fades (FL-04): in over ~90 ms, out over ~130 ms. Uses the Web Animations API on top of
+ * the CSS :hover background, so nothing waits on it and no transition events are fired.
+ */
+function fadeHover(el: HTMLElement, entering: boolean) {
+  if (reducedMotion() || useDrag.getState().phase !== 'idle') return
+  if (el.classList.contains('is-active') || el.classList.contains('is-selected')) return
+  const hover = getComputedStyle(el).getPropertyValue('--hover').trim()
+  if (!hover) return
+  el.animate(
+    entering
+      ? [{ backgroundColor: 'transparent' }, { backgroundColor: hover }]
+      : [{ backgroundColor: hover }, { backgroundColor: 'transparent' }],
+    { duration: entering ? 90 : 130, easing: entering ? 'ease-out' : 'cubic-bezier(0.2, 0, 0, 1)' },
+  )
+}
+
 function openContextMenu(e: ReactMouseEvent, id: ItemId) {
   e.preventDefault()
   const sel = useSelection.getState().ids
@@ -371,6 +388,8 @@ export const TabRowBody = memo(function TabRowBody({ tabId, depth }: { tabId: st
       data-testid="tab-row"
       data-tab-id={tabId}
       onPointerDown={(e) => onRowPointerDown(e, tabId)}
+      onPointerEnter={(e) => fadeHover(e.currentTarget, true)}
+      onPointerLeave={(e) => fadeHover(e.currentTarget, false)}
       onAuxClick={(e) => {
         if (e.button === 1) void invoke('tabs.close', { tabId })
       }}
@@ -496,6 +515,8 @@ const FolderRow = memo(function FolderRow({
           className={`folder-row${into ? ' is-drop-into' : ''}${focused ? ' is-focused' : ''}`}
           style={{ paddingLeft: 8 + depth * INDENT }}
           data-testid="folder-row"
+          onPointerEnter={(e) => fadeHover(e.currentTarget, true)}
+          onPointerLeave={(e) => fadeHover(e.currentTarget, false)}
           onPointerDown={(e) => {
             if (e.button !== 0 || renaming) return
             clearSelection()
