@@ -104,6 +104,7 @@ export class PaneEngine {
   private ready = false
   /** A page in HTML full screen covers the whole window until it leaves (SV-25). */
   private fullscreen: TabId | null = null
+  private reportRaf = 0
 
   attach(host: HTMLElement): void {
     this.host = host
@@ -146,7 +147,9 @@ export class PaneEngine {
   detach(): void {
     for (const fn of this.cleanup.splice(0)) fn()
     if (this.raf) cancelAnimationFrame(this.raf)
+    if (this.reportRaf) cancelAnimationFrame(this.reportRaf)
     this.raf = 0
+    this.reportRaf = 0
     this.host = null
   }
 
@@ -493,8 +496,16 @@ export class PaneEngine {
   }
 
   /** Sends the live panes' rectangles (window coordinates, clipped to the frame) to main. */
+  /** Coalesces pane reports to at most one per animation frame (DOM writes stay immediate). */
   private report(): void {
-    if (!this.ready) return
+    if (!this.ready || this.reportRaf) return
+    this.reportRaf = requestAnimationFrame(() => {
+      this.reportRaf = 0
+      this.sendReport()
+    })
+  }
+
+  private sendReport(): void {
     const shown = this.model.layout ? layoutLeaves(this.model.layout) : []
     if (this.fullscreen && shown.includes(this.fullscreen)) {
       const whole = { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }
