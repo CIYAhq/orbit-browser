@@ -487,3 +487,36 @@ test('[FL-07][PN-02] a row pinned with Cmd+D travels to the pinned section inste
   expect((after?.y ?? 0) < (before?.y ?? 0)).toBe(true)
   expect((await space(app)).pinned).toEqual([third])
 })
+
+test('[TB-09][TB-11] holding a dragged tab at the sidebar edge slides to the next Space, where it can be dropped', async () => {
+  const { app, shell } = orbit
+  const sA = (await space(app)).id
+  const sB = await cmd<string>(app, 'spaces.create', { name: 'B', activate: false })
+  const inB = await newTab(app, fx.url('/page/InB'), { spaceId: sB, activate: false })
+  const t = await newTab(app, fx.url('/page/Mover'))
+  await waitTab(app, t, '/page/Mover')
+  const start = await center(row(shell, t))
+  const sidebar = await shell.getByTestId('sidebar').boundingBox()
+  const edgeX = (sidebar?.x ?? 0) + (sidebar?.width ?? 248) + 4
+  await shell.mouse.move(start.x, start.y)
+  await shell.mouse.down()
+  await shell.mouse.move(start.x, start.y + 6, { steps: 2 })
+  await shell.mouse.move(edgeX, start.y + 20, { steps: 8 })
+  // Hold near the right edge: the window shows the next Space.
+  await expect.poll(async () => Object.values((await state(app)).windows)[0]?.spaceId, { timeout: 4000 }).toBe(sB)
+  // Drop at the top of that Space's Today.
+  const target = await shell.locator(`[data-tab-id="${inB}"]`).boundingBox()
+  await shell.mouse.move(start.x, (target?.y ?? 0) + 4, { steps: 8 })
+  await shell.mouse.up()
+  await expect.poll(async () => (await state(app)).spaces[sB]?.today).toEqual([t, inB])
+  expect((await state(app)).spaces[sA]?.today).toEqual([])
+})
+
+test('[TB-06] Cmd+W in a window with nothing selected closes that window', async () => {
+  const { app } = orbit
+  await act(app, 'window.new')
+  await expect.poll(async () => Object.keys((await state(app)).windows).length).toBe(2)
+  // The new window shows an empty Space: Cmd+W closes it.
+  await act(app, 'tab.close', 1)
+  await expect.poll(async () => Object.keys((await state(app)).windows).length).toBe(1)
+})
