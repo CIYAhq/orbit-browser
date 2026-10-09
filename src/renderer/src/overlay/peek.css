@@ -112,7 +112,7 @@
 
 @media (prefers-color-scheme: dark) {
   .peek__backdrop {
-    background: rgba(0, 0, 0, 0.24);
+    background: rgba(0, 0, 0, 0.2);
   }
   .peek__grabber {
     background: rgba(255, 255, 255, 0.4);

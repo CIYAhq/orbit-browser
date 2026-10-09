@@ -165,6 +165,20 @@ test('[PK-09] Esc in the Peek page closes it and keeps the source tab as it was'
   expect(archived).toMatchObject({ url: sites.other('/site/Other'), from: 'peek' })
 })
 
+test('[PK-01][PK-09] the Peek page takes the keyboard when it opens and the source tab gets it back', async () => {
+  const { source, peekTab } = await openPeekFromPinned()
+  const focused = (id: string) =>
+    orbit.app.evaluate(
+      (_e, t) => (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(t)?.isFocused() ?? false,
+      id,
+    )
+  await expect.poll(() => focused(peekTab)).toBe(true)
+  // Close from the overlay's × (focus is not in the page then), and the source tab has it again.
+  await (await viewPage(orbit.app, 'overlay')).getByTestId('peek-close').click()
+  await expectClosed(source, peekTab)
+  await expect.poll(() => focused(source)).toBe(true)
+})
+
 test('[PK-09] ⌘W closes the Peek only, never the source tab', async () => {
   const { source, peekTab } = await openPeekFromPinned()
   await pressInTab(orbit.app, peekTab, 'Mod+W')
@@ -265,6 +279,18 @@ test('[PK-04] a meeting link in a pinned tab opens a new tab, not a Peek', async
   const s = await state(orbit.app)
   expect(s.tabs[source]?.url).toBe(sites.url('/site/Calendar'))
   expect(s.spaces[win.spaceId]?.today).toHaveLength(1)
+})
+
+test('[PK-15] hovering never opens a Peek: not a link in a pinned tab, not a pinned row', async () => {
+  const { tabId, page } = await pinned('/site/Hover')
+  await page.locator('#other').hover()
+  await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${tabId}"]`).hover()
+  // Give a would-be hover trigger time to fire, then check nothing opened.
+  await page.waitForTimeout(600)
+  expect((await overlayOf(orbit.app)).kind).toBe('none')
+  const s = await state(orbit.app)
+  expect(Object.values(s.tabs).filter((t) => t.floating)).toHaveLength(0)
+  expect(s.archive).toHaveLength(0)
 })
 
 test('[PK-12] with "Open links from pinned tabs in Peek" off, the link opens as a Today tab', async () => {
