@@ -8,6 +8,7 @@ import {
   DEFAULT_PROFILE_ID,
   DEFAULT_SETTINGS,
   DEFAULT_SIDEBAR_WIDTH,
+  DEFAULT_SITE_SEARCH,
   MAX_SIDEBAR_WIDTH,
   MIN_SIDEBAR_WIDTH,
 } from '../shared/defaults'
@@ -103,6 +104,21 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
   if (!['system', 'light', 'dark'].includes(state.settings.appearance)) state.settings.appearance = 'system'
   seedAppearanceFromOldThemes(state)
   normalizeEntities(state, base)
+  // Site searches (CB-11): keep well-formed http(s) entries; a missing list gets the defaults.
+  const sites = Array.isArray(state.settings.siteSearch) ? state.settings.siteSearch : DEFAULT_SITE_SEARCH
+  state.settings.siteSearch = sites
+    .filter(
+      (s) =>
+        isRecord(s) &&
+        typeof s.keyword === 'string' &&
+        s.keyword.trim() !== '' &&
+        typeof s.url === 'string' &&
+        /^https?:\/\//i.test(s.url) &&
+        s.url.includes('%s'),
+    )
+    .map((s) => ({ id: String(s.id || s.keyword), name: String(s.name || s.keyword), keyword: s.keyword, url: s.url }))
+  if (typeof state.settings.searchSuggestions !== 'boolean') state.settings.searchSuggestions = false
+  if (typeof state.settings.searchTopResult !== 'boolean') state.settings.searchTopResult = false
   // spaceOrder must list exactly the existing spaces.
   state.spaceOrder = [...new Set(state.spaceOrder)].filter((id) => state.spaces[id])
   for (const id of Object.keys(state.spaces)) if (!state.spaceOrder.includes(id)) state.spaceOrder.push(id)

@@ -68,8 +68,9 @@ export class ActionRegistry {
   }
 
   /**
-   * Lets a feature act first while it is in charge of a window (a Peek card, a Mini Window):
-   * the first interceptor that returns true handles the action instead of its handler.
+   * Lets a feature act first while it is in charge of a window (an open overlay such as the
+   * command bar or a Peek card, a Mini Window; KS-19), e.g. ⌘W closes the command bar instead of
+   * the tab. The first interceptor that returns true handles the action instead of its handler.
    */
   intercept(interceptor: ActionInterceptor): void {
     this.interceptors.push(interceptor)

@@ -4,14 +4,14 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 98 built (35 partial) · 134 tested · 0 feel right.
+**Totals:** 485 spec’d · 120 built (40 partial) · 161 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 64 | 81 |
-| P1 | 221 | 32 | 50 |
-| P2 | 83 | 2 | 3 |
+| P0 | 174 | 82 | 101 |
+| P1 | 221 | 35 | 56 |
+| P2 | 83 | 3 | 4 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -144,7 +144,7 @@ Spec: `spec/spaces.md`
 | SP-19 | Theme transition between Spaces | P1 | ✅ | ✅ e2e+unit | – | OKLab blend driven by the swipe or switch spring, no neutral frame |
 | SP-20 | Per-Space pinned and Today sections | P0 | ✅ | ✅ e2e | – | per-Space pinned and Today containers (tab behaviour in the tabs lane) |
 | SP-21 | Move tabs between Spaces | P0 | ✅ | ✅ e2e | – | drop on a switcher target moves the tab (tabs lane drag); edge dwell slides the strip and measures once it settles |
-| SP-22 | Spaces in the command bar | P1 | 🟡 partial | – | – | New Space, Rename Space, Edit Theme, Change Space Icon and Delete Space actions; Move to/Pin to [Space] not yet |
+| SP-22 | Spaces in the command bar | P1 | 🟡 partial | ✅ e2e+unit | – | New Space, Rename Space, Edit Theme, Change Space Icon and Delete Space actions; Move to/Pin to [Space] not yet |
 | SP-23 | Spaces across windows | P0 | ✅ | ✅ e2e+unit | – | each window keeps its own Space; all windows share Spaces |
 | SP-24 | What a new window shows | P0 | ✅ | ✅ e2e | – | Cmd/Ctrl+N: same Space, sidebar shown, cascaded, command bar open, full screen follows |
 | SP-25 | Spaces menu in the app menu | P2 | – | – | – |  |
@@ -166,29 +166,29 @@ Spec: `spec/commandbar.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| CB-01 | One bar replaces the omnibox and the new-tab page | P0 | – | – | – |  |
-| CB-02 | Open in new-tab mode (⌘T) | P0 | – | – | – |  |
-| CB-03 | Open in edit-current-URL mode (⌘L) | P0 | – | – | – |  |
-| CB-04 | Position, size and look: a floating centred panel | P0 | – | – | – |  |
-| CB-05 | What it searches (sources) | P0 | – | – | – |  |
-| CB-06 | Result kinds and their row labels | P0 | – | – | – |  |
-| CB-07 | Ranking and grouping | P0 | – | – | – |  |
-| CB-08 | Typed URLs and inline autocompletion | P0 | – | – | – |  |
-| CB-09 | Switch to an open tab instead of duplicating | P0 | – | – | – |  |
-| CB-10 | Keyboard navigation inside the bar | P0 | – | – | – |  |
-| CB-11 | Site search with Tab (search a site directly) | P0 | – | – | – |  |
-| CB-12 | Paste and go | P1 | – | – | – |  |
-| CB-13 | Actions (browser commands by name) | P0 | – | – | – |  |
-| CB-14 | Actions-only mode (Tab on an empty field) | P1 | – | – | – |  |
-| CB-15 | Default search engine fallback | P0 | – | – | – |  |
-| CB-16 | Open the top web result directly (Shift+Enter) | P2 | – | – | – |  |
-| CB-17 | Remove a suggestion | P1 | – | – | – |  |
-| CB-18 | Empty state (bar opened with nothing typed) | P0 | – | – | – |  |
-| CB-19 | Space and profile awareness | P0 | – | – | – |  |
-| CB-20 | Sidebar stays interactive while the bar is open | P1 | – | – | – |  |
-| CB-21 | Closing the bar and what happens to typed text | P0 | – | – | – |  |
-| CB-22 | Feel: open/close animation, latency and live updates | P0 | – | ✅ e2e | – |  |
-| CB-23 | The bar in other contexts (split pane, private window, Mini Window) | P1 | – | – | – |  |
+| CB-01 | One bar replaces the omnibox and the new-tab page | P0 | ✅ | ✅ e2e | – | no new-tab page: ⌘T and + New Tab open the bar; a tab exists only once a row is chosen |
+| CB-02 | Open in new-tab mode (⌘T) | P0 | ✅ | ✅ e2e | – | ⌘T/Ctrl+T, + New Tab row, macOS File menu; second ⌘T closes |
+| CB-03 | Open in edit-current-URL mode (⌘L) | P0 | ✅ | ✅ e2e+unit | – | ⌘L/Ctrl+L/Alt+D: full URL selected, current-page row (Enter reloads), navigates the current tab |
+| CB-04 | Position, size and look: a floating centred panel | P0 | ✅ | ✅ e2e | – | centred in the window (D11b), input ~36% down, 660 px wide, ≤9 rows sized to fit, no scroll bar, Space accent, dark |
+| CB-05 | What it searches (sources) | P0 | 🟡 partial | ✅ e2e+unit | – | tabs, pinned/Favorites, folders, archive, per-profile history, typed URL + autocomplete, past searches, opt-in engine suggestions, actions, Spaces; extensions and settings sections wait for their lanes |
+| CB-06 | Result kinds and their row labels | P0 | ✅ | ✅ e2e+unit | – | kind label on every row, split favicons, other-Space name, shortcuts, hints, middle-truncated URLs |
+| CB-07 | Ranking and grouping | P0 | ✅ | ✅ e2e+unit | – | one ranked list (src/main/commandbar/rank.ts, tunable), best-guess top row, dedupe tab > archived > history, stable row ids |
+| CB-08 | Typed URLs and inline autocompletion | P0 | ✅ | ✅ e2e+unit | – | inline domain/URL completion from history and tabs; Backspace drops it, →/End accept; scheme added |
+| CB-09 | Switch to an open tab instead of duplicating | P0 | ✅ | ✅ e2e+unit | – | switches to the tab (and its Space) instead of duplicating; exact URL match tops the list; ⌥/Alt+Enter opens a copy |
+| CB-10 | Keyboard navigation inside the bar | P0 | ✅ | ✅ e2e | – | ↑/↓ (⌃N/⌃P on macOS), Enter, hover, aria-activedescendant; ⌘⌥⌫ / Shift+Delete removes history rows |
+| CB-11 | Site search with Tab (search a site directly) | P0 | ✅ | ✅ e2e+unit | – | keyword or site-name prefix + Tab → chip; Backspace/Esc leaves; starter list in settings.siteSearch (editing UI is ST-06) |
+| CB-12 | Paste and go | P1 | ✅ | ✅ e2e | – | Paste and go row first in the empty state; ⌘⌥V / Ctrl+Alt+V is the tabs lane's tab.pasteAsNewTab |
+| CB-13 | Actions (browser commands by name) | P0 | 🟡 partial | ✅ e2e+unit | – | every registered action by name/synonym/initials with its shortcut; Move to / Pin to [Space]; Open [Folder]; tab-only actions hidden on empty Spaces; many catalogue actions do not exist yet |
+| CB-14 | Actions-only mode (Tab on an empty field) | P1 | ✅ | ✅ e2e+unit | – | Tab on an empty field or '/ ' at the start → Actions chip; Esc/Backspace leaves |
+| CB-15 | Default search engine fallback | P0 | ✅ | ✅ e2e+unit | – | default engine search row and destination (q=a+b); engine suggestions opt-in (settings.searchSuggestions, off by default), non-blocking with a 1.5 s timeout |
+| CB-16 | Open the top web result directly (Shift+Enter) | P2 | ✅ | ✅ e2e+unit | – | ⇧Enter opens the first result (DuckDuckGo backslash prefix) when settings.searchTopResult is on (default off); otherwise like Enter |
+| CB-17 | Remove a suggestion | P1 | ✅ | ✅ e2e+unit | – | hover × and ⌘⌥⌫ / Shift+Delete delete history and past-search rows |
+| CB-18 | Empty state (bar opened with nothing typed) | P0 | ✅ | ✅ e2e+unit | – | recent tabs, frequent sites, paste row; starter actions/sites in a fresh profile (not pre-selected: Enter on the untouched field only runs Paste and go or ⌘L's current page); current page in ⌘L mode |
+| CB-19 | Space and profile awareness | P0 | ✅ | ✅ e2e+unit | – | results use the window's current Space/profile and re-run on Space switch; new tabs go to the current Space |
+| CB-20 | Sidebar stays interactive while the bar is open | P1 | 🟡 partial | ✅ e2e | – | a left click over the sidebar closes the bar and is forwarded (one-click tab select); right/middle clicks only close; hover-reveal sidebar interplay untested |
+| CB-21 | Closing the bar and what happens to typed text | P0 | ✅ | ✅ e2e | – | Esc, ⌘T/⌘L again, click outside, window blur; text discarded; focus returns to the page, also when the window comes back after a background close |
+| CB-22 | Feel: open/close animation, latency and live updates | P0 | ✅ | ✅ e2e+unit | – | spring scale-fade entrance, quicker exit, reduced-motion fade; type-ahead and Enter buffered; IME-safe; per-keystroke latency measured |
+| CB-23 | The bar in other contexts (split pane, private window, Mini Window) | P1 | 🟡 partial | ✅ e2e | – | private (non-persistent) profiles: no history/archive rows, and their tabs, folders and Spaces never show in normal windows; ⌘L on an empty Space acts like ⌘T; split-pane and Mini Window variants not done |
 
 ## Split View (prefix SV)
 
@@ -350,7 +350,7 @@ Spec: `spec/shortcuts.md`
 | KS-01 | One keymap, remapping and persistence | P0 | – | ✅ e2e | – |  |
 | KS-02 | Conflicts with web pages ("prefer websites" vs "prefer Orbit") | P0 | – | – | – |  |
 | KS-03 | Platform mapping rules | P0 | – | – | – |  |
-| KS-04 | Command bar and address | P0 | – | – | – |  |
+| KS-04 | Command bar and address | P0 | ✅ | ✅ e2e | – | ⌘T/⌘L/Alt+D, Esc, ⌘T/⌘L again, ↑/↓ (⌃N/⌃P), Enter, Tab, ⌫, ⇧Enter (option), ⌘⌥⌫ / Shift+Delete, ⌘⌥V |
 | KS-05 | Tabs and windows | P0 | – | – | – |  |
 | KS-06 | Switching tabs | P0 | – | – | – |  |
 | KS-07 | Spaces | P0 | ✅ | ✅ e2e | – | Space shortcuts wired through the action table |
@@ -365,7 +365,7 @@ Spec: `spec/shortcuts.md`
 | KS-16 | Text-editing keys keep their meaning | P0 | – | – | – |  |
 | KS-17 | Mouse, trackpad and modifier-click bindings | P0 | – | – | – |  |
 | KS-18 | Shortcut hints everywhere | P1 | – | – | – |  |
-| KS-19 | Keys inside overlays | P0 | – | – | – |  |
+| KS-19 | Keys inside overlays | P0 | 🟡 partial | ✅ e2e | – | command bar: ⌘T/⌘L/⌘W/Esc handled by the bar first (ActionRegistry.intercept); other overlays belong to their lanes |
 | KS-20 | Shortcuts in special windows | P1 | – | – | – |  |
 
 ## Interaction feel and motion targets (prefix FL)
@@ -389,8 +389,8 @@ Spec: `spec/feel.md`
 | FL-13 | Space switching: swipe physics, settle and rubber-band | P0 | ✅ | ✅ e2e+unit | – | strip of pages, 1:1 tracking, commit thresholds, settle/rubber-band springs, one-page slides for clicks and keys, reduced motion cross-fade |
 | FL-14 | Theme-colour transition between Spaces | P0 | ✅ | ✅ e2e+unit | – | theme blends with the gesture/spring in OKLab; 200 ms preset blends; light/dark cross-fade |
 | FL-15 | Button press micro-animations | P1 | – | – | – |  |
-| FL-16 | Command bar open and close | P0 | – | – | – |  |
-| FL-17 | Command bar typing and result updates | P0 | – | – | – |  |
+| FL-16 | Command bar open and close | P0 | ✅ | ✅ e2e | – | motion spring (0.97→1, 4 px drop), 100 ms exit (80 ms after choosing a row) while focus returns at once; fade only with reduced motion; centred in the window |
+| FL-17 | Command bar typing and result updates | P0 | ✅ | ✅ e2e+unit | – | per-keystroke local results, identity-keyed memoized rows, instant highlight; engine suggestions fill free rows without moving the highlight |
 | FL-18 | Split view create and resize | P1 | – | – | – |  |
 | FL-19 | Link preview open, expand, close | P1 | ✅ | ✅ unit | – | open spring done in ~280 ms with no overshoot, 18% dim; expand meets the frame in ~250 ms, then the row enters; split slides to the right half; close 160 ms to 0.96 + fade; drag/swipe dismiss; ⌘Z/⌘⇧T replay the open |
 | FL-20 | Favorites tiles | P1 | – | – | – |  |

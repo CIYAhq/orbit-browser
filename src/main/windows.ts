@@ -27,6 +27,10 @@ interface WindowRecord {
   /** Ignore renderer pane reports older than this state sequence (after a main-side fast switch). */
   minPaneSeq: number
   overlayShown: boolean
+  /** Pending hide after the overlay's exit animation. */
+  overlayHideTimer?: ReturnType<typeof setTimeout>
+  /** The overlay closed while the window was in the background: give the page focus when it returns. */
+  refocusPage?: boolean
   /** Tab whose page is in HTML fullscreen (video): its view fills the window. */
   htmlFullscreen?: TabId
 }
@@ -38,6 +42,9 @@ interface Attachment {
   /** Id of the view's web contents, taken while it was alive (a destroyed one can't be asked). */
   contentsId: number
 }
+
+/** How long the overlay view stays up after closing so its exit animation can play (FL-16). */
+const OVERLAY_EXIT_MS = 110
 
 const isMac = process.platform === 'darwin'
 /** Isolated world for Orbit's own small page scripts (the page can't tamper with them). */
@@ -286,6 +293,10 @@ export class WindowManager {
     win.on('focus', () => {
       this.lastFocused = id
       this.setRuntime(id, { focused: true })
+      if (rec.refocusPage && !rec.overlayShown) {
+        rec.refocusPage = false
+        this.focusActiveTab(id)
+      }
     })
     win.on('blur', () => this.setRuntime(id, { focused: false }))
     win.on('enter-full-screen', () => {
@@ -328,6 +339,7 @@ export class WindowManager {
       win.once('closed', () => clearTimeout(timer))
     }
     win.on('closed', () => {
+      clearTimeout(rec.overlayHideTimer)
       this.records.delete(id)
       for (const [tabId, entry] of [...this.attached]) {
         if (entry.windowId === id) {
@@ -749,6 +761,8 @@ export class WindowManager {
   }
 
   private showOverlay(rec: WindowRecord): void {
+    clearTimeout(rec.overlayHideTimer)
+    rec.refocusPage = false
     const overlay = this.ensureOverlay(rec)
     this.fitOverlay(rec)
     rec.win.contentView.addChildView(overlay)
@@ -759,9 +773,22 @@ export class WindowManager {
 
   private hideOverlay(rec: WindowRecord): void {
     if (!rec.overlayShown || !rec.overlay) return
-    rec.overlay.setVisible(false)
     rec.overlayShown = false
+    // Focus returns to the page at once (or when the window is next focused); the view stays up
+    // while the renderer animates out.
     if (rec.win.isFocused()) this.focusActiveTab(rec.id)
+    else rec.refocusPage = true
+    const overlay = rec.overlay
+    clearTimeout(rec.overlayHideTimer)
+    rec.overlayHideTimer = setTimeout(() => {
+      rec.overlayHideTimer = undefined
+      if (rec.overlayShown || rec.win.isDestroyed() || overlay.webContents.isDestroyed()) return
+      try {
+        overlay.setVisible(false)
+      } catch {
+        // The window is going away.
+      }
+    }, OVERLAY_EXIT_MS)
   }
 
   private fitOverlay(rec: WindowRecord): void {

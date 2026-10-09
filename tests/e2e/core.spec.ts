@@ -331,7 +331,9 @@ test('[TB-02] opening tabs keeps every UI mirror in step without resyncs (review
 
 test('[CB-22] Enter right after typing opens what was typed, not a row left from an earlier query', async () => {
   const one = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/One') })) as string
-  await expect(orbit.shell.getByTestId('tab-row').first()).toContainText('One')
+  // The empty bar lists recent tabs other than the active one, so "One" must not be active.
+  await run(orbit.app, 'tabs.create', { url: fx.url('/page/Extra') })
+  await expect(orbit.shell.getByTestId('tab-row').filter({ hasText: 'Extra' })).toHaveCount(1)
   // Answers for typed text come late (as on a slow machine); the empty query's "recent tabs" don't.
   await orbit.app.evaluate(() => {
     type Handler = (args: { query: string }, c: unknown) => unknown
@@ -352,7 +354,7 @@ test('[CB-22] Enter right after typing opens what was typed, not a row left from
   const two = fx.url('/page/Two')
   await input.fill(two)
   await input.press('Enter')
-  await expect.poll(async () => Object.keys((await state(orbit.app)).tabs).length).toBe(2)
+  await expect.poll(async () => Object.keys((await state(orbit.app)).tabs).length).toBe(3)
   const s = await state(orbit.app)
   const win = Object.values(s.windows)[0]
   const active = win?.activeTab[win.spaceId]
