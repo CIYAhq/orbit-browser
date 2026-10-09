@@ -15,12 +15,13 @@ import { routeFor } from '../../shared/link-routing'
 import type { Rect } from '../../shared/rpc'
 import type { OrbitState, ProfileId, SpaceId, TabId, WindowId } from '../../shared/state'
 import { NEUTRAL_THEME, paletteFor } from '../../shared/theme'
-import { insertItem } from '../../shared/tree'
+import { insertItem, removeItem, sectionOf } from '../../shared/tree'
 import { parseInput, siteOf } from '../../shared/url'
 import type { MainContext } from '../context'
 import { archiveFloating, floatingTab, keepFloatingPagesOutOfTabClose } from '../peek/floating'
 import { runPageAction } from '../peek/page-actions'
 import type { CallContext } from '../registry'
+import { activateInDraft, detachFromSplit, reselectAway, todayInsertIndex } from '../tabs/model'
 import { activeTabOf, loadRenderer, rendererEntry, uiWebPreferences } from '../windows'
 
 /**
@@ -395,28 +396,46 @@ export function registerMiniWindow(ctx: MainContext): void {
     })
   }
 
-  /** Opens a Mini Window: with a page, or blank with its lookup bar focused (MW-01, MW-06). */
-  const open = (url?: string): WindowId | undefined => {
+  /**
+   * Opens a Mini Window: with a page, or blank with its lookup bar focused (MW-01, MW-06).
+   * `adopt` moves a sidebar tab in, live: it leaves the sidebar and the window that showed it
+   * selects another tab (MW-07). `profileId` opens the page in that profile.
+   */
+  const open = (url?: string, opts: { adopt?: TabId; profileId?: ProfileId } = {}): WindowId | undefined => {
     if (quitting) return undefined
+    const adopted = opts.adopt ? store.state.tabs[opts.adopt] : undefined
+    if (opts.adopt && (!adopted || adopted.floating)) return undefined
     const claimed = spare && !spare.win.isDestroyed() ? spare : undefined
     spare = undefined
     const id = claimed?.id ?? newId('w')
     const win = claimed?.win ?? createWindow(id)
     if (claimed) win.setBounds(nextBounds())
     const state = store.state
-    const profileId = profileFor(state, url)
-    const spaceId = spaceForProfile(state, profileId)
-    const tab = url ? floatingTab('mini', { spaceId, profileId, url }) : undefined
+    const profileId = adopted?.profileId ?? opts.profileId ?? profileFor(state, url)
+    const spaceId = adopted && state.spaces[adopted.spaceId] ? adopted.spaceId : spaceForProfile(state, profileId)
+    const tab = !adopted && url ? floatingTab('mini', { spaceId, profileId, url }) : undefined
+    const tabId = adopted?.id ?? tab?.id
     store.update((d) => {
+      if (adopted) {
+        // Other windows let go of it first (it is not in the new window yet), then it leaves the sidebar.
+        reselectAway(d, new Set([adopted.id]))
+        detachFromSplit(d, adopted.id)
+        removeItem(d, adopted.id)
+        const t = d.tabs[adopted.id]
+        if (t) t.floating = 'mini'
+      }
       const w = { ...createWindowState(spaceId, 'mini'), id }
       w.sidebar.visible = false
-      if (tab) {
-        d.tabs[tab.id] = tab
-        w.activeTab[spaceId] = tab.id
-      }
+      if (tab) d.tabs[tab.id] = tab
+      if (tabId) w.activeTab[spaceId] = tabId
       d.windows[id] = w
     })
-    const mini: Mini = { id, win, tabId: tab?.id, openedUrl: url, lastActive: Date.now() }
+    if (adopted) {
+      // The page keeps running: its view moves from the main window to this one.
+      const view = tabs.get(adopted.id)
+      if (view) windows.detachView(adopted.id, view)
+    }
+    const mini: Mini = { id, win, tabId, openedUrl: url ?? adopted?.url, lastActive: Date.now() }
     minis.set(id, mini)
     wire(mini)
     ctx.perf.mark(`mini:${id}:open`)
@@ -442,6 +461,21 @@ export function registerMiniWindow(ctx: MainContext): void {
       }
     }
     return open(url)
+  }
+
+  /**
+   * ⌘⌥-click on a sidebar row (MW-07): a Today tab (or a split pane) moves into a Mini Window,
+   * live; a pinned tab or Favorite keeps its place and its page opens in a Mini Window.
+   */
+  const fromTab = (tabId: TabId): WindowId | undefined => {
+    const state = store.state
+    const tab = state.tabs[tabId]
+    if (!tab || tab.floating) return undefined
+    const section = sectionOf(state, tabId)
+    if (section === 'today') return open(undefined, { adopt: tabId })
+    const url = tabs.contents(tabId)?.getURL() || tab.url
+    if (!url || url === 'about:blank') return undefined
+    return open(url, { profileId: tab.profileId })
   }
 
   api = { open, openOrFocus }
@@ -502,15 +536,17 @@ export function registerMiniWindow(ctx: MainContext): void {
       t.url = url
       t.spaceId = target
       t.profileId = profileId
-      t.lastActiveAt = Date.now()
       if (pinned) {
         t.pinnedUrl = url
         insertItem(d, { kind: 'pinned', spaceId: target }, Number.MAX_SAFE_INTEGER, tabId)
-      } else insertItem(d, { kind: 'today', spaceId: target }, 0, tabId)
-      w.spaceId = target
-      w.activeTab[target] = tabId
+      } else {
+        const space = d.spaces[target]
+        insertItem(d, { kind: 'today', spaceId: target }, space ? todayInsertIndex(space, 'move') : 0, tabId)
+      }
+      // The Mini Window lets go of the page, then the main window selects it (TB-17).
       const m = d.windows[mini.id]
       if (m) m.activeTab = {}
+      activateInDraft(d, mainId, tabId)
     })
     if (profileId !== tab.profileId) {
       // Another profile is another session: the page reloads there.
@@ -568,6 +604,7 @@ export function registerMiniWindow(ctx: MainContext): void {
   }
 
   commands.register('mini.open', ({ url }) => open(url) ?? '')
+  commands.register('mini.fromTab', ({ tabId }) => fromTab(tabId) ?? null)
   commands.register('mini.navigate', ({ input }, c) => {
     const mini = miniOf(c)
     if (mini) navigate(mini, input)

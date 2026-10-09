@@ -308,6 +308,43 @@ test('[MW-07][PK-16] ⌘⌥-click opens a link in a Mini Window; links inside it
   expect(Object.values((await state(orbit.app)).windows).find((w) => w.kind === 'main')?.overlay.kind).toBe('none')
 })
 
+test('[MW-07] ⌘⌥-click on a Today row moves that tab, live, into a Mini Window; a pinned row opens a copy', async () => {
+  const keep = (await run(orbit.app, 'tabs.create', { url: sites.url('/site/Keep') })) as string
+  const row = (await run(orbit.app, 'tabs.create', { url: sites.url('/site/Row') })) as string
+  const page = await findPage(orbit.app, '/site/Row')
+  await expect(page.locator('#title')).toBeVisible()
+  // Something only the live page knows, to tell a move from a reload.
+  await page.evaluate(() => {
+    ;(window as unknown as { marker: number }).marker = 42
+  })
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
+  await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${row}"]`).click({ modifiers: [mod, 'Alt'] })
+  await expect.poll(async () => (await minis(orbit.app))[0]?.tabId).toBe(row)
+  await expect.poll(async () => (await minis(orbit.app))[0]?.page?.width ?? 0).toBeGreaterThan(100)
+  expect(await page.evaluate(() => (window as unknown as { marker?: number }).marker)).toBe(42)
+  // It left the sidebar, and the main window shows another tab.
+  const s = await state(orbit.app)
+  const main = Object.values(s.windows).find((w) => w.kind === 'main')
+  expect(s.tabs[row]?.floating).toBe('mini')
+  expect(s.spaces[main?.spaceId ?? '']?.today).not.toContain(row)
+  expect(main?.activeTab[main.spaceId]).toBe(keep)
+  await expect(orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${row}"]`)).toHaveCount(0)
+  // A pinned tab keeps its place; its page opens in a new Mini Window.
+  const pin = (await run(orbit.app, 'tabs.create', {
+    url: sites.url('/site/PinnedRow'),
+    container: { kind: 'pinned', spaceId: main?.spaceId },
+  })) as string
+  await expect(orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${pin}"]`)).toBeVisible()
+  await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${pin}"]`).click({ modifiers: [mod, 'Alt'] })
+  await expect.poll(async () => (await minis(orbit.app)).length).toBe(2)
+  await expect
+    .poll(async () => (await minis(orbit.app)).find((m) => m.tabId !== row)?.url)
+    .toBe(sites.url('/site/PinnedRow'))
+  const after = await state(orbit.app)
+  expect(after.spaces[main?.spaceId ?? '']?.pinned).toContain(pin)
+  expect(after.tabs[pin]?.floating).toBeUndefined()
+})
+
 test('[MW-10] a Mini Window can reopen its page in another profile, remembered for the site', async () => {
   const work = (await run(orbit.app, 'profiles.create', { name: 'Work' })) as string
   await run(orbit.app, 'spaces.create', { name: 'Work', profileId: work, activate: false })

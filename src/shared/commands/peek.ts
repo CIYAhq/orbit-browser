@@ -16,6 +16,11 @@ export interface PeekCommands {
 
   /** Opens a Mini Window with a page, or blank with the lookup bar (MW-06). Returns its window id. */
   'mini.open': { args: { url?: string }; result: WindowId }
+  /**
+   * ⌘⌥-click on a sidebar row (MW-07): a Today tab moves into a new Mini Window, live (it leaves
+   * the sidebar); a pinned tab or Favorite stays and opens its page there. Returns the window.
+   */
+  'mini.fromTab': { args: { tabId: TabId }; result: WindowId | null }
   /** Loads what was typed in a Mini Window's lookup bar or address field (MW-06). */
   'mini.navigate': { args: { input: string }; result: void }
   /** Moves the Mini Window's page into a Space (most recent by default) and closes it (MW-05). */
