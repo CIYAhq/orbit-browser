@@ -314,11 +314,13 @@ export function CommandBar({
   // A row follows the mouse only once the pointer moves. A bar that opens under a resting pointer
   // gets a mouse-move at an unchanged spot (macOS sends one), and rows re-ranked under a still
   // pointer can too: neither may select the row under it, or Enter would run that row (CB-18).
+  // Moves of under 3 px from the last spot that counted are jitter, not a hover.
   const pointer = useRef<{ x: number; y: number } | null>(null)
   const onRowHover = useCallback((i: number, e: MouseEvent) => {
     const last = pointer.current
+    if (last && Math.hypot(e.screenX - last.x, e.screenY - last.y) < 3) return
     pointer.current = { x: e.screenX, y: e.screenY }
-    if (last && (last.x !== e.screenX || last.y !== e.screenY)) latest.current.select(i)
+    if (last) latest.current.select(i)
   }, [])
   const onRowChoose = useCallback(
     (r: SearchResult, e: MouseEvent) => latest.current.choose(r, e.metaKey || e.ctrlKey ? 'new-tab' : undefined),

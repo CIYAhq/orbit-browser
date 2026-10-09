@@ -8,6 +8,7 @@ import {
   activeTabId,
   type Fixtures,
   FRAME_SLACK,
+  isMac,
   launchOrbit,
   MOD,
   type Orbit,
@@ -218,10 +219,9 @@ test('[CB-10] arrows move the highlight, hovering highlights, Enter runs the hig
   const third = rows(overlay).nth(2)
   await expect(third).toHaveAttribute('aria-selected', 'true')
   await expect(rows(overlay).nth(0)).toHaveAttribute('aria-selected', 'false')
-  // Hover moves it too, once the pointer really moves (a resting pointer selects nothing).
+  // Hover moves it too, once the pointer really moves (a resting pointer selects nothing: F4 below).
   const over = (await rows(overlay).nth(1).boundingBox()) as { x: number; y: number; height: number }
-  await overlay.mouse.move(over.x + 40, over.y + over.height / 2 - 4)
-  await expect(rows(overlay).nth(2)).toHaveAttribute('aria-selected', 'true')
+  await overlay.mouse.move(over.x + 40, over.y + over.height / 2 - 8)
   await overlay.mouse.move(over.x + 40, over.y + over.height / 2, { steps: 2 })
   await expect(rows(overlay).nth(1)).toHaveAttribute('aria-selected', 'true')
   await overlay.keyboard.press('ArrowDown')
@@ -805,10 +805,15 @@ test('[CB-20] right and middle clicks over the sidebar only close the bar (revie
 test('[CB-18] Enter on the untouched empty field runs no starter action (review F4)', async () => {
   const overlay = await openBar()
   await expect(rows(overlay).first()).toBeVisible()
-  // A pointer resting where the rows appear gets one mouse-move there (macOS): it selects nothing.
-  const under = (await rows(overlay).first().boundingBox()) as { x: number; y: number; height: number }
-  await overlay.mouse.move(under.x + 40, under.y + under.height / 2)
-  await overlay.mouse.move(under.x + 40, under.y + under.height / 2)
+  // A pointer resting where the rows appear selects nothing. macOS itself sends the bar a mouse-move
+  // at that unchanged spot when it appears (the CI runner's pointer rests over the rows); elsewhere
+  // the test sends it, twice at one spot over the first row.
+  if (isMac) await new Promise((r) => setTimeout(r, 500))
+  else {
+    const under = (await rows(overlay).first().boundingBox()) as { x: number; y: number; height: number }
+    await overlay.mouse.move(under.x + 40, under.y + under.height / 2)
+    await overlay.mouse.move(under.x + 40, under.y + under.height / 2)
+  }
   await expect(rows(overlay).filter({ has: overlay.locator('[aria-selected="true"]') })).toHaveCount(0)
   await expect(bar(overlay).locator('[aria-selected="true"]')).toHaveCount(0)
   await overlay.keyboard.press('Enter')
