@@ -113,7 +113,7 @@ Rules: no synchronous disk I/O on hot paths after boot, no full-state broadcasts
 - **Unit** (`vitest`): shared logic (tree moves, URL parsing, accelerators, theme math, persistence normalization), main-process models with fakes. Fast; run on every commit.
 - **E2E** (`@playwright/test` `_electron`): `tests/e2e/helpers.ts` launches the built app with an isolated `userData` and `ORBIT_E2E=1`. That exposes `globalThis.__orbit` test hooks in main (state, view bounds, run command) and serves local fixture pages from a loopback HTTP server, so there's no network dependence. **Every test title starts with the feature IDs it covers**, e.g. `test('[TB-06][TB-07] close and reopen a tab', …)`. `scripts/features.mjs` reads those IDs to mark rows tested in `FEATURES.md`.
 - **CI** (`.github/workflows/ci.yml`): typecheck + lint + unit (Linux), e2e under Xvfb (Linux), and build + unit + e2e + unsigned `.dmg`/`.zip` packaging (macOS). Green CI is required before merge.
-- **Feel checks**: screen captures under Xvfb (`ffmpeg -f x11grab`) for each feature ID go to `clips/` in the Orca context directory. "Feels right" in `FEATURES.md` is a lead sign-off against `feel.md`.
+- **Feel checks and clips**: `scripts/capture/record.mjs <scenario>` drives the built app through `scripts/capture/scenarios/<scenario>.mjs` while ffmpeg (`ORBIT_FFMPEG`, needs x11grab) records the X display, so native tab views are captured exactly as composited. Clips are named by feature ID and stored in `clips/` in the Orca context directory, screenshots in `screenshots/`. "Feels right" in `FEATURES.md` is a lead sign-off against `feel.md`.
 
 ## 10. Security baseline
 
