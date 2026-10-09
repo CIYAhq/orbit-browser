@@ -7,9 +7,11 @@
   "SB-06": {"built": "yes", "note": "title row: inline rename, hover profile badge and … menu (pinned caret is PN-09)"},
   "SB-07": {"built": "yes", "note": "+ New Tab row with press animation opens the command bar"},
   "SB-09": {"built": "partial", "note": "switcher and + menu done; Library button arrives with the archive lane"},
-  "SB-11": {"built": "partial", "note": "scaffold"},
-  "SB-14": {"built": "partial", "note": "scaffold"},
+  "SB-11": {"built": "yes", "note": "Cmd+S / Ctrl+S, toggle button, View menu and command bar; the sidebar slides out as the card widens (one curve, reversible mid-way); back at the same width, scroll and selected tab; per window, persisted; new windows show it"},
+  "SB-12": {"built": "yes", "note": "left 6 px edge (moving pointer, 0 ms dwell) brings a floating card in its own view over the page, which never moves; stays while hovered (16 px band), while a field in it is edited or the command bar is open; goes 400 ms after the pointer moves on, at once on a click into the page (the click reaches the page); not over full-screen video"},
+  "SB-14": {"built": "yes", "note": "drag the edge 1:1 with a live width, clamped 180-420 with no drift; double-click resets to 248; 40 px past the minimum hides (width kept); saved per window"},
   "SB-19": {"built": "partial", "note": "scaffold"},
+  "SB-20": {"built": "partial", "note": "macOS: traffic lights hidden with the sidebar, shown (moved in) with the floating card; the rest of the hidden-sidebar chrome is not built"},
   "SB-22": {"built": "yes", "note": "Cmd/Ctrl+Shift+E focuses the sidebar; arrows, Enter, Escape, F2"},
   "SB-23": {"built": "yes", "note": "selected tab scrolled into view (smooth, then settles); pill points to it while it is out of view; rows use content-visibility"},
   "SB-24": {"built": "partial", "note": "theme gradient + grain on sidebar and frame, tinted selection; the neutral theme is a solid soft grey/near-black, not a translucent material yet"},
@@ -159,5 +161,7 @@
   "NV-04": {"built": "partial", "note": "Esc in the page while loading (overlays take it first), Cmd+. on macOS, double-click Reload, Stop (x) state; the address does not show a pending URL yet"},
   "NV-17": {"built": "partial", "note": "copy button = Cmd+Shift+C (clean URL, Copied toast); one-time shortcut tip when the URL is copied from the command bar; the Win/Linux page-first offer waits on KS-02"},
   "KS-08": {"built": "partial", "note": "Back, Forward, Reload, hard reload and Stop keys done; find, zoom indicator and the rest come with their NV items"},
-  "FL-15": {"built": "partial", "note": "top row: Back/Forward nudge, Reload glyph turns once, press to 0.94 with pop release, restarts on repeat, none when disabled or reduced motion"}
+  "FL-15": {"built": "partial", "note": "top row: Back/Forward nudge, Reload glyph turns once, press to 0.94 with pop release, restarts on repeat, none when disabled or reduced motion"},
+  "FL-02": {"built": "yes", "note": "260 ms standard curve drives the sidebar column and the card margins together; interruptible; reduced motion snaps"},
+  "FL-03": {"built": "yes", "note": "0 ms dwell; card in 200 ms (snappy), out 160 ms (quick); hysteresis band; re-entering while it leaves brings it back"}
 }

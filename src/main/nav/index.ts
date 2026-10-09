@@ -8,6 +8,7 @@ import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
 import type { TabOps } from '../tabs/ops'
 import { activeTabOf } from '../windows'
+import { type RevealHoldInfo, registerSidebarReveal } from './sidebar-reveal'
 import { SitePrefs } from './site-prefs'
 
 /** Test-only handle (ORBIT_E2E=1): globalThis.__orbitNav. */
@@ -16,6 +17,14 @@ export interface NavTestHooks {
   menu: () => { windowId: WindowId; direction: NavDirection; labels: string[]; icons: boolean[] } | null
   /** Chooses an item of the open history menu by label; `newTab` is a ⌘-click (Ctrl-click). */
   chooseMenu: (label: string, newTab?: boolean) => boolean
+  /** The floating sidebar of a window (default: the first): its view, and what keeps it out (SB-12). */
+  floating: (windowId?: WindowId) => {
+    exists: boolean
+    placed: boolean
+    shown: boolean
+    bounds?: { x: number; y: number; width: number; height: number }
+    hold: RevealHoldInfo | null
+  }
 }
 
 interface ShownMenu {
@@ -238,6 +247,9 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
     ctx.toast(windowOf(c), `Tip: ${formatAccelerator(accel, process.platform)} copies the page's link`)
   })
 
+  // The hidden sidebar's hover reveal (SB-12, FL-03).
+  const reveal = registerSidebarReveal(ctx)
+
   // Placeholder until the site controls panel (NV-16) lands.
   actions.register('site.controls', (c) => ctx.toast(windowOf(c), 'Site controls are coming soon'))
 
@@ -274,6 +286,10 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
         if (!menu || !entry) return false
         choose(menu, entry.index, newTab)
         return true
+      },
+      floating: (windowId) => {
+        const id = windowId ?? windows.ids()[0] ?? ''
+        return { ...windows.floatingInfo(id), hold: reveal.hold(id) ?? null }
       },
     }
     ;(globalThis as unknown as { __orbitNav: NavTestHooks }).__orbitNav = hooks

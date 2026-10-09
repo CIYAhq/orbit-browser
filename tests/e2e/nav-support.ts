@@ -33,9 +33,9 @@ const ICON =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%2338a169'/%3E%3C/svg%3E"
 
 /**
- * A page that records key presses (`window.__keys`) and counts its loads in sessionStorage
- * (`loads`), with a text box (#box), a link to the next page (#next) and one that opens a new
- * tab (#child).
+ * A page that records key presses (`window.__keys`) and mouse presses (`window.__clicks`: x, y,
+ * button) and counts its loads in sessionStorage (`loads`), with a text box (#box), a link to the
+ * next page (#next) and one that opens a new tab (#child).
  */
 function page(title: string): string {
   return `<!doctype html>
@@ -49,6 +49,8 @@ function page(title: string): string {
 <script>
 window.__keys = []
 addEventListener('keydown', (e) => window.__keys.push(e.key))
+window.__clicks = []
+addEventListener('mousedown', (e) => window.__clicks.push({ x: e.clientX, y: e.clientY, button: e.button }))
 sessionStorage.setItem('loads', String(Number(sessionStorage.getItem('loads') || 0) + 1))
 </script>
 </body></html>`
@@ -124,7 +126,34 @@ type Hooks = {
   __orbitNav: {
     menu: () => { windowId: string; direction: 'back' | 'forward'; labels: string[]; icons: boolean[] } | null
     chooseMenu: (label: string, newTab?: boolean) => boolean
+    floating: (windowId?: string) => FloatingInfo
   }
+}
+
+/** A window's floating sidebar (SB-12): whether its view exists, is placed in the window and is out. */
+export interface FloatingInfo {
+  exists: boolean
+  placed: boolean
+  shown: boolean
+  bounds?: { x: number; y: number; width: number; height: number }
+  /** What keeps it out; `hiding` while it waits out the grace delay before sliding away. */
+  hold: { over: boolean; editing: boolean; overlay: boolean; hiding: boolean } | null
+}
+
+/** The floating sidebar's page (its own renderer, `view=sidebar`), once it has been made. */
+export async function floatingPage(app: ElectronApplication): Promise<Page> {
+  const deadline = Date.now() + 20_000
+  while (Date.now() < deadline) {
+    const found = app.windows().find((p) => p.url().includes('view=sidebar'))
+    if (found) return found
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  throw new Error('No floating sidebar page')
+}
+
+/** The first window's floating sidebar. */
+export function floatingInfo(app: ElectronApplication): Promise<FloatingInfo> {
+  return app.evaluate(() => (globalThis as unknown as Hooks).__orbitNav.floating())
 }
 
 /** Runs a command as if from the first window. */
@@ -217,6 +246,28 @@ export async function pressInPage(
       page.sendInputEvent({ type: 'keyUp', keyCode, modifiers: [...mods] })
     },
     [urlPart, key, modifiers] as const,
+  )
+}
+
+/**
+ * Moves or presses the mouse over a tab's page the way the hardware does: through the browser
+ * process, where Orbit sees it. `x`, `y` are in the page's coordinates.
+ */
+export async function pageMouse(
+  app: ElectronApplication,
+  urlPart: string,
+  type: 'mouseMove' | 'mouseDown' | 'mouseUp',
+  x: number,
+  y: number,
+): Promise<void> {
+  await app.evaluate(
+    ({ webContents }, [part, t, px, py]) => {
+      const page = webContents.getAllWebContents().find((w) => w.getURL().includes(part))
+      if (!page) throw new Error(`no page with ${part}`)
+      if (t === 'mouseMove') page.sendInputEvent({ type: t, x: px, y: py })
+      else page.sendInputEvent({ type: t, x: px, y: py, button: 'left', clickCount: 1 })
+    },
+    [urlPart, type, x, y] as const,
   )
 }
 

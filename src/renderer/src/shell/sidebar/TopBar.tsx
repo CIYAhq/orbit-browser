@@ -10,9 +10,9 @@ import '../chrome/chrome.css'
 /**
  * The top of the sidebar (SB-03, SB-04): window controls (traffic lights on macOS), the sidebar
  * toggle, Back, Forward and Reload, then the address display. At narrow widths the toggle goes
- * first; Back and Forward stay.
+ * first; Back and Forward stay. In the floating card (SB-12) the toggle docks the sidebar again.
  */
-export function TopBar({ win }: { win: WindowState }) {
+export function TopBar({ win, floating = false }: { win: WindowState; floating?: boolean }) {
   return (
     <div className={`topbar${isMac ? ' topbar--mac' : ''}`} data-testid="topbar">
       <div className="topbar__row">
@@ -22,7 +22,7 @@ export function TopBar({ win }: { win: WindowState }) {
           type="button"
           className="icon-button topbar__toggle"
           aria-label="Toggle sidebar"
-          title={withShortcut('Hide sidebar', 'sidebar.toggle')}
+          title={withShortcut(floating ? 'Show sidebar' : 'Hide sidebar', 'sidebar.toggle')}
           data-testid="toggle-sidebar"
           onClick={() => runAction('sidebar.toggle')}
         >

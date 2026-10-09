@@ -38,7 +38,8 @@ export async function launchOrbit(
     env: { ...process.env, ORBIT_E2E: '1', ORBIT_USER_DATA: userData, ...opts.env } as Record<string, string>,
   })
   const shell = await viewPage(app, 'shell')
-  await shell.getByTestId('sidebar').waitFor()
+  // Attached rather than visible: a window restored with its sidebar hidden (SB-11) has one too.
+  await shell.getByTestId('sidebar').waitFor({ state: 'attached' })
   return { app, shell, userData }
 }
 

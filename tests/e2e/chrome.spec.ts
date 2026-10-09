@@ -1,17 +1,22 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { expect, test } from '@playwright/test'
-import { isMac, launchOrbit, type Orbit, state, tabPage, viewPage } from './helpers'
+import { expect, type Page, test } from '@playwright/test'
+import { DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH } from '../../src/shared/defaults'
+import { action, FRAME_SLACK, isMac, launchOrbit, MOD, type Orbit, state, tabPage, tabView, viewPage } from './helpers'
 import {
   activeTab,
   chooseHistory,
   cmd,
+  floatingInfo,
+  floatingPage,
   HOST_RULES,
   historyMenu,
   INSECURE_HOST,
   type NavFixtures,
   NEW_TAB_CLICK,
   openTab,
+  pageMouse,
   shellRoundTrip,
   spyCommand,
   startNavFixtures,
@@ -377,4 +382,419 @@ test('[NV-01][SB-03] Back on a fresh tab opened from a link closes it and return
   await back.click()
   await expect.poll(async () => (await state(app)).tabs[child as string]).toBeUndefined()
   expect((await activeTab(app)).id).toBe(opener)
+})
+
+// ---------- Hiding, revealing and resizing the sidebar (SB-11, SB-12, SB-14, FL-02, FL-03) ----------
+
+/** The card's margin with the sidebar hidden, and the band beside the floating card (SB-12, SB-19). */
+const MARGIN_HIDDEN = 6
+const FLOAT_BAND = 16
+
+async function sidebarState() {
+  return (await windowState(orbit.app)).sidebar
+}
+
+/** The first window's content size. */
+function contentSize(): Promise<{ width: number; height: number }> {
+  return orbit.app.evaluate(() => {
+    const hooks = (
+      globalThis as unknown as {
+        __orbit: {
+          ctx: { windows: { get: (id: string) => Electron.BrowserWindow | undefined } }
+          windowIds: () => string[]
+        }
+      }
+    ).__orbit
+    const [width = 0, height = 0] = hooks.ctx.windows.get(hooks.windowIds()[0] as string)?.getContentSize() ?? []
+    return { width, height }
+  })
+}
+
+/** Hides the sidebar and waits until the docked one has slid away. */
+async function hideSidebar(): Promise<void> {
+  await cmd(orbit.app, 'window.setSidebar', { visible: false })
+  await expect(orbit.shell.getByTestId('sidebar')).toBeHidden()
+}
+
+/** Brings the floating sidebar in from the window's left edge and returns its page. */
+async function revealFloating(): Promise<Page> {
+  // Into the edge from the page: a pointer resting there doesn't count.
+  await orbit.shell.mouse.move(40, 300)
+  await orbit.shell.mouse.move(2, 300)
+  await expect.poll(async () => (await sidebarState()).peeking).toBe(true)
+  const floating = await floatingPage(orbit.app)
+  await expect(floating.getByTestId('floating-sidebar')).toHaveAttribute('data-out', 'true')
+  return floating
+}
+
+/** macOS: where the window's traffic lights are. */
+const windowButtons = () =>
+  orbit.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getWindowButtonPosition() ?? null)
+
+const clicksSeen = (tab: Page) =>
+  tab.evaluate(() => (window as unknown as { __clicks: { x: number; y: number; button: number }[] }).__clicks)
+
+test('[SB-11] ⌘S hides the sidebar and the page card takes the window; again brings it back as it was', async () => {
+  const { app, shell } = orbit
+  const id = await openTab(app, page('Wide'))
+  for (let n = 0; n < 30; n++) await cmd(app, 'tabs.create', { url: `http://127.0.0.1:9/t${n}`, activate: false })
+  await cmd(app, 'window.setSidebar', { width: 300 })
+  const scroll = shell.getByTestId('sidebar-scroll')
+  await expect.poll(() => scroll.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(200)
+  await scroll.evaluate((el) => {
+    el.scrollTop = 120
+  })
+  const size = await contentSize()
+
+  await shell.keyboard.press(`${MOD}+S`)
+  await expect.poll(async () => (await sidebarState()).visible).toBe(false)
+  // The card spans the window but for a thin margin on every side.
+  await expect
+    .poll(async () => (await tabView(app, id))?.bounds)
+    .toEqual({
+      x: MARGIN_HIDDEN,
+      y: MARGIN_HIDDEN,
+      width: size.width - 2 * MARGIN_HIDDEN,
+      height: size.height - 2 * MARGIN_HIDDEN,
+    })
+  await expect(shell.getByTestId('sidebar')).toBeHidden()
+  await expect(shell.getByTestId('nav-back')).toBeHidden()
+
+  // Back at the same width, scroll position and selected tab.
+  await shell.keyboard.press(`${MOD}+S`)
+  await expect.poll(async () => (await sidebarState()).visible).toBe(true)
+  await expect(shell.getByTestId('sidebar')).toBeVisible()
+  await expect.poll(async () => (await tabView(app, id))?.bounds.x).toBe(300)
+  expect((await shell.getByTestId('sidebar').boundingBox())?.width).toBe(300)
+  expect(await scroll.evaluate((el) => el.scrollTop)).toBe(120)
+  expect((await activeTab(app)).id).toBe(id)
+})
+
+test('[SB-11] Toggle Sidebar is an action in the command bar (and the View menu on macOS)', async () => {
+  const { app, shell } = orbit
+  await openTab(app, page('Menus'))
+  await shell.keyboard.press(`${MOD}+T`)
+  const overlay = await viewPage(app, 'overlay')
+  await expect(overlay.getByTestId('command-input')).toBeFocused()
+  await overlay.keyboard.type('Toggle Sidebar')
+  await expect(overlay.getByTestId('command-result').first()).toContainText('Toggle Sidebar')
+  await overlay.keyboard.press('Enter')
+  await expect.poll(async () => (await sidebarState()).visible).toBe(false)
+  if (isMac) {
+    await app.evaluate(({ Menu }) => {
+      const view = Menu.getApplicationMenu()?.items.find((i) => i.label === 'View')
+      const item = view?.submenu?.items.find((i) => i.label === 'Toggle Sidebar')
+      item?.click()
+    })
+    await expect.poll(async () => (await sidebarState()).visible).toBe(true)
+  }
+})
+
+test('[SB-11][SB-14] each window keeps its own sidebar state and width, across a restart', async () => {
+  const userData = mkdtempSync(join(tmpdir(), 'orbit-e2e-sidebar-'))
+  await orbit.app.close()
+  orbit = await launchOrbit({ userData, args: [HOST_RULES] })
+  await openTab(orbit.app, page('Kept'))
+  await cmd(orbit.app, 'window.setSidebar', { width: 320 })
+  await hideSidebar()
+  // A new window opens with its sidebar shown, whatever the others do.
+  await action(orbit.app, 'window.new')
+  await expect.poll(async () => Object.keys((await state(orbit.app)).windows).length).toBe(2)
+  const firstId = (await windowState(orbit.app)).id
+  const second = Object.values((await state(orbit.app)).windows).find((w) => w.id !== firstId)
+  expect(second?.sidebar.visible).toBe(true)
+  await orbit.app.close()
+
+  orbit = await launchOrbit({ userData, args: [HOST_RULES] })
+  const windows = Object.values((await state(orbit.app)).windows)
+  const first = windows.find((w) => !w.sidebar.visible)
+  expect(first?.sidebar.width).toBe(320)
+  expect(windows.filter((w) => w.sidebar.visible)).toHaveLength(windows.length - 1)
+})
+
+test('[FL-02] the sidebar slides out as the card widens, edge to edge in every frame; ⌘S again reverses it', async () => {
+  const { app, shell } = orbit
+  await openTab(app, page('Slide'))
+  const width = (await sidebarState()).width
+  /** The sidebar's right edge and the card's left edge, every frame for 700 ms after a toggle (and another at `reverseAt`). */
+  const record = (reverseAt: number | null) =>
+    shell.evaluate(async (at) => {
+      const sidebar = document.querySelector('[data-testid="sidebar"]') as HTMLElement
+      const frame = document.querySelector('[data-testid="content-frame"]') as HTMLElement
+      const orbitApi = (window as unknown as { orbit: { invoke: (n: string, a: unknown) => Promise<unknown> } }).orbit
+      const out: { t: number; right: number; left: number }[] = []
+      const t0 = performance.now()
+      void orbitApi.invoke('action.run', { id: 'sidebar.toggle' })
+      if (at !== null) setTimeout(() => void orbitApi.invoke('action.run', { id: 'sidebar.toggle' }), at)
+      await new Promise<void>((resolve) => {
+        const tick = () => {
+          const t = performance.now() - t0
+          out.push({ t, right: sidebar.getBoundingClientRect().right, left: frame.getBoundingClientRect().left })
+          if (t < 700) requestAnimationFrame(tick)
+          else resolve()
+        }
+        requestAnimationFrame(tick)
+      })
+      return out
+    }, reverseAt)
+
+  const hide = await record(null)
+  // One value drives both: the card's left edge stays at the sidebar's right edge plus the margin.
+  for (const f of hide) {
+    expect(f.left - f.right, `at ${Math.round(f.t)} ms`).toBeGreaterThanOrEqual(-1)
+    expect(f.left - f.right, `at ${Math.round(f.t)} ms`).toBeLessThanOrEqual(MARGIN_HIDDEN + 1)
+  }
+  expect(hide.some((f) => f.right > 0 && f.right < width)).toBe(true)
+  const gone = hide.find((f) => f.right <= 0.5)
+  expect(gone?.t ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(300 * FRAME_SLACK + 50)
+  expect(hide[hide.length - 1]?.left).toBe(MARGIN_HIDDEN)
+  await expect.poll(async () => (await sidebarState()).visible).toBe(false)
+
+  // Show, then ⌘S again part way: it turns back from where it is.
+  const shown = await record(null)
+  expect(shown[shown.length - 1]?.right).toBe(width)
+  const reversed = await record(90)
+  for (const f of reversed) {
+    expect(f.left - f.right).toBeGreaterThanOrEqual(-1)
+    expect(f.left - f.right).toBeLessThanOrEqual(MARGIN_HIDDEN + 1)
+  }
+  if (FRAME_SLACK === 1) expect(Math.min(...reversed.map((f) => f.right))).toBeGreaterThan(0)
+  expect(reversed[reversed.length - 1]?.right).toBe(width)
+  await expect.poll(async () => (await sidebarState()).visible).toBe(true)
+})
+
+test('[SB-12][FL-03] with the sidebar hidden, the left edge brings it in over the page; it goes once the pointer moves on', async () => {
+  const { app, shell } = orbit
+  const id = await openTab(app, page('Under'))
+  const tab = await tabPage(app, '/page/Under')
+  await hideSidebar()
+  await tab.evaluate(() => window.scrollTo(0, 300))
+  const before = { bounds: (await tabView(app, id))?.bounds, width: await tab.evaluate(() => innerWidth) }
+  const { height } = await contentSize()
+  const { width } = await sidebarState()
+
+  const floating = await revealFloating()
+  const info = await floatingInfo(app)
+  expect(info.placed).toBe(true)
+  expect(info.bounds).toEqual({ x: 0, y: 0, width: MARGIN_HIDDEN + width + FLOAT_BAND, height })
+  // A card inset from the window's edges, sliding in with the snappy timing.
+  const slide = floating.locator('.float-sidebar__slide')
+  await expect
+    .poll(() => slide.evaluate((el) => getComputedStyle(el).transform))
+    .toMatch(/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/)
+  const box = await slide.boundingBox()
+  expect(box).toEqual({ x: MARGIN_HIDDEN, y: MARGIN_HIDDEN, width, height: height - 2 * MARGIN_HIDDEN })
+  const duration = await slide.evaluate((el) => Number.parseFloat(getComputedStyle(el).transitionDuration) * 1000)
+  expect(duration).toBeGreaterThanOrEqual(180)
+  expect(duration).toBeLessThanOrEqual(220)
+  // Everything a docked sidebar has.
+  await expect(floating.getByTestId('nav-reload')).toBeVisible()
+  await expect(floating.getByTestId('address')).toContainText('localhost')
+  await expect(floating.getByTestId('toggle-sidebar')).toHaveAttribute('title', /^Show sidebar/)
+  // macOS: the traffic lights come in with the card, in its top row.
+  if (isMac) expect(await windowButtons()).toEqual({ x: 16 + MARGIN_HIDDEN, y: 17 + MARGIN_HIDDEN })
+  // The page neither moved, resized nor scrolled.
+  expect((await tabView(app, id))?.bounds).toEqual(before.bounds)
+  expect(await tab.evaluate(() => innerWidth)).toBe(before.width)
+  expect(await tab.evaluate(() => scrollY)).toBe(300)
+  void shell
+
+  // The pointer moves on over the page: it stays a moment, then slides away and leaves the window.
+  const left = Date.now()
+  await pageMouse(app, '/page/Under', 'mouseMove', 700, 300)
+  await expect.poll(async () => (await floatingInfo(app)).hold?.over ?? false).toBe(false)
+  expect((await sidebarState()).peeking).toBe(true)
+  await expect.poll(async () => (await sidebarState()).peeking).toBe(false)
+  expect(Date.now() - left).toBeGreaterThanOrEqual(300)
+  await expect(floating.getByTestId('floating-sidebar')).toHaveAttribute('data-out', 'false')
+  await expect.poll(async () => (await floatingInfo(app)).placed).toBe(false)
+  expect(Date.now() - left).toBeLessThan(1000 * FRAME_SLACK)
+  expect((await tabView(app, id))?.bounds).toEqual(before.bounds)
+})
+
+test('[SB-12][FL-03] back over the card it stays; re-entering the edge as it leaves brings it back', async () => {
+  const { app } = orbit
+  await openTab(app, page('Return'))
+  await hideSidebar()
+  const floating = await revealFloating()
+  // Over the page, then back over the card before the grace delay ends.
+  await pageMouse(app, '/page/Return', 'mouseMove', 700, 300)
+  await expect.poll(async () => (await floatingInfo(app)).hold?.over ?? true).toBe(false)
+  await floating.mouse.move(100, 400)
+  await expect.poll(async () => (await floatingInfo(app)).hold?.over ?? false).toBe(true)
+  expect((await floatingInfo(app)).hold?.hiding).toBe(false)
+  expect((await sidebarState()).peeking).toBe(true)
+  // Leaving through the window's left edge counts as leaving.
+  await floating.mouse.move(-5, 400)
+  await expect.poll(async () => (await sidebarState()).peeking).toBe(false)
+  // The edge again while it slides away: the same view turns back.
+  const id = await floating.evaluate(() => performance.timeOrigin)
+  await revealFloating()
+  expect((await floatingInfo(app)).placed).toBe(true)
+  expect(await (await floatingPage(app)).evaluate(() => performance.timeOrigin)).toBe(id)
+})
+
+test('[SB-12] a pointer passing through the edge on its way out of the window brings the sidebar in, and it goes again', async () => {
+  const { app, shell } = orbit
+  await openTab(app, page('Passing'))
+  await hideSidebar()
+  await revealFloating()
+  await shell.mouse.move(-30, 300)
+  await expect.poll(async () => (await floatingInfo(app)).hold?.over).toBe(false)
+  await expect.poll(async () => (await sidebarState()).peeking).toBe(false)
+  if (isMac) expect(await windowButtons()).toEqual({ x: 16, y: 17 })
+})
+
+test('[SB-12] a click into the page sends the floating sidebar away at once; a click beside it reaches the page', async () => {
+  const { app } = orbit
+  await openTab(app, page('Clicks'))
+  const tab = await tabPage(app, '/page/Clicks')
+  await hideSidebar()
+  await revealFloating()
+  const at = Date.now()
+  await pageMouse(app, '/page/Clicks', 'mouseDown', 600, 200)
+  await pageMouse(app, '/page/Clicks', 'mouseUp', 600, 200)
+  await expect.poll(async () => (await sidebarState()).peeking).toBe(false)
+  expect(Date.now() - at).toBeLessThan(400 * FRAME_SLACK)
+
+  // In the band beside the card: the card goes and the page gets the click where it was made.
+  const floating = await revealFloating()
+  const { width } = await sidebarState()
+  const x = MARGIN_HIDDEN + width + 8
+  await floating.mouse.click(x, 250)
+  await expect.poll(async () => (await sidebarState()).peeking).toBe(false)
+  await expect.poll(() => clicksSeen(tab)).toContainEqual({ x: x - MARGIN_HIDDEN, y: 250 - MARGIN_HIDDEN, button: 0 })
+})
+
+test('[SB-12] the floating sidebar works like the docked one and stays while the command bar is open; ⌘S docks it', async () => {
+  const { app, shell } = orbit
+  const first = await openTab(app, page('One'))
+  const second = await openTab(app, page('Two'))
+  await hideSidebar()
+  const floating = await revealFloating()
+  // Switch tabs from it.
+  await floating.locator(`[data-testid="tab-row"][data-tab-id="${first}"]`).click()
+  await expect.poll(async () => (await activeTab(app)).id).toBe(first)
+  expect((await sidebarState()).peeking).toBe(true)
+  // New Tab opens the command bar over it; it stays, even once the pointer has gone over the page.
+  await floating.getByTestId('new-tab-button').click()
+  await expect.poll(async () => (await windowState(app)).overlay.kind).toBe('commandbar')
+  await pageMouse(app, '/page/One', 'mouseMove', 700, 300)
+  await expect.poll(async () => (await floatingInfo(app)).hold?.over).toBe(false)
+  expect((await floatingInfo(app)).hold).toMatchObject({ overlay: true, hiding: false })
+  expect((await sidebarState()).peeking).toBe(true)
+  expect((await floatingInfo(app)).placed).toBe(true)
+  // Closing the bar lets it go.
+  const overlay = await viewPage(app, 'overlay')
+  await overlay.keyboard.press('Escape')
+  await expect.poll(async () => (await windowState(app)).overlay.kind).toBe('none')
+  await expect.poll(async () => (await sidebarState()).peeking).toBe(false)
+
+  // ⌘S while it is out docks it.
+  await revealFloating()
+  await floating.keyboard.press(`${MOD}+S`)
+  await expect.poll(async () => (await sidebarState()).visible).toBe(true)
+  await expect(shell.getByTestId('sidebar')).toBeVisible()
+  await expect.poll(async () => (await floatingInfo(app)).placed).toBe(false)
+  expect((await activeTab(app)).id).toBe(first)
+  void second
+})
+
+test('[SB-12] renaming a tab in the floating sidebar keeps it out until done', async () => {
+  const { app } = orbit
+  const id = await openTab(app, page('Rename'))
+  await hideSidebar()
+  const floating = await revealFloating()
+  await floating.locator(`[data-testid="tab-row"][data-tab-id="${id}"]`).dblclick()
+  const input = floating.getByTestId('rename-field')
+  await expect(input).toBeFocused()
+  await expect.poll(async () => (await floatingInfo(app)).hold?.editing).toBe(true)
+  // The pointer goes over the page: the field holds the card.
+  await pageMouse(app, '/page/Rename', 'mouseMove', 700, 300)
+  await expect.poll(async () => (await floatingInfo(app)).hold?.over).toBe(false)
+  expect((await floatingInfo(app)).hold).toMatchObject({ editing: true, hiding: false })
+  expect((await sidebarState()).peeking).toBe(true)
+  await input.fill('Studio')
+  await input.press('Enter')
+  await expect.poll(async () => (await state(app)).tabs[id]?.customTitle).toBe('Studio')
+  // Done: it slides away.
+  await expect.poll(async () => (await sidebarState()).peeking).toBe(false)
+})
+
+test('[SB-12] the edge does nothing while the sidebar is docked or the command bar is open, nor for a pointer resting there', async () => {
+  const { app, shell } = orbit
+  await openTab(app, page('Quiet'))
+  await shell.mouse.move(40, 300)
+  await shell.mouse.move(2, 300)
+  await shellRoundTrip(shell)
+  expect((await sidebarState()).peeking).toBe(false)
+  await expect(shell.getByTestId('sidebar-edge')).toHaveCount(0)
+  // Hidden with the pointer at the edge: it doesn't come straight back.
+  await hideSidebar()
+  await expect(shell.getByTestId('sidebar-edge')).toHaveCount(1)
+  await shellRoundTrip(shell)
+  expect((await sidebarState()).peeking).toBe(false)
+  await shell.keyboard.press(`${MOD}+T`)
+  await expect.poll(async () => (await windowState(app)).overlay.kind).toBe('commandbar')
+  await cmd(app, 'sidebar.reveal')
+  await shell.mouse.move(2, 320)
+  await shellRoundTrip(shell)
+  expect((await sidebarState()).peeking).toBe(false)
+})
+
+test('[SB-14] dragging the edge sets the width 1:1 within limits; double-click resets; far left hides', async () => {
+  const { app, shell } = orbit
+  await openTab(app, page('Resize'))
+  const handle = shell.getByTestId('sidebar-resize')
+  const sidebar = shell.getByTestId('sidebar')
+  const start = (await sidebarState()).width
+  const box = await handle.boundingBox()
+  if (!box) throw new Error('no resize edge')
+  const x0 = box.x + box.width / 2
+  const y0 = box.y + 200
+  await expect(handle).toHaveCSS('cursor', 'col-resize')
+
+  await shell.mouse.move(x0, y0)
+  await shell.mouse.down()
+  await shell.mouse.move(x0 + 52, y0, { steps: 4 })
+  // Live, before the drag ends.
+  await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(start + 52)
+  // Past the maximum it stops; coming back it picks the pointer up again with no drift.
+  await shell.mouse.move(x0 + 400, y0, { steps: 4 })
+  await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(MAX_SIDEBAR_WIDTH)
+  await shell.mouse.move(x0 + 52, y0, { steps: 4 })
+  await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(start + 52)
+  await shell.mouse.up()
+  await expect.poll(async () => (await sidebarState()).width).toBe(start + 52)
+  const id = (await activeTab(app)).id
+  await expect.poll(async () => (await tabView(app, id))?.bounds.x).toBe(start + 52)
+
+  // Below the minimum it stops too.
+  const edge = x0 + 52
+  await shell.mouse.move(edge, y0)
+  await shell.mouse.down()
+  await shell.mouse.move(edge - (start + 52 - MIN_SIDEBAR_WIDTH) - 30, y0, { steps: 4 })
+  await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(MIN_SIDEBAR_WIDTH)
+  expect((await sidebarState()).visible).toBe(true)
+  await shell.mouse.up()
+  await expect.poll(async () => (await sidebarState()).width).toBe(MIN_SIDEBAR_WIDTH)
+
+  // Double-click: back to the default width (the edge glides there).
+  await handle.dblclick()
+  await expect.poll(async () => (await sidebarState()).width).toBe(DEFAULT_SIDEBAR_WIDTH)
+  await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(DEFAULT_SIDEBAR_WIDTH)
+
+  // Far left (40 px past the minimum): hidden, as ⌘S does, keeping the width it had.
+  const back = await handle.boundingBox()
+  if (!back) throw new Error('no resize edge')
+  const bx = back.x + back.width / 2
+  await shell.mouse.move(bx, y0)
+  await shell.mouse.down()
+  await shell.mouse.move(bx - (DEFAULT_SIDEBAR_WIDTH - MIN_SIDEBAR_WIDTH) - 45, y0, { steps: 6 })
+  await expect.poll(async () => (await sidebarState()).visible).toBe(false)
+  await shell.mouse.up()
+  await expect(sidebar).toBeHidden()
+  expect((await sidebarState()).width).toBe(DEFAULT_SIDEBAR_WIDTH)
+  await shell.keyboard.press(`${MOD}+S`)
+  await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(DEFAULT_SIDEBAR_WIDTH)
 })

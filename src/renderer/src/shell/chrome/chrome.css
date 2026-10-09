@@ -114,3 +114,90 @@
 .shell[data-dark] .address--insecure .address__site {
   color: #ff8a7d;
 }
+
+/* ---------- Hidden sidebar: the left edge and the floating card (SB-12, FL-03) ---------- */
+
+/* The window's left edge while the sidebar is hidden: the page card's margin there. */
+.sidebar-edge {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--gutter-hidden);
+  z-index: 30;
+  -webkit-app-region: no-drag;
+}
+
+/*
+ * The floating card's own view (view=sidebar): transparent, at the window's left edge, as wide as
+ * the card plus its margin and a 16 px band beside it for the shadow (the pointer there still
+ * counts as over the card).
+ */
+html[data-view="sidebar"] body {
+  background: transparent;
+}
+
+.shell.float-sidebar {
+  position: fixed;
+  inset: 0;
+  display: block;
+  background: none;
+  transition: none;
+}
+
+.float-sidebar__slide {
+  position: absolute;
+  top: var(--gutter-hidden);
+  bottom: var(--gutter-hidden);
+  left: var(--gutter-hidden);
+  width: var(--sidebar-w);
+  /* Out: the quick timing (FL-01, FL-03). */
+  transform: translateX(calc(-100% - var(--gutter-hidden) - 16px));
+  transition: transform 160ms cubic-bezier(0.2, 0, 0, 1);
+  will-change: transform;
+}
+
+.float-sidebar.is-out .float-sidebar__slide {
+  transform: none;
+  /* In: the snappy timing, no overshoot (structure doesn't bounce). */
+  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* The shadow fades in with the slide. */
+.float-sidebar__shadow {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-frame);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.14),
+    0 6px 14px -2px rgba(0, 0, 0, 0.22);
+  opacity: 0;
+  transition: opacity 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.float-sidebar.is-out .float-sidebar__shadow {
+  opacity: 1;
+  transition: opacity 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.float-sidebar__card {
+  position: absolute;
+  inset: 0;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: var(--radius-frame);
+}
+
+.sidebar.sidebar--floating {
+  width: 100%;
+  height: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .float-sidebar__slide,
+  .float-sidebar__shadow,
+  .float-sidebar.is-out .float-sidebar__slide,
+  .float-sidebar.is-out .float-sidebar__shadow {
+    transition: none;
+  }
+}

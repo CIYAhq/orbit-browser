@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 118 built (43 partial) · 166 tested · 0 feel right.
+**Totals:** 485 spec’d · 123 built (42 partial) · 172 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 88 | 112 |
+| P0 | 174 | 93 | 118 |
 | P1 | 221 | 27 | 50 |
 | P2 | 83 | 3 | 4 |
 
@@ -31,16 +31,16 @@ Spec: `spec/sidebar.md`
 | SB-08 | Empty sidebar area: double-click, drag, right-click | P1 | – | – | – |  |
 | SB-09 | Bottom bar: Library, Space switcher, "+" menu | P0 | 🟡 partial | ✅ e2e | – | switcher and + menu done; Library button arrives with the archive lane |
 | SB-10 | Transient trays above the bottom bar | P1 | – | – | – |  |
-| SB-11 | Show / hide the sidebar | P0 | 🟡 partial | – | – | scaffold |
-| SB-12 | Hover to reveal the hidden sidebar | P0 | – | – | – |  |
+| SB-11 | Show / hide the sidebar | P0 | ✅ | ✅ e2e | – | Cmd+S / Ctrl+S, toggle button, View menu and command bar; the sidebar slides out as the card widens (one curve, reversible mid-way); back at the same width, scroll and selected tab; per window, persisted; new windows show it |
+| SB-12 | Hover to reveal the hidden sidebar | P0 | ✅ | ✅ e2e | – | left 6 px edge (moving pointer, 0 ms dwell) brings a floating card in its own view over the page, which never moves; stays while hovered (16 px band), while a field in it is edited or the command bar is open; goes 400 ms after the pointer moves on, at once on a click into the page (the click reaches the page); not over full-screen video |
 | SB-13 | Feedback when things happen while the sidebar is hidden | P1 | – | – | – |  |
-| SB-14 | Resize the sidebar width | P0 | 🟡 partial | – | – | scaffold |
+| SB-14 | Resize the sidebar width | P0 | ✅ | ✅ e2e | – | drag the edge 1:1 with a live width, clamped 180-420 with no drift; double-click resets to 248; 40 px past the minimum hides (width kept); saved per window |
 | SB-15 | Narrow ("compact") sidebar rendering | P1 | – | – | – |  |
 | SB-16 | Sidebar position (left / right) | P2 | – | – | – |  |
 | SB-17 | Optional top toolbar | P1 | – | – | – |  |
 | SB-18 | Developer-mode tab chrome | P2 | – | – | – |  |
-| SB-19 | Inset rounded page frame ("card" look) | P0 | 🟡 partial | – | – | scaffold |
-| SB-20 | Top-of-window behaviour and window dragging | P1 | – | – | – |  |
+| SB-19 | Inset rounded page frame ("card" look) | P0 | 🟡 partial | ✅ e2e | – | scaffold |
+| SB-20 | Top-of-window behaviour and window dragging | P1 | 🟡 partial | – | – | macOS: traffic lights hidden with the sidebar, shown (moved in) with the floating card; the rest of the hidden-sidebar chrome is not built |
 | SB-21 | Dim the sidebar when the window is inactive | P1 | – | – | – |  |
 | SB-22 | Keyboard focus and navigation inside the sidebar | P2 | ✅ | ✅ e2e | – | Cmd/Ctrl+Shift+E focuses the sidebar; arrows, Enter, Escape, F2 |
 | SB-23 | Scrolling, auto-reveal of the active tab and overflow indicator | P1 | ✅ | ✅ e2e | – | selected tab scrolled into view (smooth, then settles); pill points to it while it is out of view; rows use content-visibility |
@@ -375,8 +375,8 @@ Spec: `spec/feel.md`
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
 | FL-01 | Motion principles and shared tokens | P0 | – | ✅ unit | – |  |
-| FL-02 | Sidebar show/hide (docked toggle) | P0 | – | – | – |  |
-| FL-03 | Sidebar hover-reveal overlay | P0 | – | – | – |  |
+| FL-02 | Sidebar show/hide (docked toggle) | P0 | ✅ | ✅ e2e | – | 260 ms standard curve drives the sidebar column and the card margins together; interruptible; reduced motion snaps |
+| FL-03 | Sidebar hover-reveal overlay | P0 | ✅ | ✅ e2e | – | 0 ms dwell; card in 200 ms (snappy), out 160 ms (quick); hysteresis band; re-entering while it leaves brings it back |
 | FL-04 | Tab row hover | P0 | – | – | – |  |
 | FL-05 | Tab selection | P0 | – | – | – |  |
 | FL-06 | New-tab insertion | P0 | – | – | – |  |

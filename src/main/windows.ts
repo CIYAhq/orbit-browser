@@ -1,9 +1,9 @@
 import { join } from 'node:path'
 import { BrowserWindow, nativeTheme, screen, type WebContents, WebContentsView, webContents } from 'electron'
 import { actionForInput, outsideTextActionFor } from '../shared/actions'
-import { createWindowState } from '../shared/defaults'
+import { createWindowState, DEFAULT_SIDEBAR_WIDTH } from '../shared/defaults'
 import type { Rect, RendererView } from '../shared/rpc'
-import type { ColorMode, OrbitState, SpaceId, TabId, WindowId, WindowState } from '../shared/state'
+import type { ColorMode, OrbitState, SidebarState, SpaceId, TabId, WindowId, WindowState } from '../shared/state'
 import { paletteFor } from '../shared/theme'
 import { splitLeaves, splitOfTab } from '../shared/tree'
 import type { MainContext } from './context'
@@ -37,6 +37,21 @@ interface WindowRecord {
   refocusPage?: boolean
   /** Tab whose page is in HTML fullscreen (video): its view fills the window. */
   htmlFullscreen?: TabId
+  /**
+   * The hidden sidebar's floating card (SB-12): its own view, made once the sidebar is hidden and
+   * placed in the window only while the card is out (or sliding away).
+   */
+  floating?: WebContentsView
+  /** The floating card is out (`sidebar.peeking`). */
+  floatingShown: boolean
+  /** Pending removal of the floating view after its card slid away. */
+  floatingTimer?: ReturnType<typeof setTimeout>
+  /** Pending start of the floating view's renderer, once the sidebar's hide animation is over. */
+  floatingPrewarm?: ReturnType<typeof setTimeout>
+  /** Pending release of the floating view's renderer after the sidebar stayed docked a while. */
+  floatingDispose?: ReturnType<typeof setTimeout>
+  /** macOS: pending return of the traffic lights once a docking sidebar has slid in. */
+  buttonsTimer?: ReturnType<typeof setTimeout>
 }
 
 /** A tab view placed in a window. */
@@ -49,6 +64,23 @@ interface Attachment {
 
 /** How long the overlay view stays up after closing so its exit animation can play (FL-16). */
 const OVERLAY_EXIT_MS = 110
+
+/** The floating sidebar's card sits this far from the window's edges (SB-12, SB-19). */
+export const FLOAT_INSET = 6
+/** macOS: where the traffic lights sit in the docked sidebar's top row (SB-03, SB-20). */
+const TRAFFIC_LIGHTS = { x: 16, y: 17 }
+/** Room right of the floating card for its shadow; the pointer there still counts as over it (FL-03). */
+export const FLOAT_BAND = 16
+/** The docked sidebar's slide (FL-02): the shell's `--sidebar-dur`. */
+const SIDEBAR_SLIDE_MS = 260
+/** The floating view stays up this long while its card slides away (FL-03: quick timing, 160 ms)… */
+const FLOAT_EXIT_MS = 200
+/** …and this long when the sidebar docks, while the docked one slides in beneath it. */
+const FLOAT_DOCK_MS = SIDEBAR_SLIDE_MS + 20
+/** The floating view's renderer starts once the docked sidebar has slid away (not during the slide). */
+const FLOAT_PREWARM_MS = SIDEBAR_SLIDE_MS
+/** …and is let go after the sidebar has stayed docked this long. */
+const FLOAT_DISPOSE_MS = 60_000
 
 const isMac = process.platform === 'darwin'
 /** Isolated world for Orbit's own small page scripts (the page can't tamper with them). */
@@ -249,7 +281,7 @@ export class WindowManager {
       show: false,
       title: 'Orbit',
       backgroundColor: windowBackground(this.ctx.store.state, winState.spaceId) ?? '#e9eaf5',
-      ...(isMac ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 17 } } : { frame: false }),
+      ...(isMac ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: TRAFFIC_LIGHTS } : { frame: false }),
       webPreferences: { ...uiWebPreferences(id, 'shell'), backgroundThrottling: false },
     })
     if (winState.maximized) win.maximize()
@@ -266,8 +298,11 @@ export class WindowManager {
       radius: 10,
       minPaneSeq: 0,
       overlayShown: false,
+      floatingShown: false,
     }
     this.records.set(id, rec)
+    // macOS: the traffic lights live in the sidebar's top row (SB-20).
+    if (isMac && !winState.sidebar.visible) win.setWindowButtonVisibility(false)
 
     win.once('ready-to-show', () => {
       this.ctx.perf.mark(`window:${id}:ready-to-show`)
@@ -276,6 +311,7 @@ export class WindowManager {
       setTimeout(() => {
         if (!win.isDestroyed()) this.ensureOverlay(rec)
       }, 120)
+      if (!this.ctx.store.state.windows[id]?.sidebar.visible) this.prewarmFloating(rec, 600)
     })
     win.on('focus', () => {
       this.lastFocused = id
@@ -296,6 +332,7 @@ export class WindowManager {
     })
     win.on('resize', () => {
       if (rec.overlayShown) this.fitOverlay(rec)
+      if (rec.floatingShown) this.fitFloating(rec)
       if (rec.htmlFullscreen) this.applyPanes(id, rec.panes, rec.radius)
     })
     const saveBounds = () => {
@@ -327,6 +364,11 @@ export class WindowManager {
     }
     win.on('closed', () => {
       clearTimeout(rec.overlayHideTimer)
+      clearTimeout(rec.floatingTimer)
+      clearTimeout(rec.floatingPrewarm)
+      clearTimeout(rec.floatingDispose)
+      clearTimeout(rec.buttonsTimer)
+      if (rec.floating && !rec.floating.webContents.isDestroyed()) rec.floating.webContents.close()
       this.records.delete(id)
       for (const [tabId, entry] of [...this.attached]) {
         if (entry.windowId === id) {
@@ -394,8 +436,65 @@ export class WindowManager {
   sendToWindow(windowId: WindowId, channel: string, payload: unknown): void {
     const rec = this.records.get(windowId)
     if (!rec) return
-    if (!rec.win.isDestroyed()) rec.win.webContents.send(`orbit:${channel}`, payload)
+    // While the floating sidebar is out, what the sidebar shows (a rename field, the new-Space
+    // flow, an undo toast) happens there and not in the hidden, docked one.
+    const floating = this.floatingContents(windowId)
+    const forSidebar = channel.startsWith('sidebar:') || channel.startsWith('spaces:')
+    if (floating && forSidebar) floating.send(`orbit:${channel}`, payload)
+    else if (!rec.win.isDestroyed()) rec.win.webContents.send(`orbit:${channel}`, payload)
     if (rec.overlay && !rec.overlay.webContents.isDestroyed()) rec.overlay.webContents.send(`orbit:${channel}`, payload)
+  }
+
+  /** The floating sidebar's web contents while its card is out (SB-12). */
+  floatingContents(windowId: WindowId): WebContents | undefined {
+    const rec = this.records.get(windowId)
+    const contents = rec?.floatingShown ? rec.floating?.webContents : undefined
+    return contents && !contents.isDestroyed() ? contents : undefined
+  }
+
+  /** Where Orbit's sidebar is drawn: the floating card while it is out, else the window's shell. */
+  sidebarContents(windowId: WindowId): WebContents | undefined {
+    const rec = this.records.get(windowId)
+    if (!rec || rec.win.isDestroyed()) return undefined
+    return this.floatingContents(windowId) ?? rec.win.webContents
+  }
+
+  /** True while a page of the window is in HTML full screen (a video). */
+  inHtmlFullscreen(windowId: WindowId): boolean {
+    return !!this.records.get(windowId)?.htmlFullscreen
+  }
+
+  /** A tab view's place in its window (window coordinates), while attached. */
+  tabViewBounds(tabId: TabId): Rect | undefined {
+    const entry = this.attached.get(tabId)
+    if (!entry || !this.records.get(entry.windowId)?.visible.has(tabId)) return undefined
+    return entry.view.getBounds()
+  }
+
+  /** The page under a point of a window (window coordinates), with the point in the page's coordinates. */
+  pageAt(windowId: WindowId, x: number, y: number): { contents: WebContents; x: number; y: number } | undefined {
+    const rec = this.records.get(windowId)
+    if (!rec) return undefined
+    for (const tabId of rec.visible) {
+      const b = this.tabViewBounds(tabId)
+      const contents = this.liveContents(tabId)
+      if (!b || !contents) continue
+      if (x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height) return { contents, x: x - b.x, y: y - b.y }
+    }
+    return undefined
+  }
+
+  /** Test/debug view of a window's floating sidebar. */
+  floatingInfo(windowId: WindowId): { exists: boolean; placed: boolean; shown: boolean; bounds?: Rect } {
+    const rec = this.records.get(windowId)
+    const view = rec?.floating
+    if (!rec || !view || view.webContents.isDestroyed()) return { exists: false, placed: false, shown: false }
+    return {
+      exists: true,
+      placed: rec.win.contentView.children.includes(view),
+      shown: rec.floatingShown,
+      bounds: view.getBounds(),
+    }
   }
 
   /** Positions tab views where the shell says panes are; hides tabs no longer shown. */
@@ -469,6 +568,13 @@ export class WindowManager {
       const rec = entry?.contentsId === contentsId ? this.records.get(entry.windowId) : undefined
       if (!rec) return
       rec.htmlFullscreen = tabId
+      // A floating sidebar never covers a full-screen video (SB-12).
+      if (this.ctx.store.state.windows[rec.id]?.sidebar.peeking) {
+        this.ctx.store.update((d) => {
+          const w = d.windows[rec.id]
+          if (w) w.sidebar.peeking = false
+        })
+      }
       this.applyPanes(rec.id, rec.panes, rec.radius)
       return
     }
@@ -639,7 +745,9 @@ export class WindowManager {
     const parent = rec.win.contentView
     const children = parent.children
     const at = children.indexOf(view)
-    const overlayAt = rec.overlay ? children.indexOf(rec.overlay) : -1
+    // The overlay and the floating sidebar (SB-12) stay above every page.
+    const above = [rec.overlay, rec.floating].map((v) => (v ? children.indexOf(v) : -1)).filter((i) => i >= 0)
+    const overlayAt = above.length > 0 ? Math.min(...above) : -1
     if (overlayAt < 0) {
       if (at < 0 || at !== children.length - 1) parent.addChildView(view)
       return
@@ -695,6 +803,7 @@ export class WindowManager {
         if (now.overlay.kind === 'none') this.hideOverlay(rec)
         else this.showOverlay(rec)
       }
+      if (now.sidebar !== before?.sidebar) this.onSidebar(rec, now.sidebar, before?.sidebar)
       const tabNow = activeTabOf(next, rec.id)
       const tabBefore = before ? activeTabOf(prev, rec.id) : null
       if (tabNow !== tabBefore) {
@@ -749,6 +858,141 @@ export class WindowManager {
       this.applyPanes(rec.id, [], rec.radius)
     }
     if (tabId && !rec.overlayShown) this.liveContents(tabId)?.focus()
+  }
+
+  /**
+   * The sidebar was hidden, docked, revealed floating or resized (SB-11, SB-12, SB-14). The floating
+   * card's renderer starts once the sidebar is hidden, so the first reveal is quick, and goes again
+   * after the sidebar has stayed docked for a while.
+   */
+  private onSidebar(rec: WindowRecord, now: SidebarState, before: SidebarState | undefined): void {
+    if (now.visible !== before?.visible || now.peeking !== before?.peeking) this.applyWindowButtons(rec, now, before)
+    if (now.visible) {
+      clearTimeout(rec.floatingPrewarm)
+      rec.floatingPrewarm = undefined
+      if (rec.floating && !rec.floatingDispose) {
+        rec.floatingDispose = setTimeout(() => this.disposeFloating(rec), FLOAT_DISPOSE_MS)
+      }
+    } else {
+      clearTimeout(rec.floatingDispose)
+      rec.floatingDispose = undefined
+      if (!now.peeking) this.prewarmFloating(rec, FLOAT_PREWARM_MS)
+    }
+    if (now.peeking && !before?.peeking) this.showFloating(rec)
+    else if (!now.peeking && before?.peeking) this.hideFloating(rec, now.visible ? FLOAT_DOCK_MS : FLOAT_EXIT_MS)
+    else if (now.peeking && now.width !== before?.width) this.fitFloating(rec)
+  }
+
+  /**
+   * macOS: the traffic lights belong to the sidebar's top row. While it is hidden they show only
+   * with the floating card, moved in with it (the card sits inset from the window's corner) (SB-20).
+   */
+  private applyWindowButtons(rec: WindowRecord, now: SidebarState, before: SidebarState | undefined): void {
+    if (!isMac || rec.win.isDestroyed()) return
+    clearTimeout(rec.buttonsTimer)
+    rec.buttonsTimer = undefined
+    const later = (ms: number, fn: () => void) => {
+      rec.buttonsTimer = setTimeout(() => {
+        rec.buttonsTimer = undefined
+        if (!rec.win.isDestroyed()) fn()
+      }, ms)
+    }
+    const docked = () => rec.win.setWindowButtonPosition(TRAFFIC_LIGHTS)
+    if (now.peeking) {
+      rec.win.setWindowButtonPosition({ x: TRAFFIC_LIGHTS.x + FLOAT_INSET, y: TRAFFIC_LIGHTS.y + FLOAT_INSET })
+      rec.win.setWindowButtonVisibility(true)
+    } else if (!now.visible) {
+      rec.win.setWindowButtonVisibility(false)
+      docked()
+    } else if (before?.peeking) {
+      // Docked from the floating card: they move over once the card has gone.
+      later(FLOAT_DOCK_MS, docked)
+    } else if (before && !before.visible) {
+      // Shown: they appear once the sidebar has slid in under them.
+      docked()
+      later(SIDEBAR_SLIDE_MS, () => rec.win.setWindowButtonVisibility(true))
+    } else {
+      docked()
+      rec.win.setWindowButtonVisibility(true)
+    }
+  }
+
+  private prewarmFloating(rec: WindowRecord, delay: number): void {
+    if (rec.floating || rec.floatingPrewarm) return
+    rec.floatingPrewarm = setTimeout(() => {
+      rec.floatingPrewarm = undefined
+      const sidebar = this.ctx.store.state.windows[rec.id]?.sidebar
+      if (!rec.win.isDestroyed() && sidebar && !sidebar.visible) this.ensureFloating(rec)
+    }, delay)
+  }
+
+  /** The floating sidebar's view (SB-12): a transparent view at the window's left edge. */
+  private ensureFloating(rec: WindowRecord): WebContentsView {
+    if (rec.floating && !rec.floating.webContents.isDestroyed()) return rec.floating
+    clearTimeout(rec.floatingPrewarm)
+    rec.floatingPrewarm = undefined
+    const view = new WebContentsView({ webPreferences: uiWebPreferences(rec.id, 'sidebar') })
+    view.setBackgroundColor('#00000000')
+    this.registerUi(view.webContents, rec.id)
+    this.reloadUiOnCrash(view.webContents, 'sidebar')
+    this.attachShortcuts(view.webContents)
+    this.hardenUi(view.webContents)
+    loadRenderer(view.webContents, 'sidebar')
+    rec.floating = view
+    return view
+  }
+
+  /** Puts the floating sidebar above the pages (below the overlay); its card slides in (FL-03). */
+  private showFloating(rec: WindowRecord): void {
+    if (rec.win.isDestroyed()) return
+    clearTimeout(rec.floatingTimer)
+    rec.floatingTimer = undefined
+    const view = this.ensureFloating(rec)
+    rec.floatingShown = true
+    this.fitFloating(rec)
+    const parent = rec.win.contentView
+    const children = parent.children
+    const at = children.indexOf(view)
+    const overlayAt = rec.overlay ? children.indexOf(rec.overlay) : -1
+    if (overlayAt < 0) {
+      if (at !== children.length - 1) parent.addChildView(view)
+    } else if (at !== overlayAt - 1) {
+      parent.addChildView(view, at >= 0 && at < overlayAt ? overlayAt - 1 : overlayAt)
+    }
+    view.setVisible(true)
+  }
+
+  /** The card slides away (or stays while the docked sidebar slides in), then the view leaves the window. */
+  private hideFloating(rec: WindowRecord, afterMs: number): void {
+    rec.floatingShown = false
+    const view = rec.floating
+    if (!view || view.webContents.isDestroyed()) return
+    // Keyboard focus in the card goes back to the page.
+    if (webContents.getFocusedWebContents() === view.webContents && !rec.overlayShown) this.focusActiveTab(rec.id)
+    clearTimeout(rec.floatingTimer)
+    rec.floatingTimer = setTimeout(() => {
+      rec.floatingTimer = undefined
+      if (!rec.floatingShown && !rec.win.isDestroyed()) this.removeChild(rec, view)
+    }, afterMs)
+  }
+
+  private fitFloating(rec: WindowRecord): void {
+    const view = rec.floating
+    if (!view || rec.win.isDestroyed()) return
+    const [width = 0, height = 0] = rec.win.getContentSize()
+    const sidebar = this.ctx.store.state.windows[rec.id]?.sidebar.width ?? DEFAULT_SIDEBAR_WIDTH
+    view.setBounds({ x: 0, y: 0, width: Math.min(width, FLOAT_INSET + sidebar + FLOAT_BAND), height })
+  }
+
+  private disposeFloating(rec: WindowRecord): void {
+    rec.floatingDispose = undefined
+    const view = rec.floating
+    if (!view || rec.floatingShown || !this.ctx.store.state.windows[rec.id]?.sidebar.visible) return
+    clearTimeout(rec.floatingTimer)
+    rec.floatingTimer = undefined
+    rec.floating = undefined
+    if (!rec.win.isDestroyed()) this.removeChild(rec, view)
+    if (!view.webContents.isDestroyed()) view.webContents.close()
   }
 
   /** The transparent overlay view (command bar, Peek chrome, menus), created on first need. */

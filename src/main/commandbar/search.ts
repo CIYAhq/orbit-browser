@@ -157,7 +157,8 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
 
   // CB-20: left clicks only (the renderer just closes the bar for other buttons, review M5).
   commands.register('search.forwardClick', ({ x, y }, c) => {
-    const contents = windows.get(windowOf(c) ?? '')?.webContents
+    // To the sidebar where it is drawn: the floating card while it is out (SB-12), else the shell.
+    const contents = windows.sidebarContents(windowOf(c) ?? '')
     if (!contents || contents.isDestroyed() || !Number.isFinite(x) || !Number.isFinite(y)) return
     const at = { x: Math.round(x), y: Math.round(y) }
     contents.sendInputEvent({ type: 'mouseMove', ...at })

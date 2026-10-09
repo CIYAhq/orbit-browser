@@ -43,4 +43,17 @@ export interface NavCommands {
   'nav.goToIndex': { args: { tabId?: TabId; index: number; newTab?: boolean }; result: TabId | null }
   /** The page address was copied the long way (from the command bar): a one-time ⌘⇧C tip (NV-17). */
   'nav.copyHint': { args: Record<string, never>; result: void }
+  /**
+   * The pointer reached the left edge of a window whose sidebar is hidden: the sidebar slides in
+   * over the page as a floating card (SB-12, FL-03). Ignored while something else floats over the
+   * window (command bar, a panel) or a page is in full screen.
+   */
+  'sidebar.reveal': { args: Record<string, never>; result: void }
+  /**
+   * From the floating sidebar: whether the pointer is over it (`over`) and whether a text field in it
+   * has focus (`editing`). It slides away shortly after neither holds and nothing it opened is up.
+   */
+  'sidebar.peekState': { args: { over?: boolean; editing?: boolean }; result: void }
+  /** A click beside the floating sidebar's card: the card hides at once and the click goes on to the page. */
+  'sidebar.peekDismiss': { args: { x: number; y: number; button: 'left' | 'middle' | 'right' }; result: void }
 }

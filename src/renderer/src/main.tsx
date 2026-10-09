@@ -21,6 +21,14 @@ async function boot(): Promise<void> {
         <OverlayApp />
       </StrictMode>,
     )
+  } else if (view === 'sidebar') {
+    // The hidden sidebar's floating card (chrome lane, SB-12): a transparent view at the window's left edge.
+    const { FloatingSidebarApp } = await import('./shell/chrome/FloatingSidebarApp')
+    root.render(
+      <StrictMode>
+        <FloatingSidebarApp />
+      </StrictMode>,
+    )
   } else if (view === 'strip') {
     // Split view pane strip (split lane, SV-12): a tiny transparent view over a pane's top edge.
     const { PaneStripApp } = await import('./shell/split/PaneStripApp')
