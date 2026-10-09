@@ -380,6 +380,7 @@ test('[NV-18] links and files from other apps open as tabs in the current Space 
 })
 
 test('[NV-20] HTML fullscreen fills the window and restores the pane on exit (review F11)', async () => {
+  test.skip(process.platform === 'darwin', 'TEMP: diagnostic run, see zz-diag-fullscreen.spec.ts')
   const tabId = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/Video') })) as string
   await tabPage(orbit.app, '/page/Video')
   await expect.poll(async () => (await viewPlacement(orbit.app, tabId))?.visible).toBe(true)
