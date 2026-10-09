@@ -138,6 +138,95 @@ test('[PK-03][PK-07] Shift-click opens a Peek in a Today tab; ⌘O makes it a se
   await expect(orbit.shell.getByTestId('tab-row').first()).toContainText('Today-Next')
 })
 
+test('[PK-08] Open in Split View: the source and the Peek page become two panes, one split row where the pinned tab was', async () => {
+  const hasSplit = await orbit.app.evaluate(() =>
+    (globalThis as unknown as OrbitGlobal).__orbit.ctx.commands.has('split.addTab'),
+  )
+  test.skip(!hasSplit, 'needs Split View (split.addTab), which comes with the split lane')
+  const { tabId: source, page } = await pinned('/site/Source')
+  const win = await mainWindow(orbit.app)
+  // Another pinned tab after it, so "where the pinned tab was" is a real position.
+  await run(orbit.app, 'tabs.create', {
+    url: sites.url('/site/Below'),
+    container: { kind: 'pinned', spaceId: win.spaceId },
+    activate: false,
+  })
+  await page.locator('#other').click({ noWaitAfter: true })
+  const peekTab = await settledPeek()
+  expect(await inTab(orbit.app, peekTab, 'window.marker = 42')).toBe('42')
+  const before = (await state(orbit.app)).spaces[win.spaceId]?.pinned ?? []
+  const at = before.indexOf(source)
+  expect(at).toBeGreaterThanOrEqual(0)
+
+  await (await viewPage(orbit.app, 'overlay')).getByTestId('peek-split').click()
+  await expect.poll(async () => (await overlayOf(orbit.app)).kind).toBe('none')
+  await expect(orbit.shell.getByTestId('split-row')).toHaveCount(1)
+  await expect(orbit.shell.getByTestId('split-pane')).toHaveCount(2)
+  const s = await state(orbit.app)
+  const after = s.spaces[win.spaceId]?.pinned ?? []
+  expect(after).toHaveLength(before.length)
+  const split = s.splits[after[at] as string]
+  expect(split?.layout).toMatchObject({
+    type: 'row',
+    children: [
+      { type: 'leaf', tabId: source },
+      { type: 'leaf', tabId: peekTab },
+    ],
+  })
+  expect(s.tabs[peekTab]?.floating).toBeUndefined()
+  // Both pages show side by side, the Peek page on the right, live (not reloaded).
+  await expect
+    .poll(async () => {
+      const [l, r] = [await viewInfo(orbit.app, source), await viewInfo(orbit.app, peekTab)]
+      return l.visible && r.visible && !!l.bounds && !!r.bounds && r.bounds.x > l.bounds.x + l.bounds.width - 1
+    })
+    .toBe(true)
+  expect(await inTab(orbit.app, peekTab, 'window.marker')).toBe('42')
+  // The Peek page's pane is the focused one, and it has the keyboard. (Split.focus comes with
+  // the split lane, so it is read loosely here.)
+  expect((split as { focus?: string } | undefined)?.focus).toBe(peekTab)
+  await expect
+    .poll(() =>
+      orbit.app.evaluate(
+        (_e, t) => (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(t)?.isFocused() ?? false,
+        peekTab,
+      ),
+    )
+    .toBe(true)
+})
+
+test('[PK-08] the split button asks Split View for source and Peek page side by side; refused, the page opens as a tab', async () => {
+  const hasSplit = await orbit.app.evaluate(() =>
+    (globalThis as unknown as OrbitGlobal).__orbit.ctx.commands.has('split.addTab'),
+  )
+  test.skip(hasSplit, 'Split View is in this build: the test above checks the real split')
+  // A stand-in for Split View's split.addTab: it notes the request and refuses it, as a full split does.
+  await orbit.app.evaluate(() => {
+    const g = globalThis as unknown as OrbitGlobal & { splitCalls: unknown[] }
+    g.splitCalls = []
+    const commands = g.__orbit.ctx.commands as unknown as {
+      register(name: string, handler: (args: unknown, c: { windowId?: string }) => unknown): void
+    }
+    commands.register('split.addTab', (args, c) => {
+      g.splitCalls.push({ args, windowId: c.windowId })
+      return null
+    })
+  })
+  const { source, peekTab } = await openPeekFromPinned()
+  expect(await inTab(orbit.app, peekTab, 'window.marker = 42')).toBe('42')
+  await (await viewPage(orbit.app, 'overlay')).getByTestId('peek-split').click()
+  await expect.poll(async () => (await overlayOf(orbit.app)).kind).toBe('none')
+  const win = await mainWindow(orbit.app)
+  await expect
+    .poll(() => orbit.app.evaluate(() => (globalThis as unknown as { splitCalls: unknown[] }).splitCalls))
+    .toEqual([{ args: { tabId: peekTab, target: source, side: 'right', focus: true }, windowId: win.id }])
+  // Refused: the page is not lost. It is a selected Today tab, the same live page.
+  await expect.poll(async () => (await state(orbit.app)).spaces[win.spaceId]?.today[0]).toBe(peekTab)
+  expect((await mainWindow(orbit.app)).activeTab[win.spaceId]).toBe(peekTab)
+  expect((await state(orbit.app)).tabs[peekTab]?.floating).toBeUndefined()
+  expect(await inTab(orbit.app, peekTab, 'window.marker')).toBe('42')
+})
+
 /** Opens a pinned tab and a Peek from its other-site link; returns both tab ids. */
 async function openPeekFromPinned(path = '/site/Source') {
   const { tabId: source, page } = await pinned(path)

@@ -383,7 +383,12 @@ export function registerPeek(ctx: MainContext): void {
       if (w?.overlay.kind === 'peek' && w.overlay.nonce === s.nonce) w.overlay = { kind: 'none' }
     })
     // Typed loosely: the split lane's commands may not be part of this build's registry.
-    const run = commands.run as unknown as (name: string, args: unknown, c?: CallContext) => Promise<unknown>
+    // Bound: run reads the registry's own handlers.
+    const run = commands.run.bind(commands) as unknown as (
+      name: string,
+      args: unknown,
+      c?: CallContext,
+    ) => Promise<unknown>
     const fallback = () => {
       // Refused (the split is full): the page still opens, as a tab.
       if (store.state.tabs[s.tabId] && !isPlaced(s.tabId)) placeInToday(s, source.spaceId)

@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 120 built (40 partial) · 161 tested · 0 feel right.
+**Totals:** 485 spec’d · 120 built (40 partial) · 162 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
 | P0 | 174 | 82 | 101 |
-| P1 | 221 | 35 | 56 |
+| P1 | 221 | 35 | 57 |
 | P2 | 83 | 3 | 4 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -268,7 +268,7 @@ Spec: `spec/peek.md`
 | PK-05 | The Peek card's look | P0 | ✅ | ✅ e2e+unit | – | inset card, shadow, dimmed page area, Close / Open as Tab / Split buttons with shortcut tooltips; no toolbar (AP-07 not built) |
 | PK-06 | Open and close animation, and the dismiss gesture | P1 | ✅ | ✅ e2e+unit | – | spring grow from the link, 18% dim (20% dark), 160 ms shrink to 0.96 and fade, reduced motion; drag the top handle or swipe down beside the card: follows the input, closes past 25% or 500 px/s, else springs back |
 | PK-07 | Expand a Peek into a full tab | P0 | ✅ | ✅ e2e+unit | – | ⌘O / button: card morphs to the frame, live page becomes a selected Today tab (routing rules apply) |
-| PK-08 | Open a Peek in Split View | P1 | 🟡 partial | – | – | button and animation wired; uses split.addTab once the split lane merges, else opens as a tab |
+| PK-08 | Open a Peek in Split View | P1 | 🟡 partial | ✅ e2e | – | button, animation and split.addTab call done and e2e-tested against the split lane's branch; until Split View is in main the button opens the page as a tab |
 | PK-09 | Close a Peek | P0 | ✅ | ✅ e2e+unit | – | Esc (after fullscreen), ⌘W, ×, click outside; archived as from 'peek' |
 | PK-10 | Reopen a Peek closed by mistake | P1 | ✅ | ✅ e2e | – | ⌘Z right after closing, or ⌘⇧T, reopens on the same page with history |
 | PK-11 | Navigating and acting inside a Peek | P1 | 🟡 partial | ✅ e2e | – | links, back/forward, reload, zoom, copy URL, devtools act on the Peek; the sidebar address shows the Peek host; ⌘L makes it a tab and edits it; find in page waits for the find bar (core placeholder) |
@@ -392,7 +392,7 @@ Spec: `spec/feel.md`
 | FL-16 | Command bar open and close | P0 | ✅ | ✅ e2e | – | motion spring (0.97→1, 4 px drop), 100 ms exit (80 ms after choosing a row) while focus returns at once; fade only with reduced motion; centred in the window |
 | FL-17 | Command bar typing and result updates | P0 | ✅ | ✅ e2e+unit | – | per-keystroke local results, identity-keyed memoized rows, instant highlight; engine suggestions fill free rows without moving the highlight |
 | FL-18 | Split view create and resize | P1 | – | – | – |  |
-| FL-19 | Link preview open, expand, close | P1 | ✅ | ✅ unit | – | open spring done in ~280 ms with no overshoot, 18% dim; expand meets the frame in ~250 ms, then the row enters; split slides to the right half; close 160 ms to 0.96 + fade; drag/swipe dismiss; ⌘Z/⌘⇧T replay the open |
+| FL-19 | Link preview open, expand, close | P1 | ✅ | ✅ e2e+unit | – | open spring done in ~280 ms with no overshoot, 18% dim; expand meets the frame in ~250 ms, then the row enters; split slides to the right half; close 160 ms to 0.96 + fade; drag/swipe dismiss; ⌘Z/⌘⇧T replay the open |
 | FL-20 | Favorites tiles | P1 | – | – | – |  |
 | FL-21 | Sidebar scrolling and large-sidebar performance | P0 | – | ✅ e2e | – |  |
 | FL-22 | Toasts | P1 | – | – | – |  |
