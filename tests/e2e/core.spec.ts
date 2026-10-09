@@ -9,6 +9,7 @@ import { paletteFor } from '../../src/shared/theme'
 import {
   type Fixtures,
   launchOrbit,
+  MOD,
   type Orbit,
   openViaCommandBar,
   run,
@@ -319,6 +320,37 @@ test('[TB-02] opening tabs keeps every UI mirror in step without resyncs (review
     expect(await page.evaluate(() => (globalThis as unknown as Mirror).__orbitMirror.resyncs())).toBe(1)
   }
   expect(errors.filter((e) => e.includes('[store]') || e.includes('Immer'))).toEqual([])
+})
+
+test('[CB-22] Enter right after typing opens what was typed, not a row left from an earlier query', async () => {
+  const one = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/One') })) as string
+  await expect(orbit.shell.getByTestId('tab-row').first()).toContainText('One')
+  // Answers for typed text come late (as on a slow machine); the empty query's "recent tabs" don't.
+  await orbit.app.evaluate(() => {
+    type Handler = (args: { query: string }, c: unknown) => unknown
+    const commands = (globalThis as unknown as OrbitGlobal).__orbit.ctx.commands as unknown as {
+      handlers: Map<string, Handler>
+    }
+    const original = commands.handlers.get('search.query') as Handler
+    commands.handlers.set('search.query', async (args, c) => {
+      if (args.query) await new Promise((r) => setTimeout(r, 500))
+      return original(args, c)
+    })
+  })
+  await orbit.shell.keyboard.press(`${MOD}+T`)
+  const overlay = await viewPage(orbit.app, 'overlay')
+  const input = overlay.getByTestId('command-input')
+  await expect(input).toBeFocused()
+  await expect(overlay.getByTestId('command-result').filter({ hasText: 'One' }).first()).toBeVisible()
+  const two = fx.url('/page/Two')
+  await input.fill(two)
+  await input.press('Enter')
+  await expect.poll(async () => Object.keys((await state(orbit.app)).tabs).length).toBe(2)
+  const s = await state(orbit.app)
+  const win = Object.values(s.windows)[0]
+  const active = win?.activeTab[win.spaceId]
+  expect(active).not.toBe(one)
+  expect(s.tabs[active ?? '']?.url).toBe(two)
 })
 
 test('[NV-18] links and files from other apps open as tabs in the current Space (review F10)', async () => {
