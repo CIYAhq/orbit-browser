@@ -1,8 +1,11 @@
+import { join } from 'node:path'
 import { type NavigationEntry, nativeImage, type WebContents, WebContentsView } from 'electron'
 import type { Tab, TabId } from '../../shared/state'
 import { isAwayFromPinned, sameDocUrl } from '../../shared/tabs'
 import type { MainContext } from '../context'
 import { showPageContextMenu } from './context-menu'
+import { FaviconStore } from './favicon-store'
+import { isIco, readIco } from './ico'
 
 /**
  * A view's web contents if it is alive. While a page closes itself, `view.webContents` is already
@@ -16,26 +19,52 @@ function liveContents(view: WebContentsView | undefined): WebContents | undefine
 /** Input that counts as a user gesture for opening tabs and pop-ups (NV-09). */
 const GESTURE_INPUTS = new Set(['mouseDown', 'mouseUp', 'keyDown', 'rawKeyDown', 'gestureTap', 'touchEnd'])
 const GESTURE_WINDOW_MS = 1000
-/** Favicons live in state (and on disk): keep each one small. */
-const MAX_FAVICON_BYTES = 16 * 1024
-/** Icons nativeImage can't decode (ICO, GIF, WebP…) are kept as they are up to this size. */
-const MAX_RAW_FAVICON_BYTES = 48 * 1024
+/** Every stored favicon is a data URL of at most this many characters (lane review MF-2). */
+const MAX_FAVICON_DATA_URL = 16 * 1024
 const MAX_FAVICON_FETCH_BYTES = 512 * 1024
 const FAVICON_PX = 32
 
-/** A small data URL for an icon: raster images are scaled to 32 px PNGs, others kept if small. */
+/**
+ * A small data URL for an icon, or nothing. Raster images (ICO frames included, decoded here
+ * because nativeImage can't read ICO everywhere) become ≤32 px PNGs; SVG and anything else
+ * undecodable is kept only if it already fits.
+ */
 function faviconDataUrl(buf: Buffer, type: string): string | undefined {
-  if (type !== 'image/svg+xml') {
-    const image = nativeImage.createFromBuffer(buf)
-    if (!image.isEmpty()) {
-      const { width } = image.getSize()
-      const scaled = width > FAVICON_PX ? image.resize({ width: FAVICON_PX, quality: 'best' }) : image
-      const url = scaled.toDataURL()
-      if (url.length <= MAX_FAVICON_BYTES * 1.4) return url
-    }
+  const fits = (url: string | undefined) => (url && url.length <= MAX_FAVICON_DATA_URL ? url : undefined)
+  const toPng = (image: Electron.NativeImage) => {
+    if (image.isEmpty()) return undefined
+    const { width } = image.getSize()
+    return fits((width > FAVICON_PX ? image.resize({ width: FAVICON_PX, quality: 'best' }) : image).toDataURL())
   }
-  if (buf.length > MAX_RAW_FAVICON_BYTES) return undefined
-  return `data:${type};base64,${buf.toString('base64')}`
+  if (isIco(buf)) {
+    const frame = readIco(buf, FAVICON_PX)
+    if (!frame) return undefined
+    const image =
+      frame.kind === 'png'
+        ? nativeImage.createFromBuffer(Buffer.from(frame.data))
+        : nativeImage.createFromBitmap(Buffer.from(frame.data), { width: frame.width, height: frame.height })
+    return toPng(image)
+  }
+  if (type !== 'image/svg+xml') {
+    const png = toPng(nativeImage.createFromBuffer(buf))
+    if (png) return png
+  }
+  return fits(`data:${type};base64,${buf.toString('base64')}`)
+}
+
+/** Bytes and type of a `data:` URL (base64 or percent-encoded). */
+function decodeDataUrl(url: string): { buf: Buffer; type: string } | undefined {
+  const m = /^data:([^;,]*)((?:;[^;,]*)*),(.*)$/s.exec(url)
+  if (!m) return undefined
+  const type = m[1] || 'text/plain'
+  try {
+    const buf = /;base64/i.test(m[2] ?? '')
+      ? Buffer.from(m[3] ?? '', 'base64')
+      : Buffer.from(decodeURIComponent(m[3] ?? ''))
+    return { buf, type }
+  } catch {
+    return undefined
+  }
 }
 
 /** Script run in an isolated world: is keyboard focus in an editable field of the page? */
@@ -83,12 +112,16 @@ export class TabRuntime {
   private gestures = new Map<TabId, { at: number; used: boolean }>()
   /** Favicon URL → data URL, fetched in the tab's own session (no fetches from Orbit's UI). */
   private favicons = new Map<string, string>()
+  /** Icons by origin, out of OrbitState (lane review MF-2). */
+  private faviconStore: FaviconStore | undefined
   /** The favicon each tab asked for last (a slower, older fetch must not win). */
   private wantedFavicon = new Map<TabId, string>()
   private ctx!: MainContext
 
   init(ctx: MainContext): void {
     this.ctx = ctx
+    this.faviconStore = new FaviconStore(join(ctx.paths.userData, 'orbit-favicons.json'))
+    this.faviconStore.load()
   }
 
   get(tabId: TabId): WebContentsView | undefined {
@@ -288,12 +321,14 @@ export class TabRuntime {
   private async storeFavicon(tabId: TabId, contents: WebContents, url: string): Promise<void> {
     this.wantedFavicon.set(tabId, url)
     if (url.startsWith('data:')) {
-      if (url.length <= MAX_FAVICON_BYTES * 1.4) this.update(tabId, { favicon: url })
+      const decoded = url.length <= MAX_FAVICON_FETCH_BYTES * 1.4 ? decodeDataUrl(url) : undefined
+      const data = decoded?.type.startsWith('image/') ? faviconDataUrl(decoded.buf, decoded.type) : undefined
+      if (data) this.setFavicon(tabId, data)
       return
     }
     const cached = this.favicons.get(url)
     if (cached) {
-      this.update(tabId, { favicon: cached })
+      this.setFavicon(tabId, cached)
       return
     }
     try {
@@ -307,10 +342,27 @@ export class TabRuntime {
       if (!data) return
       if (this.favicons.size > 500) this.favicons.clear()
       this.favicons.set(url, data)
-      if (!contents.isDestroyed() && this.wantedFavicon.get(tabId) === url) this.update(tabId, { favicon: data })
+      if (!contents.isDestroyed() && this.wantedFavicon.get(tabId) === url) this.setFavicon(tabId, data)
     } catch {
       // Keep the previous icon (or the fallback glyph).
     }
+  }
+
+  /** A tab's icon, also remembered by origin (outside OrbitState) for archived pages and lists. */
+  private setFavicon(tabId: TabId, data: string): void {
+    this.update(tabId, { favicon: data })
+    const url = this.ctx.store.state.tabs[tabId]?.url
+    if (url) this.faviconStore?.set(url, data)
+  }
+
+  /** The remembered icon for a page's origin (archive, history, command bar). */
+  faviconFor(pageUrl: string): string | undefined {
+    return this.faviconStore?.get(pageUrl)
+  }
+
+  /** Remembers an icon for a page's origin (e.g. moved out of an archive entry). */
+  rememberFavicon(pageUrl: string, data: string): void {
+    this.faviconStore?.set(pageUrl, data)
   }
 
   /** The next page this tab lands on is its pinned page (reset, wake at the pinned URL). */

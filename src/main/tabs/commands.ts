@@ -222,6 +222,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   commands.register('tabs.reopenClosed', ({ tabId }, c) =>
     tabId ? ops.reopen(tabId, windowOf(c)) : ops.reopenLast(windowOf(c)),
   )
+  commands.register('tabs.favicon', ({ url }) => tabs.faviconFor(url) ?? null)
   commands.register('tabs.recentlyClosed', () =>
     [...ops.recentlyClosed]
       .reverse()
@@ -724,10 +725,20 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     onContents((w) => (w.isDevToolsOpened() ? w.closeDevTools() : w.openDevTools({ mode: 'detach' }))),
   )
 
-  // Favicons are data URLs only: older states kept remote URLs, which Orbit's UI would fetch in
-  // the wrong session (sidebar integrity itself is restored by persist.normalizeState).
+  // Favicons in state are small data URLs on tabs only (lane review MF-2, F13): remote URLs (which
+  // Orbit's UI would fetch in the wrong session) go, and archive entries' copies move to the
+  // favicon store. Sidebar integrity itself is restored by persist.normalizeState.
+  for (const tab of Object.values(store.state.tabs)) {
+    if (tab.favicon?.startsWith('data:image/')) tabs.rememberFavicon(tab.url, tab.favicon)
+  }
+  for (const entry of store.state.archive) {
+    if (entry.favicon?.startsWith('data:image/') && entry.favicon.length <= 16 * 1024) {
+      tabs.rememberFavicon(entry.url, entry.favicon)
+    }
+  }
   store.update((d) => {
     for (const tab of Object.values(d.tabs)) if (tab.favicon && !tab.favicon.startsWith('data:')) delete tab.favicon
+    for (const entry of d.archive) if (entry.favicon) delete entry.favicon
   })
   maintenance.start()
 

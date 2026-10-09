@@ -187,7 +187,7 @@ export class TabOps {
       id,
       url: tab.url,
       title: tabTitle(tab),
-      favicon: tab.favicon,
+      // No favicon copy in OrbitState (lane review MF-2): look it up with tabs.favicon(url).
       spaceId: tab.spaceId,
       profileId: tab.profileId,
       archivedAt: this.now(),

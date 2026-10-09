@@ -398,3 +398,67 @@ test('[TB-17] three windows: a handoff leaves every window on a different tab (l
   await resize(orbit, ids[0] as string)
   await expectDistinct(orbit)
 })
+
+/** A multi-frame 32-bit ICO (16, 64 and 96 px) of about 60 KB. */
+function bigIco(): Buffer {
+  const sizes = [16, 64, 96]
+  const frames = sizes.map((w) => {
+    const stride = w * 4
+    const andStride = Math.ceil(w / 32) * 4
+    const out = Buffer.alloc(40 + stride * w + andStride * w)
+    out.writeUInt32LE(40, 0)
+    out.writeInt32LE(w, 4)
+    out.writeInt32LE(w * 2, 8)
+    out.writeUInt16LE(1, 12)
+    out.writeUInt16LE(32, 14)
+    for (let i = 0; i < w * w; i++) out.writeUInt32LE((0xff3366cc ^ Math.imul(i, 2654435761)) >>> 0, 40 + i * 4)
+    return out
+  })
+  const header = Buffer.alloc(6 + 16 * sizes.length)
+  header.writeUInt16LE(1, 2)
+  header.writeUInt16LE(sizes.length, 4)
+  let offset = header.length
+  sizes.forEach((w, i) => {
+    header[6 + i * 16] = w
+    header[7 + i * 16] = w
+    header.writeUInt32LE((frames[i] as Buffer).length, 6 + i * 16 + 8)
+    header.writeUInt32LE(offset, 6 + i * 16 + 12)
+    offset += (frames[i] as Buffer).length
+  })
+  return Buffer.concat([header, ...frames])
+}
+
+test('[TB-01][TD-02] an .ico favicon is stored as a small PNG; archive entries carry no copy (lane review MF-2)', async () => {
+  const { app } = orbit
+  const icon = bigIco()
+  expect(icon.length).toBeGreaterThan(40 * 1024)
+  const { createServer } = await import('node:http')
+  const server = createServer((req, res) => {
+    if (req.url === '/favicon.ico') {
+      res.writeHead(200, { 'content-type': 'image/x-icon' })
+      res.end(icon)
+      return
+    }
+    res.writeHead(200, { 'content-type': 'text/html' })
+    res.end('<!doctype html><title>Ico</title><link rel="icon" href="/favicon.ico"><p>hi</p>')
+  })
+  await new Promise<void>((r) => server.listen(3392, '127.0.0.1', () => r()))
+  try {
+    const url = 'http://127.0.0.1:3392/page'
+    const t = await newTab(app, url)
+    await expect.poll(async () => (await state(app)).tabs[t]?.favicon ?? '').toMatch(/^data:image\/png;base64,/)
+    const favicon = (await state(app)).tabs[t]?.favicon as string
+    expect(favicon.length).toBeLessThanOrEqual(16 * 1024)
+    // Closing it archives an entry without a favicon copy; the icon is looked up by origin.
+    await newTab(app, fx.url('/page/Next'))
+    await cmd(app, 'tabs.close', { tabId: t })
+    const s = await state(app)
+    const entry = s.archive[s.archive.length - 1]
+    expect(entry?.url).toBe(url)
+    expect(entry?.favicon).toBeUndefined()
+    expect(JSON.stringify(entry).length).toBeLessThan(1024)
+    expect(await cmd(app, 'tabs.favicon', { url })).toBe(favicon)
+  } finally {
+    await new Promise((r) => server.close(() => r(null)))
+  }
+})
