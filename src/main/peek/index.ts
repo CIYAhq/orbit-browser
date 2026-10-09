@@ -10,8 +10,9 @@ import { app, WebContentsView } from 'electron'
 import { decideLink, type LinkHow, type LinkSettings, type LinkSource, routeFor } from '../../shared/link-routing'
 import { PEEK_RADIUS, peekCard, peekStart } from '../../shared/peek-geometry'
 import type { Rect } from '../../shared/rpc'
+import { layoutLeaves, MAX_PANES, SPLIT_FULL_MESSAGE } from '../../shared/split'
 import type { OrbitState, SpaceId, Tab, TabId, WindowId } from '../../shared/state'
-import { insertItem, sectionOf } from '../../shared/tree'
+import { insertItem, sectionOf, splitOfTab } from '../../shared/tree'
 import type { MainContext } from '../context'
 import { openMiniWindow } from '../miniwindow'
 import type { CallContext } from '../registry'
@@ -341,10 +342,23 @@ export function registerPeek(ctx: MainContext): void {
     }
   }
 
+  /** Whether a tab's split already has the most panes Split View takes (SV-25). */
+  const inFullSplit = (tabId: TabId) => {
+    const state = store.state
+    const splitId = splitOfTab(state, tabId)
+    const split = splitId ? state.splits[splitId] : undefined
+    return !!split && layoutLeaves(split.layout).length >= MAX_PANES
+  }
+
   /** Turns the source tab and the Peek page into a split, the page on the right (PK-08). */
   const splitPeek = (windowId: WindowId) => {
     const s = sessions.get(windowId)
     if (s?.phase !== 'open') return
+    // No fifth pane by any route (SV-25): the Peek stays as it is, and a toast says why.
+    if (inFullSplit(s.sourceTabId)) {
+      ctx.toast(windowId, SPLIT_FULL_MESSAGE)
+      return
+    }
     s.phase = 'splitting'
     clearTimeout(s.settleTimer)
     setOverlay(s, { phase: 'splitting' })
@@ -359,12 +373,6 @@ export function registerPeek(ctx: MainContext): void {
     const tab = state.tabs[s.tabId]
     if (!source || !tab) {
       discard(s)
-      return
-    }
-    if (!commands.has('split.addTab')) {
-      // Without Split View the page opens as a tab instead.
-      commitExpand(s)
-      ctx.toast(s.windowId, 'Opened as a tab')
       return
     }
     sessions.delete(s.windowId)
@@ -382,18 +390,16 @@ export function registerPeek(ctx: MainContext): void {
       const w = d.windows[s.windowId]
       if (w?.overlay.kind === 'peek' && w.overlay.nonce === s.nonce) w.overlay = { kind: 'none' }
     })
-    // Typed loosely: the split lane's commands may not be part of this build's registry.
-    // Bound: run reads the registry's own handlers.
-    const run = commands.run.bind(commands) as unknown as (
-      name: string,
-      args: unknown,
-      c?: CallContext,
-    ) => Promise<unknown>
     const fallback = () => {
-      // Refused (the split is full): the page still opens, as a tab.
+      // Refused after all (the split filled up while the card moved): the page still opens, as a tab.
       if (store.state.tabs[s.tabId] && !isPlaced(s.tabId)) placeInToday(s, source.spaceId)
     }
-    run('split.addTab', { tabId: s.tabId, target: s.sourceTabId, side: 'right', focus: true }, { windowId: s.windowId })
+    commands
+      .run(
+        'split.addTab',
+        { tabId: s.tabId, target: s.sourceTabId, side: 'right', focus: true },
+        { windowId: s.windowId },
+      )
       .then((splitId) => {
         if (!splitId) fallback()
       })
