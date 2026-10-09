@@ -51,6 +51,8 @@ interface Gesture {
   hasNext: boolean
   canCreate: boolean
   releaseTimer: ReturnType<typeof setTimeout> | undefined
+  /** Why a 'swallow' gesture was released: only OS momentum follows a momentum release. */
+  releasedBy?: 'timer' | 'momentum' | 'pointer'
   source: 'wheel' | 'pointer'
 }
 
@@ -349,7 +351,7 @@ export class SpaceSwitcher {
   /** Wheel events over the sidebar. Must be attached as a non-passive listener. */
   onWheel = (e: WheelEvent): void => {
     if (e.ctrlKey || this.width <= 0) return // pinch-zoom
-    const now = e.timeStamp || performance.now()
+    const now = eventTime(e)
     // Mouse wheels scroll as usual. Only a gesture's first event can be a notch: trackpads may
     // report notch-like values mid-flick (wheelDeltaX = 3 × deltaX on macOS; review V4).
     const starting = !this.gesture || now - this.gesture.lastAt > RELEASE_GAP_MS
@@ -363,10 +365,13 @@ export class SpaceSwitcher {
     if (g.phase === 'swallow') {
       // OS momentum after a lifted swipe never scrolls the list or switches again. Anything
       // else is new input: a vertical scroll, a reversal, or growing deltas (fingers back on),
-      // which picks the strip up where it is (review M4).
+      // which picks the strip up where it is (review M4). Momentum starts right at the lift,
+      // so after a release by silence (or by a lifted pointer) any horizontal event is new
+      // input too, e.g. events that were only delivered late on a busy machine.
       const reversing = !vertical && Math.abs(dx) > 1 && Math.sign(dx) !== Math.sign(g.lastDelta)
       const growing = !vertical && Math.abs(dx) > Math.abs(g.lastDelta) * 1.05 + 0.5
-      if (!vertical && !reversing && !growing) {
+      const afterSilence = !vertical && g.releasedBy !== 'momentum'
+      if (!vertical && !reversing && !growing && !afterSilence) {
         e.preventDefault()
         g.lastAt = now
         g.lastDelta = dx
@@ -406,7 +411,7 @@ export class SpaceSwitcher {
     }
     e.preventDefault()
     this.track1to1(g, g.travel + dx, now)
-    if (this.momentum.push(dx, now)) this.release()
+    if (this.momentum.push(dx, now)) this.release(false, 'momentum')
     else this.armRelease(g)
   }
 
@@ -441,7 +446,7 @@ export class SpaceSwitcher {
   onPointerUp = (e: PointerEvent): void => {
     if (!this.pointer || e.pointerId !== this.pointer.id) return
     this.pointer = undefined
-    if (this.gesture?.source === 'pointer' && this.gesture.phase === 'tracking') this.release(false)
+    if (this.gesture?.source === 'pointer' && this.gesture.phase === 'tracking') this.release(false, 'pointer')
     else this.gesture = undefined
   }
 
@@ -522,13 +527,15 @@ export class SpaceSwitcher {
    * fingers had stopped too: the velocity is measured up to now, not up to the
    * last motion (a held-still lift is not a flick; review F3).
    */
-  private release(stillSince = false): void {
+  private release(stillSince = false, by: 'timer' | 'momentum' | 'pointer' = 'timer'): void {
     const g = this.gesture
     if (g?.phase !== 'tracking') return
     if (g.releaseTimer) clearTimeout(g.releaseTimer)
     g.releaseTimer = undefined
     g.phase = 'swallow'
-    if (stillSince) this.velocity.add(Math.max(performance.now(), g.lastAt), g.travel)
+    g.releasedBy = by
+    // A held-still lift: measured up to the moment the fingers' events stopped plus the wait.
+    if (stillSince) this.velocity.add(g.lastAt + RELEASE_GAP_MS, g.travel)
     const offset = -this.x.get()
     const v = this.velocity.velocity()
     const dir = Math.sign(offset) || Math.sign(v)
@@ -758,6 +765,15 @@ export class SpaceSwitcher {
       }
     }
   }
+}
+
+/**
+ * An input event's time on the gesture clock. Tests may stamp synthetic events with
+ * `orbitTimeStamp` (a fixed cadence that doesn't depend on how fast a machine delivers them).
+ */
+function eventTime(e: Event): number {
+  const stamped = (e as Event & { orbitTimeStamp?: number }).orbitTimeStamp
+  return typeof stamped === 'number' ? stamped : e.timeStamp || performance.now()
 }
 
 /**

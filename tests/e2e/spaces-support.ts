@@ -67,17 +67,26 @@ export async function swipe(shell: Page, dx: number, steps: number, interval = 1
 }
 
 /**
- * A quick flick: wheel events dispatched inside the page at a fixed pace, so
- * the release velocity doesn't depend on the test driver's latency.
+ * A sequence of horizontal wheel events dispatched inside the page in one go, each stamped
+ * with an explicit time `intervalMs` apart (the gesture clock reads `orbitTimeStamp`), so
+ * velocity, momentum detection and release don't depend on how fast the machine delivers
+ * events. Returns the strip's offset right after each event.
  */
-export async function flick(shell: Page, deltas: number[], intervalMs: number): Promise<void> {
-  await shell.evaluate(
-    async ([ds, ms]) => {
+export async function flick(shell: Page, deltas: number[], intervalMs: number): Promise<number[]> {
+  return shell.evaluate(
+    ([ds, ms]) => {
       const target = document.querySelector('[data-testid="sidebar-scroll"]') as HTMLElement
-      for (const d of ds) {
-        target.dispatchEvent(new WheelEvent('wheel', { deltaX: d, deltaY: 0, bubbles: true, cancelable: true }))
-        await new Promise((r) => setTimeout(r, ms))
-      }
+      const track = document.querySelector<HTMLElement>('.space-strip__track')
+      const t0 = performance.now()
+      const xs: number[] = []
+      ds.forEach((d, i) => {
+        const e = new WheelEvent('wheel', { deltaX: d, deltaY: 0, bubbles: true, cancelable: true })
+        Object.defineProperty(e, 'orbitTimeStamp', { value: t0 + i * ms })
+        target.dispatchEvent(e)
+        const m = /translate3d\((-?[\d.]+)px/.exec(track?.style.transform ?? '')
+        xs.push(m ? Number(m[1]) : 0)
+      })
+      return xs
     },
     [deltas, intervalMs] as const,
   )

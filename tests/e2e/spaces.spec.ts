@@ -877,27 +877,17 @@ test('[SP-08][FL-13] a finger that eases off and moves on keeps tracking (review
   const b = await createSpace(app, { name: 'Beta', activate: false })
   for (let i = 0; i < 40; i++) await newTab(app, fx.url(`/page/Row${i}`), { activate: false })
   await settled(shell)
-  const samples = shell.evaluate(
-    () =>
-      new Promise<number[]>((done) => {
-        const out: number[] = []
-        const track = document.querySelector<HTMLElement>('.space-strip__track')
-        const t0 = performance.now()
-        const tick = () => {
-          const m = /translate3d\((-?[\d.]+)px/.exec(track?.style.transform ?? '')
-          out.push(m ? Number(m[1]) : 0)
-          if (performance.now() - t0 < 520) requestAnimationFrame(tick)
-          else done(out)
-        }
-        requestAnimationFrame(tick)
-      }),
-  )
-  // 144 px: eases off to 2 px per event, then speeds up again (no lift in between).
-  await flick(shell, [10, 6, 6, 6, 6, 6, 5, 4, 3, 2, 3, 4, 5, ...Array(13).fill(6)], 16)
-  const xs = await samples
-  // While the fingers were on, the strip only ever moved further (it never sprang back).
-  const tracked = xs.filter((x) => x !== 0)
-  for (let i = 1; i < tracked.length; i++) expect(tracked[i]).toBeLessThanOrEqual((tracked[i - 1] as number) + 0.5)
+  // 144 px at 60 Hz: eases off to 2 px per event, then speeds up again (no lift in between).
+  const deltas = [10, 6, 6, 6, 6, 6, 5, 4, 3, 2, 3, 4, 5, ...Array(13).fill(6)]
+  const xs = await flick(shell, deltas, 16)
+  // While the fingers were on, the strip followed them 1:1 (it never sprang back): after
+  // the 9 px recognition, each event moved it by exactly that event's delta.
+  let travel = 0
+  const expected = deltas.map((d) => {
+    travel += d
+    return travel >= 9 ? -travel : 0
+  })
+  expect(xs.map((x) => Math.round(x * 10) / 10)).toEqual(expected)
   // Past half the width on release: switched.
   await expect.poll(() => activeSpace(app), { timeout: 3000 }).toBe(b)
   await settled(shell)
@@ -905,7 +895,6 @@ test('[SP-08][FL-13] a finger that eases off and moves on keeps tracking (review
   // once a vertical scroll: the list scrolls instead of being swallowed with the momentum.
   await run(app, 'spaces.switch', { spaceId: a })
   await settled(shell)
-  await sleep(200)
   await hoverSidebar(shell)
   const list = shell.getByTestId('sidebar-scroll')
   await flick(shell, [-8, -8, -7.2, -6.5, -5.9, -5.3, -4.8, -4.3], 6)
