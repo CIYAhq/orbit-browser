@@ -14,17 +14,23 @@ export function PaneStripApp() {
   const palette = usePalette(win?.spaceId)
   const [tabId, setTabId] = useState<string | null>(null)
   const [nonce, setNonce] = useState(0)
+  const [leaving, setLeaving] = useState(false)
   const dragging = useRef(false)
   useEffect(() => {
     const off = window.orbit.on('strip:show', (payload) => {
       setTabId((payload as { tabId: string }).tabId)
       setNonce((n) => n + 1)
+      setLeaving(false)
     })
+    const offHide = window.orbit.on('strip:hide', () => setLeaving(true))
     // The first show can arrive before this page has loaded: ask which pane the strip is for.
     void invoke('split.stripTarget', {}).then(({ tabId: current }) => {
       if (current) setTabId((existing) => existing ?? current)
     })
-    return off
+    return () => {
+      off()
+      offHide()
+    }
   }, [])
   if (!tabId) return null
   const drag = (phase: 'start' | 'move' | 'end' | 'cancel', e: PointerEvent) =>
@@ -32,7 +38,7 @@ export function PaneStripApp() {
   return (
     <div
       key={nonce}
-      className="pane-strip"
+      className={`pane-strip${leaving ? ' is-leaving' : ''}`}
       style={paletteVars(palette) as CSSProperties}
       data-testid="pane-strip"
       onPointerEnter={() => void invoke('split.stripHover', { hovered: true })}

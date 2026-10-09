@@ -24,7 +24,11 @@ interface StripState {
   dragging: boolean
   showTimer?: NodeJS.Timeout
   hideTimer?: NodeJS.Timeout
+  fadeTimer?: NodeJS.Timeout
 }
+
+/** The strip fades out over this long before its view hides (SV-12). */
+const FADE_OUT_MS = 120
 
 /**
  * The floating pane strip (SV-12): a small transparent view centred at the top of a split
@@ -102,6 +106,7 @@ export class PaneStrip {
     const s = this.stateOf(windowId)
     clearTimeout(s.showTimer)
     clearTimeout(s.hideTimer)
+    clearTimeout(s.fadeTimer)
     const view = s.view ?? this.createView(windowId)
     s.view = view
     s.tabId = tabId
@@ -119,16 +124,28 @@ export class PaneStrip {
     view.webContents.send('orbit:strip:show', { tabId })
   }
 
-  hide(windowId: WindowId): void {
+  /** Hides the strip: a short fade, then the view goes away (`now` skips the fade). */
+  hide(windowId: WindowId, now = false): void {
     const s = this.windows.get(windowId)
     if (!s) return
     clearTimeout(s.showTimer)
     clearTimeout(s.hideTimer)
+    clearTimeout(s.fadeTimer)
+    const wasShown = s.tabId !== null
     s.tabId = null
     s.candidate = null
     s.hovered = false
     s.dragging = false
-    if (s.view && !s.view.webContents.isDestroyed()) s.view.setVisible(false)
+    const view = s.view
+    if (!view || view.webContents.isDestroyed()) return
+    if (now || !wasShown) {
+      view.setVisible(false)
+      return
+    }
+    view.webContents.send('orbit:strip:hide', {})
+    s.fadeTimer = setTimeout(() => {
+      if (!s.tabId && !view.webContents.isDestroyed()) view.setVisible(false)
+    }, FADE_OUT_MS)
   }
 
   private scheduleHide(windowId: WindowId): void {
@@ -182,7 +199,7 @@ export class PaneStrip {
       if (!s.tabId) continue
       const win = next.windows[windowId]
       if (win?.overlay.kind !== 'none' || !next.tabs[s.tabId] || !this.isShownPane(next, windowId, s.tabId)) {
-        this.hide(windowId)
+        this.hide(windowId, true)
       }
     }
   }
