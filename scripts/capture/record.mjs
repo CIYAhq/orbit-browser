@@ -14,7 +14,7 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { _electron as electron } from '@playwright/test'
 
@@ -28,7 +28,8 @@ if (!scenario) {
   console.error('usage: record.mjs <scenario> [--out file.mp4] [--shots dir] [--size 1440x900]')
   process.exit(2)
 }
-const OUT = resolve(opt('out', `clips/${scenario}.mp4`))
+const scenarioName = basename(scenario, '.mjs')
+const OUT = resolve(opt('out', `clips/${scenarioName}.mp4`))
 const SHOTS = opt('shots') ? resolve(opt('shots')) : undefined
 const [W, H] = opt('size', '1440x900').split('x').map(Number)
 const FFMPEG = process.env.ORBIT_FFMPEG ?? 'ffmpeg'
@@ -39,14 +40,32 @@ const log = (...m) => console.error(`[capture ${new Date().toISOString().slice(1
 
 /** Local pages for demos that must not depend on the network. */
 async function startFixtures() {
-  const colors = ['#fde8e8', '#e8f0fd', '#e9fbe8', '#fff6dc', '#f1e8fd', '#e6fafa']
+  const accents = ['#e5484d', '#3e63dd', '#30a46c', '#f76b15', '#8e4ec6', '#12a594', '#d6409f', '#ffb224']
+  const esc = (t) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
   const server = createServer((req, res) => {
     const name = decodeURIComponent((req.url ?? '/').split('/').pop() || 'Home')
-    const bg = colors[[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % colors.length]
+    const accent = accents[[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % accents.length]
+    const icon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="${accent}"/><text x="16" y="22" font-family="Arial,sans-serif" font-size="17" font-weight="700" fill="#fff" text-anchor="middle">${esc(name[0] ?? '?')}</text></svg>`
+    const cards = ['Overview', 'Recent', 'Shared with you', 'Starred', 'Activity', 'Ideas']
+      .map(
+        (c, i) =>
+          `<div class="card"><div class="dot" style="opacity:${0.35 + (i % 3) * 0.2}"></div><h3>${c}</h3><p>Local demo content for ${esc(name)}. Nothing here comes from the network.</p></div>`,
+      )
+      .join('')
     res.writeHead(200, { 'content-type': 'text/html' })
-    res.end(`<!doctype html><html><head><meta charset="utf-8"><title>${name}</title>
-<style>body{font:18px system-ui;margin:0;padding:56px;background:${bg};color:#222}h1{font-size:44px;margin:0 0 16px}p{max-width:62ch;line-height:1.6}</style>
-</head><body><h1>${name}</h1>${'<p>A local demo page for Orbit screen captures. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>'.repeat(12)}</body></html>`)
+    res.end(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(name)}</title>
+<link rel="icon" href="data:image/svg+xml,${encodeURIComponent(icon)}">
+<style>
+:root{color-scheme:light}body{font:16px/1.55 system-ui,sans-serif;margin:0;background:#fafafa;color:#1d1d1f}
+header{display:flex;align-items:center;gap:12px;padding:18px 40px;background:#fff;border-bottom:1px solid #eee}
+header .logo{width:30px;height:30px;border-radius:8px;background:${accent}}header b{font-size:18px}
+header nav{margin-left:auto;display:flex;gap:22px;color:#666;font-size:14px}
+main{padding:40px;max-width:1100px}h1{font-size:40px;margin:8px 0 6px;letter-spacing:-0.02em}
+.lead{color:#555;max-width:60ch;margin:0 0 28px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
+.card{background:#fff;border:1px solid #eee;border-radius:14px;padding:18px}.card h3{margin:10px 0 4px;font-size:16px}
+.card p{margin:0;color:#666;font-size:14px}.dot{width:36px;height:36px;border-radius:10px;background:${accent}}
+</style></head><body><header><div class="logo"></div><b>${esc(name)}</b><nav><span>Home</span><span>Library</span><span>Settings</span></nav></header>
+<main><h1>${esc(name)}</h1><p class="lead">A local demo page for Orbit screen captures, served from 127.0.0.1.</p><div class="grid">${cards}</div></main></body></html>`)
   })
   let port = 3380
   await new Promise((ok, fail) => {
@@ -161,7 +180,7 @@ function makeToolkit(app, shell, fx) {
       if (!SHOTS) return
       shotNo++
       log('screenshot', name)
-      await screenshot(join(SHOTS, `${scenario}-${String(shotNo).padStart(2, '0')}-${name}.png`))
+      await screenshot(join(SHOTS, `${scenarioName}-${String(shotNo).padStart(2, '0')}-${name}.png`))
     },
   }
 }
@@ -188,13 +207,32 @@ await app.evaluate(
   [W, H],
 )
 await sleep(800)
+// Captures stay offline: any http(s) request that isn't to the local fixture server is cancelled.
+await app.evaluate(({ app: electronApp, session, webContents }) => {
+  const local = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//
+  const guard = (s) =>
+    s.webRequest.onBeforeRequest((d, done) => done({ cancel: /^https?:/.test(d.url) && !local.test(d.url) }))
+  guard(session.defaultSession)
+  for (const wc of webContents.getAllWebContents()) guard(wc.session)
+  electronApp.on('session-created', guard)
+})
 
-const { default: play } = await import(pathToFileURL(resolve('scripts/capture/scenarios', `${scenario}.mjs`)).href)
+const scenarioFile = scenario.endsWith('.mjs')
+  ? resolve(scenario)
+  : resolve(import.meta.dirname, 'scenarios', `${scenario}.mjs`)
+const { default: play, setup } = await import(pathToFileURL(scenarioFile).href)
+const toolkit = makeToolkit(app, shell, fx)
+// Optional unrecorded preparation (Spaces, tabs, history), so the clip starts on the demo itself.
+if (setup) {
+  log('setup')
+  await setup(toolkit)
+  await sleep(1200)
+}
 log('recording', OUT)
 const rec = startRecorder(OUT)
 await sleep(700)
 try {
-  await play(makeToolkit(app, shell, fx))
+  await play(toolkit)
   await sleep(800)
 } finally {
   await rec.stop()
