@@ -62,6 +62,7 @@ export function registerSplit(ctx: MainContext): void {
   const windowOf = (c: CallContext): WindowId | undefined => c.windowId ?? windows.focusedWindowId()
   const sessions = new Map<WindowId, PaneSession>()
   const strip = new PaneStrip(ctx)
+  if (ctx.e2e) (globalThis as unknown as { __orbitSplit: unknown }).__orbitSplit = { strip }
 
   const refuse = (windowId: WindowId | undefined, result: unknown) => {
     if (result === 'full') ctx.toast(windowId, SPLIT_FULL_MESSAGE)

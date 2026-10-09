@@ -724,9 +724,60 @@ html.is-resizing-rows * {
   border-radius: calc(var(--radius-frame) + 2px);
 }
 
+/* Pane strip view (SV-12): its own transparent web contents, sized to the strip. */
+html[data-view="strip"] body {
+  background: transparent;
+}
+
+.pane-strip {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 4px;
+  border-radius: 9px;
+  color: #1c1c1f;
+  background: color-mix(in srgb, var(--frame-top) 25%, rgba(255, 255, 255, 0.94));
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.16),
+    0 4px 12px rgba(0, 0, 0, 0.16);
+  animation: pane-strip-in 140ms var(--ease-out);
+}
+
+@media (prefers-color-scheme: dark) {
+  .pane-strip {
+    color: #f3f3f5;
+    background: color-mix(in srgb, var(--frame-top) 30%, rgba(30, 30, 34, 0.94));
+  }
+}
+
+@keyframes pane-strip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+.pane-strip__button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 22px;
+  border-radius: 6px;
+  opacity: 0.75;
+}
+
+.pane-strip__button:hover {
+  opacity: 1;
+  background: rgba(127, 127, 127, 0.18);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pane--blank,
-  .pane--drop {
+  .pane--drop,
+  .pane-strip {
     animation-duration: 1ms;
   }
 }

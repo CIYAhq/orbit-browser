@@ -9,6 +9,7 @@ import {
   run,
   startFixtures,
   state,
+  tabPage,
   tabView,
   viewPage,
 } from './helpers'
@@ -279,4 +280,96 @@ test('[SV-04][SV-25] dragging a tab row onto the page makes a split; a full spli
     }),
   )
   await expectViewsOverPanes(orbit, [a, b])
+})
+
+async function stripInfo(app: ElectronApplication) {
+  return app.evaluate(() => {
+    const g = globalThis as unknown as {
+      __orbitSplit: { strip: { info: (w: string) => { tabId: string | null; visible: boolean; bounds?: Box } } }
+      __orbit: { windowIds: () => string[] }
+    }
+    return g.__orbitSplit.strip.info(g.__orbit.windowIds()[0] as string)
+  })
+}
+
+test('[SV-12][SV-14] hovering a pane top shows its strip; clicking a pane focuses it', async () => {
+  const b = await openTab(orbit.app, 'Second')
+  const a = await openTab(orbit.app, 'First')
+  await run(orbit.app, 'split.create', { tabIds: [a, b] })
+  await expectViewsOverPanes(orbit, [a, b])
+  // Clicking into the left page focuses that pane: outline, address and commands follow it.
+  const first = await tabPage(orbit.app, '/page/First')
+  await first.mouse.click(200, 300)
+  await expect.poll(() => activeTabId(orbit.app)).toBe(a)
+  await expect(orbit.shell.locator(`[data-testid="split-pane"][data-tab-id="${a}"]`)).toHaveAttribute(
+    'data-focused',
+    'true',
+  )
+  const ring = await orbit.shell.getByTestId('split-focus-ring').boundingBox()
+  const pa = await paneBox(orbit.shell, a)
+  expect(near(ring, { x: pa.x - 2, y: pa.y - 2, width: pa.width + 4, height: pa.height + 4 })).toBe(true)
+  // Hover near the top edge of the right page: the strip appears centred over that pane only.
+  const second = await tabPage(orbit.app, '/page/Second')
+  await second.mouse.move(150, 120)
+  await second.mouse.move(160, 10)
+  await expect.poll(async () => (await stripInfo(orbit.app)).visible).toBe(true)
+  const info = await stripInfo(orbit.app)
+  expect(info.tabId).toBe(b)
+  const pb = await paneBox(orbit.shell, b)
+  const bounds = info.bounds as Box
+  expect(Math.abs(bounds.x + bounds.width / 2 - (pb.x + pb.width / 2))).toBeLessThanOrEqual(1)
+  expect(bounds.y).toBeGreaterThanOrEqual(pb.y)
+  expect(bounds.y).toBeLessThan(pb.y + 20)
+  // Moving down into the page hides it again.
+  await second.mouse.move(160, 300)
+  await expect.poll(async () => (await stripInfo(orbit.app)).visible).toBe(false)
+  // The strip's × closes that pane.
+  await second.mouse.move(160, 8)
+  await expect.poll(async () => (await stripInfo(orbit.app)).visible).toBe(true)
+  const strip = await viewPage(orbit.app, 'strip' as 'overlay')
+  await strip.getByTestId('pane-strip-close').click()
+  await expect(orbit.shell.getByTestId('split-row')).toHaveCount(0)
+  expect((await state(orbit.app)).tabs[b]).toBeUndefined()
+})
+
+test('[SV-16][SV-14] keyboard focus moves between panes and Ctrl+Shift+- closes the focused one', async () => {
+  const c = await openTab(orbit.app, 'Three')
+  const b = await openTab(orbit.app, 'Two')
+  const a = await openTab(orbit.app, 'One')
+  await run(orbit.app, 'split.create', { tabIds: [a, b, c], focus: a })
+  await expectViewsOverPanes(orbit, [a, b, c])
+  await orbit.shell.keyboard.press('Control+Shift+Digit3')
+  await expect.poll(() => activeTabId(orbit.app)).toBe(c)
+  await orbit.shell.keyboard.press('Control+Shift+BracketRight')
+  await expect.poll(() => activeTabId(orbit.app)).toBe(a)
+  await orbit.shell.keyboard.press('Control+Shift+BracketLeft')
+  await expect.poll(() => activeTabId(orbit.app)).toBe(c)
+  await expect(orbit.shell.getByTestId('address-pill')).toContainText('localhost')
+  await orbit.shell.keyboard.press('Control+Shift+Minus')
+  await expect(orbit.shell.getByTestId('split-row').getByTestId('split-segment')).toHaveCount(2)
+  expect((await state(orbit.app)).tabs[c]).toBeUndefined()
+  await expect.poll(() => activeTabId(orbit.app)).not.toBe(c)
+  await expectViewsOverPanes(orbit, [a, b])
+})
+
+test('[SV-24] a resized three-pane split comes back after relaunch', async () => {
+  const c = await openTab(orbit.app, 'P3')
+  const b = await openTab(orbit.app, 'P2')
+  const a = await openTab(orbit.app, 'P1')
+  const splitId = (await run(orbit.app, 'split.create', { tabIds: [a, b, c], focus: b })) as string
+  await run(orbit.app, 'split.resize', { splitId, path: [], sizes: [0.5, 0.25, 0.25] })
+  await expectViewsOverPanes(orbit, [a, b, c])
+  await orbit.app.evaluate(() => (globalThis as unknown as { __orbit: { flush: () => void } }).__orbit.flush())
+  const userData = orbit.userData
+  await orbit.app.close()
+  orbit = await launchOrbit({ userData })
+  const row = orbit.shell.getByTestId('split-row')
+  await expect(row.getByTestId('split-segment')).toHaveCount(3)
+  const s = await state(orbit.app)
+  const layout = s.splits[splitId]?.layout
+  expect(layout?.type === 'row' && layout.sizes).toEqual([0.5, 0.25, 0.25])
+  expect(await activeTabId(orbit.app)).toBe(b)
+  await expectViewsOverPanes(orbit, [a, b, c])
+  const [pa, pb] = [await paneBox(orbit.shell, a), await paneBox(orbit.shell, b)]
+  expect(pa.width / pb.width).toBeCloseTo(2, 1)
 })
