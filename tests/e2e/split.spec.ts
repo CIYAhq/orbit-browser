@@ -17,6 +17,9 @@ import {
 let fx: Fixtures
 let orbit: Orbit
 
+// Several of these flows launch the app twice or drag across views; leave headroom for busy CI machines.
+test.describe.configure({ timeout: 120_000 })
+
 test.beforeAll(async () => {
   fx = await startFixtures()
 })
