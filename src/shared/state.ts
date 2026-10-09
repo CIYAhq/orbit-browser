@@ -82,6 +82,12 @@ export interface Split {
   id: SplitId
   layout: SplitLayout
   createdAt: number
+  /** User-chosen name; when set, the sidebar row shows it instead of the pane titles (SV-21, SV-22). */
+  name?: string
+  /** The pane focused last: selecting the split returns to it (SV-14). */
+  focus?: TabId
+  /** A pane still waiting for its first page while the command bar is open for it (SV-02). */
+  pending?: TabId
 }
 
 export type ColorMode = 'system' | 'light' | 'dark'

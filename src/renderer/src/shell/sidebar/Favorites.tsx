@@ -1,12 +1,13 @@
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
 import { forwardRef, memo, useMemo, useState } from 'react'
 import { MAX_FAVORITES } from '../../../../shared/defaults'
-import { isTabId } from '../../../../shared/ids'
+import { isSplitId, isTabId } from '../../../../shared/ids'
 import { isAwayFromPinned, tabTitle } from '../../../../shared/tabs'
 import { invoke } from '../../api'
 import { activeTabId } from '../../selectors'
 import { useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
+import { SplitFavoriteTile } from '../split/SplitFavoriteTile'
 import { pressItem } from './drag'
 import { POP, SNAPPY } from './motion-tokens'
 import { clearSelection, useDrag } from './ui-state'
@@ -29,7 +30,8 @@ export const Favorites = memo(
     const ids = useOrbit((s) => s.profiles[profileId]?.favorites ?? NO_ITEMS)
     const favIndex = useDrag((s) => s.favIndex)
     const hidden = useDrag((s) => s.hidden)
-    const favorites = useMemo(() => ids.filter(isTabId), [ids])
+    // Tabs and split views (a Favorite split shows its panes' icons in one tile, SV-23).
+    const favorites = useMemo(() => ids.filter((id) => isTabId(id) || isSplitId(id)), [ids])
     const visible = favorites.filter((id) => !(hidden[id] && favIndex !== null))
     const tiles: (string | null)[] = [...visible]
     if (favIndex !== null) tiles.splice(Math.min(favIndex, tiles.length), 0, null)
@@ -46,7 +48,11 @@ export const Favorites = memo(
           <AnimatePresence initial={false} mode="popLayout">
             {tiles.map((id) =>
               id ? (
-                <FavoriteTile key={id} tabId={id} />
+                isSplitId(id) ? (
+                  <SplitFavoriteTile key={id} splitId={id} />
+                ) : (
+                  <FavoriteTile key={id} tabId={id} />
+                )
               ) : (
                 <motion.div
                   key="placeholder"

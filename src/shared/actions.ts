@@ -171,7 +171,8 @@ export const ACTIONS: ActionDef[] = [
     title: 'Zoom In',
     category: 'Page',
     mac: ['Cmd+=', 'Cmd+Shift+='],
-    other: ['Ctrl+=', 'Ctrl+Shift+='],
+    // Ctrl+Shift+= adds a split pane on Windows/Linux (split-view.md SV-02).
+    other: ['Ctrl+='],
   },
   { id: 'page.zoomOut', title: 'Zoom Out', category: 'Page', mac: ['Cmd+-'], other: ['Ctrl+-'] },
   { id: 'page.zoomReset', title: 'Actual Size', category: 'Page', mac: ['Cmd+0'], other: ['Ctrl+0'] },
@@ -247,22 +248,61 @@ export const ACTIONS: ActionDef[] = [
     (n) => `Alt+${n}`,
   ),
 
-  // Split view
+  // Split view (split-view.md SV-*)
   {
     id: 'split.add',
-    title: 'Add Split View',
+    title: 'New Split View',
     category: 'Split View',
     mac: ['Ctrl+Shift+='],
-    other: ['Ctrl+Alt+='],
-    keywords: ['side by side', 'pane'],
+    other: ['Ctrl+Shift+='],
+    keywords: ['split', 'side by side', 'pane', 'add split'],
   },
+  { id: 'split.addRight', title: 'Add Split Right', category: 'Split View', keywords: ['split', 'pane'] },
+  { id: 'split.addLeft', title: 'Add Split Left', category: 'Split View', keywords: ['split', 'pane'] },
+  { id: 'split.addAbove', title: 'Add Split Above', category: 'Split View', keywords: ['split', 'pane', 'top'] },
+  { id: 'split.addBelow', title: 'Add Split Below', category: 'Split View', keywords: ['split', 'pane', 'bottom'] },
   {
     id: 'split.close',
     title: 'Close Split Pane',
     category: 'Split View',
     mac: ['Ctrl+Shift+-'],
-    other: ['Ctrl+Alt+-'],
+    other: ['Ctrl+Shift+-'],
+    keywords: ['split'],
   },
+  {
+    id: 'split.flip',
+    title: 'Flip Split Orientation',
+    category: 'Split View',
+    keywords: ['split', 'rotate', 'stacked', 'side by side'],
+  },
+  { id: 'split.separate', title: 'Separate Split Tabs', category: 'Split View', keywords: ['split', 'unsplit'] },
+  { id: 'split.equalize', title: 'Equalize Split Panes', category: 'Split View', keywords: ['split', 'resize'] },
+  {
+    id: 'split.focusNext',
+    title: 'Focus Next Split Pane',
+    category: 'Split View',
+    mac: ['Ctrl+Shift+]'],
+    other: ['Ctrl+Shift+]'],
+    keywords: ['split'],
+  },
+  {
+    id: 'split.focusPrevious',
+    title: 'Focus Previous Split Pane',
+    category: 'Split View',
+    mac: ['Ctrl+Shift+['],
+    other: ['Ctrl+Shift+['],
+    keywords: ['split'],
+  },
+  ...[1, 2, 3, 4].map(
+    (n): ActionDef => ({
+      id: `split.focus.${n}`,
+      title: `Focus Split Pane ${n}`,
+      category: 'Split View',
+      mac: [`Ctrl+Shift+${n}`],
+      other: [`Ctrl+Shift+${n}`],
+      hidden: true,
+    }),
+  ),
 ]
 
 export const ACTIONS_BY_ID: Record<string, ActionDef> = Object.fromEntries(ACTIONS.map((a) => [a.id, a]))

@@ -219,8 +219,7 @@ export function canMoveTo(state: OrbitState, id: ItemId, to: ContainerRef): bool
     if (to.kind === 'favorites' || to.kind === 'today') return false
     if (to.kind === 'folder' && isWithin(state, to.folderId, id)) return false
   }
-  // The Favorites grid holds tabs only (a split pane can't be favorited on its own).
-  if (isSplitId(id) && to.kind === 'favorites') return false
+  // A split pane can't move on its own (no location, above); a whole split may be a Favorite (SV-23).
   if (to.kind === 'folder') {
     // A folder must itself sit in a pinned area.
     const root = rootContainerOf(state, { kind: 'folder', folderId: to.folderId })

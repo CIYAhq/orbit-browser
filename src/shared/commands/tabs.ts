@@ -34,6 +34,8 @@ export interface TabCommands {
   'tabs.move': { args: { id: ItemId; ids?: ItemId[]; to: ContainerRef; index: number }; result: boolean }
   /** Move to another Space's pinned or Today section (TB-11). */
   'tabs.moveToSpace': { args: { ids: ItemId[]; spaceId: SpaceId; section: 'pinned' | 'today' }; result: boolean }
+  /** A tab dropped onto a row's half joins it as a split pane; undoable (SV-05, TB-18). */
+  'tabs.splitWith': { args: { tabId: TabId; target: ItemId; side: 'left' | 'right' }; result: string | null }
   /** Drag a tab out of the window: a new window shows it (TB-09). `x`/`y` are screen coordinates. */
   'tabs.toNewWindow': { args: { tabId: TabId; x?: number; y?: number }; result: WindowId | null }
   /** Pin into the tab's Space, or into `spaceId` ("Pin to [Space]") (PN-02). */
