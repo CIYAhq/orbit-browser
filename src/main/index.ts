@@ -57,6 +57,10 @@ function start(): void {
     },
   }
   ctx.tabs.init(ctx)
+  // PERF.md cold-start metric: when each tab's page first finishes loading.
+  ctx.hooks.tabCreated.push((tabId, contents) => {
+    contents.once('did-finish-load', () => perf.mark(`tab:${tabId}:loaded`))
+  })
   windows.init(ctx)
   registerIpc(ctx)
   registerFeatures(ctx)
