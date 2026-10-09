@@ -1,6 +1,16 @@
 import { expect, test } from '@playwright/test'
 import type { MainContext } from '../../src/main/context'
-import { type Fixtures, launchOrbit, type Orbit, run, startFixtures, state, tabPage } from './helpers'
+import {
+  type Fixtures,
+  launchOrbit,
+  type Orbit,
+  openViaCommandBar,
+  run,
+  startFixtures,
+  state,
+  tabPage,
+  viewPage,
+} from './helpers'
 
 /**
  * Core main-process behaviour (store, sessions, windows, persistence). Titles carry
@@ -229,4 +239,24 @@ test('[TB-22] closing the last window keeps it for the next launch (review F1)',
   expect(Object.keys(s.windows)).toEqual([windowId])
   expect(win?.activeTab[win.spaceId]).toBe(tabId)
   expect(win?.bounds).toMatchObject({ width: 900, height: 640 })
+})
+
+test('[TB-02] opening tabs keeps every UI mirror in step without resyncs (review M2, F4)', async () => {
+  const errors: string[] = []
+  orbit.shell.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
+  await openViaCommandBar(orbit, fx.url('/page/One'))
+  const overlay = await viewPage(orbit.app, 'overlay')
+  overlay.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
+  await expect(orbit.shell.getByTestId('tab-row')).toHaveCount(1)
+  await openViaCommandBar(orbit, fx.url('/page/Two'))
+  await expect(orbit.shell.getByTestId('tab-row')).toHaveCount(2)
+  await expect(orbit.shell.getByTestId('tab-row').first()).toContainText('Two')
+  const mainSeq = await orbit.app.evaluate(() => (globalThis as unknown as OrbitGlobal).__orbit.ctx.store.seq)
+  type Mirror = { __orbitMirror: { resyncs: () => number; seq: () => number } }
+  for (const page of [orbit.shell, overlay]) {
+    await expect.poll(() => page.evaluate(() => (globalThis as unknown as Mirror).__orbitMirror.seq())).toBe(mainSeq)
+    // Only the first load: no batch failed to apply and no gap forced a snapshot.
+    expect(await page.evaluate(() => (globalThis as unknown as Mirror).__orbitMirror.resyncs())).toBe(1)
+  }
+  expect(errors.filter((e) => e.includes('[store]') || e.includes('Immer'))).toEqual([])
 })

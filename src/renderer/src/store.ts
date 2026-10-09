@@ -1,7 +1,8 @@
-import { applyPatches, enablePatches, type Patch } from 'immer'
+import { enablePatches, type Patch } from 'immer'
 import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
 import type { OrbitState } from '../../shared/state'
+import { MirrorSync } from './mirror-sync'
 
 enablePatches()
 
@@ -12,39 +13,30 @@ interface Mirror {
 
 /**
  * Read-only mirror of the main process state. Updated by patch batches; on a
- * sequence gap it refetches a full snapshot.
+ * sequence gap or a batch that fails to apply it refetches one snapshot and
+ * replays the batches that arrived meanwhile (see MirrorSync).
  */
 export const useMirror = create<Mirror>(() => ({ state: undefined as unknown as OrbitState, seq: 0 }))
 
+const sync = new MirrorSync<OrbitState>(
+  () => {
+    const m = useMirror.getState()
+    return m.state ? m : undefined
+  },
+  (snap) => useMirror.setState({ state: snap.state, seq: snap.seq }),
+  () => window.orbit.getState(),
+)
+
+// Read-only diagnostics for tests and debugging (Orbit UI pages only; web pages never load this).
+;(globalThis as unknown as { __orbitMirror: unknown }).__orbitMirror = {
+  resyncs: () => sync.resyncs,
+  seq: () => useMirror.getState().seq,
+}
+
 export async function initStore(): Promise<void> {
-  const early: { seq: number; patches: Patch[] }[] = []
-  let ready = false
-  window.orbit.onPatches((seq, patches) => {
-    if (!ready) {
-      early.push({ seq, patches: patches as Patch[] })
-      return
-    }
-    applyBatch(seq, patches as Patch[])
-  })
-  const snap = await window.orbit.getState()
-  useMirror.setState({ state: snap.state, seq: snap.seq })
-  ready = true
-  for (const batch of early) applyBatch(batch.seq, batch.patches)
-}
-
-function applyBatch(seq: number, patches: Patch[]): void {
-  const current = useMirror.getState()
-  if (seq <= current.seq) return
-  if (seq !== current.seq + 1) {
-    void resync()
-    return
-  }
-  useMirror.setState({ state: applyPatches(current.state, patches), seq })
-}
-
-async function resync(): Promise<void> {
-  const snap = await window.orbit.getState()
-  useMirror.setState({ state: snap.state, seq: snap.seq })
+  const first = sync.start()
+  window.orbit.onPatches((seq, patches) => sync.receive(seq, patches as Patch[]))
+  await first
 }
 
 /** Subscribe to a slice of state (re-renders when the selected value changes by identity). */
