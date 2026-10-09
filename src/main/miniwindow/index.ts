@@ -288,18 +288,35 @@ export function registerMiniWindow(ctx: MainContext): void {
     }, 12)
   }
 
-  const closeWindow = (mini: Mini) => {
+  /**
+   * Closes with a quick fade (about 150 ms, MW-15) where windows can fade. After "Open in…" it
+   * also shrinks a little, as if the page went into the main window; its page has already left,
+   * so only the window's own bar re-lays out.
+   */
+  const closeWindow = (mini: Mini, opts: { shrink?: boolean } = {}) => {
     const win = mini.win
     if (win.isDestroyed()) return
     if (!canFade || reducedMotion() || !win.isVisible()) {
       win.close()
       return
     }
+    const from = win.getBounds()
     const start = Date.now()
     const timer = setInterval(() => {
       if (win.isDestroyed()) return clearInterval(timer)
       const t = Math.min(1, (Date.now() - start) / 140)
       win.setOpacity(1 - t)
+      if (opts.shrink) {
+        const scale = 1 - 0.08 * (1 - (1 - t) ** 3)
+        const width = Math.round(from.width * scale)
+        const height = Math.round(from.height * scale)
+        win.setBounds({
+          x: from.x + Math.round((from.width - width) / 2),
+          y: from.y + Math.round((from.height - height) / 2),
+          width,
+          height,
+        })
+      }
       if (t >= 1) {
         clearInterval(timer)
         win.close()
@@ -365,7 +382,8 @@ export function registerMiniWindow(ctx: MainContext): void {
     const saveBounds = () => {
       clearTimeout(saveTimer)
       saveTimer = setTimeout(() => {
-        if (win.isDestroyed() || win.isFullScreen() || win.isMinimized() || !win.isVisible()) return
+        // A window shrinking away as it closes is not a size to remember.
+        if (win.isDestroyed() || win.isFullScreen() || win.isMinimized() || !win.isVisible() || mini.moved) return
         const b = win.getNormalBounds()
         store.update((d) => {
           d.settings.miniWindowBounds = { x: b.x, y: b.y, width: b.width, height: b.height }
@@ -525,9 +543,12 @@ export function registerMiniWindow(ctx: MainContext): void {
     const profileId = state.spaces[target]?.profileId ?? tab.profileId
     const mainId = mainWindowFor(ctx, target) ?? windows.open(undefined, target)
     const url = tabs.contents(tabId)?.getURL() || tab.url
-    // The main window takes the page's view: it leaves the Mini Window first.
+    // The main window takes the page's view: it leaves the Mini Window first. The page is the
+    // main window's from here on, while this window shrinks and fades out showing its old bar.
+    send(mini, 'mini:leaving')
     detachPage(mini)
     mini.moved = true
+    mini.tabId = undefined
     ctx.perf.mark('mini:move')
     store.update((d) => {
       const t = d.tabs[tabId]
@@ -555,7 +576,7 @@ export function registerMiniWindow(ctx: MainContext): void {
       tabs.sleep(tabId)
     }
     raise(windows.get(mainId))
-    closeWindow(mini)
+    closeWindow(mini, { shrink: true })
   }
 
   /** Reopens the page in another profile and remembers the choice for its site (MW-10). */

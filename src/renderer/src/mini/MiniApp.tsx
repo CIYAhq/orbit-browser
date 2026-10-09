@@ -20,10 +20,19 @@ const CARD_RADIUS = 10
  */
 export function MiniApp() {
   const win = useWindow()
-  const tab = useOrbit((s) => {
+  const live = useOrbit((s) => {
     const id = win ? activeTabId(s, win.id) : null
     return id ? s.tabs[id] : undefined
   })
+  // After "Open in…" the page belongs to the main window, but this window keeps its bar as it was
+  // while it shrinks and fades away, rather than flashing the blank lookup bar (MW-15).
+  const [leftWith, setLeftWith] = useState<Tab | undefined>()
+  const liveRef = useRef(live)
+  useEffect(() => {
+    liveRef.current = live
+  }, [live])
+  useEffect(() => window.orbit.on('mini:leaving', () => setLeftWith(liveRef.current)), [])
+  const tab = leftWith ?? live
   const profileCount = useOrbit((s) => Object.keys(s.profiles).length)
   const profileName = useOrbit((s) => (tab ? s.profiles[tab.profileId]?.name : undefined))
   // A Mini Window has no Space yet: the neutral theme, light or dark as the app is (MW-03).
