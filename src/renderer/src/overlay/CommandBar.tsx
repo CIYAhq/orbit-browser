@@ -1,5 +1,5 @@
 import { Search, X, Zap } from 'lucide-react'
-import { m, useIsPresent } from 'motion/react'
+import { m, useIsPresent, useReducedMotion } from 'motion/react'
 import {
   type FormEvent,
   type KeyboardEvent,
@@ -89,6 +89,8 @@ export function CommandBar({
   const [scope, setScopeState] = useState<Scope>(null)
   const maxRows = useMaxRows()
   const present = useIsPresent()
+  // FL-28: with reduced motion the bar only fades (no scale or drop, not even for one frame).
+  const reduced = useReducedMotion() ?? false
   const spaceId = useOrbit((s) => s.windows[window.orbit.windowId]?.spaceId)
   const suggestOn = useOrbit((s) => !!s.settings.searchSuggestions)
   const currentFavicon = useOrbit((s) => {
@@ -409,14 +411,22 @@ export function CommandBar({
           data-testid={warm ? undefined : present ? 'command-bar' : 'command-bar-closing'}
           data-mode={mode}
           data-scope={scope?.kind ?? ''}
-          initial={{ opacity: 0, scale: 0.97, y: -4 }}
-          animate={{
-            opacity: 1,
-            scale: 1,
-            y: 0,
-            transition: { type: 'spring', stiffness: 632, damping: 45, mass: 1, opacity: { duration: 0.12 } },
-          }}
-          exit={{ opacity: 0, scale: 0.98, transition: { duration: 0.1, ease: [0.2, 0, 0, 1] } }}
+          initial={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.97, y: -4 }}
+          animate={
+            reduced
+              ? { opacity: 1, transition: { duration: 0.1 } }
+              : {
+                  opacity: 1,
+                  scale: 1,
+                  y: 0,
+                  transition: { type: 'spring', stiffness: 632, damping: 45, mass: 1, opacity: { duration: 0.12 } },
+                }
+          }
+          exit={
+            reduced
+              ? { opacity: 0, transition: { duration: 0.08 } }
+              : { opacity: 0, scale: 0.98, transition: { duration: 0.1, ease: [0.2, 0, 0, 1] } }
+          }
         >
           <div className="cmdbar__input-row">
             {scope ? (

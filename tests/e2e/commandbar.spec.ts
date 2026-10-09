@@ -603,7 +603,9 @@ test('[CB-22][FL-16] the bar scales in normally and only fades with reduced moti
   const identity = (t: string) => t === 'none' || t === 'matrix(1, 0, 0, 1, 0, 0)'
   expect((await sampleOpen()).some((t) => !identity(t))).toBe(true)
   await overlay.emulateMedia({ reducedMotion: 'reduce' })
-  expect((await sampleOpen()).every(identity)).toBe(true)
+  await expect.poll(() => overlay.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true)
+  const reduced = await sampleOpen()
+  expect(reduced.every(identity), reduced.join(' | ')).toBe(true)
 })
 
 test('[CB-05] history survives a restart and still feeds the bar', async () => {
