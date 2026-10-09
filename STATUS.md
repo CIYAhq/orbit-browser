@@ -1,6 +1,6 @@
 # Orbit status
 
-_Last updated: 2026-10-09 19:55 UTC by the lead (third session, after the usage-limit stop)._
+_Last updated: 2026-10-09 21:55 UTC by the lead (third session, after the usage-limit stop)._
 
 ## In plain words
 `main` has the scaffold (PR #1), the full tabs experience (PR #2), Spaces (PR #3), the command bar (PR #4) and, since 19:44 UTC, split view (PR #5). **Every milestone-1 area is on `main`, and milestone 1 is recorded.** Spaces covers themes and the two-finger swipe, profiles with separate cookies, and per-profile Favorites.
@@ -15,9 +15,13 @@ _Last updated: 2026-10-09 19:55 UTC by the lead (third session, after the usage-
   - the machine's smaller window;
   - rows measured while still animating in;
   - one race in a test.
-- **Running now:**
-  - **peek** (link preview and Mini Window) and **media** (picture-in-picture, media tray) are finishing their work;
-  - **chrome** (sidebar top, show/hide, navigation) has been running since 18:55 UTC.
+- **Reviews (21:30 UTC):**
+  - **Lead PRs #6 and #7:** approved with one fix each, both now made with tests. They land together, because each one's macOS run fails only on a test the other fixes.
+    - Captures now stay offline behind a dead local proxy, checked before anything is recorded.
+    - A quick drop of a Favorite on a row's lower half lands after the row again.
+  - **Peek (PR #8):** changes requested. In pinned tabs and Favorites, a form post or sign-in right after a click opened in a Peek. Its agent is fixing that.
+  - **Media (PR #9):** approved with three fixes. The macOS failures turned out to be the CI machine's Reduce Motion setting, not a product bug. Its agent is fixing them.
+- **Running now:** the peek and media fixes, and **chrome** (sidebar top, show/hide, navigation), which has been running since 18:55 UTC.
 
 At about 15:00 UTC the shared Claude usage limit stopped the previous lead and five running lanes. Their unfinished work was saved and nothing was lost. The peek and media lanes have resumed from it. From now on at most three agents run at once (decision D16).
 
@@ -62,6 +66,10 @@ At about 15:00 UTC the shared Claude usage limit stopped the previous lead and f
   - The first take swiped two Spaces instead of one. The machine was busy (load average 31), so the scripted swipe's events reached the app more than 90 ms apart, and the app read them as two swipes.
   - A real swipe can't skip a Space: its movement is capped at one sidebar width. So this was the recording, not the product.
   - The capture now sends each swipe from inside the page at a fixed 16 ms rhythm, as the tests do. Its mouse pointer now moves on screen too.
+- 20:26–21:10 UTC: lead polish opened as PR #7, and peek and media as PRs #8 and #9.
+  - A 200-tab test that failed on CI was a real sidebar bug. A row that scrolled off screen while it grew in stayed at that height. Fixed in PR #7, with a test.
+  - Peek's macOS failures were its tests measuring a card mid-animation on the slow CI machine.
+- 21:30–21:55 UTC: reviews of PRs #6–#9 came back (see above). The two lead fixes are made, and the peek and media agents resumed with theirs.
 
 ## Milestone 1: core experience that feels good (✅ reached 19:50 UTC)
 Target: sidebar, tabs, Spaces, pinned tabs and Favorites, command bar and split view all work and feel smooth. That includes a 30–60 s screen capture under Xvfb, screenshots and a `checkpoint` signal.
@@ -78,7 +86,7 @@ Target: sidebar, tabs, Spaces, pinned tabs and Favorites, command bar and split 
 **Capture:** ✅ `clips/milestone1.mp4` (37 s, 1440×900) and six screenshots, recorded from `main` at 19:50 UTC. `checkpoint` signal sent.
 
 ## Next
-1. Review and merge **peek** and **media** when their agents finish.
+1. Merge lead PRs #6 and #7 together once CI is green, then **peek** and **media** when their fixes are in.
 2. Start the next lanes, three agents at a time. Briefs are in `lanes/`. Order:
    1. **chrome:** sidebar top, show/hide, resize, navigation, find in page, zoom, windows. *(running since 18:55 UTC)*
    2. **archive:** Archive and Library.
@@ -86,14 +94,14 @@ Target: sidebar, tabs, Spaces, pinned tabs and Favorites, command bar and split 
    4. **downloads:** downloads, DevTools, import.
    5. **keys:** one keymap, remapping, conflicts with pages.
    6. Then tweaks and extensions, and a "feel" audit.
-3. Land the lead's branch `lead/docs` as one reviewed PR. It holds the capture tooling, the milestone tour and the Spaces swipe-test hardening.
+3. Two split tests are flaky on CI, and the media review found why. One reads a stale width; the other clicks while the rows still animate. Fix both on `main`.
 4. Performance follow-up: the first mount of a 200-tab Space takes about 1.2 s. The budget for a Space switch is 100 ms.
 5. Small follow-ups for a later polish lane (none blocks a merge):
-   - **Split W2:** resting on a row arms a split only on the half of the row nearer where the drag started. On the other half, the reorder gap slides the row away.
    - **Tabs W3:** undoing Delete Folder after the Space changed profile brings the tab back on the old profile.
-   - **Split:** the Favorites limit counts each pane, and a full split's rows still highlight as drop targets.
+   - **Split:** a full split's rows still highlight as drop targets (SV-25).
+   - **Favorites:** separating a Favorite split can take Favorites past 12.
+   - **Tests:** the e2e harness, like the capture before its fix, lets Chromium fetch its spell-check dictionary from the network.
    - **Command bar N3.**
-   - **Spaces:** panels lost their overlay fade-in.
 
 ## Blockers
 None. All decisions are logged in `DECISIONS.md` (Orca context directory).
