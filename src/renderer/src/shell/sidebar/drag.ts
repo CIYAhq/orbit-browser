@@ -323,6 +323,16 @@ function listTarget(s: Session, prev: DropTarget | null): DropTarget | null {
       todayContainer: `today:${ctx.spaceId}`,
       counts,
     })
+  // While the pointer rests on a row's middle band, the row holds still: the gap stays on the side
+  // of it where it already is, so the row can't slide out from under the pointer before the rest
+  // makes a split (review W2).
+  const resting = s.splitDwell ? s.slots.find((sl) => sl.key === s.splitDwell?.key) : undefined
+  if (resting) {
+    const shown = useDrag.getState().shifts[resting.key] ?? 0
+    const before = at(resting.top + resting.height * 0.4)
+    if ((rowShifts(s.slots, s.dragged, before)[resting.key] ?? 0) === shown) return before
+    return at(resting.top + resting.height * 0.6)
+  }
   let target = at(y)
   // Hysteresis: keep the current slot until the pointer is a few pixels past the boundary.
   if (prev && !sameTarget(prev, target)) {

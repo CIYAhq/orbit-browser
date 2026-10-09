@@ -184,8 +184,9 @@ export class TabOps {
     this.ctx.store.update((d) => activateInDraft(d, windowId, tabId, this.now()))
   }
 
+  /** Favorites in use, one per tile: a Favorite split counts once, however many panes it has (FV-02, SV-23, D19). */
   favoriteCount(profileId: string, state: OrbitState = this.state): number {
-    return (state.profiles[profileId]?.favorites ?? []).flatMap((id) => tabsInItem(state, id)).length
+    return (state.profiles[profileId]?.favorites ?? []).length
   }
 
   // ---- Close, archive, reopen ----
@@ -767,12 +768,11 @@ export class TabOps {
     if (to.kind === 'folder' && items.includes(to.folderId)) return false
     if (to.kind === 'favorites') {
       const target = containerKey(to)
-      const incoming = items
-        .filter((id) => {
-          const from = locate(state, id)
-          return !from || containerKey(from.container) !== target
-        })
-        .flatMap((id) => tabsInItem(state, id)).length
+      // Tiles, not tabs: a split coming in takes one Favorite (D19).
+      const incoming = items.filter((id) => {
+        const from = locate(state, id)
+        return !from || containerKey(from.container) !== target
+      }).length
       if (incoming > 0 && this.favoriteCount(to.profileId) + incoming > MAX_FAVORITES) {
         this.ctx.toast(opts.windowId, `Favorites are full (${MAX_FAVORITES} max)`)
         return false

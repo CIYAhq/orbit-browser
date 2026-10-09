@@ -242,3 +242,26 @@ describe('split panes in the tab model', () => {
     expect(store.state.spaces[spaceId]?.today).toContain(d)
   })
 })
+
+describe('Favorite splits and the Favorites cap', () => {
+  it('[FV-02][SV-23] a Favorite split takes one of the 12 Favorites, however many panes it has (D19)', () => {
+    const { store, ops, spaceId, add } = world()
+    // Ten single Favorites and one 3-pane split: 11 tiles.
+    const singles = Array.from({ length: 10 }, () => add())
+    const panes = [add(), add(), add()]
+    const v = 'v-favorite'
+    store.update((d) => {
+      const space = d.spaces[spaceId]
+      const profile = d.profiles[DEFAULT_PROFILE_ID]
+      if (!space || !profile) return
+      space.today = space.today.filter((id) => !singles.includes(id) && !panes.includes(id))
+      profile.favorites.push(...singles, v)
+      d.splits[v] = { id: v, layout: { type: 'row', sizes: [0.4, 0.3, 0.3], children: panes.map(L) }, createdAt: 0 }
+    })
+    expect(ops.favoriteCount(DEFAULT_PROFILE_ID)).toBe(11)
+    // A twelfth fits; a thirteenth is refused.
+    expect(ops.favorite(add())).toBe(true)
+    expect(ops.favorite(add())).toBe(false)
+    expect(store.state.profiles[DEFAULT_PROFILE_ID]?.favorites).toHaveLength(12)
+  })
+})

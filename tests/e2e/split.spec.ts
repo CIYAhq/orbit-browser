@@ -1040,6 +1040,42 @@ test('[SV-05] leaving the list starts the rest over: back on the same row and re
   expect(Object.keys((await state(orbit.app)).splits)).toHaveLength(0)
 })
 
+/** Drags `from`'s row onto `onto`'s row, to `fy` of its height on the right half, and holds. */
+async function restOnRow(from: string, onto: string, fy: number) {
+  await settled(orbit.shell)
+  const a = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${from}"]`).boundingBox()
+  const to = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${onto}"]`).boundingBox()
+  if (!a || !to) throw new Error('rows')
+  const dy = to.y > a.y ? 6 : -6
+  await orbit.shell.mouse.move(a.x + 30, a.y + a.height / 2)
+  await orbit.shell.mouse.down()
+  await orbit.shell.mouse.move(a.x + 40, a.y + a.height / 2 + dy, { steps: 2 })
+  await orbit.shell.mouse.move(to.x + to.width * 0.75, to.y + to.height * fy, { steps: 10 })
+  return to
+}
+
+for (const [dir, fy] of [
+  ['down', 0.7],
+  ['up', 0.3],
+] as const) {
+  test(`[SV-05] dragging ${dir}, a rest on the far half of a row's middle band (${fy * 100} %) makes a split: the row holds still (review W2)`, async () => {
+    const d = await openTab(orbit.app, 'Fourth')
+    await openTab(orbit.app, 'Third')
+    const b = await openTab(orbit.app, 'Second')
+    const a = await openTab(orbit.app, 'First')
+    // Down: the first row onto the last. Up: the last row onto the second.
+    const [from, onto] = dir === 'down' ? [a, d] : [d, b]
+    const to = await restOnRow(from, onto, fy)
+    await expect(orbit.shell.locator('.row-slot.is-split-right')).toHaveCount(1)
+    const held = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${onto}"]`).boundingBox()
+    expect(Math.abs((held?.y ?? 0) - to.y)).toBeLessThan(2)
+    await orbit.shell.mouse.up()
+    await expect(orbit.shell.getByTestId('split-row')).toHaveCount(1)
+    const split = await splitOf(orbit.app, onto)
+    expect(split && JSON.stringify(split.layout).match(/t-[a-z0-9]+/g)).toEqual([onto, from])
+  })
+}
+
 test('[SV-06] Open in Split View from a multi-selection makes one split in sidebar order', async () => {
   const c = await openTab(orbit.app, 'Sel3')
   const b = await openTab(orbit.app, 'Sel2')
