@@ -1,9 +1,23 @@
 import { newId } from './ids'
-import type { OrbitState, Profile, Settings, Space, SpaceTheme, WindowState } from './state'
+import type { OrbitState, Profile, Settings, SiteSearchEngine, Space, SpaceTheme, WindowState } from './state'
 import { STATE_SCHEMA } from './state'
 import { DEFAULT_INTENSITY } from './theme'
 
 export const DEFAULT_PROFILE_ID = 'p-default'
+
+/** Starter site searches for the command bar (CB-11). Users can add, edit and remove them. */
+export const DEFAULT_SITE_SEARCH: SiteSearchEngine[] = [
+  { id: 'youtube', name: 'YouTube', keyword: 'yt', url: 'https://www.youtube.com/results?search_query=%s' },
+  { id: 'wikipedia', name: 'Wikipedia', keyword: 'w', url: 'https://en.wikipedia.org/w/index.php?search=%s' },
+  { id: 'github', name: 'GitHub', keyword: 'gh', url: 'https://github.com/search?q=%s' },
+  { id: 'x', name: 'X', keyword: 'x', url: 'https://x.com/search?q=%s' },
+  { id: 'reddit', name: 'Reddit', keyword: 'r', url: 'https://www.reddit.com/search/?q=%s' },
+  { id: 'amazon', name: 'Amazon', keyword: 'a', url: 'https://www.amazon.com/s?k=%s' },
+  { id: 'spotify', name: 'Spotify', keyword: 'sp', url: 'https://open.spotify.com/search/%s' },
+  { id: 'maps', name: 'Google Maps', keyword: 'maps', url: 'https://www.google.com/maps/search/%s' },
+  { id: 'chatgpt', name: 'ChatGPT', keyword: 'gpt', url: 'https://chatgpt.com/?q=%s' },
+  { id: 'perplexity', name: 'Perplexity', keyword: 'pp', url: 'https://www.perplexity.ai/search?q=%s' },
+]
 
 export const DEFAULT_SETTINGS: Settings = {
   searchEngine: 'google',
@@ -14,6 +28,9 @@ export const DEFAULT_SETTINGS: Settings = {
   autoPip: true,
   miniWindowForExternalLinks: true,
   onboarded: false,
+  siteSearch: DEFAULT_SITE_SEARCH,
+  searchSuggestions: false,
+  searchTopResult: false,
   countFavoritesInShortcuts: true,
   lastTabOnCmd9: true,
 }
@@ -100,7 +117,7 @@ export function createInitialState(now = Date.now()): OrbitState {
     folders: {},
     splits: {},
     archive: [],
-    settings: { ...DEFAULT_SETTINGS },
+    settings: { ...DEFAULT_SETTINGS, siteSearch: DEFAULT_SITE_SEARCH.map((s) => ({ ...s })) },
     downloads: {},
     tweaks: {},
   }

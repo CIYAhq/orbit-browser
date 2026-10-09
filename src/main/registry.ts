@@ -54,6 +54,15 @@ export interface ActionContext {
 /** User-facing actions (shortcuts, menu, command bar) keyed by ActionDef id. */
 export class ActionRegistry {
   private handlers = new Map<string, (ctx: ActionContext) => void | Promise<void>>()
+  private interceptors: ((id: string, ctx: ActionContext) => boolean)[] = []
+
+  /**
+   * Lets an open overlay claim an action before its handler runs (KS-19), e.g.
+   * ⌘W closes the command bar instead of the tab. Return true to consume it.
+   */
+  intercept(fn: (id: string, ctx: ActionContext) => boolean): void {
+    this.interceptors.push(fn)
+  }
 
   register(id: string, handler: (ctx: ActionContext) => void | Promise<void>): void {
     this.handlers.set(id, handler)
@@ -64,6 +73,7 @@ export class ActionRegistry {
   }
 
   async run(id: string, ctx: ActionContext): Promise<void> {
+    for (const fn of this.interceptors) if (fn(id, ctx)) return
     const handler = this.handlers.get(id)
     if (!handler) {
       console.warn(`[actions] no handler for ${id}`)
