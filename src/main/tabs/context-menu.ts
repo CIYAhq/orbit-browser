@@ -1,6 +1,7 @@
 import { type ContextMenuParams, clipboard, Menu, type MenuItemConstructorOptions, type WebContents } from 'electron'
 import type { TabId } from '../../shared/state'
 import type { MainContext } from '../context'
+import { linkPeekMenuItems } from '../peek/menu'
 
 /** Native right-click menu for web pages. */
 export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: WebContents, params: ContextMenuParams) {
@@ -13,6 +14,7 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
   if (params.linkURL) {
     items.push(
       { label: 'Open Link in New Tab', click: () => openInNewTab(params.linkURL, false) },
+      ...linkPeekMenuItems(ctx, tabId, params.linkURL),
       { label: 'Copy Link Address', click: () => clipboard.writeText(params.linkURL) },
       { type: 'separator' },
     )
