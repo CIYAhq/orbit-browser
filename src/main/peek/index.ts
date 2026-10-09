@@ -527,6 +527,13 @@ export function registerPeek(ctx: MainContext): void {
       expandPeek(windowId)
       return true
     }
+    if (id === 'url.edit') {
+      // Editing the address is about the page on screen: the Peek becomes a tab at once and the
+      // command bar then edits its URL, so the tab underneath never navigates (PK-11).
+      s.phase = 'expanding'
+      commitExpand(s)
+      return false
+    }
     const contents = s.view?.webContents
     if (!contents || contents.isDestroyed()) return false
     return runPageAction(id, contents, (message) => ctx.toast(windowId, message))

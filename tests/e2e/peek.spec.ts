@@ -307,6 +307,43 @@ test('[PK-11] inside a Peek, links navigate the Peek and page commands act on it
   expect((await state(orbit.app)).tabs[source]?.url).toBe(sites.url('/site/Source'))
 })
 
+/** Clicks the "Other site" link of a tab's page through the page's own input handling. */
+async function clickOtherLink(tabId: string) {
+  const link = JSON.parse(
+    await inTab(orbit.app, tabId, 'JSON.stringify(document.querySelector("#other").getBoundingClientRect())'),
+  ) as { x: number; y: number }
+  await clickInTab(orbit.app, tabId, { x: link.x + 6, y: link.y + 6 })
+}
+
+test('[PK-11] the sidebar address shows the Peek page while it is open; ⌘L makes it a tab and edits its address', async () => {
+  const { source, peekTab } = await openPeekFromPinned()
+  const pill = orbit.shell.getByTestId('address-pill')
+  const peekHost = new URL(sites.other('/')).host
+  const sourceHost = new URL(sites.url('/')).host
+  await expect(pill).toContainText(peekHost)
+  await pressInTab(orbit.app, peekTab, 'Escape')
+  await expectClosed(source, peekTab)
+  await expect(pill).toContainText(sourceHost)
+  // ⌘L: the Peek becomes the selected tab at once and the command bar edits its address; the
+  // pinned tab underneath never navigates.
+  await clickOtherLink(source)
+  const second = await settledPeek()
+  await expect(pill).toContainText(peekHost)
+  await pressInTab(orbit.app, second, 'Mod+L')
+  await expect
+    .poll(async () => {
+      const o = await overlayOf(orbit.app)
+      return o.kind === 'commandbar' ? `${o.mode} ${o.query}` : o.kind
+    })
+    .toBe(`edit-url ${sites.other('/site/Other')}`)
+  const s = await state(orbit.app)
+  expect(s.tabs[second]?.floating).toBeUndefined()
+  const win = await mainWindow(orbit.app)
+  expect(win.activeTab[win.spaceId]).toBe(second)
+  expect(s.tabs[source]?.url).toBe(sites.url('/site/Source'))
+  await expect(pill).toContainText(peekHost)
+})
+
 test('[PK-06] the card grows out of the clicked link and shrinks away; both under 300 ms', async () => {
   const { page } = await pinned('/site/Motion')
   // Record the page view's bounds on every change while it opens and closes.
@@ -363,8 +400,8 @@ test('[PK-06] dragging the handle moves the card with the pointer; let go early 
   await overlay.mouse.down()
   await overlay.mouse.move(x, y + 40, { steps: 4 })
   await overlay.mouse.move(x, y + 80, { steps: 4 })
-  // The page follows the pointer 1:1 and shrinks a little.
-  await expect.poll(async () => Math.round(((await peekBounds(peekTab))?.cy ?? 0) - rest.cy)).toBe(80)
+  // The page follows the pointer 1:1 and shrinks a little (view bounds are whole pixels).
+  await expect.poll(async () => Math.abs(((await peekBounds(peekTab))?.cy ?? 0) - rest.cy - 80) <= 1).toBe(true)
   const dragged = await peekBounds(peekTab)
   expect(dragged?.width).toBeLessThan(rest.width)
   expect(dragged?.width).toBeGreaterThan(rest.width * 0.95)
@@ -393,15 +430,12 @@ test('[PK-06] dragged past a quarter of its height, or flicked down, the Peek cl
   await overlay.mouse.move(x, y)
   await overlay.mouse.down()
   await overlay.mouse.move(x, y + far, { steps: 8 })
-  await expect.poll(async () => Math.round(((await peekBounds(peekTab))?.cy ?? 0) - rest.cy)).toBe(far)
+  await expect.poll(async () => Math.abs(((await peekBounds(peekTab))?.cy ?? 0) - rest.cy - far) <= 1).toBe(true)
   await overlay.waitForTimeout(150)
   await overlay.mouse.up()
   await expectClosed(source, peekTab)
   // A quick flick closes it even though it moved only a little.
-  const link = JSON.parse(
-    await inTab(orbit.app, source, 'JSON.stringify(document.querySelector("#other").getBoundingClientRect())'),
-  ) as { x: number; y: number }
-  await clickInTab(orbit.app, source, { x: link.x + 6, y: link.y + 6 })
+  await clickOtherLink(source)
   const second = await settledPeek()
   await overlay.getByTestId('peek-handle').evaluate((el) => {
     const r = el.getBoundingClientRect()
