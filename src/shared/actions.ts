@@ -241,12 +241,37 @@ const CODE_NAMES: Record<string, string> = {
   NumpadEnter: 'Enter',
 }
 
-/** Physical-key name for an input, so Alt/Shift-modified characters still match. */
+/** Shifted ASCII symbols (US positions) → the unshifted key they share, so "Cmd+Shift+=" matches "+". */
+const SHIFTED_SYMBOLS: Record<string, string> = {
+  '+': '=',
+  _: '-',
+  '{': '[',
+  '}': ']',
+  '<': ',',
+  '>': '.',
+  '?': '/',
+  ':': ';',
+  '"': "'",
+  '~': '`',
+  '|': '\\',
+}
+const ASCII_SYMBOL = /^[!-/:-@[-`{-~]$/
+
+/**
+ * Key name for an input, matched against accelerator keys. Like Chrome:
+ *  - letters follow the keyboard layout (`key`), so AZERTY's Cmd+Z is undo, not the physical W key;
+ *  - digits use the physical key (`code`), so AZERTY's unshifted digit row still selects tabs;
+ *  - ASCII symbols follow the layout too (Dvorak's "." sits on the physical E key);
+ *  - anything else (macOS Option combos, Cyrillic and other non-Latin layouts, dead keys) falls
+ *    back to the physical key, so Cmd+Option+V or Ctrl+T on a Russian layout still work.
+ */
 export function keyName(input: Pick<KeyInput, 'key' | 'code'>): string {
   const { code, key } = input
-  if (code.startsWith('Key') && code.length === 4) return code.slice(3)
+  if (/^[a-z]$/i.test(key)) return key.toUpperCase()
   if (code.startsWith('Digit') && code.length === 6) return code.slice(5)
   if (code.startsWith('Numpad') && code.length === 7 && /\d/.test(code[6] ?? '')) return code.slice(6)
+  if (ASCII_SYMBOL.test(key)) return SHIFTED_SYMBOLS[key] ?? key
+  if (code.startsWith('Key') && code.length === 4) return code.slice(3)
   if (CODE_NAMES[code]) return CODE_NAMES[code] as string
   if (key === ' ') return 'Space'
   return key.length === 1 ? key.toUpperCase() : key
