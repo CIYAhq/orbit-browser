@@ -9,7 +9,7 @@
  */
 import { animate, motionValue } from 'motion/react'
 import { isFolderId, isSplitId, isTabId } from '../../../../shared/ids'
-import { rowDropSide } from '../../../../shared/split'
+import { layoutLeaves, MAX_PANES, rowDropSide } from '../../../../shared/split'
 import type { ItemId, OrbitState, SpaceId } from '../../../../shared/state'
 import { locate, parseContainerKey, visibleTabOrder } from '../../../../shared/tree'
 import { invoke } from '../../api'
@@ -367,6 +367,14 @@ function clearSplitDwell(s: Session): void {
   s.splitDwell = null
 }
 
+/** A split with no room for the tab: it takes no fifth pane, so its row is no split target (SV-25). */
+function isFullFor(key: string, tabId: string): boolean {
+  const layout = isSplitId(key) ? getOrbitState().splits[key]?.layout : undefined
+  if (!layout) return false
+  const leaves = layoutLeaves(layout)
+  return leaves.length >= MAX_PANES && !leaves.includes(tabId)
+}
+
 function splitTarget(s: Session, y: number): DropTarget | null {
   const first = s.ids[0]
   const scroll = ctx.scroll
@@ -380,6 +388,8 @@ function splitTarget(s: Session, y: number): DropTarget | null {
   for (const sl of s.slots) {
     if (sl.kind !== 'item' || sl.folder || s.dragged.has(sl.key) || sl.ancestors.some((a) => s.dragged.has(a))) continue
     if (!isTabId(sl.key) && !isSplitId(sl.key)) continue
+    // A full split shows no target and reorders like any other row, as on the page (SV-25).
+    if (isFullFor(sl.key, first)) continue
     const row = { x: box.left, y: sl.top + (shifts[sl.key] ?? 0), width: box.width, height: sl.height }
     const side = rowDropSide(row, s.lastX, y)
     if (!side) continue
