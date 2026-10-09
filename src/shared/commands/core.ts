@@ -19,7 +19,13 @@ export interface CoreCommands {
 
 export interface CoreEvents {
   /** Shell reports where each visible tab's page should be drawn (window coordinates, DIP). */
-  'layout.panes': { panes: { tabId: TabId; rect: Rect }[]; radius: number; seq: number }
+  'layout.panes': {
+    panes: { tabId: TabId; rect: Rect }[]
+    radius: number
+    seq: number
+    /** The whole content frame (all panes together), for main's split fast path. */
+    frame?: Rect
+  }
   /** Renderer-side performance marks (used by perf scripts and tests). */
   'perf.mark': { name: string; t: number }
 }
