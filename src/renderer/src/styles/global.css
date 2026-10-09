@@ -501,6 +501,7 @@ html.is-resizing * {
 
 /* Split view row (split lane, SV-21): one pill, one segment per pane. */
 .split-row {
+  animation: split-row-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
   position: relative;
   display: flex;
   align-items: center;
@@ -847,7 +848,15 @@ html[data-view="strip"] body {
   background: rgba(127, 127, 127, 0.18);
 }
 
+@keyframes split-row-in {
+  from {
+    opacity: 0.5;
+    transform: scale(0.97);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .split-row,
   .pane--blank,
   .pane--drop,
   .pane-strip {

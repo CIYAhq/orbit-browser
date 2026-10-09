@@ -59,6 +59,13 @@ export function ContentArea({ win }: { win: WindowState }) {
     })
   }, [engine, frame])
   useLayoutEffect(() => engine.setPreview(drop), [engine, drop])
+  useLayoutEffect(
+    () =>
+      window.orbit.on('split:fullscreen', (payload) => {
+        engine.setFullscreen((payload as { tabId: string | null }).tabId)
+      }),
+    [engine],
+  )
   useTabDrop(engine, setDrop)
   usePaneDrag(engine, setDrop)
   useAltClickSplit()

@@ -737,6 +737,14 @@ export function registerSplit(ctx: MainContext): void {
       strip.onPageMouse(tabId, mouse)
     })
     placeholderUntilLoaded(tabId, contents)
+    // A page going full screen (e.g. a video) fills the window; leaving returns to the split (SV-25).
+    const fullscreen = (on: boolean) => {
+      const windowId = windows.windowOfTab(tabId)
+      if (windowId) windows.sendToWindow(windowId, 'split:fullscreen', { tabId: on ? tabId : null })
+    }
+    contents.on('enter-html-full-screen', () => fullscreen(true))
+    contents.on('leave-html-full-screen', () => fullscreen(false))
+    contents.once('destroyed', () => fullscreen(false))
   })
 
   /** A page starting in a split pane shows the frame colour until it has loaded, never a white flash (SV-26). */

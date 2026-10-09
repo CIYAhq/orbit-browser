@@ -635,3 +635,32 @@ test('[SV-20][SV-12] dragging a pane by its strip swaps or moves it', async () =
     .toContain(`{"type":"column","children":[{"type":"leaf","tabId":"${c}"},{"type":"leaf","tabId":"${b}"}]`)
   await expectViewsOverPanes(orbit, [a, b, c])
 })
+
+test('[SV-25] a page going full screen in a pane fills the window and comes back to the split', async () => {
+  const b = await openTab(orbit.app, 'Video')
+  const a = await openTab(orbit.app, 'Notes')
+  await run(orbit.app, 'split.create', { tabIds: [a, b] })
+  await expectViewsOverPanes(orbit, [a, b])
+  const video = await tabPage(orbit.app, '/page/Video')
+  await video.evaluate(() => {
+    const button = document.createElement('button')
+    button.id = 'fs'
+    button.textContent = 'Full screen'
+    button.onclick = () => void document.documentElement.requestFullscreen()
+    document.body.prepend(button)
+  })
+  await video.click('#fs')
+  const size = await orbit.shell.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }))
+  await expect
+    .poll(async () => {
+      const v = await tabView(orbit.app, b)
+      const w = await orbit.shell.evaluate(() => window.innerWidth)
+      return v?.bounds.x === 0 && v.bounds.y === 0 && v.bounds.width === w
+    })
+    .toBe(true)
+  expect((await tabView(orbit.app, a))?.visible).toBe(false)
+  expect(size.width).toBeGreaterThan(0)
+  await video.evaluate(() => document.exitFullscreen())
+  await expectViewsOverPanes(orbit, [a, b])
+  await expect(orbit.shell.getByTestId('split-pane')).toHaveCount(2)
+})

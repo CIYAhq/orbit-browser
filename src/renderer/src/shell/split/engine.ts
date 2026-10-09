@@ -102,6 +102,8 @@ export class PaneEngine {
   private cleanup: (() => void)[] = []
   /** Nothing is reported before the first model arrives (avoids hiding the views on mount). */
   private ready = false
+  /** A page in HTML full screen covers the whole window until it leaves (SV-25). */
+  private fullscreen: TabId | null = null
 
   attach(host: HTMLElement): void {
     this.host = host
@@ -483,9 +485,30 @@ export class PaneEngine {
     this.report()
   }
 
+  setFullscreen(tabId: TabId | null): void {
+    if (this.fullscreen === tabId) return
+    this.fullscreen = tabId
+    this.lastReport = ''
+    this.report()
+  }
+
   /** Sends the live panes' rectangles (window coordinates, clipped to the frame) to main. */
   private report(): void {
     if (!this.ready) return
+    const shown = this.model.layout ? layoutLeaves(this.model.layout) : []
+    if (this.fullscreen && shown.includes(this.fullscreen)) {
+      const whole = { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }
+      const key = JSON.stringify(['fullscreen', this.fullscreen, whole])
+      if (key === this.lastReport) return
+      this.lastReport = key
+      window.orbit.send('layout.panes', {
+        panes: [{ tabId: this.fullscreen, rect: whole }],
+        radius: 0,
+        seq: getSeq(),
+        frame: { ...this.frame },
+      })
+      return
+    }
     const panes: { tabId: TabId; rect: Box }[] = []
     for (const [tabId, anim] of this.anims) {
       if (tabId === DROP_PANE || this.model.blank.has(tabId)) continue

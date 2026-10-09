@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 15 built (36 partial) · 21 tested · 0 feel right.
+**Totals:** 485 spec’d · 16 built (35 partial) · 21 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
 | P0 | 174 | 12 | 15 |
-| P1 | 221 | 2 | 5 |
+| P1 | 221 | 3 | 5 |
 | P2 | 83 | 1 | 1 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -220,8 +220,8 @@ Spec: `spec/split-view.md`
 | SV-22 | The split as one unit: context menu | P1 | 🟡 partial | ✅ e2e | – | split menu: rename, per-pane submenus, flip, equalize, duplicate, pin/unpin, move to Space, separate, close; custom icon, archive below, share and Add to Favorites not built |
 | SV-23 | Pinned and Favorite splits | P1 | 🟡 partial | ✅ e2e | – | pinning keeps panes/sizes/orientation; drops onto pinned tabs stay pinned; per-pane pinned URLs; SplitFavoriteTile ready, not yet rendered by the Favorites grid |
 | SV-24 | Splits persist | P0 | ✅ | ✅ e2e | – | panes, order, orientation, sizes and focused pane survive relaunch |
-| SV-25 | Limits and edge cases | P1 | 🟡 partial | ✅ e2e | – | fifth pane refused with a toast on every route; no split from an empty window; full-screen video not handled |
-| SV-26 | Feel: create, resize, close | P1 | 🟡 partial | – | – | springs for create/close/flip, 1:1 resize, drop indicator fade/slide, frame colour until loaded; no closing-card fade or sidebar merge animation |
+| SV-25 | Limits and edge cases | P1 | ✅ | ✅ e2e | – | fifth pane refused with a toast on every route; no split from an empty window; HTML full screen in a pane fills the window and returns to the split; DevTools follow the focused pane |
+| SV-26 | Feel: create, resize, close | P1 | 🟡 partial | – | – | springs for create/close/flip, closing card fades, 1:1 resize, drop indicator fade/slide, frame colour until loaded, split row entrance; sidebar row-merge reflow belongs to the tabs lane's list animation |
 
 ## Page navigation, windows, links and page-level controls (prefix NV)
 

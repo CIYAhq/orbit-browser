@@ -48,6 +48,6 @@
   "SV-22": { "built": "partial", "note": "split menu: rename, per-pane submenus, flip, equalize, duplicate, pin/unpin, move to Space, separate, close; custom icon, archive below, share and Add to Favorites not built" },
   "SV-23": { "built": "partial", "note": "pinning keeps panes/sizes/orientation; drops onto pinned tabs stay pinned; per-pane pinned URLs; SplitFavoriteTile ready, not yet rendered by the Favorites grid" },
   "SV-24": { "built": "yes", "note": "panes, order, orientation, sizes and focused pane survive relaunch" },
-  "SV-25": { "built": "partial", "note": "fifth pane refused with a toast on every route; no split from an empty window; full-screen video not handled" },
-  "SV-26": { "built": "partial", "note": "springs for create/close/flip, 1:1 resize, drop indicator fade/slide, frame colour until loaded; no closing-card fade or sidebar merge animation" }
+  "SV-25": { "built": "yes", "note": "fifth pane refused with a toast on every route; no split from an empty window; HTML full screen in a pane fills the window and returns to the split; DevTools follow the focused pane" },
+  "SV-26": { "built": "partial", "note": "springs for create/close/flip, closing card fades, 1:1 resize, drop indicator fade/slide, frame colour until loaded, split row entrance; sidebar row-merge reflow belongs to the tabs lane's list animation" }
 }
