@@ -36,6 +36,7 @@ function start(): void {
   const userData = app.getPath('userData')
   const stateFile = join(userData, 'orbit-state.json')
   const { state } = loadState(stateFile)
+  perf.mark('state:loaded')
   const store = new Store(state)
   const persistence = new Persistence(store, stateFile)
   const windows = new WindowManager()
@@ -64,7 +65,9 @@ function start(): void {
   windows.init(ctx)
   registerIpc(ctx)
   registerFeatures(ctx)
+  perf.mark('features:registered')
   installMenu(ctx)
+  perf.mark('menu:installed')
   if (e2e) exposeTestHooks(ctx, persistence)
 
   // Mini windows are transient; restore only main windows.

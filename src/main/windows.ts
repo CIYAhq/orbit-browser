@@ -16,7 +16,8 @@ interface Pane {
 interface WindowRecord {
   id: WindowId
   win: BrowserWindow
-  overlay: WebContentsView
+  /** Created shortly after the shell first paints (see ensureOverlay), or on first use. */
+  overlay?: WebContentsView
   /** Tabs whose views are currently drawn in this window. */
   visible: Set<TabId>
   panes: Pane[]
@@ -173,18 +174,9 @@ export class WindowManager {
     this.attachShortcuts(win.webContents)
     this.hardenUi(win.webContents)
 
-    const overlay = new WebContentsView({ webPreferences: uiWebPreferences(id, 'overlay') })
-    overlay.setBackgroundColor('#00000000')
-    overlay.setVisible(false)
-    win.contentView.addChildView(overlay)
-    this.registerUi(overlay.webContents, id)
-    this.attachShortcuts(overlay.webContents)
-    this.hardenUi(overlay.webContents)
-
     const rec: WindowRecord = {
       id,
       win,
-      overlay,
       visible: new Set(),
       panes: [],
       radius: 10,
@@ -196,6 +188,10 @@ export class WindowManager {
     win.once('ready-to-show', () => {
       this.ctx.perf.mark(`window:${id}:ready-to-show`)
       win.show()
+      // The overlay renderer starts after the shell has painted so the two don't compete at startup.
+      setTimeout(() => {
+        if (!win.isDestroyed()) this.ensureOverlay(rec)
+      }, 120)
     })
     win.on('focus', () => this.setRuntime(id, { focused: true }))
     win.on('blur', () => this.setRuntime(id, { focused: false }))
@@ -226,7 +222,7 @@ export class WindowManager {
           this.ctx.tabs.sleep(tabId)
         }
       }
-      if (!overlay.webContents.isDestroyed()) overlay.webContents.close()
+      if (rec.overlay && !rec.overlay.webContents.isDestroyed()) rec.overlay.webContents.close()
       this.records.delete(id)
       if (!this.quitting) {
         this.ctx.store.update((d) => {
@@ -236,7 +232,6 @@ export class WindowManager {
     })
 
     loadRenderer(win.webContents, 'shell')
-    loadRenderer(overlay.webContents, 'overlay')
     return id
   }
 
@@ -256,7 +251,7 @@ export class WindowManager {
     const rec = this.records.get(windowId)
     if (!rec) return
     if (!rec.win.isDestroyed()) rec.win.webContents.send(`orbit:${channel}`, payload)
-    if (!rec.overlay.webContents.isDestroyed()) rec.overlay.webContents.send(`orbit:${channel}`, payload)
+    if (rec.overlay && !rec.overlay.webContents.isDestroyed()) rec.overlay.webContents.send(`orbit:${channel}`, payload)
   }
 
   /** Positions tab views where the shell says panes are; hides tabs no longer shown. */
@@ -323,7 +318,7 @@ export class WindowManager {
     }
     // Insert below the overlay so menus and the command bar stay on top.
     const children = rec.win.contentView.children
-    const overlayIndex = children.indexOf(rec.overlay)
+    const overlayIndex = rec.overlay ? children.indexOf(rec.overlay) : -1
     rec.win.contentView.addChildView(view, overlayIndex >= 0 ? overlayIndex : undefined)
     this.attached.set(tabId, rec.id)
   }
@@ -362,16 +357,32 @@ export class WindowManager {
     if (tabId && !rec.overlayShown) this.ctx.tabs.contents(tabId)?.focus()
   }
 
+  /** The transparent overlay view (command bar, Peek chrome, menus), created on first need. */
+  private ensureOverlay(rec: WindowRecord): WebContentsView {
+    if (rec.overlay) return rec.overlay
+    const overlay = new WebContentsView({ webPreferences: uiWebPreferences(rec.id, 'overlay') })
+    overlay.setBackgroundColor('#00000000')
+    overlay.setVisible(false)
+    rec.win.contentView.addChildView(overlay)
+    this.registerUi(overlay.webContents, rec.id)
+    this.attachShortcuts(overlay.webContents)
+    this.hardenUi(overlay.webContents)
+    loadRenderer(overlay.webContents, 'overlay')
+    rec.overlay = overlay
+    return overlay
+  }
+
   private showOverlay(rec: WindowRecord): void {
+    const overlay = this.ensureOverlay(rec)
     this.fitOverlay(rec)
-    rec.win.contentView.addChildView(rec.overlay)
-    rec.overlay.setVisible(true)
+    rec.win.contentView.addChildView(overlay)
+    overlay.setVisible(true)
     rec.overlayShown = true
-    rec.overlay.webContents.focus()
+    overlay.webContents.focus()
   }
 
   private hideOverlay(rec: WindowRecord): void {
-    if (!rec.overlayShown) return
+    if (!rec.overlayShown || !rec.overlay) return
     rec.overlay.setVisible(false)
     rec.overlayShown = false
     if (rec.win.isFocused()) this.focusActiveTab(rec.id)
@@ -379,7 +390,7 @@ export class WindowManager {
 
   private fitOverlay(rec: WindowRecord): void {
     const [width = 0, height = 0] = rec.win.getContentSize()
-    rec.overlay.setBounds({ x: 0, y: 0, width, height })
+    rec.overlay?.setBounds({ x: 0, y: 0, width, height })
   }
 
   private applyBackground(rec: WindowRecord): void {
