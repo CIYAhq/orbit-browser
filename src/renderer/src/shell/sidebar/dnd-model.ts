@@ -147,17 +147,24 @@ function heightAbove(slots: Slot[], slot: Slot, dragged: Set<string>): number {
 /**
  * Vertical offset per remaining row so the list shows the gap at the drop target
  * (and closes the gap the dragged rows left). `target` undefined means the rows leave
- * this list (Favorites, another Space or window).
+ * this list (Favorites, another Space or window). One pass (running sum), so dragging
+ * stays cheap with hundreds of rows.
  */
 export function rowShifts(slots: Slot[], dragged: Set<string>, target: DropTarget | undefined): Record<string, number> {
   const H = draggedHeight(slots, dragged)
-  const remaining = slots.filter((s) => !isDragged(s, dragged))
   const out: Record<string, number> = {}
-  remaining.forEach((s, i) => {
-    let shift = -heightAbove(slots, s, dragged)
+  let above = 0
+  let i = 0
+  for (const s of slots) {
+    if (isDragged(s, dragged)) {
+      above += s.height + ROW_GAP
+      continue
+    }
+    let shift = -above
     if (target && target.type === 'between' && i >= target.at) shift += H
     if (shift !== 0) out[s.key] = shift
-  })
+    i += 1
+  }
   return out
 }
 

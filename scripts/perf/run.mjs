@@ -334,6 +334,80 @@ async function orbitInteractive(fx) {
         requestAnimationFrame(step)
       }),
   )
+
+  log('space switch and swipe, 200 tabs per Space')
+  // §8 sidebar stress size on both sides of a switch (spaces lane review M5): Space A already
+  // holds 200 tabs from the scroll test; give Space B 200 too.
+  await orbitRun(app, 'spaces.switch', { spaceId: spaceB })
+  for (let i = 0; i < 200; i++) await orbitRun(app, 'tabs.create', { url: fx.url(`b${i}`), activate: false })
+  await sleep(1000)
+  const bigTimes = []
+  for (let k = 0; k < 8; k++) {
+    const cur = await app.evaluate(() => {
+      const st = globalThis.__orbit.state()
+      return st.windows[globalThis.__orbit.windowIds()[0]].spaceId
+    })
+    const target = cur === spaceA ? spaceB : spaceA
+    const name = (await app.evaluate(() => globalThis.__orbit.state())).spaces[target].name
+    const armed = shell.evaluate(
+      (want) =>
+        new Promise((done) => {
+          const obs = new MutationObserver(() => {
+            const el = document.querySelector('[data-testid="space-name"]')
+            if (el?.textContent?.includes(want)) {
+              obs.disconnect()
+              requestAnimationFrame(() => done(Date.now()))
+            }
+          })
+          obs.observe(document.body, { subtree: true, childList: true, characterData: true })
+          setTimeout(() => done(null), 3000)
+        }),
+      name,
+    )
+    await sleep(30)
+    const t0 = Date.now()
+    await orbitRun(app, 'spaces.switch', { spaceId: target })
+    const painted = await armed
+    if (painted !== null) bigTimes.push(painted - t0)
+    await sleep(600)
+  }
+  // A slow two-finger swipe over the sidebar (wheel deltaX), frame times while it tracks.
+  const strip = await shell.evaluate(() => {
+    const r = document.querySelector('[data-testid="space-strip"]')?.getBoundingClientRect()
+    return r ? { x: r.x + r.width / 2, y: r.y + Math.min(160, r.height / 2) } : null
+  })
+  let swipeFrames = []
+  if (strip) {
+    await shell.mouse.move(strip.x, strip.y)
+    const frames = shell.evaluate(
+      () =>
+        new Promise((done) => {
+          const out = []
+          let last = performance.now()
+          const t0 = last
+          const tick = (now) => {
+            out.push(now - last)
+            last = now
+            if (now - t0 < 900) requestAnimationFrame(tick)
+            else done(out)
+          }
+          requestAnimationFrame(tick)
+        }),
+    )
+    for (let i = 0; i < 40; i++) {
+      await shell.mouse.wheel(3, 0)
+      await sleep(16)
+    }
+    swipeFrames = (await frames).slice(2)
+  }
+  result.spaceSwitch200 = {
+    medianMs: round(median(bigTimes)),
+    p95Ms: round(pct(bigTimes, 95)),
+    swipeMedianFrameMs: round(median(swipeFrames)),
+    swipeP95FrameMs: round(pct(swipeFrames, 95)),
+    samples: bigTimes,
+  }
+
   await app.close()
   rmSync(dir, { recursive: true, force: true })
   return result

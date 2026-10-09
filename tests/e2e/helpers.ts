@@ -106,7 +106,9 @@ export async function openViaCommandBar(orbit: Orbit, text: string): Promise<voi
   const input = overlay.getByTestId('command-input')
   await expect(input).toBeFocused()
   await input.fill(text)
-  await expect(overlay.getByTestId('command-result').first()).toBeVisible()
+  // Wait for rows that answer what was typed: a row left from an earlier query (say, "switch to"
+  // a recent tab) must not be the one Enter opens.
+  await expect(overlay.getByTestId('command-result').filter({ hasText: text }).first()).toBeVisible()
   await input.press('Enter')
 }
 

@@ -373,6 +373,9 @@ test('[CB-22] typing a whole action name and Enter right after ⌘T runs it (no 
   await barOpenInMain()
   await overlay.keyboard.type('new space')
   await overlay.keyboard.press('Enter')
+  // "New Space" opens the creation flow in the sidebar (SP-02); creating from it adds the Space.
+  await expect(orbit.shell.getByTestId('new-space-flow')).toBeVisible()
+  await orbit.shell.getByTestId('new-space-create').click()
   await expect.poll(async () => (await state(orbit.app)).spaceOrder.length).toBe(2)
 })
 

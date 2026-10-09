@@ -3,10 +3,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { backupOf, isRuntimeOnlyPatch, loadState, normalizeState, Persistence } from '../../src/main/persist'
+import { normalizeSpacesInDraft } from '../../src/main/spaces/model'
 import { Store } from '../../src/main/store'
 import { makeTab } from '../../src/main/tabs/model'
 import { createInitialState, createWindowState, DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
 import type { OrbitState } from '../../src/shared/state'
+import { paletteFor } from '../../src/shared/theme'
 
 const tempFile = () => join(mkdtempSync(join(tmpdir(), 'orbit-')), 'state.json')
 const readJson = (file: string): OrbitState => JSON.parse(readFileSync(file, 'utf8'))
@@ -305,5 +307,73 @@ describe('normalizeState repairs loaded state', () => {
     expect(state.settings.searchEngine).toBe('google')
     expect(existsSync(file)).toBe(false)
     expect(readdirSync(join(file, '..')).some((f) => f.startsWith('state.json.schema99-'))).toBe(true)
+  })
+})
+
+describe('[SP-15][SP-18] stored Space themes (review M1, F11)', () => {
+  const withThemes = (themes: unknown[], appearance?: string) => {
+    const base = createInitialState(0)
+    const spaces: Record<string, unknown> = {}
+    const order: string[] = []
+    themes.forEach((theme, i) => {
+      const id = `s-${i}`
+      spaces[id] = { id, name: `S${i}`, icon: '', theme, profileId: DEFAULT_PROFILE_ID, pinned: [], today: [] }
+      order.push(id)
+    })
+    return {
+      ...JSON.parse(JSON.stringify(base)),
+      spaces,
+      spaceOrder: order,
+      settings: { ...base.settings, ...(appearance ? { appearance } : {}) },
+    }
+  }
+
+  it('keeps new themes, upgrades old ones and repairs corrupt ones', () => {
+    const state = normalizeState(
+      withThemes([
+        { colors: ['#e85d9a', '#6b7cff'], intensity: 0.7, grain: 0.4 },
+        { color: '#FF7A59', color2: '#2fbf8f', mode: 'system' },
+        { intensity: 0.6, grain: 0 },
+        'pink',
+        null,
+        { colors: 'nope', intensity: 'x', grain: 9 },
+      ]),
+    )
+    expect(state.spaces['s-0']?.theme).toEqual({ colors: ['#e85d9a', '#6b7cff'], intensity: 0.7, grain: 0.4 })
+    expect(state.spaces['s-1']?.theme).toEqual({ colors: ['#ff7a59', '#2fbf8f'], intensity: 0.6, grain: 0 })
+    expect(state.spaces['s-2']?.theme).toEqual({ colors: [], intensity: 0.6, grain: 0 })
+    expect(state.spaces['s-3']?.theme).toEqual({ colors: [], intensity: 0.6, grain: 0 })
+    expect(state.spaces['s-4']?.theme).toEqual({ colors: [], intensity: 0.6, grain: 0 })
+    expect(state.spaces['s-5']?.theme).toEqual({ colors: [], intensity: 0.6, grain: 1 })
+    // Nothing downstream can trip over a stored theme any more.
+    const store = new Store(state)
+    expect(() => store.update((d) => normalizeSpacesInDraft(d))).not.toThrow()
+    for (const space of Object.values(store.state.spaces)) {
+      expect(() => paletteFor(space.theme, true)).not.toThrow()
+    }
+  })
+
+  it('a theme without colors is rewritten by the boot normalizer instead of throwing', () => {
+    const state = createInitialState(0)
+    const id = state.spaceOrder[0] as string
+    ;(state.spaces[id] as unknown as { theme: unknown }).theme = { intensity: 0.6, grain: 0 }
+    expect(() => normalizeSpacesInDraft(state)).not.toThrow()
+    expect(state.spaces[id]?.theme).toEqual({ colors: [], intensity: 0.6, grain: 0 })
+  })
+
+  it('keeps the light/dark choice that old files stored per Space (D12)', () => {
+    expect(normalizeState(withThemes([{ color: '#123456', mode: 'dark' }])).settings.appearance).toBe('dark')
+    expect(
+      normalizeState(
+        withThemes([
+          { color: '#123456', mode: 'dark' },
+          { color: '#654321', mode: 'light' },
+        ]),
+      ).settings.appearance,
+    ).toBe('system')
+    expect(normalizeState(withThemes([{ color: '#123456', mode: 'dark' }], 'light')).settings.appearance).toBe('light')
+    expect(normalizeState(withThemes([{ colors: ['#123456'], intensity: 1, grain: 0 }])).settings.appearance).toBe(
+      'system',
+    )
   })
 })

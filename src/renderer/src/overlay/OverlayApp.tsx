@@ -1,6 +1,7 @@
 import { AnimatePresence, domAnimation, LazyMotion, MotionConfig } from 'motion/react'
 import { type CSSProperties, useEffect, useState } from 'react'
 import { invoke } from '../api'
+import { isSpacePanel, SpacePanels } from '../shell/spaces/SpacePanels'
 import { useWindow } from '../store'
 import { paletteVars, usePalette } from '../theme'
 import { CommandBar } from './CommandBar'
@@ -50,6 +51,9 @@ export function OverlayApp() {
               <CommandBar key={overlay.nonce} mode={overlay.mode} initialQuery={overlay.query} dark={palette?.dark} />
             )}
           </AnimatePresence>
+          {overlay?.kind === 'panel' && isSpacePanel(overlay.panel) && (
+            <SpacePanels key={overlay.nonce} overlay={overlay} />
+          )}
         </div>
       </MotionConfig>
     </LazyMotion>
