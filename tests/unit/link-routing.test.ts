@@ -7,7 +7,15 @@ import {
   routeFor,
   sameSite,
 } from '../../src/shared/link-routing'
-import { peekCard, peekStart } from '../../src/shared/peek-geometry'
+import {
+  dismissesOnRelease,
+  draggedCard,
+  dragTravel,
+  PEEK_DRAG_UP_MAX,
+  peekCard,
+  peekStart,
+  releaseVelocity,
+} from '../../src/shared/peek-geometry'
 
 const on: LinkSettings = { peekExternalLinks: true, peekShiftClick: true, linkRules: [] }
 const pinned: LinkSource = { kind: 'tab', section: 'pinned', url: 'https://mail.example.com/inbox' }
@@ -165,5 +173,50 @@ describe('Peek card geometry (PK-05, PK-06)', () => {
     const centred = peekStart(card, area)
     expect(centred.width / card.width).toBeCloseTo(0.94, 2)
     expect(centred.x + centred.width / 2).toBeCloseTo(card.x + card.width / 2, 5)
+  })
+})
+
+describe('Peek interactive dismiss (PK-06, FL-19)', () => {
+  const area = { width: 1000, height: 800 }
+  const card = peekCard(area)
+
+  it('[PK-06] the dragged card follows the input 1:1 downward and shrinks a little', () => {
+    const moved = draggedCard(card, 100, card.height)
+    // Its centre moves down exactly as far as the pointer.
+    expect(moved.y + moved.height / 2).toBeCloseTo(card.y + card.height / 2 + 100, 5)
+    expect(moved.x + moved.width / 2).toBeCloseTo(card.x + card.width / 2, 5)
+    expect(moved.width).toBeLessThan(card.width)
+    expect(moved.width / card.width).toBeGreaterThan(0.95)
+    expect(draggedCard(card, 0, card.height)).toEqual(card)
+  })
+
+  it('[PK-06] dragged upward it only gives a little (rubber band)', () => {
+    expect(dragTravel(-10)).toBeLessThan(0)
+    expect(dragTravel(-10)).toBeGreaterThan(-10)
+    expect(dragTravel(-1000)).toBeGreaterThanOrEqual(-PEEK_DRAG_UP_MAX)
+    expect(draggedCard(card, -400, card.height).width).toBe(card.width)
+  })
+
+  it('[PK-06] letting go past a quarter of its height or flicking down faster than 500 px/s dismisses it', () => {
+    const h = card.height
+    expect(dismissesOnRelease(h * 0.3, h, 0)).toBe(true)
+    expect(dismissesOnRelease(h * 0.2, h, 0)).toBe(false)
+    expect(dismissesOnRelease(20, h, 800)).toBe(true)
+    expect(dismissesOnRelease(20, h, 300)).toBe(false)
+    // Past the threshold but pushed back up quickly: it stays.
+    expect(dismissesOnRelease(h * 0.3, h, -900)).toBe(false)
+  })
+
+  it('[PK-06] the release velocity is the movement of the last ~100 ms; holding still first gives zero', () => {
+    const samples = [
+      { t: 0, y: 0 },
+      { t: 50, y: 20 },
+      { t: 100, y: 60 },
+      { t: 150, y: 110 },
+    ]
+    expect(releaseVelocity(samples, 150)).toBeCloseTo(((110 - 20) / 100) * 1000, 5)
+    expect(releaseVelocity(samples, 400)).toBe(0)
+    expect(releaseVelocity([], 10)).toBe(0)
+    expect(releaseVelocity([{ t: 0, y: 0 }], 0)).toBe(0)
   })
 })

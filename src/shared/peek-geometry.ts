@@ -70,3 +70,55 @@ export function splitTarget(area: { width: number; height: number }, gap = 8): B
   const width = (area.width - gap) / 2
   return { x: area.width - width, y: 0, width, height: area.height }
 }
+
+// ---- Interactive dismiss (PK-06, FL-19) ----
+
+/** How much the card shrinks when dragged down by its whole height ("shrinks a little"). */
+export const PEEK_DRAG_SHRINK = 0.1
+/** Dragged upward, the card gives at most this many pixels (rubber band). */
+export const PEEK_DRAG_UP_MAX = 24
+/** Releasing past this fraction of the card's height dismisses it. */
+export const PEEK_DISMISS_FRACTION = 0.25
+/** A downward flick faster than this (px/s) dismisses it wherever it is. */
+export const PEEK_DISMISS_VELOCITY = 500
+
+/** How far the card travels for a drag of `offset` px: 1:1 downward, resisting upward (FL-01). */
+export function dragTravel(offset: number): number {
+  if (offset >= 0) return offset
+  return -PEEK_DRAG_UP_MAX * (1 - Math.exp(offset / (2 * PEEK_DRAG_UP_MAX)))
+}
+
+/** The card dragged by `offset` px from `base`: it follows the input and shrinks a little. */
+export function draggedCard(base: Box, offset: number, restHeight: number): Box {
+  const travel = dragTravel(offset)
+  const progress = clamp(travel / Math.max(1, restHeight), 0, 1)
+  const box = scaleBox(base, 1 - PEEK_DRAG_SHRINK * progress)
+  return { ...box, y: box.y + travel }
+}
+
+/**
+ * Whether letting go of a drag dismisses the card (FL-19): past about a quarter of its height
+ * (unless it is being pushed back up quickly), or flicked down faster than about 500 px/s.
+ * `velocity` is in px/s, positive downward.
+ */
+export function dismissesOnRelease(offset: number, restHeight: number, velocity: number): boolean {
+  if (velocity > PEEK_DISMISS_VELOCITY) return true
+  return offset > restHeight * PEEK_DISMISS_FRACTION && velocity > -PEEK_DISMISS_VELOCITY
+}
+
+/**
+ * Release velocity (px/s, positive downward) from pointer samples: the movement over the last
+ * ~100 ms before `now`. Holding still before letting go gives zero.
+ */
+export function releaseVelocity(samples: readonly { t: number; y: number }[], now: number, windowMs = 100): number {
+  const last = samples[samples.length - 1]
+  if (!last) return 0
+  // Where the pointer was when the window began: the last sample at or before its start.
+  let from = samples[0] as { t: number; y: number }
+  for (const s of samples) {
+    if (s.t <= now - windowMs) from = s
+    else break
+  }
+  const dt = now - from.t
+  return dt > 0 ? ((last.y - from.y) / dt) * 1000 : 0
+}

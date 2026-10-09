@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import { launchOrbit, type Orbit, run, state, viewPage } from './helpers'
 import {
   blockNetwork,
+  clickInTab,
   findPage,
   inTab,
   mainWindow,
@@ -338,4 +339,121 @@ test('[PK-06] the card grows out of the clicked link and shrinks away; both unde
   expect(closing.length).toBeGreaterThan(3)
   expect((closing[closing.length - 1]?.w ?? 0) < (closing[0]?.w ?? 0)).toBe(true)
   expect((closing[closing.length - 1]?.t ?? 0) - (closing[0]?.t ?? 0)).toBeLessThan(300)
+})
+
+/** The Peek page view's bounds, rounded, or null when it is not placed. */
+async function peekBounds(peekTab: string) {
+  const b = (await viewInfo(orbit.app, peekTab)).bounds
+  return b ? { x: b.x, y: b.y, width: b.width, height: b.height, cy: b.y + b.height / 2 } : null
+}
+
+test('[PK-06] dragging the handle moves the card with the pointer; let go early and it springs back', async () => {
+  const { peekTab } = await openPeekFromPinned()
+  const overlay = await viewPage(orbit.app, 'overlay')
+  const rest = await peekBounds(peekTab)
+  const handle = await overlay.getByTestId('peek-handle').boundingBox()
+  if (!rest || !handle) throw new Error('no card or handle')
+  // The handle sits centred just above the card.
+  const area = (await viewInfo(orbit.app, peekTab)).area
+  expect(Math.abs(area ? area.x + handle.x + handle.width / 2 - (rest.x + rest.width / 2) : 99)).toBeLessThanOrEqual(1)
+  expect(area ? area.y + handle.y + handle.height : 0).toBeLessThanOrEqual(rest.y + 1)
+  const x = handle.x + handle.width / 2
+  const y = handle.y + handle.height / 2
+  await overlay.mouse.move(x, y)
+  await overlay.mouse.down()
+  await overlay.mouse.move(x, y + 40, { steps: 4 })
+  await overlay.mouse.move(x, y + 80, { steps: 4 })
+  // The page follows the pointer 1:1 and shrinks a little.
+  await expect.poll(async () => Math.round(((await peekBounds(peekTab))?.cy ?? 0) - rest.cy)).toBe(80)
+  const dragged = await peekBounds(peekTab)
+  expect(dragged?.width).toBeLessThan(rest.width)
+  expect(dragged?.width).toBeGreaterThan(rest.width * 0.95)
+  // Held still, then let go well short of a quarter of the card's height: it springs back.
+  await overlay.waitForTimeout(150)
+  await overlay.mouse.up()
+  await expect
+    .poll(async () => {
+      const b = await peekBounds(peekTab)
+      return !!b && Math.abs(b.y - rest.y) <= 1 && Math.abs(b.width - rest.width) <= 1
+    })
+    .toBe(true)
+  expect((await overlayOf(orbit.app)).kind).toBe('peek')
+  expect((await state(orbit.app)).tabs[peekTab]?.floating).toBe('peek')
+})
+
+test('[PK-06] dragged past a quarter of its height, or flicked down, the Peek closes', async () => {
+  const { source, peekTab } = await openPeekFromPinned()
+  const overlay = await viewPage(orbit.app, 'overlay')
+  const rest = await peekBounds(peekTab)
+  const handle = await overlay.getByTestId('peek-handle').boundingBox()
+  if (!rest || !handle) throw new Error('no card or handle')
+  const x = handle.x + handle.width / 2
+  const y = handle.y + handle.height / 2
+  const far = Math.round(rest.height * 0.32)
+  await overlay.mouse.move(x, y)
+  await overlay.mouse.down()
+  await overlay.mouse.move(x, y + far, { steps: 8 })
+  await expect.poll(async () => Math.round(((await peekBounds(peekTab))?.cy ?? 0) - rest.cy)).toBe(far)
+  await overlay.waitForTimeout(150)
+  await overlay.mouse.up()
+  await expectClosed(source, peekTab)
+  // A quick flick closes it even though it moved only a little.
+  const link = JSON.parse(
+    await inTab(orbit.app, source, 'JSON.stringify(document.querySelector("#other").getBoundingClientRect())'),
+  ) as { x: number; y: number }
+  await clickInTab(orbit.app, source, { x: link.x + 6, y: link.y + 6 })
+  const second = await settledPeek()
+  await overlay.getByTestId('peek-handle').evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    const at = (type: string, dy: number) =>
+      el.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          button: 0,
+          pointerId: 1,
+          pointerType: 'mouse',
+          isPrimary: true,
+          clientX: r.x + r.width / 2,
+          clientY: r.y + r.height / 2 + dy,
+        }),
+      )
+    at('pointerdown', 0)
+    at('pointermove', 15)
+    at('pointermove', 30)
+    at('pointerup', 30)
+  })
+  await expectClosed(source, second)
+})
+
+test('[PK-06] a two-finger swipe down beside the card follows the fingers; a long one dismisses', async () => {
+  const { source, peekTab } = await openPeekFromPinned()
+  const overlay = await viewPage(orbit.app, 'overlay')
+  const rest = await peekBounds(peekTab)
+  const area = (await viewInfo(orbit.app, peekTab)).area
+  if (!rest || !area) throw new Error('no card')
+  // Record the card's centre on every frame (overlay coordinates).
+  await orbit.app.evaluate(() => {
+    const g = globalThis as unknown as OrbitGlobal & { __swipe: number[] }
+    g.__swipe = []
+    g.__orbit.ctx.events.on('peek.frame', ({ rect }) => g.__swipe.push(rect.y + rect.height / 2))
+  })
+  // Over the dimmed page, left of the card.
+  await overlay.mouse.move(8, Math.round(area.height / 2))
+  // Fingers moving down scroll content up (a negative delta): the card goes down with them.
+  await overlay.mouse.wheel(0, -60)
+  // A short swipe springs back once the fingers stop.
+  await expect
+    .poll(async () => {
+      const b = await peekBounds(peekTab)
+      const frames = await orbit.app.evaluate(() => (globalThis as unknown as { __swipe: number[] }).__swipe.length)
+      return frames > 2 && !!b && Math.abs(b.y - rest.y) <= 1 && Math.abs(b.width - rest.width) <= 1
+    })
+    .toBe(true)
+  const centres = await orbit.app.evaluate(() => (globalThis as unknown as { __swipe: number[] }).__swipe.splice(0))
+  // It followed the 60 px swipe, then came back to rest (its last frame).
+  expect(Math.round(Math.max(...centres) - (centres[centres.length - 1] ?? 0))).toBe(60)
+  expect((await overlayOf(orbit.app)).kind).toBe('peek')
+  // A long swipe dismisses it.
+  await overlay.mouse.wheel(0, -Math.round(rest.height * 0.4))
+  await expectClosed(source, peekTab)
 })

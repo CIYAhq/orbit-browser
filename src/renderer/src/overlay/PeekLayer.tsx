@@ -3,11 +3,14 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ACTIONS_BY_ID, formatAccelerator, shortcutsFor } from '../../../shared/actions'
 import {
   type Box,
+  dismissesOnRelease,
+  draggedCard,
   FRAME_RADIUS,
   lerpBox,
   PEEK_RADIUS,
   peekCard,
   peekStart,
+  releaseVelocity,
   scaleBox,
   splitTarget,
 } from '../../../shared/peek-geometry'
@@ -21,10 +24,17 @@ type Phase = NonNullable<PeekOverlay['phase']> | 'open'
 /** Springs from feel.md FL-01 (mass 1): the open is close to "standard", the expand "snappy". */
 const OPEN_SPRING = { stiffness: 520, damping: 42 }
 const EXPAND_SPRING = { stiffness: 632, damping: 45 }
-const CLOSE_MS = 170
+/** Close: a slight shrink (to about 0.96) and a fade over about 150–180 ms (FL-19). */
+const CLOSE_MS = 160
+const CLOSE_SCALE = 0.96
 const FADE_MS = 130
 const BUTTON = 28
 const BUTTON_GAP = 8
+/** The grab handle above the card (PK-06): its hit area, centred over the card's top edge. */
+const HANDLE_HIT_W = 160
+const HANDLE_HIT_H = 30
+/** A trackpad swipe has ended when no wheel event came for this long. */
+const WHEEL_END_MS = 120
 
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
 
@@ -40,6 +50,20 @@ interface Frame {
   page: boolean
 }
 
+/** A drag of the handle or a two-finger swipe that the card is following (PK-06). */
+interface Drag {
+  /** The card when the drag began (the open animation may have been mid-way). */
+  base: Box
+  /** Backdrop dim when the drag began. */
+  dim: number
+  /** Distance moved, px, positive downward. */
+  offset: number
+  samples: { t: number; y: number }[]
+  /** Pointer y at the press, for a handle drag; undefined for a swipe. */
+  pointerY?: number
+  wheelTimer?: number
+}
+
 /**
  * Animates the Peek card. Each frame moves the chrome in the DOM and sends the same rect to main,
  * which moves the page's native view in step (FL-19, PK-06). Every phase starts from wherever the
@@ -50,8 +74,12 @@ class PeekAnimator {
   backdrop: HTMLElement | null = null
   card: HTMLElement | null = null
   controls: HTMLElement | null = null
+  handle: HTMLElement | null = null
   private frame: Frame | null = null
   private raf = 0
+  private drag: Drag | null = null
+  /** A drag or swipe let go past the threshold: the card is already leaving. */
+  private leaving = false
 
   area(): { width: number; height: number } {
     const a = this.overlay.area
@@ -60,6 +88,12 @@ class PeekAnimator {
 
   stop(): void {
     cancelAnimationFrame(this.raf)
+    this.raf = 0
+  }
+
+  dispose(): void {
+    this.stop()
+    this.cancelDrag()
   }
 
   draw(f: Frame): void {
@@ -74,10 +108,18 @@ class PeekAnimator {
       style.opacity = String(f.chrome)
     }
     if (this.backdrop) this.backdrop.style.opacity = String(f.dim)
+    const chromeOpacity = String(Math.max(0, f.chrome * 2 - 1))
     if (this.controls) {
       const x = Math.min(rect.x + rect.width + BUTTON_GAP, this.area().width - BUTTON - 4)
       this.controls.style.transform = `translate(${x}px, ${rect.y}px)`
-      this.controls.style.opacity = String(Math.max(0, f.chrome * 2 - 1))
+      this.controls.style.opacity = chromeOpacity
+    }
+    if (this.handle) {
+      const height = Math.max(12, Math.min(rect.y, HANDLE_HIT_H))
+      const style = this.handle.style
+      style.transform = `translate(${rect.x + rect.width / 2 - HANDLE_HIT_W / 2}px, ${rect.y - height}px)`
+      style.height = `${height}px`
+      style.opacity = chromeOpacity
     }
     window.orbit.send('peek.frame', { nonce: this.overlay.nonce, rect, radius, visible: f.page })
   }
@@ -85,17 +127,19 @@ class PeekAnimator {
   /** The page area changed while open: the card takes its new place at once. */
   resize(width: number | undefined, height: number | undefined): void {
     const f = this.frame
-    if (!f || (this.overlay.phase ?? 'open') !== 'open' || !width || !height) return
+    if (!f || this.drag || this.leaving || (this.overlay.phase ?? 'open') !== 'open' || !width || !height) return
     this.draw({ ...f, rect: peekCard({ width, height }) })
   }
 
   play(phase: Phase): void {
+    // Already leaving after a drag: main's "closing" confirms what is on screen.
+    if (phase === 'closing' && this.leaving) return
+    this.cancelDrag()
     this.stop()
-    const nonce = this.overlay.nonce
     const a = this.area()
     const card = peekCard(a)
     const reduced = reduceMotion.matches
-    const settled = () => void invoke('peek.settled', { nonce })
+    const settled = this.settler()
 
     if (phase === 'open') {
       if (reduced) {
@@ -119,36 +163,13 @@ class PeekAnimator {
       return
     }
 
-    const start = this.frame ?? { rect: card, radius: PEEK_RADIUS, dim: 1, chrome: 1, page: true }
     if (phase === 'closing') {
-      if (reduced) {
-        this.tween(
-          FADE_MS,
-          (t) =>
-            this.draw({ rect: start.rect, radius: start.radius, dim: start.dim * (1 - t), chrome: 0, page: false }),
-          settled,
-        )
-        return
-      }
-      // A slight shrink and fade (FL-19). The page view can't fade, so it leaves part way and the
-      // card underneath, painted in the page's colour, finishes the fade.
-      const to = scaleBox(start.rect, 0.92)
-      this.tween(
-        CLOSE_MS,
-        (e) =>
-          this.draw({
-            rect: lerpBox(start.rect, to, e),
-            radius: start.radius,
-            dim: start.dim * (1 - e),
-            chrome: start.chrome * (1 - e),
-            page: e < 0.45,
-          }),
-        settled,
-      )
+      this.close(0, false)
       return
     }
 
     // Expanding into a tab (the whole page area) or sliding into a split's right pane.
+    const start = this.frame ?? { rect: card, radius: PEEK_RADIUS, dim: 1, chrome: 1, page: true }
     const target = phase === 'splitting' ? splitTarget(a) : { x: 0, y: 0, width: a.width, height: a.height }
     if (reduced) {
       this.draw({ rect: target, radius: FRAME_RADIUS, dim: 0, chrome: 0, page: true })
@@ -171,14 +192,170 @@ class PeekAnimator {
     )
   }
 
+  /** Tells main the running transition finished (it then commits the close, expand or split). */
+  private settler(): () => void {
+    const nonce = this.overlay.nonce
+    return () => void invoke('peek.settled', { nonce })
+  }
+
+  /**
+   * The close (FL-19): a slight shrink and fade, or under reduced motion a fade (FL-28). After a
+   * drag the card keeps going down at the speed it was let go (velocity carries over, FL-01).
+   * The page view can't fade: it leaves part way and the card underneath, painted in the page's
+   * colour, finishes the fade.
+   */
+  private close(velocity: number, dragged: boolean): void {
+    const start = this.frame ?? {
+      rect: peekCard(this.area()),
+      radius: PEEK_RADIUS,
+      dim: 1,
+      chrome: 1,
+      page: true,
+    }
+    const settled = this.settler()
+    if (reduceMotion.matches) {
+      this.tween(
+        FADE_MS,
+        (t) => this.draw({ rect: start.rect, radius: start.radius, dim: start.dim * (1 - t), chrome: 0, page: false }),
+        settled,
+      )
+      return
+    }
+    const to = scaleBox(start.rect, CLOSE_SCALE)
+    // An ease-out starts at 3× its average speed: travel so that matches the release speed.
+    if (dragged) to.y += Math.max(40, (Math.max(0, velocity) * CLOSE_MS) / 3000)
+    this.tween(
+      CLOSE_MS,
+      (e) =>
+        this.draw({
+          rect: lerpBox(start.rect, to, e),
+          radius: start.radius,
+          dim: start.dim * (1 - e),
+          chrome: start.chrome * (1 - e),
+          page: e < 0.45,
+        }),
+      settled,
+    )
+  }
+
+  // ---- Interactive dismiss (PK-06, FL-19) ----
+
+  /**
+   * Starts following a drag or swipe; only an open card can be dragged. A press is a real
+   * sample (the pointer was there then); a swipe's first event is its first sample, so a single
+   * wheel tick carries no speed.
+   */
+  private beginDrag(pointerY?: number): Drag | null {
+    if (this.drag) return this.drag
+    if ((this.overlay.phase ?? 'open') !== 'open' || this.leaving) return null
+    // Interrupts the open spring wherever it is (FL-01).
+    this.stop()
+    const f = this.frame
+    this.drag = {
+      base: f?.rect ?? peekCard(this.area()),
+      dim: f?.dim ?? 1,
+      offset: 0,
+      samples: pointerY === undefined ? [] : [{ t: performance.now(), y: 0 }],
+      pointerY,
+    }
+    return this.drag
+  }
+
+  /** The card follows the input 1:1 downward, shrinking a little; the dim lifts as it goes. */
+  private moveDrag(d: Drag, offset: number): void {
+    d.offset = offset
+    d.samples.push({ t: performance.now(), y: offset })
+    if (d.samples.length > 32) d.samples.shift()
+    const restHeight = peekCard(this.area()).height
+    const rect = draggedCard(d.base, offset, restHeight)
+    const progress = Math.max(0, Math.min(1, (rect.y - d.base.y) / restHeight))
+    this.draw({ rect, radius: PEEK_RADIUS, dim: d.dim * (1 - 0.6 * progress), chrome: 1 - 0.4 * progress, page: true })
+  }
+
+  /** Let go: past the threshold (or flicked) the card leaves; otherwise it springs back. */
+  private endDrag(now = performance.now()): void {
+    const d = this.drag
+    if (!d) return
+    this.drag = null
+    clearTimeout(d.wheelTimer)
+    const restHeight = peekCard(this.area()).height
+    const velocity = releaseVelocity(d.samples, now)
+    if (dismissesOnRelease(d.offset, restHeight, velocity)) {
+      this.leaving = true
+      this.close(velocity, true)
+      void invoke('peek.close', {})
+      return
+    }
+    this.springBack(velocity, d.offset)
+  }
+
+  private cancelDrag(): void {
+    if (this.drag) clearTimeout(this.drag.wheelTimer)
+    this.drag = null
+  }
+
+  /** Back to the card's place, starting with the speed it was let go at (FL-01). */
+  private springBack(velocity: number, offset: number): void {
+    const from = this.frame
+    if (!from) return
+    const card = peekCard(this.area())
+    const step = (p: number) => {
+      const q = Math.min(1, p)
+      this.draw({
+        rect: lerpBox(from.rect, card, p),
+        radius: PEEK_RADIUS,
+        dim: from.dim + (1 - from.dim) * q,
+        chrome: from.chrome + (1 - from.chrome) * q,
+        page: true,
+      })
+    }
+    if (reduceMotion.matches) {
+      this.tween(FADE_MS, step)
+      return
+    }
+    // In spring units (0 → 1 is the whole way back); moving down is moving away.
+    const v0 = Math.abs(offset) > 1 ? Math.max(-30, Math.min(30, -velocity / Math.abs(offset))) : 0
+    this.spring(OPEN_SPRING, step, undefined, v0)
+  }
+
+  pointerDown(clientY: number): boolean {
+    if (this.drag) return false
+    return !!this.beginDrag(clientY)
+  }
+
+  pointerMove(clientY: number): void {
+    const d = this.drag
+    if (d?.pointerY !== undefined) this.moveDrag(d, clientY - d.pointerY)
+  }
+
+  pointerUp(): void {
+    if (this.drag?.pointerY !== undefined) this.endDrag()
+  }
+
+  /** A two-finger swipe over the dimmed page or the handle moves the card the same way. */
+  wheel(deltaY: number, deltaMode: number, pinch: boolean): void {
+    if (pinch) return
+    const existing = this.drag
+    if (existing?.pointerY !== undefined) return
+    const d = existing ?? this.beginDrag()
+    if (!d) return
+    // Fingers moving down scroll the content up (negative delta): the card goes down with them.
+    const dy = deltaMode === 1 ? deltaY * 16 : deltaMode === 2 ? deltaY * this.area().height : deltaY
+    this.moveDrag(d, d.offset - dy)
+    clearTimeout(d.wheelTimer)
+    const last = performance.now()
+    d.wheelTimer = window.setTimeout(() => this.drag === d && this.endDrag(last), WHEEL_END_MS)
+  }
+
   /** Runs a unit spring (0 → 1) frame by frame; `done` fires once it rests. */
   private spring(
     cfg: { stiffness: number; damping: number },
     step: (p: number, elapsed: number) => void,
     done?: () => void,
+    initialVelocity = 0,
   ): void {
     let x = 0
-    let v = 0
+    let v = initialVelocity
     let last = 0
     let first = 0
     const tick = (now: number) => {
@@ -194,8 +371,10 @@ class PeekAnimator {
       }
       const resting = Math.abs(1 - x) < 0.002 && Math.abs(v) < 0.02
       step(resting ? 1 : x, now - first)
-      if (resting) done?.()
-      else this.raf = requestAnimationFrame(tick)
+      if (resting) {
+        this.raf = 0
+        done?.()
+      } else this.raf = requestAnimationFrame(tick)
     }
     this.raf = requestAnimationFrame(tick)
   }
@@ -207,8 +386,10 @@ class PeekAnimator {
       if (!first) first = now
       const t = Math.min(1, (now - first) / ms)
       step(1 - (1 - t) ** 3)
-      if (t >= 1) done?.()
-      else this.raf = requestAnimationFrame(tick)
+      if (t >= 1) {
+        this.raf = 0
+        done?.()
+      } else this.raf = requestAnimationFrame(tick)
     }
     this.raf = requestAnimationFrame(tick)
   }
@@ -223,7 +404,9 @@ export function PeekLayer({ overlay }: { overlay: PeekOverlay }) {
   const backdropRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const controlsRef = useRef<HTMLDivElement>(null)
+  const handleRef = useRef<HTMLDivElement>(null)
   const [animator] = useState(() => new PeekAnimator())
+  const [grabbing, setGrabbing] = useState(false)
   animator.overlay = overlay
   const phase: Phase = overlay.phase ?? 'open'
 
@@ -231,7 +414,8 @@ export function PeekLayer({ overlay }: { overlay: PeekOverlay }) {
     animator.backdrop = backdropRef.current
     animator.card = cardRef.current
     animator.controls = controlsRef.current
-    return () => animator.stop()
+    animator.handle = handleRef.current
+    return () => animator.dispose()
   }, [animator])
 
   useLayoutEffect(() => animator.play(phase), [animator, phase])
@@ -261,6 +445,7 @@ export function PeekLayer({ overlay }: { overlay: PeekOverlay }) {
         onMouseDown={(e) => {
           if (e.button === 0) void invoke('peek.close', {})
         }}
+        onWheel={(e) => animator.wheel(e.deltaY, e.deltaMode, e.ctrlKey)}
       />
       <div
         ref={cardRef}
@@ -268,6 +453,36 @@ export function PeekLayer({ overlay }: { overlay: PeekOverlay }) {
         data-testid="peek-card"
         style={phase === 'closing' && overlay.background ? { background: overlay.background } : undefined}
       />
+      {/* Drag the handle (or swipe) down to dismiss; let go early and the card springs back (PK-06). */}
+      <div
+        ref={handleRef}
+        className={`peek__handle${grabbing ? ' is-grabbing' : ''}`}
+        data-testid="peek-handle"
+        title="Drag down to close"
+        onPointerDown={(e) => {
+          if (e.button !== 0) return
+          e.preventDefault()
+          if (!animator.pointerDown(e.clientY)) return
+          try {
+            e.currentTarget.setPointerCapture(e.pointerId)
+          } catch {
+            // The pointer is already gone; the drag ends on the next pointerup.
+          }
+          setGrabbing(true)
+        }}
+        onPointerMove={(e) => animator.pointerMove(e.clientY)}
+        onPointerUp={() => {
+          setGrabbing(false)
+          animator.pointerUp()
+        }}
+        onPointerCancel={() => {
+          setGrabbing(false)
+          animator.pointerUp()
+        }}
+        onWheel={(e) => animator.wheel(e.deltaY, e.deltaMode, e.ctrlKey)}
+      >
+        <span className="peek__grabber" />
+      </div>
       <div ref={controlsRef} className="peek__controls" data-testid="peek-controls">
         <PeekButton label="Close" hint="Esc" testId="peek-close" onClick={() => invoke('peek.close', {})}>
           <X size={15} strokeWidth={2} />
