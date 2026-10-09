@@ -626,7 +626,7 @@ export class SpaceSwitcher {
     const pages = track.querySelectorAll<HTMLElement>(':scope > [data-slot]')
     if (!moving) {
       for (const page of pages) {
-        const fav = page.querySelector<HTMLElement>('[data-favorites-layer]')
+        const fav = page.querySelector<HTMLElement>(FAVORITES_LAYER)
         if (fav) {
           fav.style.transform = ''
           fav.style.opacity = ''
@@ -640,7 +640,7 @@ export class SpaceSwitcher {
     const same = profileOf(a) === profileOf(b) || profileOf(b) === 'new' || profileOf(a) === 'new'
     for (const page of pages) {
       const k = Number(page.dataset.slot)
-      const fav = page.querySelector<HTMLElement>('[data-favorites-layer]')
+      const fav = page.querySelector<HTMLElement>(FAVORITES_LAYER)
       if (!fav) continue
       fav.style.transform = `translate3d(${-(k * this.width + x)}px,0,0)`
       let opacity = 0
@@ -654,6 +654,12 @@ export class SpaceSwitcher {
     }
   }
 }
+
+/**
+ * The Favorites grid of a page: our wrapper, or a Favorites root rendered by
+ * other sidebar code (first match in document order wins).
+ */
+const FAVORITES_LAYER = '[data-favorites-layer], [data-testid="favorites"]'
 
 /** The shell's Space switcher (one sidebar per shell renderer). */
 export const switcher = new SpaceSwitcher()
