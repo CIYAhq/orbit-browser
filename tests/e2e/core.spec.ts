@@ -133,7 +133,13 @@ test('[TB-19] a target=_blank link shows its tab in exactly one attached, top-mo
 })
 
 test('[TB-06] a page that closes itself leaves no dead view; the tab shows again (review M3)', async () => {
-  const a = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/Closer') })) as string
+  // A pinned tab: its page closing itself unloads it (like closing it) and it shows again when
+  // selected. A Today tab is closed into the Archive instead (tabs-review.spec.ts covers that).
+  const spaceId = (await state(orbit.app)).spaceOrder[0] as string
+  const a = (await run(orbit.app, 'tabs.create', {
+    url: fx.url('/page/Closer'),
+    container: { kind: 'pinned', spaceId },
+  })) as string
   const page = await tabPage(orbit.app, '/page/Closer')
   await expect(page.locator('#title')).toHaveText('Closer')
   const b = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/Other') })) as string

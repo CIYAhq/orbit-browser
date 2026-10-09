@@ -6,6 +6,7 @@
 import { current, type Draft, isDraft } from 'immer'
 import { createProfile, createSpace, DEFAULT_PROFILE_ID, NEW_SPACE_PRESETS, THEME_PRESETS } from '../../shared/defaults'
 import { isFolderId, isSplitId, isTabId, newId } from '../../shared/ids'
+import { placeholderName } from '../../shared/space-names'
 import type {
   ArchivedTab,
   Folder,
@@ -24,23 +25,13 @@ import type {
 import { normalizeSpaceTheme, sameTheme } from '../../shared/theme'
 import { splitLeaves, tabsInItem } from '../../shared/tree'
 
-/** Archive size cap; trimmed in chunks from the oldest end so trims are rare (review F2). */
+/** Archive size cap; trimmed in chunks from the oldest end so trims are rare (review F2, same rule as tabs/ops.ts). */
 export const MAX_ARCHIVE = 5000
 const ARCHIVE_TRIM = 500
 
 const snapshot = <T>(value: T): T => (isDraft(value) ? (current(value as Draft<T>) as T) : structuredClone(value))
 
-/** "Space N", where N is the Space's position or the next number no other Space uses (SP-02). */
-export function placeholderName(state: OrbitState, position: number, exceptId?: SpaceId): string {
-  const taken = new Set(
-    Object.values(state.spaces)
-      .filter((s) => s.id !== exceptId)
-      .map((s) => s.name),
-  )
-  let n = Math.max(1, Math.round(position))
-  while (taken.has(`Space ${n}`)) n++
-  return `Space ${n}`
-}
+export { placeholderName }
 
 export interface CreateSpaceOptions {
   name?: string
@@ -157,7 +148,7 @@ function collectItem(d: OrbitState, id: ItemId, out: Pick<DeletedSpace, 'tabs' |
 /** Appends archive entries (never unshift: review F2) and trims the oldest in chunks. */
 export function appendArchive(d: OrbitState, entries: ArchivedTab[]): void {
   d.archive.push(...entries)
-  if (d.archive.length > MAX_ARCHIVE) d.archive.splice(0, Math.max(ARCHIVE_TRIM, d.archive.length - MAX_ARCHIVE))
+  if (d.archive.length > MAX_ARCHIVE + ARCHIVE_TRIM) d.archive.splice(0, d.archive.length - MAX_ARCHIVE)
 }
 
 /**
@@ -301,31 +292,27 @@ export function assignProfileInDraft(d: OrbitState, spaceId: SpaceId, profileId:
 }
 
 /**
- * Deletes a profile (never the Default one). Spaces still using it fall back
- * to Default, and its Favorites move to Default's grid. Returns the tabs that
- * changed profile (they must be put to sleep so no page keeps the deleted
- * session), or undefined when nothing was deleted.
+ * Deletes a profile (PR-08). Never the Default one, and never while a Space
+ * still uses it (the caller reassigns those Spaces first; review F1). Its
+ * Favorites are erased with it. Returns the removed tabs (their pages must be
+ * closed), or undefined when nothing was deleted.
  */
-export function deleteProfileInDraft(d: OrbitState, profileId: ProfileId): { moved: TabId[] } | undefined {
+export function deleteProfileInDraft(d: OrbitState, profileId: ProfileId): { removed: TabId[] } | undefined {
   const profile = d.profiles[profileId]
-  const fallback = d.profiles[DEFAULT_PROFILE_ID]
-  if (!profile || !fallback || profileId === DEFAULT_PROFILE_ID) return undefined
-  const moved: TabId[] = []
-  for (const spaceId of d.spaceOrder) {
-    if (d.spaces[spaceId]?.profileId === profileId) moved.push(...assignProfileInDraft(d, spaceId, DEFAULT_PROFILE_ID))
-  }
-  for (const id of profile.favorites) {
-    for (const tabId of tabsInItem(d, id)) {
-      const tab = d.tabs[tabId]
-      if (tab) {
-        tab.profileId = DEFAULT_PROFILE_ID
-        moved.push(tabId)
-      }
+  if (!profile || profileId === DEFAULT_PROFILE_ID || spacesOfProfile(d, profileId).length > 0) return undefined
+  const items = { tabs: [] as Tab[], folders: [] as Folder[], splits: [] as Split[] }
+  for (const id of profile.favorites) collectItem(d, id, items)
+  const removed = new Set(items.tabs.map((t) => t.id))
+  for (const win of Object.values(d.windows)) {
+    for (const [spaceId, active] of Object.entries(win.activeTab)) {
+      if (active && removed.has(active)) win.activeTab[spaceId] = null
     }
   }
-  fallback.favorites.push(...profile.favorites)
+  for (const tab of items.tabs) delete d.tabs[tab.id]
+  for (const folder of items.folders) delete d.folders[folder.id]
+  for (const split of items.splits) delete d.splits[split.id]
   delete d.profiles[profileId]
-  return { moved }
+  return { removed: [...removed] }
 }
 
 /** Spaces using a profile, in order. */

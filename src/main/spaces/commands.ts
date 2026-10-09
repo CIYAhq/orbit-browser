@@ -89,6 +89,8 @@ export function registerSpaces(ctx: MainContext): void {
 
   const lastStepAt = new Map<WindowId, number>()
   const queuedStep = new Map<WindowId, ReturnType<typeof setTimeout>>()
+  /** Direction of the queued step: a press the other way replaces it (FL-13; review F13). */
+  const queuedDelta = new Map<WindowId, number>()
   const step = (windowId: WindowId | undefined, delta: number): SpaceId | null => {
     if (!windowId) return null
     const win = store.state.windows[windowId]
@@ -112,13 +114,15 @@ export function registerSpaces(ctx: MainContext): void {
       step(windowId, delta)
       return
     }
+    queuedDelta.set(windowId, delta)
     if (queuedStep.has(windowId)) return
     queuedStep.set(
       windowId,
       setTimeout(() => {
         queuedStep.delete(windowId)
         lastStepAt.set(windowId, Date.now())
-        step(windowId, delta)
+        step(windowId, queuedDelta.get(windowId) ?? delta)
+        queuedDelta.delete(windowId)
       }, wait),
     )
   }
@@ -169,7 +173,16 @@ export function registerSpaces(ctx: MainContext): void {
     for (const tab of deleted.tabs) ctx.tabs.destroy(tab.id)
     lastDeleted = { deleted, histories }
     const windowId = windowOf(c)
-    if (windowId) windows.sendToWindow(windowId, 'spaces:deleted', { spaceId, name: deleted.space.name })
+    if (windowId) {
+      windows.sendToWindow(windowId, 'spaces:deleted', { spaceId, name: deleted.space.name })
+      // The Undo note lives in the sidebar; with it hidden, say how to undo (review F12).
+      if (!store.state.windows[windowId]?.sidebar.visible) {
+        ctx.toast(
+          windowId,
+          `Deleted “${deleted.space.name}”. ${process.platform === 'darwin' ? '⌘Z' : 'Ctrl+Z'} restores it.`,
+        )
+      }
+    }
     return true
   })
 
@@ -196,6 +209,9 @@ export function registerSpaces(ctx: MainContext): void {
     if (!windowId || !win || !store.state.spaces[spaceId]) return
     if (win.overlay.kind !== 'none') await commands.run('overlay.close', {}, { windowId })
     if (!win.sidebar.visible) await commands.run('window.setSidebar', { visible: true }, { windowId })
+    // A background Space (renamed from its switcher target's menu) is brought into view first,
+    // so the one inline rename UI applies to it (SP-07, review M7).
+    if (win.spaceId !== spaceId) switchTo(windowId, spaceId)
     focusShell(windowId)
     windows.sendToWindow(windowId, 'spaces:rename', { spaceId })
   })
@@ -244,14 +260,15 @@ export function registerSpaces(ctx: MainContext): void {
 
   commands.register('profiles.delete', ({ profileId }) => {
     const profile = store.state.profiles[profileId]
+    // Refused for Default and while any Space uses the profile (PR-08; review F1).
     if (!profile || profileId === DEFAULT_PROFILE_ID) return false
-    let result: { moved: TabId[] } | undefined
+    let result: { removed: TabId[] } | undefined
     store.update((d) => {
       result = deleteProfileInDraft(d, profileId)
     })
     if (!result) return false
-    // No page may keep the deleted profile's session (review F14), then its stored data goes.
-    restartInNewSession(result.moved)
+    // Its Favorites' pages close (no page keeps the deleted session), then its stored data goes.
+    for (const tabId of result.removed) ctx.tabs.destroy(tabId)
     const ses = session.fromPartition(profile.partition)
     void ses
       .clearStorageData()

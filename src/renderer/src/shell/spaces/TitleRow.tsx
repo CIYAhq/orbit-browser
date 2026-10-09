@@ -1,10 +1,11 @@
 import { MoreHorizontal } from 'lucide-react'
-import { type KeyboardEvent, memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type KeyboardEvent, memo, useLayoutEffect, useRef, useState } from 'react'
 import type { SpacePanel } from '../../../../shared/commands/spaces'
 import { DEFAULT_PROFILE_ID } from '../../../../shared/defaults'
 import type { SpaceId } from '../../../../shared/state'
 import { invoke } from '../../api'
 import { useOrbit } from '../../store'
+import { consumeRename, usePendingRename } from './rename-request'
 
 export function openSpacePanel(panel: SpacePanel, params: Record<string, string | number | boolean>): void {
   void invoke('overlay.open', { overlay: { kind: 'panel', panel, params } })
@@ -34,14 +35,12 @@ export const TitleRow = memo(function TitleRow({ spaceId }: { spaceId: SpaceId }
     return id && id !== DEFAULT_PROFILE_ID ? s.profiles[id]?.name : undefined
   })
   const [editing, setEditing] = useState(false)
+  const pendingRename = usePendingRename()
 
-  useEffect(
-    () =>
-      window.orbit.on('spaces:rename', (payload) => {
-        if ((payload as { spaceId?: string }).spaceId === spaceId) setEditing(true)
-      }),
-    [spaceId],
-  )
+  // Rename requested from a menu or the command bar (possibly with a switch to this Space).
+  useLayoutEffect(() => {
+    if (pendingRename === spaceId && consumeRename(spaceId)) setEditing(true)
+  }, [pendingRename, spaceId])
 
   if (name === undefined) return null
   // A single Space that was never named shows no title row until it gets a name (SP-04).

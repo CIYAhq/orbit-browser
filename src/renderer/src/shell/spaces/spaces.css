@@ -127,6 +127,23 @@
 
 /* ---------- Title row (SP-04, SB-06) ---------- */
 
+/* Inside the tabs lane's header (with the pinned caret, PN-09). */
+.space-header .space-title {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Pinned collapsed with a pinned tab selected: the name is shown bold (SP-04, PN-09). */
+.space-header.has-hidden-active .space-title__name {
+  font-weight: 800;
+}
+
+/* A dragged tab hovering a switcher target (SP-21). */
+.space-dot.is-drop-target {
+  background: color-mix(in oklab, var(--accent) 22%, transparent);
+  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--accent) 60%, transparent);
+}
+
 .space-title {
   display: flex;
   align-items: center;
@@ -152,7 +169,7 @@
   text-overflow: ellipsis;
   text-align: left;
   font-size: 13px;
-  font-weight: 680;
+  font-weight: 620;
   letter-spacing: -0.005em;
   color: var(--text);
 }
@@ -296,6 +313,8 @@
   border-radius: 50%;
   background: color-mix(in oklab, var(--dot, var(--accent)) calc(var(--p) * 100%), var(--text-muted));
   transform: scale(calc(1 + 0.4 * var(--p)));
+  /* Painted per frame from the swipe progress: no transitions (review F2). */
+  transition: none;
 }
 
 .space-dot__icon {
@@ -304,6 +323,7 @@
   opacity: calc(0.5 + 0.5 * var(--p));
   filter: grayscale(calc(0.7 - 0.7 * var(--p)));
   transform: scale(calc(0.9 + 0.1 * var(--p)));
+  transition: none;
 }
 
 .spacebar__plus {

@@ -286,6 +286,12 @@ function SpaceMenu({ spaceId, x, y, sidebar }: { spaceId: SpaceId; x: number; y:
           runAction('folder.new')
         }),
       },
+      {
+        id: 'new-space',
+        label: 'New Space',
+        icon: <LayoutGrid size={14} />,
+        run: run(() => invoke('spaces.beginCreate', {})),
+      },
       'separator',
     )
   }

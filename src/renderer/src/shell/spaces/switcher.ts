@@ -197,6 +197,17 @@ export class SpaceSwitcher {
     return !!this.anim || this.x.get() !== 0 || this.gesture?.phase === 'tracking'
   }
 
+  private settleWaiters: (() => void)[] = []
+
+  /**
+   * Resolves once the strip rests on the active Space (at once if it already does).
+   * The tab drag waits for this before measuring the rows of a Space it slid to.
+   */
+  whenSettled(): Promise<void> {
+    if (!this.isMoving()) return Promise.resolve()
+    return new Promise((resolve) => this.settleWaiters.push(resolve))
+  }
+
   // ---- Active Space changes (clicks, keys, commits, other code) ----
 
   /**
@@ -591,6 +602,7 @@ export class SpaceSwitcher {
       if (this.newPage === 'hint') this.newPage = undefined
       this.setSlots(this.slots.filter((s) => s.k === 0))
       perfMark('space:switch:settled')
+      for (const resolve of this.settleWaiters.splice(0)) resolve()
     }
     this.paint()
   }
@@ -737,8 +749,15 @@ export const switcher = new SpaceSwitcher()
 
 /**
  * For the tab drag (TB-09, SP-21): slide to the neighbouring Space while a tab
- * is held at the sidebar edge. The window switches; the strip animates.
+ * is held at the sidebar edge. The window switches; the strip animates. Resolves
+ * once the strip rests on the new Space, so its rows can be measured.
  */
-export function slideToNeighbour(direction: 1 | -1): void {
-  void invoke('spaces.step', { delta: direction })
+export async function slideToNeighbour(direction: 1 | -1): Promise<void> {
+  await invoke('spaces.step', { delta: direction })
+  await stripSettled()
+}
+
+/** Resolves when the Space strip rests (after the state change reached this renderer). */
+export function stripSettled(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => void switcher.whenSettled().then(resolve)))
 }

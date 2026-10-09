@@ -508,61 +508,7 @@ html.is-resizing * {
   box-shadow: inset 0 0 0 1px var(--divider);
 }
 
-/* Space bar */
-.spacebar {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 40px;
-  padding-top: 4px;
-}
-
-.spacebar__spaces {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-  gap: 2px;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.space-dot {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  transition: background var(--dur-fast) ease;
-}
-
-.space-dot:hover {
-  background: var(--hover);
-}
-
-.space-dot__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--text-muted);
-  transition:
-    transform var(--dur-fast) var(--ease-spring),
-    background var(--dur-fast) ease;
-}
-
-.space-dot.is-active .space-dot__dot {
-  background: var(--dot);
-  transform: scale(1.35);
-}
-
-.space-dot__icon {
-  font-size: 14px;
-  opacity: 0.6;
-}
-
-.space-dot.is-active .space-dot__icon {
-  opacity: 1;
-}
+/* Space bar: see src/renderer/src/shell/spaces/spaces.css (spaces lane). */
 
 .sidebar__resize {
   position: absolute;
@@ -601,6 +547,536 @@ html.is-resizing * {
   from {
     opacity: 0;
     transform: translateY(6px) scale(0.98);
+  }
+}
+
+/* ---------- Sidebar items: tabs, pinned, Favorites, Today, folders (tabs lane) ---------- */
+
+.sidebar-items {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-items .sidebar__scroll {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  outline: none;
+}
+
+.sidebar__fill {
+  flex: 1 0 28px;
+}
+
+.row-slot {
+  position: relative;
+  flex: none;
+  overflow: clip;
+  overflow-clip-margin: 3px;
+}
+
+/* Press and hover respond at once (no fade on press). */
+.tab-row,
+.folder-row {
+  transition: none;
+}
+
+.tab-row.is-selected:not(.is-active) {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.tab-row.is-focused,
+.folder-row.is-focused {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.tab-row.is-asleep .tab-row__icon {
+  opacity: 0.72;
+}
+
+.tab-row__emoji {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.tab-row__icon--resettable {
+  border-radius: 5px;
+}
+
+.tab-row__icon--resettable:hover {
+  background: var(--hover);
+  box-shadow: 0 0 0 3px var(--hover);
+}
+
+.tab-row__reset-glyph {
+  color: var(--text);
+}
+
+.tab-row__crumb {
+  color: var(--text-muted);
+}
+
+.tab-row__slash {
+  opacity: 0.6;
+}
+
+.tab-row__hint {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.rename-field {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  margin: 0 2px 0 -4px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 5px;
+  outline: none;
+  font: inherit;
+  color: var(--text);
+  background: color-mix(in srgb, var(--active) 92%, transparent);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 70%, transparent);
+  user-select: text;
+}
+
+.rename-field::selection {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.folder-row__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  color: var(--text-muted);
+}
+
+/* Full-colour default folder glyph, distinct open and closed shapes (FD-07). */
+.folder-row__icon svg {
+  color: var(--accent);
+  fill: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.folder-row.is-drop-into {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+.folder__children {
+  overflow: clip;
+  overflow-clip-margin: 3px;
+}
+
+.space-header {
+  display: flex;
+  align-items: center;
+}
+
+.space-header .sidebar__space-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.space-header__caret {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-right: 4px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  opacity: 0;
+}
+
+.space-header:hover .space-header__caret,
+.space-header.is-collapsed .space-header__caret,
+.space-header__caret:focus-visible {
+  opacity: 1;
+}
+
+.space-header__caret:hover {
+  background: var(--hover);
+}
+
+.space-header__caret-glyph,
+.folder-row__chevron-wrap {
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--text-muted);
+}
+
+.space-header.has-hidden-active .sidebar__space-name {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.pinned-section {
+  overflow: clip;
+  overflow-clip-margin: 3px;
+}
+
+.today-block {
+  position: relative;
+  flex: none;
+}
+
+.sidebar__clear {
+  transition: none;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 5px;
+}
+
+.sidebar__clear:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.new-tab-button__plus {
+  display: grid;
+  place-items: center;
+}
+
+/* Favorites grid (FV-02) */
+.favorites {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.favorites--empty {
+  display: block;
+  padding: 0;
+}
+
+.favorites__hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.favorite {
+  transition: none;
+}
+
+.favorite--placeholder {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.favorites.is-full .favorite--placeholder {
+  background: rgba(220, 60, 60, 0.12);
+  box-shadow: inset 0 0 0 1.5px rgba(220, 60, 60, 0.5);
+}
+
+.favorite__emoji {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.favorite__away {
+  position: absolute;
+  bottom: 5px;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+/* Drag and drop (TB-08) */
+html.is-dragging-tab,
+html.is-dragging-tab * {
+  cursor: grabbing !important;
+}
+
+.drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 0 8px;
+  border-radius: var(--radius-row);
+  pointer-events: none;
+  color: var(--text);
+  background: color-mix(in srgb, var(--active) 100%, transparent);
+  backdrop-filter: blur(14px);
+  box-shadow:
+    0 6px 16px rgba(0, 0, 0, 0.22),
+    0 0 0 0.5px rgba(0, 0, 0, 0.08);
+  transform-origin: 30% 50%;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.folder-row__icon.is-absorbing {
+  animation: folder-absorb 220ms ease-out;
+}
+
+@keyframes folder-absorb {
+  50% {
+    transform: scale(1.1);
+  }
+}
+
+/* A row travelling to another section draws above its neighbours, unclipped (FL-07). */
+.row-slot.is-travelling {
+  z-index: 2;
+  overflow: visible;
+}
+
+.pinned-section:has(.is-travelling),
+.folder__children:has(.is-travelling) {
+  overflow: visible;
+}
+
+/* The dragged rows' slots stay in layout (the gap) but are not drawn. */
+.is-drag-hidden {
+  visibility: hidden;
+}
+
+/* Same-frame press feedback before the selection round-trip lands (FL-05, FL-29). */
+.tab-row:active:not(.is-active) {
+  background: color-mix(in srgb, var(--active) 70%, transparent);
+}
+
+/* Off-screen rows stay out of layout and paint work (FL-21). */
+.row-slot {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 32px;
+}
+
+/* A tab opened in the background glows briefly so the eye finds it (FL-06). */
+.tab-row.is-new-background {
+  animation: row-glow 420ms ease-out;
+}
+
+@keyframes row-glow {
+  30% {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+}
+
+.drag-ghost--tile {
+  justify-content: center;
+  padding: 0;
+  border-radius: 10px;
+  transform-origin: 50% 50%;
+}
+
+.drag-ghost--outside {
+  opacity: 0.7;
+}
+
+.drag-ghost__count {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  color: #fff;
+  background: var(--accent);
+}
+
+.space-dot.is-drop-target {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+/* Overflow indicator for the selected tab (SB-23) */
+.reveal-pill {
+  position: absolute;
+  left: 50%;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 11px;
+  font-size: 11px;
+  color: var(--text);
+  background: var(--active);
+  box-shadow:
+    var(--active-shadow),
+    0 2px 8px rgba(0, 0, 0, 0.08);
+  transform: translateX(-50%);
+  animation: reveal-pill-in 160ms var(--ease-out);
+}
+
+.reveal-pill--above {
+  top: 4px;
+}
+
+.reveal-pill--below {
+  bottom: 6px;
+}
+
+@keyframes reveal-pill-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Emoji picker (TB-12, FD-07) */
+.icon-picker {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  z-index: 40;
+  padding: 8px;
+  border-radius: 12px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--frame-top) 22%, white);
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.2),
+    0 0 0 0.5px rgba(0, 0, 0, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  .icon-picker {
+    background: color-mix(in srgb, var(--frame-top) 35%, #1f1f24);
+  }
+}
+
+.icon-picker__search {
+  width: 100%;
+  height: 26px;
+  margin-bottom: 6px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  outline: none;
+  font: inherit;
+  color: inherit;
+  background: var(--hover);
+  user-select: text;
+}
+
+.icon-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.icon-picker__emoji {
+  height: 26px;
+  border-radius: 6px;
+  font-size: 16px;
+}
+
+.icon-picker__emoji:hover {
+  background: var(--hover);
+}
+
+.icon-picker__remove {
+  width: 100%;
+  height: 24px;
+  margin-top: 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.icon-picker__remove:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* Folder search (FD-08) */
+.folder-row__search {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  opacity: 0;
+}
+
+.folder-row:hover .folder-row__search,
+.folder-row__search:focus-visible {
+  opacity: 1;
+}
+
+.folder-row__search:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.tab-row__close:active,
+.tab-row__audio:active,
+.folder-row__search:active {
+  transform: scale(0.9);
+}
+
+.folder-search {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  z-index: 40;
+  padding: 8px;
+  border-radius: 12px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--frame-top) 22%, white);
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.2),
+    0 0 0 0.5px rgba(0, 0, 0, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  .folder-search {
+    background: color-mix(in srgb, var(--frame-top) 35%, #1f1f24);
+  }
+}
+
+.folder-search__list {
+  max-height: 210px;
+  overflow-y: auto;
+}
+
+.folder-search__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 6px;
+  border-radius: 7px;
+}
+
+.folder-search__item.is-selected {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.folder-search__empty {
+  padding: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal-pill {
+    transition: none;
+    animation: none;
   }
 }
 

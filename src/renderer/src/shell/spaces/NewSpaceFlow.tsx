@@ -1,6 +1,7 @@
 import { Check, Smile } from 'lucide-react'
 import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { DEFAULT_PROFILE_ID, NEW_SPACE_PRESETS, THEME_PRESETS } from '../../../../shared/defaults'
+import { placeholderName } from '../../../../shared/space-names'
 import type { SpaceTheme } from '../../../../shared/state'
 import { invoke } from '../../api'
 import { getOrbitState, useOrbit } from '../../store'
@@ -22,7 +23,8 @@ export function NewSpaceFlow({ windowId }: { windowId: string }) {
     return {
       profileId: active?.profileId ?? DEFAULT_PROFILE_ID,
       theme: THEME_PRESETS[s.spaceOrder.length % NEW_SPACE_PRESETS] as SpaceTheme,
-      placeholder: `Space ${s.spaceOrder.length + 1}`,
+      // Inserted right after the active Space: the same placeholder the model will give it (review F8).
+      placeholder: placeholderName(s, s.spaceOrder.indexOf(s.windows[windowId]?.spaceId ?? '') + 2),
     }
   })
   const [name, setName] = useState('')

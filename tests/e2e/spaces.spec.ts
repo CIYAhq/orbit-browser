@@ -1,3 +1,5 @@
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import {
   type Fixtures,
@@ -309,9 +311,16 @@ test('[SP-04][SP-07][SB-06] the Space menu lists its items, also for a backgroun
   // Right-click a background Space's target: its menu, without switching to it.
   await shell.locator(`[data-testid="space-dot"][data-space-id="${b}"]`).click({ button: 'right' })
   await expect(overlay.getByTestId('space-menu')).toHaveAttribute('aria-label', 'Beta options')
-  await overlay.getByTestId('menu-rename').click()
-  await expect(shell.getByTestId('space-rename-input')).toHaveCount(0)
   expect(await activeSpace(app)).toBe(a)
+  // Rename acts on that Space: it comes into view with its name ready to edit (review M7).
+  await overlay.getByTestId('menu-rename').click()
+  await expect.poll(() => activeSpace(app)).toBe(b)
+  const input = shell.getByTestId('space-rename-input')
+  await expect(input).toBeFocused()
+  await input.fill('Background renamed')
+  await input.press('Enter')
+  await expect.poll(async () => (await state(app)).spaces[b]?.name).toBe('Background renamed')
+  expect((await state(app)).spaces[a]?.name).toBe('Personal')
 })
 
 test('[SP-12] deleting a Space asks first, archives its tabs tagged with its name, and Undo brings it back', async () => {
@@ -444,6 +453,8 @@ test('[PR-02][PR-03][PR-05][PR-07][PR-08] a new profile from the Space menu isol
     document.cookie = 'orbit_session=alice; path=/; max-age=3600'
   })
   const b = await createSpace(app, { name: 'Client' })
+  const shown = await newTab(app, fx.url('/page/ClientHome'))
+  await tabPage(app, '/page/ClientHome')
   await settled(shell)
   // Space menu → Profile → New Profile… assigns it to this Space at once.
   await shell.getByTestId('space-title-row').hover()
@@ -458,6 +469,32 @@ test('[PR-02][PR-03][PR-05][PR-07][PR-08] a new profile from the Space menu isol
   const work = s.spaces[b]?.profileId as string
   expect(s.profiles[work]?.name).toBe('Work')
   expect(s.profiles[work]?.partition).toBe(`persist:orbit-${work}`)
+  // The page that was on screen reloads in the new profile's session, visible (PR-03; review M6).
+  const live = () =>
+    app.evaluate((_e, id) => {
+      const ctx = (
+        globalThis as unknown as {
+          __orbit: {
+            ctx: {
+              tabs: {
+                get: (id: string) => { getVisible: () => boolean; webContents: { session: unknown } } | undefined
+              }
+              sessions: { get: (p: string) => unknown }
+              store: { state: { tabs: Record<string, { profileId: string; asleep: boolean }> } }
+            }
+          }
+        }
+      ).__orbit.ctx
+      const view = ctx.tabs.get(id)
+      const tab = ctx.store.state.tabs[id]
+      return {
+        visible: view?.getVisible() ?? false,
+        newSession: !!view && !!tab && view.webContents.session === ctx.sessions.get(tab.profileId),
+        asleep: tab?.asleep,
+      }
+    }, shown)
+  await expect.poll(live).toEqual({ visible: true, newSession: true, asleep: false })
+  await expect(shell.getByTestId('content-frame')).toHaveAttribute('data-active-tab', shown)
   // Same site in the other profile: signed out (no cookie).
   await newTab(app, fx.url('/page/CookieB'))
   const pageB = await tabPage(app, '/page/CookieB')
@@ -477,11 +514,14 @@ test('[PR-02][PR-03][PR-05][PR-07][PR-08] a new profile from the Space menu isol
     'title',
     /Client · Work/,
   )
-  // The Default profile can't be deleted; a deleted profile's Spaces fall back to Default.
+  // Default can't be deleted, nor a profile a Space still uses (review F1); once unused it can.
   expect(await run(app, 'profiles.delete', { profileId: 'p-default' })).toBe(false)
-  expect(await run(app, 'profiles.delete', { profileId: work })).toBe(true)
-  await expect.poll(async () => (await state(app)).spaces[b]?.profileId).toBe('p-default')
+  expect(await run(app, 'profiles.delete', { profileId: work })).toBe(false)
+  expect((await state(app)).profiles[work]).toBeDefined()
+  await run(app, 'spaces.update', { spaceId: b, profileId: 'p-default' })
   await expect(shell.getByTestId('profile-badge')).toHaveCount(0)
+  expect(await run(app, 'profiles.delete', { profileId: work })).toBe(true)
+  await expect.poll(async () => (await state(app)).profiles[work]).toBeUndefined()
 })
 
 test('[PR-06][SP-01][SP-20] Favorites belong to the profile; pinned and Today belong to the Space', async () => {
@@ -577,6 +617,8 @@ test('[SP-02][PR-04] New Space from the + menu: the flow in the sidebar, profile
   const flow = shell.getByTestId('new-space-flow')
   await expect(flow).toBeVisible()
   await expect(shell.getByTestId('new-space-name')).toBeFocused()
+  // Same name an unnamed Space gets in that position (review F8).
+  await expect(shell.getByTestId('new-space-name')).toHaveAttribute('placeholder', 'Space 3')
   // Profile step: the active Space's profile is preselected.
   const profiles = shell.getByTestId('new-space-profile')
   await expect(profiles).toHaveCount(2)
@@ -764,4 +806,120 @@ test('[FL-13][SP-07] jumping several Spaces slides one page with the destination
   const shift = Number(result.find((r) => r.startsWith('shift:'))?.slice(6))
   expect(shift).toBeLessThanOrEqual(width + 1)
   await expect.poll(() => activeSpace(app)).toBe(d)
+})
+
+test('[SB-23][SP-08] slow, small vertical wheel steps scroll the tab list (review M2)', async () => {
+  const { app, shell } = orbit
+  await createSpace(app, { name: 'Beta', activate: false })
+  for (let i = 0; i < 40; i++) await newTab(app, fx.url(`/page/Row${i}`), { activate: false })
+  await settled(shell)
+  await hoverSidebar(shell)
+  const list = shell.getByTestId('sidebar-scroll')
+  await list.evaluate((el) => {
+    el.scrollTop = 0
+  })
+  for (let i = 0; i < 15; i++) {
+    await shell.mouse.wheel(0, 6)
+    await sleep(120)
+  }
+  await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBeGreaterThanOrEqual(60)
+  expect(await stripX(shell)).toBe(0)
+})
+
+test('[SP-08][FL-13] the strip never freezes between pages (review M3)', async () => {
+  const { app, shell } = orbit
+  await createSpace(app, { name: 'Beta', activate: false })
+  await settled(shell)
+  const w = await stripWidth(shell)
+  await hoverSidebar(shell)
+  // (a) Fingers still moving while the new-Space page springs in: it still arrives.
+  await run(app, 'spaces.beginCreate', {})
+  await sleep(40)
+  await swipe(shell, 6, 3, 8)
+  await expect.poll(() => stripX(shell), { timeout: 3000 }).toBeCloseTo(-w, 0)
+  await shell.getByTestId('new-space-cancel').click()
+  await settled(shell)
+  // (b) A release starved by a long task, then a vertical event: the strip still settles.
+  await sleep(150)
+  await swipe(shell, 10, 6, 10)
+  await expect.poll(() => stripX(shell)).toBeLessThan(-20)
+  await shell.evaluate(() => {
+    const end = performance.now() + 150
+    while (performance.now() < end) {
+      // busy: the release timer can't run
+    }
+  })
+  await shell.mouse.wheel(0, 8)
+  await settled(shell)
+  expect(await stripX(shell)).toBe(0)
+})
+
+test('[SP-08][FL-13] a finger that eases off and moves on keeps tracking (review M4)', async () => {
+  const { app, shell } = orbit
+  const a = await activeSpace(app)
+  const b = await createSpace(app, { name: 'Beta', activate: false })
+  for (let i = 0; i < 40; i++) await newTab(app, fx.url(`/page/Row${i}`), { activate: false })
+  await settled(shell)
+  const samples = shell.evaluate(
+    () =>
+      new Promise<number[]>((done) => {
+        const out: number[] = []
+        const track = document.querySelector<HTMLElement>('.space-strip__track')
+        const t0 = performance.now()
+        const tick = () => {
+          const m = /translate3d\((-?[\d.]+)px/.exec(track?.style.transform ?? '')
+          out.push(m ? Number(m[1]) : 0)
+          if (performance.now() - t0 < 520) requestAnimationFrame(tick)
+          else done(out)
+        }
+        requestAnimationFrame(tick)
+      }),
+  )
+  // 144 px: eases off to 2 px per event, then speeds up again (no lift in between).
+  await flick(shell, [10, 6, 6, 6, 6, 6, 5, 4, 3, 2, 3, 4, 5, ...Array(13).fill(6)], 16)
+  const xs = await samples
+  // While the fingers were on, the strip only ever moved further (it never sprang back).
+  const tracked = xs.filter((x) => x !== 0)
+  for (let i = 1; i < tracked.length; i++) expect(tracked[i]).toBeLessThanOrEqual((tracked[i - 1] as number) + 0.5)
+  // Past half the width on release: switched.
+  await expect.poll(() => activeSpace(app), { timeout: 3000 }).toBe(b)
+  await settled(shell)
+  // A swipe released by OS-style momentum (here: rubber-banding at the first Space), then at
+  // once a vertical scroll: the list scrolls instead of being swallowed with the momentum.
+  await run(app, 'spaces.switch', { spaceId: a })
+  await settled(shell)
+  await sleep(200)
+  await hoverSidebar(shell)
+  const list = shell.getByTestId('sidebar-scroll')
+  await flick(shell, [-8, -8, -7.2, -6.5, -5.9, -5.3, -4.8, -4.3], 6)
+  await shell.mouse.wheel(0, 60)
+  await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBeGreaterThan(20)
+  await settled(shell)
+})
+
+test('[SP-15][PR-01] a theme with a gradient and grain survives relaunch (review M1)', async () => {
+  const { app } = orbit
+  const a = await activeSpace(app)
+  const theme = { colors: ['#e85d9a', '#6b7cff'], intensity: 0.7, grain: 0.4 }
+  await run(app, 'spaces.update', { spaceId: a, theme })
+  await expect.poll(async () => (await state(app)).spaces[a]?.theme).toEqual(theme)
+  const userData = orbit.userData
+  await app.close()
+  orbit = await launchOrbit({ userData })
+  await expect.poll(async () => (await state(orbit.app)).spaces[a]?.theme).toEqual(theme)
+  await expect.poll(() => bgVar(orbit.shell, '--bg-top')).not.toBe('')
+})
+
+test('[SP-15] a stored theme without colors still opens the window (review M1)', async () => {
+  const { app } = orbit
+  const a = await activeSpace(app)
+  const userData = orbit.userData
+  await app.close()
+  const file = join(userData, 'orbit-state.json')
+  const saved = JSON.parse(readFileSync(file, 'utf8'))
+  saved.spaces[a].theme = { intensity: 0.6, grain: 0 }
+  writeFileSync(file, JSON.stringify(saved))
+  orbit = await launchOrbit({ userData })
+  await expect(orbit.shell.getByTestId('sidebar')).toBeVisible()
+  expect((await state(orbit.app)).spaces[a]?.theme).toEqual({ colors: [], intensity: 0.6, grain: 0 })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activateInDraft, detachFromSplit, makeTab, pickNextActive } from '../../src/main/tabs/model'
+import { activateInDraft, detachFromSplit, makeTab, mostRecentTab } from '../../src/main/tabs/model'
 import { createInitialState, createSpace, createWindowState, DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
 import { matchScore } from '../../src/shared/match'
 
@@ -39,13 +39,13 @@ describe('tab model', () => {
     expect(state.windows[win]?.activeTab[s1]).toBe(fav)
   })
 
-  it('picks the most recently used awake tab next', () => {
+  it('picks the most recently used tab of a Space', () => {
     const { state, s1, add } = world()
     const a = add(s1, 'today', 10)
     const b = add(s1, 'today', 30)
     const c = add(s1, 'today', 20)
-    for (const id of [a, b, c]) if (state.tabs[id]) (state.tabs[id] as { asleep: boolean }).asleep = false
-    expect(pickNextActive(state, s1, new Set([b]))).toBe(c)
+    expect(mostRecentTab(state, s1, new Set([b]))).toBe(c)
+    expect(mostRecentTab(state, s1, new Set([b, c]))).toBe(a)
   })
 
   it('dissolves a split when only one pane is left', () => {

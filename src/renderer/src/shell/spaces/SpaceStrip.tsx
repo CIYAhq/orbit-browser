@@ -3,6 +3,7 @@ import { memo, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from '
 import type { SpaceId } from '../../../../shared/state'
 import { useOrbit } from '../../store'
 import { NewSpaceFlow } from './NewSpaceFlow'
+import { requestRename } from './rename-request'
 import { SpaceContent } from './SpaceContent'
 import { SpacePreview } from './SpacePreview'
 import { switcher } from './switcher'
@@ -58,9 +59,11 @@ export const SpaceStrip = memo(function SpaceStrip({ windowId, spaceId }: { wind
   useEffect(() => {
     const offNudge = window.orbit.on('spaces:nudge', (p) => switcher.nudge((p as { direction: number }).direction))
     const offFlow = window.orbit.on('spaces:new-flow', () => switcher.openFlow())
+    const offRename = window.orbit.on('spaces:rename', (p) => requestRename((p as { spaceId: string }).spaceId))
     return () => {
       offNudge()
       offFlow()
+      offRename()
     }
   }, [])
 

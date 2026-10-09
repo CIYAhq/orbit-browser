@@ -190,7 +190,7 @@ describe('[SP-12] delete a Space', () => {
   it('caps the archive by trimming the oldest entries in chunks', () => {
     const { state, a, addTab } = world()
     const b = createSpaceInDraft(state, { name: 'B', afterSpaceId: a })
-    for (let i = 0; i < MAX_ARCHIVE; i++) {
+    for (let i = 0; i < MAX_ARCHIVE + 500; i++) {
       state.archive.push({
         id: `a-${i}`,
         url: `https://x${i}.test/`,
@@ -203,9 +203,9 @@ describe('[SP-12] delete a Space', () => {
     }
     addTab(b.id, 'today', 'https://new.test/')
     deleteSpaceInDraft(state, b.id)
-    expect(state.archive.length).toBeLessThanOrEqual(MAX_ARCHIVE)
+    expect(state.archive.length).toBe(MAX_ARCHIVE)
     expect(state.archive.at(-1)?.url).toBe('https://new.test/')
-    expect(state.archive[0]?.id).toBe('a-500')
+    expect(state.archive[0]?.id).toBe('a-501')
   })
 })
 
@@ -232,20 +232,25 @@ describe('[PR-02][PR-03][PR-05][PR-06] profiles', () => {
     expect(assignProfileInDraft(state, a, work.id)).toEqual([])
   })
 
-  it('deleting a profile re-homes its Spaces and Favorites to Default; Default itself cannot be deleted', () => {
-    const { state, a, addTab } = world()
+  it('[PR-08] a profile is deleted only when no Space uses it, and its Favorites go with it (review F1)', () => {
+    const { state, a, win, addTab } = world()
     const work = createProfileInDraft(state, 'Work')
     const b = createSpaceInDraft(state, { name: 'B', afterSpaceId: a, profileId: work.id })
     const t = addTab(b.id, 'today')
     const fav = addTab(b.id, 'favorites')
-    expect(state.profiles[work.id]?.favorites).toEqual([fav])
+    state.windows[win]!.activeTab[b.id] = fav
     expect(deleteProfileInDraft(state, DEFAULT_PROFILE_ID)).toBeUndefined()
-    const result = deleteProfileInDraft(state, work.id)
-    expect(result?.moved.sort()).toEqual([t, fav].sort())
+    // In use by Space B: refused, nothing changes.
+    expect(deleteProfileInDraft(state, work.id)).toBeUndefined()
+    expect(state.profiles[work.id]).toBeDefined()
+    // Reassign B, then delete: the profile and its Favorites are gone; B's tabs stay.
+    assignProfileInDraft(state, b.id, DEFAULT_PROFILE_ID)
+    expect(deleteProfileInDraft(state, work.id)?.removed).toEqual([fav])
     expect(state.profiles[work.id]).toBeUndefined()
-    expect(state.spaces[b.id]?.profileId).toBe(DEFAULT_PROFILE_ID)
-    expect(state.profiles[DEFAULT_PROFILE_ID]?.favorites).toContain(fav)
-    expect(state.tabs[fav]?.profileId).toBe(DEFAULT_PROFILE_ID)
+    expect(state.tabs[fav]).toBeUndefined()
+    expect(state.tabs[t]?.profileId).toBe(DEFAULT_PROFILE_ID)
+    expect(state.profiles[DEFAULT_PROFILE_ID]?.favorites).not.toContain(fav)
+    expect(state.windows[win]?.activeTab[b.id]).toBeNull()
   })
 })
 

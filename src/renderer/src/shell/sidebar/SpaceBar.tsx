@@ -8,11 +8,11 @@ import {
   useRef,
   useState,
 } from 'react'
-import { formatAccelerator } from '../../../../shared/actions'
+import { ACTIONS_BY_ID, formatAccelerator, shortcutsFor } from '../../../../shared/actions'
 import { DEFAULT_PROFILE_ID } from '../../../../shared/defaults'
 import type { SpaceId, WindowState } from '../../../../shared/state'
 import { primaryColor } from '../../../../shared/theme'
-import { invoke, isMac } from '../../api'
+import { invoke } from '../../api'
 import { useOrbit } from '../../store'
 import { switcher } from '../spaces/switcher'
 import { openSpaceMenu, openSpacePanel } from '../spaces/TitleRow'
@@ -138,6 +138,13 @@ function Switcher({ order, activeId }: { order: SpaceId[]; activeId: SpaceId }) 
     if (drag.moved) setTimeout(() => setDrag(null), 0)
     else setDrag(null)
   }, [])
+  // A cancelled drag (e.g. the pointer was taken away) keeps the old order (review F10).
+  const onPointerCancel = useCallback((e: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current
+    if (!drag || e.pointerId !== drag.pointerId) return
+    e.currentTarget.style.removeProperty('--drag-x')
+    setDrag(null)
+  }, [])
 
   const shiftOf = (index: number): number => {
     if (!drag?.moved) return 0
@@ -167,6 +174,7 @@ function Switcher({ order, activeId }: { order: SpaceId[]; activeId: SpaceId }) 
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
+            onPointerCancel={onPointerCancel}
             suppressClick={drag?.moved === true}
           />
         ))}
@@ -185,6 +193,7 @@ const SpaceTarget = memo(function SpaceTarget(props: {
   onPointerDown: (e: ReactPointerEvent<HTMLButtonElement>, spaceId: SpaceId) => void
   onPointerMove: (e: ReactPointerEvent<HTMLButtonElement>) => void
   onPointerUp: (e: ReactPointerEvent<HTMLButtonElement>) => void
+  onPointerCancel: (e: ReactPointerEvent<HTMLButtonElement>) => void
 }) {
   const { spaceId, index, active } = props
   const ref = useCallback((el: HTMLButtonElement | null) => switcher.registerDot(spaceId, el), [spaceId])
@@ -199,8 +208,10 @@ const SpaceTarget = memo(function SpaceTarget(props: {
     return id && id !== DEFAULT_PROFILE_ID ? s.profiles[id]?.name : undefined
   })
   if (name === undefined) return null
-  const shortcut =
-    index < 9 ? formatAccelerator(isMac ? `Ctrl+${index + 1}` : `Alt+${index + 1}`, window.orbit.platform) : ''
+  // The shortcut comes from the action table, so it follows remaps (AP-16; review F14).
+  const action = index < 9 ? ACTIONS_BY_ID[`space.goto.${index + 1}`] : undefined
+  const accel = action ? shortcutsFor(action, window.orbit.platform)[0] : undefined
+  const shortcut = accel ? formatAccelerator(accel, window.orbit.platform) : ''
   // Tooltip: "Name · Profile (shortcut)" (SP-06, PR-07, AP-16).
   const tooltip = `${name}${profile ? ` · ${profile}` : ''}${shortcut ? ` (${shortcut})` : ''}`
   const style = {
@@ -227,7 +238,7 @@ const SpaceTarget = memo(function SpaceTarget(props: {
       onPointerDown={(e) => props.onPointerDown(e, spaceId)}
       onPointerMove={props.onPointerMove}
       onPointerUp={props.onPointerUp}
-      onPointerCancel={props.onPointerUp}
+      onPointerCancel={props.onPointerCancel}
       onClick={() => {
         if (props.suppressClick || active) return
         void invoke('spaces.switch', { spaceId })
