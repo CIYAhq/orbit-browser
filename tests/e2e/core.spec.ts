@@ -135,7 +135,13 @@ test('[TB-19] a target=_blank link shows its tab in exactly one attached, top-mo
 })
 
 test('[TB-06] a page that closes itself leaves no dead view; the tab shows again (review M3)', async () => {
-  const a = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/Closer') })) as string
+  // A pinned tab: its page closing itself unloads it (like closing it) and it shows again when
+  // selected. A Today tab is closed into the Archive instead (tabs-review.spec.ts covers that).
+  const spaceId = (await state(orbit.app)).spaceOrder[0] as string
+  const a = (await run(orbit.app, 'tabs.create', {
+    url: fx.url('/page/Closer'),
+    container: { kind: 'pinned', spaceId },
+  })) as string
   const page = await tabPage(orbit.app, '/page/Closer')
   await expect(page.locator('#title')).toHaveText('Closer')
   const b = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/Other') })) as string
@@ -496,15 +502,16 @@ test('[NV-20] leaving HTML fullscreen right after entering does not leave the pa
 })
 
 test('[TB-19] a tab view that replaces another stays below the open command bar (review R1)', async () => {
-  const opener = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/Alpha') })) as string
-  await tabPage(orbit.app, '/page/Alpha')
+  await run(orbit.app, 'tabs.create', { url: fx.url('/page/Alpha') })
+  const alpha = await tabPage(orbit.app, '/page/Alpha')
   await action(orbit.app, 'tab.new')
   const overlay = await viewPage(orbit.app, 'overlay')
   await expect(overlay.getByTestId('command-input')).toBeFocused()
   // The page opens a tab while the command bar is up: its first view is replaced by the real one.
-  await inPage(orbit.app, opener, `window.open(${JSON.stringify(fx.url('/page/Ext'))}); 'ok'`)
+  // A real click, because pages may only open tabs on a user gesture (review M6).
+  await alpha.click('#external')
   await expect.poll(async () => Object.keys((await state(orbit.app)).tabs).length).toBe(2)
-  await expect.poll(async () => (await zOrder(orbit.app)).filter((l) => l === '/page/Ext').length).toBe(1)
+  await expect.poll(async () => (await zOrder(orbit.app)).filter((l) => l === '/page/External').length).toBe(1)
   await expect.poll(async () => (await zOrder(orbit.app)).at(-1)).toBe('OVERLAY')
   expect(await overlay.getByTestId('command-input').isVisible()).toBe(true)
 })
@@ -581,7 +588,7 @@ test('[AP-01][SP-18] the window background and colour scheme follow the global a
   await orbit.shell.emulateMedia({ colorScheme: null })
   for (const appearance of ['dark', 'light'] as const) {
     await setAppearance(appearance)
-    const expected = paletteFor({ ...(theme as SpaceTheme), mode: 'system' }, appearance === 'dark').windowBackground
+    const expected = paletteFor(theme as SpaceTheme, appearance === 'dark').windowBackground
     await expect.poll(native).toEqual({ source: appearance, background: expected.toLowerCase() })
     await expect
       .poll(() => orbit.shell.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches))

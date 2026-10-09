@@ -1,55 +1,46 @@
-import { Plus } from 'lucide-react'
-import { type PointerEvent as ReactPointerEvent, useRef } from 'react'
+import { type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, useRef } from 'react'
 import type { WindowState } from '../../../../shared/state'
-import { invoke, runAction } from '../../api'
+import { invoke } from '../../api'
 import { useOrbit } from '../../store'
-import { Favorites } from './Favorites'
-import { ItemList } from './ItemList'
+import { SpaceStrip } from '../spaces/SpaceStrip'
+import { UndoToast } from '../spaces/UndoToast'
 import { SpaceBar } from './SpaceBar'
 import { TopBar } from './TopBar'
 
-/** The vertical sidebar: top bar, address, favorites, pinned + Today lists, Space switcher. */
+/**
+ * The vertical sidebar: top bar and address, then the per-Space strip
+ * (Favorites, title row, pinned, Today; swipeable between Spaces), then the
+ * Space switcher. Space content lives in ../spaces/.
+ */
 export function Sidebar({ win }: { win: WindowState }) {
-  const space = useOrbit((s) => s.spaces[win.spaceId])
-  if (!space) return null
+  const exists = useOrbit((s) => !!s.spaces[win.spaceId])
+  if (!exists) return null
   return (
-    <aside className="sidebar" data-testid="sidebar" aria-hidden={!win.sidebar.visible}>
+    <aside
+      className="sidebar"
+      data-testid="sidebar"
+      aria-hidden={!win.sidebar.visible}
+      onMouseUp={onSideButtons}
+      onAuxClick={preventSideButtons}
+    >
       <TopBar win={win} />
-      <Favorites profileId={space.profileId} />
-      <div className="sidebar__scroll" data-testid="sidebar-scroll">
-        <div className="sidebar__space-name" data-testid="space-name">
-          {space.icon ? <span className="sidebar__space-icon">{space.icon}</span> : null}
-          {space.name}
-        </div>
-        <ItemList container={{ kind: 'pinned', spaceId: space.id }} items={space.pinned} testId="pinned-list" />
-        <div className="sidebar__divider" data-testid="today-divider">
-          <span className="sidebar__divider-line" />
-          {space.today.length > 0 && (
-            <button
-              type="button"
-              className="sidebar__clear"
-              data-testid="clear-today"
-              onClick={() => void invoke('tabs.clearToday', { spaceId: space.id })}
-            >
-              Clear
-            </button>
-          )}
-        </div>
-        <button
-          type="button"
-          className="new-tab-button"
-          data-testid="new-tab-button"
-          onClick={() => runAction('tab.new')}
-        >
-          <Plus size={16} strokeWidth={2} />
-          <span>New Tab</span>
-        </button>
-        <ItemList container={{ kind: 'today', spaceId: space.id }} items={space.today} testId="today-list" />
-      </div>
+      <SpaceStrip windowId={win.id} spaceId={win.spaceId} />
+      <UndoToast />
       <SpaceBar win={win} />
       <ResizeHandle width={win.sidebar.width} />
     </aside>
   )
+}
+
+/** Mouse back/forward buttons over the sidebar move between Spaces (SP-09). */
+function onSideButtons(e: ReactMouseEvent) {
+  if (e.button !== 3 && e.button !== 4) return
+  e.preventDefault()
+  void invoke('spaces.step', { delta: e.button === 3 ? -1 : 1 })
+}
+
+function preventSideButtons(e: ReactMouseEvent) {
+  if (e.button === 3 || e.button === 4) e.preventDefault()
 }
 
 function ResizeHandle({ width }: { width: number }) {

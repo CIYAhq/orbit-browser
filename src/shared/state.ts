@@ -37,8 +37,16 @@ export interface Tab {
   favicon?: string
   /** For pinned tabs and favorites: the URL the tab resets to. */
   pinnedUrl?: string
-  /** User-chosen name for a pinned tab or favorite (overrides the page title). */
+  /** User-chosen name (overrides the page title). */
   customTitle?: string
+  /** Pinned tabs and favorites: title of the pinned page (the breadcrumb's first part, PN-03). */
+  pinnedTitle?: string
+  /** Pinned tabs and favorites: where the pinned URL resolved to after redirects (PN-03). */
+  pinnedResolvedUrl?: string
+  /** User-chosen emoji that replaces the favicon (TB-12). */
+  icon?: string
+  /** Tab whose link opened this tab (TB-19). */
+  openerTabId?: TabId
   createdAt: number
   lastActiveAt: number
   /** Runtime-only fields (not persisted): */
@@ -61,6 +69,8 @@ export interface Folder {
   children: ItemId[]
   collapsed: boolean
   createdAt: number
+  /** User-chosen emoji for the folder (FD-07). */
+  icon?: string
 }
 
 /** Split view layout tree. Leaves are tabs; max 4 leaves per split. */
@@ -76,17 +86,25 @@ export interface Split {
 
 export type ColorMode = 'system' | 'light' | 'dark'
 
+/**
+ * A Space's colours. Light/dark is not part of it: that is the one global
+ * `settings.appearance`, and every theme has a light and a dark rendition
+ * (see src/shared/theme.ts).
+ */
 export interface SpaceTheme {
-  /** Base colour as #rrggbb. */
-  color: string
-  /** Optional second colour for a gradient. */
-  color2?: string
-  mode: ColorMode
+  /** Zero to three colours (#rrggbb), blended top to bottom. Empty = the neutral default theme. */
+  colors: string[]
+  /** How strongly the colours show: 0 = faint wash … 1 = full. */
+  intensity: number
+  /** Static grain texture over the sidebar and frame: 0 = none … 1 = strong. */
+  grain: number
 }
 
 export interface Space {
   id: SpaceId
   name: string
+  /** True while `name` is an automatic placeholder ("Space 3") the user never chose. */
+  unnamed?: boolean
   /** Emoji or a short icon key. */
   icon: string
   theme: SpaceTheme
@@ -94,6 +112,8 @@ export interface Space {
   pinned: ItemId[]
   today: ItemId[]
   createdAt: number
+  /** Pinned section collapsed under the Space title (PN-09). */
+  pinnedCollapsed?: boolean
 }
 
 export interface Profile {
@@ -104,6 +124,8 @@ export interface Profile {
   /** Favorites are shared by every Space that uses this profile. */
   favorites: ItemId[]
   createdAt: number
+  /** Per-profile auto-archive period for Today tabs (TD-03); falls back to settings.archiveAfterMs. */
+  archiveAfterMs?: number
 }
 
 export type CommandBarMode = 'new-tab' | 'edit-url' | 'search-tabs'
@@ -112,7 +134,7 @@ export type OverlayState =
   | { kind: 'none' }
   | { kind: 'commandbar'; mode: CommandBarMode; query: string; nonce: number }
   | { kind: 'peek'; tabId: TabId; nonce: number }
-  | { kind: 'panel'; panel: string; nonce: number }
+  | { kind: 'panel'; panel: string; nonce: number; params?: Record<string, string | number | boolean> }
 
 export interface SidebarState {
   /** Docked and visible (true) or hidden/auto-hiding (false). */
@@ -154,17 +176,26 @@ export interface Settings {
   /** Links opened from other apps open in a Mini Window. */
   miniWindowForExternalLinks: boolean
   onboarded: boolean
+  /** ⌘1–⌘8 count Favorites first (TB-04, FV-10). */
+  countFavoritesInShortcuts: boolean
+  /** ⌘9 selects the last tab (true) or the 9th item (false) (TB-04). */
+  lastTabOnCmd9: boolean
 }
 
 export interface ArchivedTab {
   id: string
   url: string
   title: string
+  /** Not stored by the tabs lane (keeps state small): look icons up with `tabs.favicon`. */
   favicon?: string
   spaceId: SpaceId
+  /** Name of the Space at archive time (kept when the Space itself is deleted). */
+  spaceName?: string
   profileId: ProfileId
   archivedAt: number
-  reason: 'auto' | 'closed'
+  reason: 'auto' | 'closed' | 'cleared'
+  /** Section the tab left from (AR-01). */
+  section?: 'today' | 'pinned'
 }
 
 export interface Download {
@@ -199,6 +230,7 @@ export interface OrbitState {
   tabs: Record<TabId, Tab>
   folders: Record<FolderId, Folder>
   splits: Record<SplitId, Split>
+  /** Oldest first: new entries are appended (cheap patches) and the list is trimmed in chunks. */
   archive: ArchivedTab[]
   settings: Settings
   downloads: Record<string, Download>
