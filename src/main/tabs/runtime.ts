@@ -1,7 +1,17 @@
 import { type NavigationEntry, type WebContents, WebContentsView } from 'electron'
 import type { Tab, TabId } from '../../shared/state'
+import { isAwayFromPinned, sameDocUrl } from '../../shared/tabs'
 import type { MainContext } from '../context'
 import { showPageContextMenu } from './context-menu'
+
+/** Script run in an isolated world: is keyboard focus in an editable field of the page? */
+const FOCUS_IS_EDITABLE = `(() => {
+  const el = document.activeElement
+  if (!el || el === document.body) return false
+  if (el.isContentEditable) return true
+  const tag = el.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'IFRAME' || tag === 'EMBED' || tag === 'OBJECT'
+})()`
 
 type RuntimeFields = Partial<
   Pick<
@@ -25,6 +35,10 @@ export class TabRuntime {
   private byContents = new Map<number, TabId>()
   /** Navigation history of sleeping tabs, so waking restores back/forward. */
   readonly savedHistory = new Map<TabId, SavedHistory>()
+  /** Pinned tabs loading their pinned URL: the URL they land on (after redirects) counts as home (PN-03). */
+  private homeLoads = new Set<TabId>()
+  /** Sidebar undo, called for ⌘Z pressed in a page whose focus is not in a text field (TB-18). */
+  onUndoShortcut?: (tabId: TabId) => void
   private ctx!: MainContext
 
   init(ctx: MainContext): void {
@@ -70,6 +84,9 @@ export class TabRuntime {
     const saved = this.savedHistory.get(tabId)
     this.savedHistory.delete(tabId)
     const contents = view.webContents
+    if (tab.pinnedUrl && sameDocUrl(tab.url, tab.pinnedUrl) && !(saved && saved.entries.length > 0)) {
+      this.homeLoads.add(tabId)
+    }
     if (saved && saved.entries.length > 0) {
       contents.navigationHistory
         .restore({ entries: saved.entries, index: saved.index })
@@ -97,15 +114,34 @@ export class TabRuntime {
       canGoForward: contents.navigationHistory.canGoForward(),
     })
     contents.on('did-start-loading', () => this.update(tabId, { loading: true, error: undefined }))
-    contents.on('did-stop-loading', () => this.update(tabId, { loading: false, ...navState() }))
+    contents.on('did-stop-loading', () => {
+      this.homeLoads.delete(tabId)
+      this.update(tabId, { loading: false, ...navState() })
+    })
     contents.on('did-navigate', (_e, url) => {
+      if (this.homeLoads.has(tabId)) this.setPinnedHome(tabId, url)
       this.update(tabId, { url, ...navState() })
       for (const hook of this.ctx.hooks.tabNavigated) hook(tabId, contents, url)
     })
     contents.on('did-navigate-in-page', (_e, url, isMainFrame) => {
       if (isMainFrame) this.update(tabId, { url, ...navState() })
     })
-    contents.on('page-title-updated', (_e, title) => this.update(tabId, { title }))
+    contents.on('page-title-updated', (_e, title) => {
+      this.update(tabId, { title })
+      this.trackPinnedTitle(tabId, title)
+    })
+    contents.on('before-input-event', (_event, input) => {
+      // ⌘Z / Ctrl+Z: the page's own undo wins in text fields; elsewhere it undoes the last sidebar change.
+      if (input.type !== 'keyDown' || input.shift || input.alt || input.key.toLowerCase() !== 'z') return
+      const mod = process.platform === 'darwin' ? input.meta && !input.control : input.control && !input.meta
+      if (!mod || !this.onUndoShortcut) return
+      contents
+        .executeJavaScriptInIsolatedWorld(999, [{ code: FOCUS_IS_EDITABLE }])
+        .then((editable) => {
+          if (!editable) this.onUndoShortcut?.(tabId)
+        })
+        .catch(() => {})
+    })
     contents.on('page-favicon-updated', (_e, favicons) => {
       const icon = favicons.find((f) => /^(https?|data):/.test(f))
       if (icon) this.update(tabId, { favicon: icon })
@@ -164,6 +200,30 @@ export class TabRuntime {
     this.views.delete(tabId)
     this.ctx.windows.detachView(tabId, view)
     if (!view.webContents.isDestroyed()) view.webContents.close()
+  }
+
+  /** The next page this tab lands on is its pinned page (reset, wake at the pinned URL). */
+  markHomeLoad(tabId: TabId): void {
+    if (this.views.has(tabId)) this.homeLoads.add(tabId)
+  }
+
+  /** A pinned URL that redirected: where it landed is home too, so no breadcrumb shows (PN-03). */
+  private setPinnedHome(tabId: TabId, url: string): void {
+    this.ctx.store.update((d) => {
+      const tab = d.tabs[tabId]
+      if (!tab?.pinnedUrl || tab.pinnedResolvedUrl === url) return
+      tab.pinnedResolvedUrl = url
+    })
+  }
+
+  /** While a pinned tab shows its pinned page, that page's title is the breadcrumb's first part. */
+  private trackPinnedTitle(tabId: TabId, title: string): void {
+    const tab = this.ctx.store.state.tabs[tabId]
+    if (!tab?.pinnedUrl || !title || tab.pinnedTitle === title || isAwayFromPinned(tab)) return
+    this.ctx.store.update((d) => {
+      const t = d.tabs[tabId]
+      if (t) t.pinnedTitle = title
+    })
   }
 
   navigate(tabId: TabId, url: string): void {

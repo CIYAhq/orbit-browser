@@ -13,7 +13,12 @@ export const DEFAULT_SETTINGS: Settings = {
   autoPip: true,
   miniWindowForExternalLinks: true,
   onboarded: false,
+  countFavoritesInShortcuts: true,
+  lastTabOnCmd9: true,
 }
+
+/** Favorites per profile (FV-02). */
+export const MAX_FAVORITES = 12
 
 /** Orbit's own palette of Space colours (original, not taken from any other product). */
 export const THEME_PRESETS: SpaceTheme[] = [

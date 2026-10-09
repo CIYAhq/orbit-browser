@@ -172,10 +172,183 @@ export function insertItem(state: OrbitState, ref: ContainerRef, index: number, 
  * Returns false when the move is invalid (e.g. a folder into itself).
  */
 export function moveItem(state: OrbitState, id: ItemId, to: ContainerRef, index: number): boolean {
-  if (to.kind === 'folder' && isFolderId(id) && isWithin(state, to.folderId, id)) return false
-  if (to.kind === 'favorites' && isFolderId(id)) return false
-  if (!containerItems(state, to)) return false
+  if (!canMoveTo(state, id, to)) return false
   removeItem(state, id)
   insertItem(state, to, index, id)
   return true
+}
+
+/**
+ * Whether an item may live in a container. Folders exist only in the pinned area
+ * (FD-01): never in Favorites or Today, and never inside themselves.
+ */
+export function canMoveTo(state: OrbitState, id: ItemId, to: ContainerRef): boolean {
+  if (!containerItems(state, to)) return false
+  if (isFolderId(id)) {
+    if (to.kind === 'favorites' || to.kind === 'today') return false
+    if (to.kind === 'folder' && isWithin(state, to.folderId, id)) return false
+  }
+  if (to.kind === 'folder') {
+    // A folder must itself sit in a pinned area.
+    const root = rootContainerOf(state, { kind: 'folder', folderId: to.folderId })
+    if (root && root.kind !== 'pinned') return false
+  }
+  return true
+}
+
+/** The top-level container (favorites, pinned or today) that a container sits in. */
+export function rootContainerOf(state: OrbitState, ref: ContainerRef): ContainerRef | undefined {
+  let current = ref
+  for (let depth = 0; depth < 64; depth++) {
+    if (current.kind !== 'folder') return current
+    const loc = locate(state, current.folderId)
+    if (!loc) return undefined
+    current = loc.container
+  }
+  return undefined
+}
+
+/** Key that identifies a container (stable string, handy for maps and DOM attributes). */
+export function containerKey(ref: ContainerRef): string {
+  switch (ref.kind) {
+    case 'favorites':
+      return `favorites:${ref.profileId}`
+    case 'pinned':
+      return `pinned:${ref.spaceId}`
+    case 'today':
+      return `today:${ref.spaceId}`
+    case 'folder':
+      return `folder:${ref.folderId}`
+  }
+}
+
+export function parseContainerKey(key: string): ContainerRef | undefined {
+  const i = key.indexOf(':')
+  const kind = key.slice(0, i)
+  const id = key.slice(i + 1)
+  if (!id) return undefined
+  if (kind === 'favorites') return { kind, profileId: id }
+  if (kind === 'pinned' || kind === 'today') return { kind, spaceId: id }
+  if (kind === 'folder') return { kind, folderId: id }
+  return undefined
+}
+
+// ---- Visible order (what the sidebar shows, top to bottom) ----
+
+export interface VisibleOrderOptions {
+  /** The window's selected tab: it stays visible inside a collapsed folder or pinned section (FD-04, PN-09). */
+  activeTabId?: TabId | null
+  /** Count Favorites first (default true). */
+  includeFavorites?: boolean
+}
+
+/** The tab a split view stands for in keyboard order: its most recently used pane. */
+function splitStop(state: OrbitState, splitId: SplitId): TabId[] {
+  const split = state.splits[splitId]
+  if (!split) return []
+  const leaves = splitLeaves(split.layout).filter((id) => state.tabs[id])
+  if (leaves.length === 0) return []
+  const best = leaves.reduce((a, b) =>
+    (state.tabs[b]?.lastActiveAt ?? 0) > (state.tabs[a]?.lastActiveAt ?? 0) ? b : a,
+  )
+  return [best]
+}
+
+function visibleIn(state: OrbitState, items: ItemId[], active: TabId | null | undefined): TabId[] {
+  const out: TabId[] = []
+  for (const id of items) {
+    if (isTabId(id)) {
+      if (state.tabs[id]) out.push(id)
+    } else if (isSplitId(id)) {
+      out.push(...splitStop(state, id))
+    } else if (isFolderId(id)) {
+      const folder = state.folders[id]
+      if (!folder) continue
+      if (!folder.collapsed) out.push(...visibleIn(state, folder.children, active))
+      else if (active && tabsInItem(state, id).includes(active)) out.push(active)
+    }
+  }
+  return out
+}
+
+/** Tabs per section in the order the sidebar shows them, skipping rows hidden in collapsed sections. */
+export function visibleSections(
+  state: OrbitState,
+  spaceId: SpaceId,
+  opts: VisibleOrderOptions = {},
+): { favorites: TabId[]; pinned: TabId[]; today: TabId[] } {
+  const space = state.spaces[spaceId]
+  if (!space) return { favorites: [], pinned: [], today: [] }
+  const active = opts.activeTabId
+  const favorites = visibleIn(state, state.profiles[space.profileId]?.favorites ?? [], active)
+  let pinned = visibleIn(state, space.pinned, active)
+  if (space.pinnedCollapsed) pinned = active && pinned.includes(active) ? [active] : []
+  const today = visibleIn(state, space.today, active)
+  return { favorites: opts.includeFavorites === false ? [] : favorites, pinned, today }
+}
+
+export function visibleTabOrder(state: OrbitState, spaceId: SpaceId, opts: VisibleOrderOptions = {}): TabId[] {
+  const s = visibleSections(state, spaceId, opts)
+  return [...s.favorites, ...s.pinned, ...s.today]
+}
+
+/**
+ * Repairs a sidebar tree loaded from disk: drops references to missing items and
+ * duplicates, re-homes orphaned tabs into their Space's Today section and removes
+ * folders that no container holds. Mutates `state`.
+ */
+export function repairTree(state: OrbitState): void {
+  const seen = new Set<ItemId>()
+  const leafSeen = new Set<TabId>()
+  const fixSplit = (id: SplitId): boolean => {
+    const split = state.splits[id]
+    if (!split) return false
+    const leaves = splitLeaves(split.layout).filter((t) => state.tabs[t] && !leafSeen.has(t))
+    for (const t of leaves) leafSeen.add(t)
+    if (leaves.length < 2) {
+      delete state.splits[id]
+      return false
+    }
+    return true
+  }
+  const clean = (list: ItemId[], depth: number): ItemId[] => {
+    const out: ItemId[] = []
+    for (const id of list) {
+      if (seen.has(id)) continue
+      if (isTabId(id) && state.tabs[id] && !leafSeen.has(id)) {
+        seen.add(id)
+        out.push(id)
+      } else if (isSplitId(id) && fixSplit(id)) {
+        seen.add(id)
+        out.push(id)
+      } else if (isFolderId(id) && state.folders[id] && depth < 32) {
+        seen.add(id)
+        const folder = state.folders[id]
+        if (folder) folder.children = clean(folder.children, depth + 1)
+        out.push(id)
+      }
+    }
+    return out
+  }
+  for (const profile of Object.values(state.profiles)) {
+    profile.favorites = clean(profile.favorites, 0).filter((id) => !isFolderId(id))
+  }
+  for (const space of Object.values(state.spaces)) {
+    space.pinned = clean(space.pinned, 0)
+    space.today = clean(space.today, 0).filter((id) => !isFolderId(id))
+  }
+  for (const id of Object.keys(state.folders)) if (!seen.has(id)) delete state.folders[id]
+  for (const id of Object.keys(state.splits)) if (!seen.has(id)) delete state.splits[id]
+  const fallbackSpace = state.spaceOrder[0]
+  for (const tab of Object.values(state.tabs)) {
+    if (seen.has(tab.id) || leafSeen.has(tab.id)) continue
+    const space = state.spaces[tab.spaceId] ?? (fallbackSpace ? state.spaces[fallbackSpace] : undefined)
+    if (!space) {
+      delete state.tabs[tab.id]
+      continue
+    }
+    tab.spaceId = space.id
+    space.today.unshift(tab.id)
+    seen.add(tab.id)
+  }
 }

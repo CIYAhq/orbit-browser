@@ -1,142 +1,480 @@
-import { ChevronRight, Folder, Volume2, VolumeX, X } from 'lucide-react'
+import { ChevronRight, Folder, FolderOpen, Undo2, Volume2, VolumeX, X } from 'lucide-react'
+import { AnimatePresence, animate, motion, useIsPresent, useMotionValue, type Variants } from 'motion/react'
+import {
+  memo,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
 import { isFolderId, isSplitId, isTabId } from '../../../../shared/ids'
-import type { ContainerRef, ItemId } from '../../../../shared/state'
-import { splitLeaves } from '../../../../shared/tree'
-import { invoke } from '../../api'
+import type { ItemId, TabId } from '../../../../shared/state'
+import { isAwayFromPinned, rowTitle } from '../../../../shared/tabs'
+import { splitLeaves, tabsInItem, visibleTabOrder } from '../../../../shared/tree'
+import { invoke, isMac } from '../../api'
 import { activeTabId } from '../../selectors'
-import { useOrbit } from '../../store'
+import { getOrbitState, useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
+import { pressItem } from './drag'
+import { RenameField } from './RenameField'
+import { clearSelection, startRename, useDrag, useKeyboardFocus, useRename, useSelection } from './ui-state'
+
+/** Indent per folder level (FD-06). */
+export const INDENT = 14
+
+const ROW_SPRING = { type: 'spring', stiffness: 560, damping: 44, mass: 0.7 } as const
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+/** Exit/enter of rows: height collapse so neighbours glide (FL-09); Clear sweeps out staggered (TD-04). */
+const EASE_OUT: [number, number, number, number] = [0.4, 0, 0.2, 1]
+const rowVariants: Variants = {
+  hidden: { height: 0, opacity: 0 },
+  shown: { height: 'auto', opacity: 1, transition: { height: ROW_SPRING, opacity: { duration: 0.14 } } },
+  exit: (c: { stagger?: boolean; index?: number } | undefined) => ({
+    height: 0,
+    opacity: 0,
+    x: c?.stagger ? -16 : 0,
+    transition: {
+      height: { duration: 0.16, ease: EASE_OUT, delay: c?.stagger ? (c.index ?? 0) * 0.02 : 0 },
+      opacity: { duration: 0.1, delay: c?.stagger ? (c.index ?? 0) * 0.02 : 0 },
+      x: { duration: 0.14 },
+    },
+  }),
+}
+
+/** Rows leaving together, in list order (drives the cascade delay). */
+const exitOrder = new Map<string, number>()
 
 /** A list of sidebar items (tabs, folders, split views) in one container. */
-export function ItemList({
-  container,
+export const ItemList = memo(function ItemList({
+  containerKey,
   items,
   depth = 0,
+  ancestors = '',
   testId,
 }: {
-  container: ContainerRef
+  containerKey: string
   items: ItemId[]
   depth?: number
+  ancestors?: string
   testId?: string
 }) {
+  // Several rows leaving at once (Clear, archive below) sweep out in a cascade (TD-04).
+  const prev = useRef(items)
+  if (prev.current !== items) {
+    const removed = prev.current.filter((id) => !items.includes(id))
+    if (removed.length > 1) {
+      for (const [k, id] of removed.entries()) exitOrder.set(id, k)
+    }
+    prev.current = items
+  }
   return (
-    <div className="item-list" data-testid={testId} data-container={container.kind}>
-      {items.map((id) => {
-        if (isTabId(id)) return <TabRow key={id} tabId={id} depth={depth} />
-        if (isFolderId(id)) return <FolderRow key={id} folderId={id} depth={depth} />
-        if (isSplitId(id)) return <SplitRow key={id} splitId={id} depth={depth} />
-        return null
-      })}
+    <div className="item-list" data-testid={testId} data-list={containerKey}>
+      <AnimatePresence initial={false}>
+        {items.map((id, index) => {
+          if (isTabId(id))
+            return (
+              <TabRow
+                key={id}
+                tabId={id}
+                depth={depth}
+                containerKey={containerKey}
+                index={index}
+                ancestors={ancestors}
+              />
+            )
+          if (isFolderId(id))
+            return (
+              <FolderRow
+                key={id}
+                folderId={id}
+                depth={depth}
+                containerKey={containerKey}
+                index={index}
+                ancestors={ancestors}
+              />
+            )
+          if (isSplitId(id))
+            return (
+              <SplitRow
+                key={id}
+                splitId={id}
+                depth={depth}
+                containerKey={containerKey}
+                index={index}
+                ancestors={ancestors}
+              />
+            )
+          return null
+        })}
+      </AnimatePresence>
     </div>
+  )
+})
+
+/** Row offset while a drag opens a gap; jumps (no animation) when the drop commits. */
+export function useRowShift(key: string) {
+  const shift = useDrag((s) => s.shifts[key] ?? 0)
+  const animated = useDrag((s) => s.phase === 'dragging' || s.phase === 'cancelling')
+  const y = useMotionValue(0)
+  useLayoutEffect(() => {
+    if (animated && !reducedMotion()) {
+      const controls = animate(y, shift, ROW_SPRING)
+      return () => controls.stop()
+    }
+    y.jump(shift)
+    return undefined
+  }, [shift, animated, y])
+  return y
+}
+
+interface SlotProps {
+  depth: number
+  containerKey: string
+  index: number
+  ancestors: string
+}
+
+/** Wrapper that animates a row in and out and carries its drag-and-drop slot data. */
+function RowSlot({
+  id,
+  folder,
+  children,
+  depth,
+  containerKey,
+  index,
+  ancestors,
+  className = 'row-slot',
+}: SlotProps & { id: string; folder?: 'open' | 'closed'; children: React.ReactNode; className?: string }) {
+  const y = useRowShift(id)
+  const hidden = useDrag((s) => !!s.hidden[id])
+  const present = useIsPresent()
+  // Rows that arrive or leave through a drag appear/disappear at once (the ghost covers them).
+  const [instant] = useState(() => hidden)
+  if (!present && hidden) return null
+  const order = present ? undefined : exitOrder.get(id)
+  return (
+    <motion.div
+      className={className}
+      style={{ y, opacity: hidden ? 0 : undefined }}
+      variants={rowVariants}
+      custom={{ stagger: order !== undefined, index: order }}
+      onAnimationComplete={() => {
+        if (!present) exitOrder.delete(id)
+      }}
+      initial={instant || reducedMotion() ? false : 'hidden'}
+      animate="shown"
+      exit="exit"
+      data-slot="item"
+      data-key={id}
+      data-container={containerKey}
+      data-index={index}
+      data-depth={depth}
+      data-folder={folder}
+      data-ancestors={ancestors || undefined}
+      data-exiting={present ? undefined : '1'}
+    >
+      {children}
+    </motion.div>
   )
 }
 
-export function TabRow({ tabId, depth }: { tabId: string; depth: number }) {
+function onRowPointerDown(e: ReactPointerEvent<HTMLElement>, tabId: TabId) {
+  if (e.button !== 0) return
+  const sel = useSelection.getState()
+  if ((isMac ? e.metaKey : e.ctrlKey) && !e.altKey) {
+    // ⌘-click toggles a row in the multi-selection (TB-13).
+    e.preventDefault()
+    const active = activeTabId(getOrbitState())
+    const base = sel.ids.length > 0 ? sel.ids : active && active !== tabId ? [active] : []
+    const ids = base.includes(tabId) ? base.filter((id) => id !== tabId) : [...base, tabId]
+    useSelection.setState({ ids, anchor: tabId })
+    return
+  }
+  if (e.shiftKey) {
+    // ⇧-click selects a contiguous range in sidebar order (TB-13).
+    e.preventDefault()
+    const state = getOrbitState()
+    const win = state.windows[window.orbit.windowId]
+    const active = activeTabId(state)
+    const order = win ? visibleTabOrder(state, win.spaceId, { activeTabId: active, includeFavorites: false }) : []
+    const anchor = sel.anchor ?? active ?? tabId
+    const a = order.indexOf(anchor)
+    const b = order.indexOf(tabId)
+    if (a >= 0 && b >= 0) useSelection.setState({ ids: order.slice(Math.min(a, b), Math.max(a, b) + 1), anchor })
+    return
+  }
+  if (!useSelection.getState().ids.includes(tabId)) clearSelection()
+  void invoke('tabs.activate', { tabId })
+  pressItem(e, tabId, 'list')
+}
+
+function openContextMenu(e: ReactMouseEvent, id: ItemId) {
+  e.preventDefault()
+  const sel = useSelection.getState().ids
+  void invoke('tabs.contextMenu', { id, selection: sel.includes(id) ? sel : [] })
+}
+
+export const TabRow = memo(function TabRow({
+  tabId,
+  depth,
+  containerKey,
+  index,
+  ancestors,
+}: { tabId: string } & SlotProps) {
+  return (
+    <RowSlot id={tabId} depth={depth} containerKey={containerKey} index={index} ancestors={ancestors}>
+      <TabRowBody tabId={tabId} depth={depth} />
+    </RowSlot>
+  )
+})
+
+/** The row itself (TB-01): icon, title (or breadcrumb, PN-03), audio, close. */
+export const TabRowBody = memo(function TabRowBody({ tabId, depth }: { tabId: string; depth: number }) {
   const tab = useOrbit((s) => s.tabs[tabId])
   const active = useOrbit((s) => activeTabId(s) === tabId)
+  const selected = useSelection((s) => s.ids.includes(tabId))
+  const focused = useKeyboardFocus((s) => s.id === tabId)
+  const renaming = useRename((s) => (s.id === tabId ? s.mode : null))
+  const [iconHover, setIconHover] = useState(false)
   if (!tab) return null
-  const title = tab.customTitle ?? tab.title
-  const awayFromPin = !!tab.pinnedUrl && tab.url !== tab.pinnedUrl && !tab.asleep
+  const { prefix, title } = rowTitle(tab)
+  const away = isAwayFromPinned(tab)
+  const showReset = away && iconHover
   return (
     <div
-      role="button"
+      role="treeitem"
       tabIndex={-1}
-      className={`tab-row${active ? ' is-active' : ''}${tab.asleep ? ' is-asleep' : ''}${tab.loading ? ' is-loading' : ''}`}
-      style={{ paddingLeft: 8 + depth * 14 }}
+      aria-selected={active}
+      aria-label={prefix ? `${prefix} / ${title}` : title}
+      className={`tab-row${active ? ' is-active' : ''}${selected ? ' is-selected' : ''}${tab.asleep ? ' is-asleep' : ''}${tab.loading ? ' is-loading' : ''}${away ? ' is-away' : ''}${focused ? ' is-focused' : ''}`}
+      style={{ paddingLeft: 8 + depth * INDENT }}
       data-testid="tab-row"
       data-tab-id={tabId}
-      onMouseDown={(e) => {
-        if (e.button === 0) void invoke('tabs.activate', { tabId })
-      }}
+      onPointerDown={(e) => onRowPointerDown(e, tabId)}
       onAuxClick={(e) => {
         if (e.button === 1) void invoke('tabs.close', { tabId })
       }}
-      onContextMenu={(e) => {
-        e.preventDefault()
-        void invoke('tabs.contextMenu', { id: tabId })
+      onDoubleClick={(e) => {
+        if ((e.target as HTMLElement).closest('button')) return
+        startRename(tabId)
       }}
+      onContextMenu={(e) => openContextMenu(e, tabId)}
     >
-      <span className="tab-row__icon">
-        <Favicon src={tab.favicon} />
+      <span
+        className={`tab-row__icon${away ? ' tab-row__icon--resettable' : ''}`}
+        data-testid="tab-icon"
+        onMouseEnter={() => setIconHover(true)}
+        onMouseLeave={() => setIconHover(false)}
+        onPointerDown={(e) => {
+          if (!away || e.button !== 0) return
+          // Click the favicon of a pinned tab that wandered off: back to its pinned page (PN-04).
+          e.stopPropagation()
+          void invoke('tabs.activate', { tabId })
+          void invoke('tabs.resetToPinned', { tabId, keepCurrent: isMac ? e.metaKey : e.ctrlKey })
+        }}
+      >
+        {showReset ? (
+          <Undo2 size={14} strokeWidth={2.2} className="tab-row__reset-glyph" data-testid="reset-pinned" />
+        ) : tab.icon ? (
+          <span className="tab-row__emoji">{tab.icon}</span>
+        ) : (
+          <Favicon src={tab.favicon} />
+        )}
       </span>
-      <span className="tab-row__title">{title}</span>
+      {renaming ? (
+        <RenameField
+          id={tabId}
+          mode={renaming}
+          initial={renaming === 'url' ? (tab.pinnedUrl ?? tab.url) : (tab.customTitle ?? tab.title)}
+        />
+      ) : (
+        <span className="tab-row__title" data-testid="tab-title">
+          {showReset ? (
+            <span className="tab-row__hint">Return to pinned page</span>
+          ) : (
+            <>
+              {prefix && (
+                <span className="tab-row__crumb" data-testid="tab-crumb">
+                  {prefix}
+                  <span className="tab-row__slash"> / </span>
+                </span>
+              )}
+              {title}
+            </>
+          )}
+        </span>
+      )}
       {(tab.audible || tab.muted) && (
         <button
           type="button"
           className="tab-row__audio"
+          data-testid="tab-audio"
           aria-label={tab.muted ? 'Unmute tab' : 'Mute tab'}
-          onMouseDown={(e) => e.stopPropagation()}
+          title={tab.muted ? 'Unmute' : 'Mute'}
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={() => void invoke('tabs.setMuted', { tabId, muted: !tab.muted })}
         >
           {tab.muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
-        </button>
-      )}
-      {awayFromPin && (
-        <button
-          type="button"
-          className="tab-row__reset"
-          data-testid="reset-pinned"
-          title="Go back to pinned URL"
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={() => void invoke('tabs.resetToPinned', { tabId })}
-        >
-          ↩
         </button>
       )}
       <button
         type="button"
         className="tab-row__close"
         aria-label="Close tab"
+        title="Close"
         data-testid="tab-close"
-        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
         onClick={() => void invoke('tabs.close', { tabId })}
       >
         <X size={13} strokeWidth={2.2} />
       </button>
     </div>
   )
-}
+})
 
-function FolderRow({ folderId, depth }: { folderId: string; depth: number }) {
+const FolderRow = memo(function FolderRow({
+  folderId,
+  depth,
+  containerKey,
+  index,
+  ancestors,
+}: { folderId: string } & SlotProps) {
   const folder = useOrbit((s) => s.folders[folderId])
+  // FD-04: the selected tab stays visible under a closed folder ("peeking").
+  const peek = useOrbit((s) => {
+    const f = s.folders[folderId]
+    if (!f?.collapsed) return null
+    const active = activeTabId(s)
+    return active && tabsInItem(s, folderId).includes(active) ? active : null
+  })
+  const into = useDrag((s) => s.intoFolder === folderId)
+  const focused = useKeyboardFocus((s) => s.id === folderId)
+  const renaming = useRename((s) => s.id === folderId)
+  const hidden = useDrag((s) => !!s.hidden[folderId])
   if (!folder) return null
+  const childAncestors = ancestors ? `${ancestors},${folderId}` : folderId
+  const open = !folder.collapsed
+  const FolderIcon = open ? FolderOpen : Folder
   return (
-    <div className="folder" data-testid="folder" data-folder-id={folderId}>
-      <div
-        role="button"
-        tabIndex={-1}
-        className="folder-row"
-        style={{ paddingLeft: 8 + depth * 14 }}
-        onMouseDown={(e) => {
-          if (e.button === 0) void invoke('folders.setCollapsed', { folderId, collapsed: !folder.collapsed })
-        }}
-        onContextMenu={(e) => {
-          e.preventDefault()
-          void invoke('tabs.contextMenu', { id: folderId })
-        }}
+    <div className="folder" data-testid="folder" data-folder-id={folderId} style={{ opacity: hidden ? 0 : undefined }}>
+      <RowSlot
+        id={folderId}
+        folder={open ? 'open' : 'closed'}
+        depth={depth}
+        containerKey={containerKey}
+        index={index}
+        ancestors={ancestors}
       >
-        <ChevronRight size={13} className={`folder-row__chevron${folder.collapsed ? '' : ' is-open'}`} />
-        <Folder size={15} strokeWidth={1.7} />
-        <span className="folder-row__title">{folder.name}</span>
-      </div>
-      {!folder.collapsed && (
-        <ItemList container={{ kind: 'folder', folderId }} items={folder.children} depth={depth + 1} />
+        <div
+          role="treeitem"
+          tabIndex={-1}
+          aria-expanded={open}
+          className={`folder-row${into ? ' is-drop-into' : ''}${focused ? ' is-focused' : ''}`}
+          style={{ paddingLeft: 8 + depth * INDENT }}
+          data-testid="folder-row"
+          onPointerDown={(e) => {
+            if (e.button !== 0 || renaming) return
+            clearSelection()
+            pressItem(e, folderId, 'list')
+          }}
+          onClick={(e) => {
+            if (renaming || e.detail > 1) return
+            void invoke('folders.setCollapsed', { folderId, collapsed: open })
+          }}
+          onDoubleClick={() => startRename(folderId)}
+          onContextMenu={(e) => openContextMenu(e, folderId)}
+        >
+          <ChevronRight size={13} className={`folder-row__chevron${open ? ' is-open' : ''}`} />
+          <span className="folder-row__icon">
+            {folder.icon ? (
+              <span className="tab-row__emoji">{folder.icon}</span>
+            ) : (
+              <FolderIcon size={15} strokeWidth={1.7} />
+            )}
+          </span>
+          {renaming ? (
+            <RenameField id={folderId} mode="name" initial={folder.name} />
+          ) : (
+            <span className="folder-row__title" data-testid="folder-title">
+              {folder.name}
+            </span>
+          )}
+        </div>
+      </RowSlot>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="children"
+            className="folder__children"
+            initial={reducedMotion() ? false : { height: 0, opacity: 0 }}
+            animate={{
+              height: 'auto',
+              opacity: 1,
+              transition: { height: { duration: 0.2, ease: EASE_OUT }, opacity: { duration: 0.12 } },
+            }}
+            exit={{
+              height: 0,
+              opacity: 0,
+              transition: { height: { duration: 0.18, ease: EASE_OUT }, opacity: { duration: 0.1 } },
+            }}
+          >
+            <ItemList
+              containerKey={`folder:${folderId}`}
+              items={folder.children}
+              depth={depth + 1}
+              ancestors={childAncestors}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {!open && peek && (
+        <div className="folder__peek" data-testid="folder-peek">
+          <TabRow
+            tabId={peek}
+            depth={depth + 1}
+            containerKey={`folder:${folderId}`}
+            index={folder.children.indexOf(peek)}
+            ancestors={childAncestors}
+          />
+        </div>
       )}
     </div>
   )
-}
+})
 
-function SplitRow({ splitId, depth }: { splitId: string; depth: number }) {
+const SplitRow = memo(function SplitRow({
+  splitId,
+  depth,
+  containerKey,
+  index,
+  ancestors,
+}: { splitId: string } & SlotProps) {
   const leaves = useOrbit((s) => {
     const split = s.splits[splitId]
     return split ? splitLeaves(split.layout).join(',') : ''
   })
   if (!leaves) return null
   return (
-    <div className="split-row" data-testid="split-row" data-split-id={splitId}>
-      {leaves.split(',').map((tabId) => (
-        <TabRow key={tabId} tabId={tabId} depth={depth} />
-      ))}
-    </div>
+    <RowSlot
+      id={splitId}
+      depth={depth}
+      containerKey={containerKey}
+      index={index}
+      ancestors={ancestors}
+      className="row-slot row-slot--split"
+    >
+      <div
+        className="split-row"
+        data-testid="split-row"
+        data-split-id={splitId}
+        onContextMenu={(e) => openContextMenu(e, leaves.split(',')[0] as string)}
+      >
+        {leaves.split(',').map((tabId) => (
+          <TabRowBody key={tabId} tabId={tabId} depth={depth} />
+        ))}
+      </div>
+    </RowSlot>
   )
-}
+})

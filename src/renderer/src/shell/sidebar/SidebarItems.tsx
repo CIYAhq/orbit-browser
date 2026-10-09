@@ -1,0 +1,436 @@
+import { ArrowDown, ArrowUp, ChevronDown, Plus } from 'lucide-react'
+import { AnimatePresence, MotionConfig, motion } from 'motion/react'
+import {
+  memo,
+  type DragEvent as ReactDragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
+import { isFolderId, isTabId } from '../../../../shared/ids'
+import type { Space, WindowState } from '../../../../shared/state'
+import { containerKey, locate, sectionOf } from '../../../../shared/tree'
+import { parseInput } from '../../../../shared/url'
+import { invoke, isMac, runAction } from '../../api'
+import { activeTabId } from '../../selectors'
+import { getOrbitState, useOrbit } from '../../store'
+import { DragGhost } from './DragGhost'
+import { setDragContext } from './drag'
+import { Favorites } from './Favorites'
+import { IconPicker } from './IconPicker'
+import { ItemList, TabRow, useRowShift } from './ItemList'
+import { clearSelection, startRename, useDrag, useIconPicker, useKeyboardFocus, useSelection } from './ui-state'
+
+/**
+ * Everything between the address bar and the Space switcher (SB-02 regions 3–9):
+ * Favorites, then one scrolling list with the Space title, pinned section, divider with
+ * Clear, "+ New Tab" and Today. Owns drag and drop, keyboard navigation and auto-reveal.
+ */
+export function SidebarItems({ win, space, header }: { win: WindowState; space: Space; header: ReactNode }) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const favRef = useRef<HTMLDivElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  useLayoutEffect(() => {
+    setDragContext({
+      scroll: scrollRef.current,
+      favorites: favRef.current,
+      sidebar: rootRef.current?.closest<HTMLElement>('.sidebar') ?? rootRef.current,
+      spaceId: space.id,
+      profileId: space.profileId,
+    })
+  })
+
+  useMainMessages(scrollRef)
+  useShellUndo()
+  useScrollMemory(scrollRef, space.id)
+  const reveal = useAutoReveal(scrollRef, win)
+  const onKeyDown = useKeyboardNav(scrollRef)
+
+  return (
+    <MotionConfig reducedMotion="user">
+      <div className="sidebar-items" ref={rootRef}>
+        <Favorites ref={favRef} profileId={space.profileId} />
+        <div
+          className="sidebar__scroll"
+          ref={scrollRef}
+          data-testid="sidebar-scroll"
+          tabIndex={-1}
+          role="tree"
+          aria-label="Tabs"
+          onKeyDown={onKeyDown}
+          onDragOver={onLinkDragOver}
+          onDrop={(e) => onLinkDrop(e, space.id)}
+        >
+          <SpaceHeader space={space}>{header}</SpaceHeader>
+          <PinnedSection space={space} />
+          <TodayBlock space={space} />
+          <ItemList
+            key={`today:${space.id}`}
+            containerKey={`today:${space.id}`}
+            items={space.today}
+            testId="today-list"
+          />
+          <div
+            className="sidebar__fill"
+            data-testid="sidebar-empty-area"
+            onDoubleClick={() => runAction('tab.new')}
+            onPointerDown={() => clearSelection()}
+          />
+        </div>
+        {reveal && (
+          <button
+            type="button"
+            className={`reveal-pill reveal-pill--${reveal.side}`}
+            data-testid="reveal-active"
+            onClick={reveal.go}
+          >
+            {reveal.side === 'above' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
+            <span>Current tab</span>
+          </button>
+        )}
+        <IconPicker />
+        <DragGhost />
+      </div>
+    </MotionConfig>
+  )
+}
+
+/** Space title row with the pinned-section caret (PN-09). */
+function SpaceHeader({ space, children }: { space: Space; children: ReactNode }) {
+  const activePinned = useOrbit((s) => {
+    const a = activeTabId(s)
+    return !!a && sectionOf(s, a) === 'pinned'
+  })
+  const collapsed = !!space.pinnedCollapsed
+  return (
+    <div
+      className={`space-header${collapsed ? ' is-collapsed' : ''}${collapsed && activePinned ? ' has-hidden-active' : ''}`}
+      data-testid="space-header"
+    >
+      {children}
+      <button
+        type="button"
+        className="space-header__caret"
+        data-testid="pinned-toggle"
+        aria-label={collapsed ? 'Expand pinned tabs' : 'Collapse pinned tabs'}
+        aria-expanded={!collapsed}
+        title={collapsed ? 'Expand Pinned' : 'Collapse Pinned'}
+        onClick={() => void invoke('tabs.setPinnedCollapsed', { spaceId: space.id, collapsed: !collapsed })}
+      >
+        <ChevronDown size={13} className={collapsed ? 'is-collapsed' : ''} />
+      </button>
+    </div>
+  )
+}
+
+/** Pinned tabs and folders (PN-01); collapsed, only the selected pinned tab stays visible (PN-09). */
+const PinnedSection = memo(function PinnedSection({ space }: { space: Space }) {
+  const collapsed = !!space.pinnedCollapsed
+  const peek = useOrbit((s) => {
+    if (!collapsed) return null
+    const a = activeTabId(s)
+    if (!a || sectionOf(s, a) !== 'pinned' || s.tabs[a]?.spaceId !== space.id) return null
+    const loc = locate(s, a)
+    return loc ? { id: a, key: containerKey(loc.container), index: loc.index } : null
+  })
+  return (
+    <>
+      <AnimatePresence initial={false}>
+        {!collapsed && (
+          <motion.div
+            key="pinned"
+            className="pinned-section"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{
+              height: 'auto',
+              opacity: 1,
+              transition: { height: { duration: 0.2 }, opacity: { duration: 0.12 } },
+            }}
+            exit={{ height: 0, opacity: 0, transition: { height: { duration: 0.18 }, opacity: { duration: 0.1 } } }}
+          >
+            <ItemList
+              key={`pinned:${space.id}`}
+              containerKey={`pinned:${space.id}`}
+              items={space.pinned}
+              testId="pinned-list"
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {peek && (
+        <div className="pinned-peek" data-testid="pinned-peek">
+          <TabRow tabId={peek.id} depth={0} containerKey={peek.key} index={peek.index} ancestors="" />
+        </div>
+      )}
+    </>
+  )
+})
+
+/** Divider with Clear (TD-04) and the "+ New Tab" row (SB-07): one drop slot between pinned and Today. */
+function TodayBlock({ space }: { space: Space }) {
+  const y = useRowShift('divider')
+  const hasToday = space.today.length > 0
+  return (
+    <motion.div
+      className="today-block"
+      style={{ y }}
+      data-slot="divider"
+      data-key="divider"
+      data-container={`today:${space.id}`}
+      data-index={0}
+      data-depth={0}
+    >
+      <div className="sidebar__divider" data-testid="today-divider">
+        <span className="sidebar__divider-line" />
+        {hasToday && (
+          <button
+            type="button"
+            className="sidebar__clear"
+            data-testid="clear-today"
+            title={`Archive all Today tabs (${isMac ? '⌘⇧K' : 'Ctrl+Shift+K'})`}
+            onClick={() => void invoke('tabs.clearToday', { spaceId: space.id })}
+          >
+            <ArrowDown size={11} strokeWidth={2.4} />
+            <span>Clear</span>
+          </button>
+        )}
+      </div>
+      <button
+        type="button"
+        className="new-tab-button"
+        data-testid="new-tab-button"
+        onClick={() => runAction('tab.new')}
+      >
+        <motion.span className="new-tab-button__plus" whileTap={{ scale: 0.92 }} transition={{ duration: 0.15 }}>
+          <Plus size={16} strokeWidth={2} />
+        </motion.span>
+        <span>New Tab</span>
+      </button>
+    </motion.div>
+  )
+}
+
+// ---- Links dropped on the sidebar open as new tabs (TB-02) ----
+
+function onLinkDragOver(e: ReactDragEvent) {
+  if (useDrag.getState().phase !== 'idle') return
+  const types = e.dataTransfer.types
+  if (types.includes('text/uri-list') || types.includes('text/plain')) {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+function onLinkDrop(e: ReactDragEvent, spaceId: string) {
+  const uri = e.dataTransfer
+    .getData('text/uri-list')
+    .split('\n')
+    .find((l) => l && !l.startsWith('#'))
+  const text = uri?.trim() || e.dataTransfer.getData('text/plain').trim()
+  if (!text) return
+  e.preventDefault()
+  const parsed = parseInput(text, getOrbitState().settings.searchEngine)
+  void invoke('tabs.create', { url: parsed.url, spaceId })
+}
+
+// ---- Messages from main (context menu items that need the sidebar) ----
+
+function useMainMessages(scrollRef: React.RefObject<HTMLDivElement | null>) {
+  useEffect(() => {
+    const offs = [
+      window.orbit.on('sidebar:rename', (p) => {
+        const { id, isNew } = p as { id: string; isNew?: boolean }
+        startRename(id, { isNew })
+        requestAnimationFrame(() =>
+          scrollRef.current
+            ?.querySelector(`[data-slot][data-key="${id}"]`)
+            ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
+        )
+      }),
+      window.orbit.on('sidebar:edit-pinned-url', (p) => startRename((p as { id: string }).id, { mode: 'url' })),
+      window.orbit.on('sidebar:icon', (p) => useIconPicker.setState({ id: (p as { id: string }).id })),
+      window.orbit.on('sidebar:focus', () => {
+        const el = scrollRef.current
+        if (!el) return
+        el.focus()
+        const state = getOrbitState()
+        useKeyboardFocus.setState({ id: activeTabId(state) ?? firstRowKey(el) })
+      }),
+    ]
+    return () => {
+      for (const off of offs) off()
+    }
+  }, [scrollRef])
+}
+
+/** ⌘Z with focus in Orbit's UI (not a text field) undoes the last sidebar change (TB-18). */
+function useShellUndo() {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target?.closest('input, textarea, [contenteditable="true"]')) return
+      if (e.key === 'Escape') {
+        clearSelection()
+        return
+      }
+      const mod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
+      if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        void invoke('tabs.undo', {})
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+}
+
+/** Each Space keeps its own scroll position in this window (SP-10). */
+function useScrollMemory(scrollRef: React.RefObject<HTMLDivElement | null>, spaceId: string) {
+  const positions = useRef(new Map<string, number>())
+  const current = useRef(spaceId)
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    if (current.current !== spaceId) {
+      el.scrollTop = positions.current.get(spaceId) ?? 0
+      current.current = spaceId
+    }
+    const onScroll = () => positions.current.set(spaceId, el.scrollTop)
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [scrollRef, spaceId])
+}
+
+/**
+ * Scrolls a newly selected tab into view and, while the selected tab is scrolled out of
+ * sight, shows a small pill pointing to it (SB-23).
+ */
+function useAutoReveal(scrollRef: React.RefObject<HTMLDivElement | null>, win: WindowState) {
+  const active = win.activeTab[win.spaceId] ?? null
+  const [side, setSide] = useState<'above' | 'below' | null>(null)
+  const rowOf = (id: string) => rowIn(scrollRef.current, id)
+  useEffect(() => {
+    if (!active) return
+    const raf = requestAnimationFrame(() => {
+      const scroll = scrollRef.current
+      const el = rowIn(scroll, active)
+      if (!el || !scroll) return
+      const r = el.getBoundingClientRect()
+      const s = scroll.getBoundingClientRect()
+      if (r.top < s.top || r.bottom > s.bottom) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [active, scrollRef])
+  useEffect(() => {
+    const scroll = scrollRef.current
+    if (!scroll || !active) {
+      setSide(null)
+      return
+    }
+    let observer: IntersectionObserver | undefined
+    let raf = requestAnimationFrame(function attach() {
+      const el = rowIn(scroll, active)
+      if (!el) {
+        raf = requestAnimationFrame(attach)
+        return
+      }
+      observer = new IntersectionObserver(
+        ([entry]) => {
+          if (!entry || entry.isIntersecting) setSide(null)
+          else setSide(entry.boundingClientRect.top < (entry.rootBounds?.top ?? 0) ? 'above' : 'below')
+        },
+        { root: scroll, threshold: 0.6 },
+      )
+      observer.observe(el)
+    })
+    return () => {
+      cancelAnimationFrame(raf)
+      observer?.disconnect()
+    }
+  }, [active, scrollRef])
+  if (!side || !active) return null
+  return {
+    side,
+    go: () => rowOf(active)?.scrollIntoView({ block: 'center', behavior: 'smooth' }),
+  }
+}
+
+function rowIn(scroll: HTMLElement | null, id: string): HTMLElement | null {
+  return scroll?.querySelector<HTMLElement>(`[data-slot][data-key="${id}"]`) ?? null
+}
+
+function firstRowKey(scroll: HTMLElement): string | null {
+  return scroll.querySelector<HTMLElement>('[data-slot="item"]')?.dataset.key ?? null
+}
+
+/** Arrow keys move between rows, Enter opens, Escape returns to the page (SB-22). */
+function useKeyboardNav(scrollRef: React.RefObject<HTMLDivElement | null>) {
+  return (e: ReactKeyboardEvent) => {
+    const scroll = scrollRef.current
+    if (!scroll || (e.target as HTMLElement).closest('input')) return
+    const keys = [...scroll.querySelectorAll<HTMLElement>('[data-slot="item"]')]
+      .filter((el) => !el.dataset.exiting)
+      .map((el) => el.dataset.key as string)
+    const current = useKeyboardFocus.getState().id
+    const i = current ? keys.indexOf(current) : -1
+    const focus = (id: string | undefined) => {
+      if (!id) return
+      useKeyboardFocus.setState({ id })
+      scroll.querySelector(`[data-slot][data-key="${id}"]`)?.scrollIntoView({ block: 'nearest' })
+    }
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault()
+        focus(keys[Math.min(keys.length - 1, i + 1)])
+        break
+      case 'ArrowUp':
+        e.preventDefault()
+        focus(keys[Math.max(0, i - 1)])
+        break
+      case 'Home':
+        e.preventDefault()
+        focus(keys[0])
+        break
+      case 'End':
+        e.preventDefault()
+        focus(keys[keys.length - 1])
+        break
+      case 'ArrowRight':
+      case 'ArrowLeft':
+        if (current && isFolderId(current)) {
+          e.preventDefault()
+          void invoke('folders.setCollapsed', { folderId: current, collapsed: e.key === 'ArrowLeft' })
+        }
+        break
+      case 'Enter':
+      case ' ':
+        if (!current) return
+        e.preventDefault()
+        if (isTabId(current)) {
+          useKeyboardFocus.setState({ id: null })
+          void invoke('tabs.activate', { tabId: current })
+          void invoke('tabs.focusPage', {})
+        } else if (isFolderId(current)) {
+          const folder = getOrbitState().folders[current]
+          if (folder) void invoke('folders.setCollapsed', { folderId: current, collapsed: !folder.collapsed })
+        }
+        break
+      case 'Escape':
+        e.preventDefault()
+        useKeyboardFocus.setState({ id: null })
+        clearSelection()
+        void invoke('tabs.focusPage', {})
+        break
+      case 'F2':
+        if (current) startRename(current)
+        break
+      default:
+        return
+    }
+    if (useSelection.getState().ids.length > 0 && e.key.startsWith('Arrow')) clearSelection()
+  }
+}
