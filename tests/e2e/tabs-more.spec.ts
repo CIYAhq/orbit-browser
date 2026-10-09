@@ -520,3 +520,20 @@ test('[TB-06] Cmd+W in a window with nothing selected closes that window', async
   await act(app, 'tab.close', 1)
   await expect.poll(async () => Object.keys((await state(app)).windows).length).toBe(1)
 })
+
+test('[TB-07] recently closed tabs are listed newest first and any of them can be reopened', async () => {
+  const { app } = orbit
+  const a = await newTab(app, fx.url('/page/ClosedA'))
+  await waitTab(app, a, '/page/ClosedA')
+  const b = await newTab(app, fx.url('/page/ClosedB'))
+  await waitTab(app, b, '/page/ClosedB')
+  await cmd(app, 'tabs.close', { tabId: a })
+  await cmd(app, 'tabs.close', { tabId: b })
+  const list = await cmd<{ tabId: string; title: string }[]>(app, 'tabs.recentlyClosed')
+  expect(list.map((r) => r.tabId)).toEqual([b, a])
+  expect(list[1]?.title).toBe('ClosedA')
+  // Reopen the older one directly (as the command bar would).
+  expect(await cmd(app, 'tabs.reopenClosed', { tabId: a })).toBe(a)
+  await expect.poll(() => activeId(app)).toBe(a)
+  expect((await cmd<{ tabId: string }[]>(app, 'tabs.recentlyClosed')).map((r) => r.tabId)).toEqual([b])
+})

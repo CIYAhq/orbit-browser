@@ -9,8 +9,13 @@ export interface TabCommands {
   'tabs.activate': { args: { tabId: TabId }; result: void }
   /** Close (TB-06): Today tabs go to the Archive; pinned tabs and Favorites unload and reset. */
   'tabs.close': { args: { tabId?: TabId; tabIds?: TabId[] }; result: void }
-  /** Reopen the most recently closed tab with its history (TB-07). */
-  'tabs.reopenClosed': { args: Record<string, never>; result: TabId | null }
+  /** Reopen the most recently closed tab (or `tabId` from the list) with its history (TB-07). */
+  'tabs.reopenClosed': { args: { tabId?: TabId }; result: TabId | null }
+  /** Recently closed tabs, newest first (for command bar results, TB-07). */
+  'tabs.recentlyClosed': {
+    args: Record<string, never>
+    result: { tabId: TabId; url: string; title: string; favicon?: string; spaceId: SpaceId; closedAt: number }[]
+  }
   /** Undo the last sidebar change (TB-18). Returns what was undone. */
   'tabs.undo': { args: Record<string, never>; result: string | null }
   /** Redo the last undone sidebar change (⌘⇧Z) (TB-18). */

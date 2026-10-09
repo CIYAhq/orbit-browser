@@ -193,7 +193,22 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     ops.closeTabs(ids, 'closed')
   })
 
-  commands.register('tabs.reopenClosed', (_args, c) => ops.reopenLast(windowOf(c)))
+  commands.register('tabs.reopenClosed', ({ tabId }, c) =>
+    tabId ? ops.reopen(tabId, windowOf(c)) : ops.reopenLast(windowOf(c)),
+  )
+  commands.register('tabs.recentlyClosed', () =>
+    [...ops.recentlyClosed]
+      .reverse()
+      .filter((r) => !store.state.tabs[r.tab.id])
+      .map((r) => ({
+        tabId: r.tab.id,
+        url: r.tab.url,
+        title: r.tab.customTitle || r.tab.title,
+        favicon: r.tab.favicon,
+        spaceId: r.tab.spaceId,
+        closedAt: r.closedAt ?? 0,
+      })),
+  )
   commands.register('tabs.undo', () => ops.undo.undo() ?? null)
   commands.register('tabs.redo', () => ops.undo.redo() ?? null)
 

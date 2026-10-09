@@ -52,6 +52,7 @@ export interface ClosedTab {
   location?: ItemLocation
   history?: SavedHistory
   archiveId?: string
+  closedAt?: number
 }
 
 /** Tab fields that moving between sections changes (restored by undo). */
@@ -217,10 +218,12 @@ export class TabOps {
     }
     if (removing.length === 0 && unloading.length === 0) return
     const all = new Set([...removing, ...unloading])
+    const closedAt = this.now()
     const records: ClosedTab[] = removing.map((id) => ({
       tab: { ...(state.tabs[id] as Tab) },
       location: locate(state, splitOfTab(state, id) ?? id),
       history: this.historyOf(id),
+      closedAt,
     }))
     const todayTabs = (spaceId: SpaceId) =>
       new Set((state.spaces[spaceId]?.today ?? []).flatMap((id) => tabsInItem(state, id)))
@@ -314,6 +317,16 @@ export class TabOps {
       if (opts.select && opts.windowId && last) activateInDraft(d, opts.windowId, last.tab.id, now)
     })
     return live.map((r) => r.tab.id)
+  }
+
+  /** Reopens one specific recently closed tab (from the command bar). */
+  reopen(tabId: TabId, windowId: WindowId | undefined): TabId | null {
+    const i = this.recentlyClosed.findIndex((r) => r.tab.id === tabId)
+    const rec = i >= 0 ? this.recentlyClosed[i] : undefined
+    if (!rec) return null
+    this.recentlyClosed.splice(i, 1)
+    const [id] = this.restoreClosed([rec], { windowId, select: true })
+    return id ?? null
   }
 
   /** ⌘⇧T: reopens the most recently closed tab (a stack). */
