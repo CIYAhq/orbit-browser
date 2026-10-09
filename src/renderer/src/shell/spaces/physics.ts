@@ -86,6 +86,8 @@ export function releaseDecision(
   }
   const projected = offset + velocity * PROJECTION_S
   const towards = velocity * dir
+  // A flick back toward where it started cancels, however far the content had moved.
+  if (towards < -COMMIT_VELOCITY) return 'return'
   if (Math.abs(projected) > width / 2 && Math.sign(projected) === dir) return 'commit'
   if (Math.abs(offset) > width / 3) return 'commit'
   if (towards > COMMIT_VELOCITY) return 'commit'
@@ -148,7 +150,7 @@ export class MomentumDetector {
 /** Which page slot the viewport mostly shows, and how far it is toward the next one. */
 export function viewportPosition(x: number, width: number): { slot: number; t: number } {
   if (width <= 0) return { slot: 0, t: 0 }
-  const f = -x / width
-  const slot = Math.floor(f)
+  const f = -x / width || 0
+  const slot = Math.floor(f) || 0
   return { slot, t: f - slot }
 }

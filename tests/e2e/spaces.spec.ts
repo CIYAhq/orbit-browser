@@ -621,3 +621,89 @@ test('[FL-13][SP-07] with reduced motion a switch cross-fades without sliding', 
   expect(await slid).toBe(false)
   await expect(shell.getByTestId('space-name')).toHaveText('Beta')
 })
+
+test('[PR-06][FL-13] mid-swipe, Favorites stay still within a profile and cross-fade between profiles', async () => {
+  const { app, shell } = orbit
+  await newTab(app, fx.url('/page/Fav'), { container: { kind: 'favorites', profileId: 'p-default' } })
+  const b = await createSpace(app, { name: 'Same', activate: false })
+  const work = (await run(app, 'profiles.create', { name: 'Work' })) as string
+  await createSpace(app, { name: 'Other', activate: false, profileId: work, afterSpaceId: b })
+  await settled(shell)
+  const layers = () =>
+    shell.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('.space-strip__track > [data-slot]')].map((page) => {
+        const layer = page.querySelector<HTMLElement>('[data-favorites-layer]')
+        const box = layer?.getBoundingClientRect()
+        return {
+          slot: Number(page.dataset.slot),
+          x: Math.round(box?.left ?? 0),
+          opacity: layer?.style.opacity ?? '',
+          tiles: layer?.querySelectorAll('.favorite').length ?? 0,
+        }
+      }),
+    )
+  const favX = await shell.getByTestId('favorites').evaluate((el) => Math.round(el.getBoundingClientRect().left))
+  await hoverSidebar(shell)
+  await swipe(shell, 10, 8, 10)
+  // Same profile: the real page's grid is held in place, the neighbour's is hidden.
+  const same = await layers()
+  const real = same.find((l) => l.slot === 0)
+  expect(real?.x).toBe(favX)
+  expect(real?.opacity).toBe('1')
+  expect(same.find((l) => l.slot === 1)?.opacity).toBe('0')
+  await settled(shell)
+  await run(app, 'spaces.switch', { spaceId: b })
+  await settled(shell)
+  await sleep(150)
+  await hoverSidebar(shell)
+  await swipe(shell, 10, 10, 10)
+  // Different profiles: the two grids cross-fade in place.
+  const cross = await layers()
+  const out = Number(cross.find((l) => l.slot === 0)?.opacity)
+  const into = Number(cross.find((l) => l.slot === 1)?.opacity)
+  expect(out).toBeGreaterThan(0)
+  expect(out).toBeLessThan(1)
+  expect(out + into).toBeCloseTo(1, 2)
+  await settled(shell)
+})
+
+test('[SP-02][SP-04] with the sidebar hidden, New Space creates at once; a single unnamed Space hides its title row', async () => {
+  const { app, shell } = orbit
+  const [a] = await order(app)
+  await run(app, 'window.setSidebar', { visible: false })
+  await app.evaluate(async () => {
+    const hooks = (
+      globalThis as unknown as {
+        __orbit: { action: (id: string, w?: string) => Promise<void>; windowIds: () => string[] }
+      }
+    ).__orbit
+    await hooks.action('space.new', hooks.windowIds()[0])
+  })
+  await expect.poll(() => names(app)).toEqual(['Personal', 'Space 2'])
+  await expect(shell.getByTestId('toast')).toContainText('Space 2')
+  await run(app, 'window.setSidebar', { visible: true })
+  const second = (await order(app))[1] as string
+  await run(app, 'spaces.delete', { spaceId: second })
+  await run(app, 'spaces.update', { spaceId: a, name: '' })
+  await expect(shell.getByTestId('space-title-row')).toHaveCount(0)
+  // Rename Space (command bar action) still reaches it.
+  await run(app, 'spaces.beginRename', { spaceId: a })
+  await shell.getByTestId('space-rename-input').fill('Home')
+  await shell.getByTestId('space-rename-input').press('Enter')
+  await expect(shell.getByTestId('space-name')).toHaveText('Home')
+})
+
+test('[SP-09] mouse back/forward buttons over the sidebar move between Spaces', async () => {
+  const { app, shell } = orbit
+  const [a] = await order(app)
+  const b = await createSpace(app, { name: 'Beta', activate: false })
+  await settled(shell)
+  const press = (button: number) =>
+    shell.getByTestId('sidebar').evaluate((el, b) => {
+      el.dispatchEvent(new MouseEvent('mouseup', { button: b, bubbles: true }))
+    }, button)
+  await press(4)
+  await expect.poll(() => activeSpace(app)).toBe(b)
+  await press(3)
+  await expect.poll(() => activeSpace(app)).toBe(a)
+})
