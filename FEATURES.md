@@ -4,14 +4,14 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 0 built (26 partial) · 0 tested · 0 feel right.
+**Totals:** 485 spec’d · 19 built (35 partial) · 39 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 0 | 0 |
-| P1 | 221 | 0 | 0 |
-| P2 | 83 | 0 | 0 |
+| P0 | 174 | 12 | 20 |
+| P1 | 221 | 7 | 18 |
+| P2 | 83 | 0 | 1 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -57,11 +57,11 @@ Spec: `spec/tabs.md`
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
 | TB-01 | Tab row anatomy and states | P0 | – | – | – |  |
-| TB-02 | Create a new tab | P0 | 🟡 partial | – | – | scaffold |
+| TB-02 | Create a new tab | P0 | 🟡 partial | ✅ e2e | – | scaffold |
 | TB-03 | Where new tabs are inserted | P0 | – | – | – |  |
 | TB-04 | Switching between tabs (pointer and keyboard) | P0 | 🟡 partial | – | – | scaffold |
 | TB-05 | Recent-tab switcher (Ctrl+Tab) | P1 | – | – | – |  |
-| TB-06 | Closing a tab | P0 | 🟡 partial | – | – | scaffold |
+| TB-06 | Closing a tab | P0 | 🟡 partial | ✅ e2e | – | scaffold |
 | TB-07 | Reopen the last closed tab | P0 | 🟡 partial | – | – | scaffold |
 | TB-08 | Reorder tabs by drag and drop | P0 | – | – | – |  |
 | TB-09 | Drag and drop to other destinations | P0 | – | – | – |  |
@@ -72,12 +72,12 @@ Spec: `spec/tabs.md`
 | TB-14 | Tab context menu | P0 | 🟡 partial | – | – | scaffold |
 | TB-15 | Audio, mute, microphone/camera and screen-share indicators | P1 | – | – | – |  |
 | TB-16 | Tab sleeping and background resource limits | P1 | 🟡 partial | – | – | sleep/wake runtime; no timer yet |
-| TB-17 | Tabs across multiple windows | P1 | – | – | – |  |
+| TB-17 | Tabs across multiple windows | P1 | – | ✅ e2e | – |  |
 | TB-18 | Undo sidebar actions | P1 | – | – | – |  |
-| TB-19 | Back on a fresh child tab returns to its opener | P2 | – | – | – |  |
+| TB-19 | Back on a fresh child tab returns to its opener | P2 | – | ✅ e2e | – |  |
 | TB-20 | Copy a tab's URL | P1 | – | – | – |  |
 | TB-21 | Hover cards for known web apps | P2 | – | – | – |  |
-| TB-22 | Session restore on relaunch | P0 | 🟡 partial | – | – | scaffold |
+| TB-22 | Session restore on relaunch | P0 | 🟡 partial | ✅ e2e | – | scaffold |
 | PN-01 | What a pinned tab is | P0 | – | – | – |  |
 | PN-02 | Pin and unpin | P0 | 🟡 partial | – | – | scaffold |
 | PN-03 | Pinned URL memory and the "navigated away" indicator | P0 | – | – | – |  |
@@ -133,14 +133,14 @@ Spec: `spec/spaces.md`
 | SP-08 | Switch Spaces with a trackpad swipe | P0 | – | – | – |  |
 | SP-09 | Switch Spaces with the keyboard, mouse buttons and command bar | P0 | – | – | – |  |
 | SP-10 | What switching Space does | P0 | – | – | – |  |
-| SP-11 | Reorder Spaces | P1 | – | – | – |  |
+| SP-11 | Reorder Spaces | P1 | – | ✅ e2e | – |  |
 | SP-12 | Delete a Space | P0 | – | – | – |  |
 | SP-13 | Spaces overview in the Library | P1 | – | – | – |  |
 | SP-14 | Open the theme picker | P0 | – | – | – |  |
 | SP-15 | Theme colours and gradients | P0 | – | – | – |  |
 | SP-16 | How the Space theme colours the sidebar, frame and other surfaces | P0 | – | – | – |  |
 | SP-17 | Grain, intensity, presets and reset | P1 | – | – | – |  |
-| SP-18 | Light / Dark / Automatic switch in the theme picker | P1 | – | – | – |  |
+| SP-18 | Light / Dark / Automatic switch in the theme picker | P1 | – | ✅ e2e | – |  |
 | SP-19 | Theme transition between Spaces | P1 | – | – | – |  |
 | SP-20 | Per-Space pinned and Today sections | P0 | – | – | – |  |
 | SP-21 | Move tabs between Spaces | P0 | – | – | – |  |
@@ -187,7 +187,7 @@ Spec: `spec/commandbar.md`
 | CB-19 | Space and profile awareness | P0 | – | – | – |  |
 | CB-20 | Sidebar stays interactive while the bar is open | P1 | – | – | – |  |
 | CB-21 | Closing the bar and what happens to typed text | P0 | – | – | – |  |
-| CB-22 | Feel: open/close animation, latency and live updates | P0 | – | – | – |  |
+| CB-22 | Feel: open/close animation, latency and live updates | P0 | – | ✅ e2e | – |  |
 | CB-23 | The bar in other contexts (split pane, private window, Mini Window) | P1 | – | – | – |  |
 
 ## Split View (prefix SV)
@@ -242,13 +242,13 @@ Spec: `spec/navigation.md`
 | NV-11 | Private (incognito) window | P0 | – | – | – |  |
 | NV-12 | Page context menu | P0 | – | – | – |  |
 | NV-13 | Load-error pages | P1 | – | – | – |  |
-| NV-14 | Crashed or unresponsive tab | P1 | – | – | – |  |
-| NV-15 | Permission prompts | P0 | – | – | – |  |
+| NV-14 | Crashed or unresponsive tab | P1 | – | ✅ e2e | – |  |
+| NV-15 | Permission prompts | P0 | – | ✅ e2e | – |  |
 | NV-16 | Site controls panel | P0 | – | – | – |  |
 | NV-17 | Copy the current URL | P0 | – | – | – |  |
-| NV-18 | Links from other apps (Orbit as the default browser) | P0 | – | – | – |  |
+| NV-18 | Links from other apps (Orbit as the default browser) | P0 | – | ✅ e2e | – |  |
 | NV-19 | Links that open other apps (external protocols) | P1 | – | – | – |  |
-| NV-20 | Full screen | P1 | – | – | – |  |
+| NV-20 | Full screen | P1 | – | ✅ e2e | – |  |
 | NV-21 | Save page and view source | P2 | – | – | – |  |
 | NV-22 | Translate a page | P2 | – | – | – |  |
 | NV-23 | Reader mode | P2 | – | – | – |  |
@@ -261,22 +261,22 @@ Spec: `spec/peek.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| PK-01 | What Peek is | P0 | – | – | – |  |
-| PK-02 | Which links open in Peek: other-site links in pinned tabs and Favorites | P0 | – | – | – |  |
-| PK-03 | Shift-click opens any link in Peek | P1 | – | – | – |  |
-| PK-04 | Exceptions: meeting links and link-routing rules | P1 | – | – | – |  |
-| PK-05 | The Peek card's look | P0 | – | – | – |  |
-| PK-06 | Open and close animation, and the dismiss gesture | P1 | – | – | – |  |
-| PK-07 | Expand a Peek into a full tab | P0 | – | – | – |  |
-| PK-08 | Open a Peek in Split View | P1 | – | – | – |  |
-| PK-09 | Close a Peek | P0 | – | – | – |  |
-| PK-10 | Reopen a Peek closed by mistake | P1 | – | – | – |  |
-| PK-11 | Navigating and acting inside a Peek | P1 | – | – | – |  |
-| PK-12 | Peek settings | P1 | – | – | – |  |
-| PK-13 | Peek and the sidebar | P0 | – | – | – |  |
+| PK-01 | What Peek is | P0 | ✅ | ✅ e2e+unit | – | floating card over the source tab; one Peek per window; links inside navigate it |
+| PK-02 | Which links open in Peek: other-site links in pinned tabs and Favorites | P0 | ✅ | ✅ e2e+unit | – | other-site (eTLD+1) clicks and target=_blank in pinned tabs/Favorites; same-site navigates |
+| PK-03 | Shift-click opens any link in Peek | P1 | ✅ | ✅ e2e+unit | – | Shift-click in any tab; link menu 'Open Link in Peek' |
+| PK-04 | Exceptions: meeting links and link-routing rules | P1 | ✅ | ✅ e2e+unit | – | meeting links open a tab; routing rules (settings.linkRules) win; rules UI is the settings lane's |
+| PK-05 | The Peek card's look | P0 | ✅ | ✅ e2e+unit | – | inset card, shadow, dimmed page area, Close / Open as Tab / Split buttons with shortcut tooltips; no toolbar (AP-07 not built) |
+| PK-06 | Open and close animation, and the dismiss gesture | P1 | 🟡 partial | ✅ e2e+unit | – | spring grow from the link, dim, quick shrink-fade, reduced motion; no interactive dismiss gesture |
+| PK-07 | Expand a Peek into a full tab | P0 | ✅ | ✅ e2e | – | ⌘O / button: card morphs to the frame, live page becomes a selected Today tab (routing rules apply) |
+| PK-08 | Open a Peek in Split View | P1 | 🟡 partial | – | – | button and animation wired; uses split.addTab once the split lane merges, else opens as a tab |
+| PK-09 | Close a Peek | P0 | ✅ | ✅ e2e | – | Esc (after fullscreen), ⌘W, ×, click outside; archived as from 'peek' |
+| PK-10 | Reopen a Peek closed by mistake | P1 | ✅ | ✅ e2e | – | ⌘Z right after closing, or ⌘⇧T, reopens on the same page with history |
+| PK-11 | Navigating and acting inside a Peek | P1 | 🟡 partial | ✅ e2e | – | links, back/forward, reload, zoom, copy URL, devtools act on the Peek; sidebar address does not show the Peek host |
+| PK-12 | Peek settings | P1 | 🟡 partial | ✅ e2e+unit | – | settings.peekExternalLinks / peekShiftClick honoured; toggles UI belongs to the settings lane |
+| PK-13 | Peek and the sidebar | P0 | ✅ | ✅ e2e | – | no sidebar row; sidebar stays usable; selecting another tab, Space or window dismisses (reopenable) |
 | PK-14 | Canvases, notes and Library items open in Peek | P2 | – | – | – |  |
 | PK-15 | Peek is not the hover preview | P2 | – | – | – |  |
-| PK-16 | Peek and the Mini Window are different | P1 | – | – | – |  |
+| PK-16 | Peek and the Mini Window are different | P1 | ✅ | ✅ e2e+unit | – | Mini Window links never Peek; target=_blank stays in the Mini Window |
 
 ## Mini Window (prefix MW)
 
@@ -284,21 +284,21 @@ Spec: `spec/mini-window.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| MW-01 | What the Mini Window is | P0 | – | – | – |  |
-| MW-02 | Links from other apps open in a Mini Window by default | P0 | – | – | – |  |
-| MW-03 | Look and anatomy | P0 | – | – | – |  |
-| MW-04 | Opening animation and window placement | P1 | – | – | – |  |
-| MW-05 | Move the page into a Space ("Open in…") | P0 | – | – | – |  |
-| MW-06 | Open a blank Mini Window for a quick lookup | P0 | – | – | – |  |
-| MW-07 | Open a link or a tab in a Mini Window on purpose | P1 | – | – | – |  |
-| MW-08 | Several Mini Windows at once | P1 | – | – | – |  |
-| MW-09 | Closing, auto-archive and the Archive | P0 | – | – | – |  |
-| MW-10 | Profiles | P1 | – | – | – |  |
-| MW-11 | Turning the Mini Window off | P1 | – | – | – |  |
-| MW-12 | What works inside a Mini Window | P2 | – | – | – |  |
+| MW-01 | What the Mini Window is | P0 | ✅ | ✅ e2e | – | separate small window, one floating tab, main window untouched |
+| MW-02 | Links from other apps open in a Mini Window by default | P0 | ✅ | ✅ e2e | – | open-url / second-instance / argv links open a Mini Window; same URL resurfaces it; routing rules first |
+| MW-03 | Look and anatomy | P0 | ✅ | ✅ e2e | – | slim top bar: controls, favicon+host (click/⌘L edits), Open in…, profile pill; inset page card; neutral theme |
+| MW-04 | Opening animation and window placement | P1 | 🟡 partial | – | – | last-used size/position, 24 px cascade, fade-in on macOS/Windows, best-effort above fullscreen on macOS; no scale |
+| MW-05 | Move the page into a Space ("Open in…") | P0 | ✅ | ✅ e2e | – | ⌘O to the most recent Space, Open in… / ⌘⌥O (⌘⇧O) native Space menu; live page, no reload |
+| MW-06 | Open a blank Mini Window for a quick lookup | P0 | ✅ | ✅ e2e | – | ⌘⌥N (global shortcut outside e2e) opens a pre-rendered blank window with a focused lookup bar; Esc/⌘W close |
+| MW-07 | Open a link or a tab in a Mini Window on purpose | P1 | 🟡 partial | ✅ e2e+unit | – | ⌘⌥-click and link menu 'Open Link in Mini Window'; ⌘⌥-click on a sidebar row not built (sidebar lane) |
+| MW-08 | Several Mini Windows at once | P1 | ✅ | ✅ e2e | – | any number; Show/Hide All action and macOS dock menu |
+| MW-09 | Closing, auto-archive and the Archive | P0 | ✅ | ✅ e2e | – | close and idle auto-close (settings.miniWindowArchiveAfterMs, 6 h, 0 = never; not while audible) archive with from 'mini' |
+| MW-10 | Profiles | P1 | ✅ | ✅ e2e | – | profile pill/menu reopens the page in another profile; remembered per site |
+| MW-11 | Turning the Mini Window off | P1 | ✅ | ✅ e2e | – | settings.miniWindowForExternalLinks off: tabs in the most recent or chosen Space (externalLinksSpace) |
+| MW-12 | What works inside a Mini Window | P2 | 🟡 partial | – | – | fullscreen video fills the window, copy URL, devtools, downloads via the session; no captures |
 | MW-13 | Menu-bar / tray button | P2 | – | – | – |  |
-| MW-14 | Platforms | P1 | – | – | – |  |
-| MW-15 | Feel | P1 | – | – | – |  |
+| MW-14 | Platforms | P1 | 🟡 partial | – | – | all platforms with Ctrl+Alt+N / Ctrl+O / Ctrl+Alt+O; no tray or jump-list fallback |
+| MW-15 | Feel | P1 | 🟡 partial | ✅ e2e | – | warm spare window takes keys at once, page loads before the window shows; Open in… has no fly-to-sidebar motion |
 
 ## Picture-in-picture, sidebar media player and call controls (prefix MD)
 
@@ -347,7 +347,7 @@ Spec: `spec/shortcuts.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| KS-01 | One keymap, remapping and persistence | P0 | – | – | – |  |
+| KS-01 | One keymap, remapping and persistence | P0 | – | ✅ e2e | – |  |
 | KS-02 | Conflicts with web pages ("prefer websites" vs "prefer Orbit") | P0 | – | – | – |  |
 | KS-03 | Platform mapping rules | P0 | – | – | – |  |
 | KS-04 | Command bar and address | P0 | – | – | – |  |
@@ -413,7 +413,7 @@ Spec: `spec/appearance.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| AP-01 | Light, Dark or Match system | P0 | – | – | – |  |
+| AP-01 | Light, Dark or Match system | P0 | – | ✅ e2e | – |  |
 | AP-02 | Theme colours carry through the whole interface | P1 | – | – | – |  |
 | AP-03 | Restore the default (neutral) theme | P1 | – | – | – |  |
 | AP-04 | Dark mode quality | P1 | – | – | – |  |
@@ -544,7 +544,7 @@ Spec: `spec/settings.md`
 | ST-06 | Per-profile: default search engine and custom engines | P0 | – | – | – |  |
 | ST-07 | Per-profile: download location, new-document app, data shortcuts | P1 | – | – | – |  |
 | ST-08 | Shortcuts section (remapping) | P1 | – | – | – |  |
-| ST-09 | Links section | P1 | – | – | – |  |
+| ST-09 | Links section | P1 | – | ✅ unit | – |  |
 | ST-10 | Advanced section | P1 | – | – | – |  |
 | ST-11 | Appearance section | P1 | – | – | – |  |
 | ST-12 | Privacy & security, and clearing browsing data | P1 | – | – | – |  |
