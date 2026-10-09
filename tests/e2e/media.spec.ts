@@ -14,7 +14,7 @@ import type { MediaTestHooks } from '../../src/main/media'
 import type { PlayerHost, PlayerInfo } from '../../src/main/media/player'
 import { formatClock } from '../../src/shared/media'
 import type { TabMedia } from '../../src/shared/state'
-import { FRAME_SLACK, launchOrbit, type Orbit, state, tabPage, tabView, viewPage } from './helpers'
+import { FRAME_SLACK, launchOrbit, MOD, type Orbit, state, tabPage, tabView, viewPage } from './helpers'
 import { act, activeId, cmd, newTab, tab, tabsHook, waitTab } from './tabs-support'
 
 // ---- Local media fixtures (ports 3300–3399 are this project's) ----
@@ -797,10 +797,10 @@ test('[MD-06][FL-32] the player snaps to the corner a move or fling heads for, r
   await pip.mouse.wheel(900, 0)
   await expect.poll(async () => (await player(app)).bounds).toEqual(cornerBox(area, 'top-left', 200, 113))
 
-  // ⌘/Ctrl + scroll zooms into the video inside the same window.
-  await pip.keyboard.down('Control')
+  // ⌘ + scroll (Ctrl + scroll on Windows and Linux) zooms into the video inside the same window.
+  await pip.keyboard.down(MOD)
   await pip.mouse.wheel(0, -150)
-  await pip.keyboard.up('Control')
+  await pip.keyboard.up(MOD)
   await expect
     .poll(() =>
       v.page.evaluate(() => new DOMMatrix(getComputedStyle(document.getElementById('v') as Element).transform).a),
