@@ -35,12 +35,12 @@ const ICON =
 /**
  * A page that records key presses (`window.__keys`) and mouse presses (`window.__clicks`: x, y,
  * button) and counts its loads in sessionStorage (`loads`), with a text box (#box), a link to the
- * next page (#next) and one that opens a new tab (#child).
+ * next page (#next) and one that opens a new tab (#child). `background` is its CSS background.
  */
-function page(title: string): string {
+function page(title: string, background = '#f2fbf5'): string {
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>${title}</title><link rel="icon" href="${ICON}">
-<style>body{font:16px system-ui;background:#f2fbf5;margin:0;padding:40px}input{font:inherit}</style></head>
+<style>body{font:16px system-ui;background:${background};margin:0;padding:40px}input{font:inherit}</style></head>
 <body><h1 id="title">${title}</h1>
 <p><input id="box" autocomplete="off"></p>
 <p><a id="next" href="/page/${encodeURIComponent(`${title}-next`)}">Next page</a></p>
@@ -58,7 +58,7 @@ sessionStorage.setItem('loads', String(Number(sessionStorage.getItem('loads') ||
 
 /**
  * Routes:
- * - `/page/<title>`: a page (see `page()`).
+ * - `/page/<title>?bg=<css colour>`: a page (see `page()`), optionally in another background.
  * - `/slow/<title>?ms=N`: the page after N ms (default 30 s): keeps a tab loading.
  * - `/slow-reload/<title>`: the page at once on the first request, then slowly (30 s) on reloads.
  */
@@ -78,7 +78,7 @@ export async function startNavFixtures(): Promise<NavFixtures> {
       pending.delete(res)
       if (res.writableEnded || res.destroyed) return
       res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' })
-      res.end(page(title))
+      res.end(page(title, u.searchParams.get('bg') ?? undefined))
     }
     const later = (ms: number) => {
       pending.add(res)
@@ -122,11 +122,16 @@ export async function startNavFixtures(): Promise<NavFixtures> {
 }
 
 type Hooks = {
-  __orbit: { run: (n: string, a: unknown, w?: string) => Promise<unknown>; windowIds: () => string[] }
+  __orbit: {
+    run: (n: string, a: unknown, w?: string) => Promise<unknown>
+    windowIds: () => string[]
+    ctx: { windows: { get: (id: string) => Electron.BrowserWindow | undefined } }
+  }
   __orbitNav: {
     menu: () => { windowId: string; direction: 'back' | 'forward'; labels: string[]; icons: boolean[] } | null
     chooseMenu: (label: string, newTab?: boolean) => boolean
     floating: (windowId?: string) => FloatingInfo
+    corner: (tabId: string) => number | null
   }
 }
 
@@ -154,6 +159,20 @@ export async function floatingPage(app: ElectronApplication): Promise<Page> {
 /** The first window's floating sidebar. */
 export function floatingInfo(app: ElectronApplication): Promise<FloatingInfo> {
   return app.evaluate(() => (globalThis as unknown as Hooks).__orbitNav.floating())
+}
+
+/** The corner radius a shown page's card was given (SB-19). */
+export function pageCorner(app: ElectronApplication, tabId: string): Promise<number | null> {
+  return app.evaluate((_e, id) => (globalThis as unknown as Hooks).__orbitNav.corner(id), tabId)
+}
+
+/** Puts the first window into or out of native full screen and waits until it is there (macOS animates). */
+export async function setNativeFullScreen(app: ElectronApplication, on: boolean): Promise<void> {
+  await app.evaluate((_e, value) => {
+    const { __orbit } = globalThis as unknown as Hooks
+    __orbit.ctx.windows.get(__orbit.windowIds()[0] as string)?.setFullScreen(value)
+  }, on)
+  await expect.poll(async () => (await windowState(app)).fullscreen, { timeout: 15_000 }).toBe(on)
 }
 
 /** Runs a command as if from the first window. */

@@ -115,6 +115,17 @@ html.is-resizing * {
   padding: var(--gutter-hidden);
 }
 
+/* Native full screen has no frame: the page meets the screen's edges, square (SB-19). */
+.shell--fullscreen .content,
+.shell--fullscreen.shell--sidebar-hidden .content {
+  padding: 0;
+}
+
+.shell--fullscreen .pane {
+  border-radius: 0;
+  box-shadow: none;
+}
+
 /* Dragging the sidebar's edge is 1:1 with the pointer (SB-14, FL-01). */
 .shell--resizing,
 .shell--resizing .content,

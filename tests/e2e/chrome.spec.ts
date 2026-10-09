@@ -16,7 +16,9 @@ import {
   type NavFixtures,
   NEW_TAB_CLICK,
   openTab,
+  pageCorner,
   pageMouse,
+  setNativeFullScreen,
   shellRoundTrip,
   spyCommand,
   startNavFixtures,
@@ -797,4 +799,168 @@ test('[SB-14] dragging the edge sets the width 1:1 within limits; double-click r
   expect((await sidebarState()).width).toBe(DEFAULT_SIDEBAR_WIDTH)
   await shell.keyboard.press(`${MOD}+S`)
   await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(DEFAULT_SIDEBAR_WIDTH)
+})
+
+// ---------- The page card (SB-19) ----------
+
+/** The card's margin with the sidebar shown: top, right and bottom (the sidebar's edge is the left). */
+const MARGIN = 8
+const RADIUS = 10
+
+test('[SB-19] the page is a rounded card inset from the window in every state: loading, sidebar hidden or floating', async () => {
+  const { app } = orbit
+  const id = await openTab(app, page('Card'))
+  const size = await contentSize()
+  const { width } = await sidebarState()
+  const docked = { x: width, y: MARGIN, width: size.width - width - MARGIN, height: size.height - 2 * MARGIN }
+  await expect.poll(async () => (await tabView(app, id))?.bounds).toEqual(docked)
+  expect(await pageCorner(app, id)).toBe(RADIUS)
+  // Loading.
+  await cmd(app, 'tabs.navigate', { tabId: id, url: fx.url('/slow/CardLoading') })
+  await expect.poll(async () => (await state(app)).tabs[id]?.loading).toBe(true)
+  expect(await pageCorner(app, id)).toBe(RADIUS)
+  expect((await tabView(app, id))?.bounds).toEqual(docked)
+  // Sidebar hidden: a thin margin on all four sides.
+  await hideSidebar()
+  const hidden = {
+    x: MARGIN_HIDDEN,
+    y: MARGIN_HIDDEN,
+    width: size.width - 2 * MARGIN_HIDDEN,
+    height: size.height - 2 * MARGIN_HIDDEN,
+  }
+  await expect.poll(async () => (await tabView(app, id))?.bounds).toEqual(hidden)
+  expect(await pageCorner(app, id)).toBe(RADIUS)
+  // The floating sidebar over it changes nothing.
+  await revealFloating()
+  expect((await tabView(app, id))?.bounds).toEqual(hidden)
+  expect(await pageCorner(app, id)).toBe(RADIUS)
+  // The shell's card under the page has the same corners and a fine edge.
+  const pane = orbit.shell.locator(`[data-testid="split-pane"][data-tab-id="${id}"]`)
+  await expect(pane).toHaveCSS('border-radius', `${RADIUS}px`)
+  expect(await pane.evaluate((el) => getComputedStyle(el).boxShadow)).not.toBe('none')
+})
+
+test('[SB-19] native full screen takes the frame away; leaving brings it back', async () => {
+  const { app } = orbit
+  const id = await openTab(app, page('Screen'))
+  const { width } = await sidebarState()
+  await expect.poll(async () => (await tabView(app, id))?.bounds.x).toBe(width)
+  await setNativeFullScreen(app, true)
+  await expect
+    .poll(async () => {
+      const size = await contentSize()
+      return (
+        JSON.stringify((await tabView(app, id))?.bounds) ===
+        JSON.stringify({ x: width, y: 0, width: size.width - width, height: size.height })
+      )
+    })
+    .toBe(true)
+  expect(await pageCorner(app, id)).toBe(0)
+  await setNativeFullScreen(app, false)
+  await expect.poll(async () => (await tabView(app, id))?.bounds.y).toBe(MARGIN)
+  expect(await pageCorner(app, id)).toBe(RADIUS)
+})
+
+test('[SB-19] the card takes the page’s own background, so a resize uncovers no white', async () => {
+  const { app, shell } = orbit
+  const id = await openTab(app, fx.url('/page/Dark?bg=%23202124'))
+  await expect.poll(async () => (await state(app)).tabs[id]?.pageColor).toBe('#202124')
+  const pane = shell.locator(`[data-testid="split-pane"][data-tab-id="${id}"]`)
+  await expect(pane).toHaveCSS('background-color', 'rgb(32, 33, 36)')
+  // Another page, another colour: the card follows.
+  await visit(app, id, page('Light'))
+  await expect.poll(async () => (await state(app)).tabs[id]?.pageColor).toBe('#f2fbf5')
+  await expect(pane).toHaveCSS('background-color', 'rgb(242, 251, 245)')
+})
+
+// ---------- Window layout and the sidebar's regions (SB-01, SB-02, SB-05) ----------
+
+test('[SB-01] a window is the sidebar on the left and the page card beside it, with no tab strip across the top', async () => {
+  const { app, shell } = orbit
+  const id = await openTab(app, page('Layout'))
+  const size = await contentSize()
+  const sidebar = await shell.getByTestId('sidebar').boundingBox()
+  expect(sidebar).toMatchObject({ x: 0, y: 0, height: size.height })
+  const view = (await tabView(app, id))?.bounds
+  expect(view?.x).toBe(sidebar?.width)
+  // Above the card there is only the thin themed margin, nothing that holds tabs.
+  expect(view?.y).toBe(MARGIN)
+  const across = await shell.evaluate(() => {
+    const el = document.elementFromPoint(innerWidth / 2, 3)
+    return el ? !!el.closest('[data-testid="tab-row"], [role="tablist"], [data-testid="sidebar"]') : false
+  })
+  expect(across).toBe(false)
+  // The tab is in the sidebar.
+  await expect(shell.locator(`[data-testid="sidebar"] [data-testid="tab-row"][data-tab-id="${id}"]`)).toBeVisible()
+})
+
+test('[SB-02][SB-05] the sidebar’s regions run top to bottom in order; the middle scrolls, the top and bottom stay', async () => {
+  const { app, shell } = orbit
+  const favorite = await openTab(app, page('Fav'))
+  expect(await cmd(app, 'tabs.favorite', { tabId: favorite })).toBe(true)
+  for (const title of ['PinA', 'PinB']) await cmd(app, 'tabs.pin', { tabId: await openTab(app, page(title)) })
+  for (const title of ['TodayA', 'TodayB', 'TodayC']) await openTab(app, page(title))
+  const regions = [
+    '[data-testid="topbar"] .topbar__row',
+    '[data-testid="address"]',
+    '[data-testid="favorites"]',
+    '[data-testid="space-title-row"]',
+    '[data-testid="pinned-list"]',
+    '[data-testid="today-divider"]',
+    '[data-testid="new-tab-button"]',
+    '[data-testid="today-list"]',
+    '[data-testid="sidebar-empty-area"]',
+    '[data-testid="spacebar"]',
+  ]
+  const sidebar = shell.getByTestId('sidebar')
+  const tops = async () => {
+    const out: number[] = []
+    for (const r of regions) out.push((await sidebar.locator(r).first().boundingBox())?.y ?? Number.NaN)
+    return out
+  }
+  await expect(sidebar.locator('[data-testid="favorite-tile"]')).toHaveCount(1)
+  await expect(sidebar.locator('[data-testid="pinned-list"] [data-testid="tab-row"]')).toHaveCount(2)
+  await expect(sidebar.locator('[data-testid="today-list"] [data-testid="tab-row"]')).toHaveCount(3)
+  const before = await tops()
+  for (let i = 1; i < before.length; i++) {
+    expect(before[i], `${regions[i]} below ${regions[i - 1]}`).toBeGreaterThan(before[i - 1] as number)
+  }
+  // Title row to the empty area scroll together; the top rows, Favorites and the bottom bar don't.
+  const scroll = shell.getByTestId('sidebar-scroll')
+  for (const r of regions.slice(3, 9)) await expect(scroll.locator(r)).toHaveCount(1)
+  for (const r of [...regions.slice(0, 3), regions[9] as string]) await expect(scroll.locator(r)).toHaveCount(0)
+  for (let n = 0; n < 30; n++) await cmd(app, 'tabs.create', { url: `http://127.0.0.1:9/r${n}`, activate: false })
+  await expect.poll(() => scroll.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(100)
+  await scroll.evaluate((el) => {
+    el.scrollTop = 80
+  })
+  await expect.poll(async () => (await tops())[3]).toBe((before[3] as number) - 80)
+  const after = await tops()
+  for (const i of [0, 1, 2, 9]) expect(after[i], regions[i]).toBe(before[i])
+})
+
+test('[SB-05] Favorites stay in place across a switch to another Space of the same profile', async () => {
+  const { app, shell } = orbit
+  const favorite = await openTab(app, page('Shared'))
+  expect(await cmd(app, 'tabs.favorite', { tabId: favorite })).toBe(true)
+  const tile = shell.locator(`[data-testid="favorite-tile"][data-tab-id="${favorite}"]`)
+  await expect(tile).toBeVisible()
+  // Where the tile rests once its arrival animation is over.
+  const rest = async () => {
+    let last = ''
+    await expect
+      .poll(async () => {
+        const now = JSON.stringify(await tile.boundingBox())
+        const same = now === last
+        last = now
+        return same
+      })
+      .toBe(true)
+    return JSON.parse(last) as { x: number; y: number; width: number; height: number }
+  }
+  const where = await rest()
+  const other = (await cmd(app, 'spaces.create', { name: 'Elsewhere' })) as string
+  await expect.poll(async () => (await windowState(app)).spaceId).toBe(other)
+  await expect(tile).toBeVisible()
+  expect(await rest()).toEqual(where)
 })

@@ -24,6 +24,8 @@ interface WindowRecord {
   visible: Set<TabId>
   panes: Pane[]
   radius: number
+  /** The corner radius each shown page was given (0 in full screen) (SB-19). */
+  corners: Map<TabId, number>
   /** Last single-pane content rect: lets tab switches swap views without a renderer round trip. */
   lastSingleRect?: Rect
   /** Last reported content frame (all panes together); used to lay out split views on the fast path. */
@@ -296,6 +298,7 @@ export class WindowManager {
       visible: new Set(),
       panes: [],
       radius: 10,
+      corners: new Map(),
       minPaneSeq: 0,
       overlayShown: false,
       floatingShown: false,
@@ -325,10 +328,13 @@ export class WindowManager {
     win.on('enter-full-screen', () => {
       this.setRuntime(id, { fullscreen: true })
       this.settleHtmlFullscreen(rec)
+      // The frame goes (SB-19): square corners now, the margins as the shell lays out again.
+      if (!rec.htmlFullscreen) this.applyPanes(id, rec.panes, rec.radius)
     })
     win.on('leave-full-screen', () => {
       this.setRuntime(id, { fullscreen: false })
       this.settleHtmlFullscreen(rec)
+      if (!rec.htmlFullscreen) this.applyPanes(id, rec.panes, rec.radius)
     })
     win.on('resize', () => {
       if (rec.overlayShown) this.fitOverlay(rec)
@@ -445,6 +451,12 @@ export class WindowManager {
     if (rec.overlay && !rec.overlay.webContents.isDestroyed()) rec.overlay.webContents.send(`orbit:${channel}`, payload)
   }
 
+  /** The corner radius a shown page was last given (SB-19), for tests. */
+  cornerOf(tabId: TabId): number | undefined {
+    const entry = this.attached.get(tabId)
+    return entry ? this.records.get(entry.windowId)?.corners.get(tabId) : undefined
+  }
+
   /** The floating sidebar's web contents while its card is out (SB-12). */
   floatingContents(windowId: WindowId): WebContents | undefined {
     const rec = this.records.get(windowId)
@@ -503,6 +515,8 @@ export class WindowManager {
     if (!rec || rec.win.isDestroyed()) return
     rec.panes = panes
     rec.radius = radius
+    // Native full screen has no frame: square corners (SB-19).
+    const corner = this.ctx.store.state.windows[windowId]?.fullscreen ? 0 : radius
     const wanted = new Set(panes.map((p) => p.tabId))
     for (const tabId of rec.visible) {
       if (wanted.has(tabId)) continue
@@ -518,7 +532,8 @@ export class WindowManager {
       if (!view) continue
       this.attach(rec, pane.tabId, view)
       view.setBounds(roundRect(pane.rect))
-      view.setBorderRadius(radius)
+      view.setBorderRadius(corner)
+      rec.corners.set(pane.tabId, corner)
       view.setVisible(true)
       // A tab whose page crashed while in the background reloads when it is shown again.
       if (!rec.visible.has(pane.tabId) && view.webContents.isCrashed()) view.webContents.reload()
@@ -560,6 +575,7 @@ export class WindowManager {
     this.placeOnTop(rec, entry.view)
     entry.view.setBounds({ x: 0, y: 0, width, height })
     entry.view.setBorderRadius(0)
+    rec.corners.set(tabId, 0)
   }
 
   private setHtmlFullscreen(tabId: TabId, contentsId: number, on: boolean): void {

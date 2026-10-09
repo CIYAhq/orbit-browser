@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 123 built (42 partial) · 172 tested · 0 feel right.
+**Totals:** 485 spec’d · 127 built (38 partial) · 175 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 93 | 118 |
+| P0 | 174 | 97 | 121 |
 | P1 | 221 | 27 | 50 |
 | P2 | 83 | 3 | 4 |
 
@@ -21,11 +21,11 @@ Spec: `spec/sidebar.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| SB-01 | Sidebar-first window layout | P0 | 🟡 partial | – | – | scaffold; audit vs spec |
-| SB-02 | Sidebar anatomy (top to bottom) | P0 | 🟡 partial | – | – | scaffold; audit vs spec |
+| SB-01 | Sidebar-first window layout | P0 | ✅ | ✅ e2e | – | sidebar on the left with controls, navigation, address and every tab; the page an inset rounded card beside it in the Space theme; no tab strip |
+| SB-02 | Sidebar anatomy (top to bottom) | P0 | ✅ | ✅ e2e | – | top row, address, Favorites, title row, pinned, divider, + New Tab, Today, empty area, bottom bar in that order; title row to empty area scroll together, the rest stays; trays come with SB-10, the Library button with SB-09 |
 | SB-03 | Top row: window controls and navigation buttons | P0 | ✅ | ✅ e2e | – | traffic lights (Linux: window controls), sidebar toggle, Back/Forward/Reload with disabled and Stop states; long-press/right-click history menu; Cmd/middle-click into a new tab; Esc or double-click stops; toggle gives way first when narrow |
 | SB-04 | Address display at the top of the sidebar | P0 | 🟡 partial | ✅ e2e+unit | – | host only (focused pane), click or Cmd+L edits the full URL, warning icon for plain http (no padlock), copy-link button; site-controls button shows a placeholder until NV-16 |
-| SB-05 | Favorites grid placement | P0 | 🟡 partial | – | – | scaffold |
+| SB-05 | Favorites grid placement | P0 | ✅ | ✅ e2e | – | Favorites between the address and the title row, outside the scrolling list; same grid, same place across Spaces of one profile |
 | SB-06 | Space title row placement | P0 | ✅ | ✅ e2e | – | title row: inline rename, hover profile badge and … menu (pinned caret is PN-09) |
 | SB-07 | "+ New Tab" row | P0 | ✅ | ✅ e2e | – | + New Tab row with press animation opens the command bar |
 | SB-08 | Empty sidebar area: double-click, drag, right-click | P1 | – | – | – |  |
@@ -39,7 +39,7 @@ Spec: `spec/sidebar.md`
 | SB-16 | Sidebar position (left / right) | P2 | – | – | – |  |
 | SB-17 | Optional top toolbar | P1 | – | – | – |  |
 | SB-18 | Developer-mode tab chrome | P2 | – | – | – |  |
-| SB-19 | Inset rounded page frame ("card" look) | P0 | 🟡 partial | ✅ e2e | – | scaffold |
+| SB-19 | Inset rounded page frame ("card" look) | P0 | ✅ | ✅ e2e | – | 8 px margins (6 px with the sidebar hidden), 10 px corners on every page and pane while loading, hidden or floating; fine edge and shadow; native and video full screen drop the frame; the card and the page view take the page background colour so resizes show no white |
 | SB-20 | Top-of-window behaviour and window dragging | P1 | 🟡 partial | – | – | macOS: traffic lights hidden with the sidebar, shown (moved in) with the floating card; the rest of the hidden-sidebar chrome is not built |
 | SB-21 | Dim the sidebar when the window is inactive | P1 | – | – | – |  |
 | SB-22 | Keyboard focus and navigation inside the sidebar | P2 | ✅ | ✅ e2e | – | Cmd/Ctrl+Shift+E focuses the sidebar; arrows, Enter, Escape, F2 |

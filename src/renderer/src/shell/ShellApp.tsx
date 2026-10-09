@@ -16,7 +16,7 @@ export function ShellApp() {
   const style = { '--sidebar-w': `${win.sidebar.width}px` } as CSSProperties
   return (
     <div
-      className={`shell${hidden ? ' shell--sidebar-hidden' : ''}${win.focused ? '' : ' shell--blurred'}`}
+      className={`shell${hidden ? ' shell--sidebar-hidden' : ''}${win.fullscreen ? ' shell--fullscreen' : ''}${win.focused ? '' : ' shell--blurred'}`}
       style={style}
       ref={theme.shellRef}
       data-testid="shell"

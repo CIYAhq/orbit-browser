@@ -47,6 +47,8 @@ export interface Tab {
   icon?: string
   /** Tab whose link opened this tab (TB-19). */
   openerTabId?: TabId
+  /** The page's background colour (#rrggbb) when last seen: fills its card while it draws (SB-19). */
+  pageColor?: string
   createdAt: number
   lastActiveAt: number
   /** Runtime-only fields (not persisted): */

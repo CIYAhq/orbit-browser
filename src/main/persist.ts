@@ -228,6 +228,7 @@ function normalizeEntities(state: OrbitState, base: OrbitState): void {
     t.title = text(t.title, fallbackTitle(t.url))
     t.createdAt = time(t.createdAt)
     t.lastActiveAt = time(t.lastActiveAt)
+    if (typeof t.pageColor !== 'string' || !/^#[0-9a-f]{6}$/.test(t.pageColor)) delete t.pageColor
   }
   for (const [id, w] of Object.entries(state.windows)) {
     w.id = id
