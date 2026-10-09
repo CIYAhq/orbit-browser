@@ -208,18 +208,28 @@ export async function startFixtures(): Promise<Fixtures> {
     res.writeHead(404, { 'content-type': 'text/plain' })
     res.end('not found')
   })
-  const base = 3300 + (Number(process.env.TEST_PARALLEL_INDEX ?? 0) % 50)
-  await new Promise<void>((resolveListen, reject) => {
-    let port = base
-    server.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE' && port < 3399) server.listen(++port, '127.0.0.1')
-      else reject(err)
-    })
-    server.listen(port, '127.0.0.1', () => resolveListen())
-  })
-  const { port } = server.address() as AddressInfo
+  const port = await listenInRange(server, 3300 + (Number(process.env.TEST_PARALLEL_INDEX ?? 0) % 50))
   return {
     url: (path) => `http://localhost:${port}${path}`,
     close: () => new Promise((r) => server.close(() => r())),
   }
+}
+
+/**
+ * Listens on loopback at the first free port from `base` up: Orbit keeps to ports 3300–3399 (the
+ * brief's range), and several suites or agents may be using some of them at once.
+ */
+export function listenInRange(server: Server, base = 3300): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let port = base
+    const retry = (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE' && port < 3399) server.listen(++port, '127.0.0.1')
+      else reject(err)
+    }
+    server.on('error', retry)
+    server.listen(port, '127.0.0.1', () => {
+      server.off('error', retry)
+      resolve(port)
+    })
+  })
 }

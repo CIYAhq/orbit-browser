@@ -1,9 +1,17 @@
 /**
  * Regression tests for the PR #1 review findings owned by the tabs lane (M1, M3, M4, M6, M8).
  */
-import type { AddressInfo } from 'node:net'
 import { expect, test } from '@playwright/test'
-import { type Fixtures, launchOrbit, type Orbit, startFixtures, state, tabPage, tabView } from './helpers'
+import {
+  type Fixtures,
+  launchOrbit,
+  listenInRange,
+  type Orbit,
+  startFixtures,
+  state,
+  tabPage,
+  tabView,
+} from './helpers'
 import { act, activeId, center, cmd, drag, liveTabs, newTab, row, setState, space, waitTab } from './tabs-support'
 
 let fx: Fixtures
@@ -188,10 +196,9 @@ test('[TB-01] favicons are fetched in the tab session and stored as small data U
     res.writeHead(200, { 'content-type': 'text/html' })
     res.end('<!doctype html><title>Iconic</title><link rel="icon" href="/icon.png"><p>hi</p>')
   })
-  // Port 0: the OS picks a free port, so two runs at once can't collide.
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
+  const port = await listenInRange(server)
   try {
-    const t = await newTab(app, `http://127.0.0.1:${(server.address() as AddressInfo).port}/page`)
+    const t = await newTab(app, `http://127.0.0.1:${port}/page`)
     await expect.poll(async () => (await state(app)).tabs[t]?.favicon ?? '').toMatch(/^data:image\/png;base64,/)
     const favicon = (await state(app)).tabs[t]?.favicon as string
     expect(favicon.length).toBeLessThan(16 * 1024 * 1.4)
@@ -445,9 +452,9 @@ test('[TB-01][TD-02] an .ico favicon is stored as a small PNG; archive entries c
     res.writeHead(200, { 'content-type': 'text/html' })
     res.end('<!doctype html><title>Ico</title><link rel="icon" href="/favicon.ico"><p>hi</p>')
   })
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
+  const port = await listenInRange(server)
   try {
-    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/page`
+    const url = `http://127.0.0.1:${port}/page`
     const t = await newTab(app, url)
     await expect.poll(async () => (await state(app)).tabs[t]?.favicon ?? '').toMatch(/^data:image\/png;base64,/)
     const favicon = (await state(app)).tabs[t]?.favicon as string
