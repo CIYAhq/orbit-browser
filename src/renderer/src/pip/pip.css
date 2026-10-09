@@ -225,6 +225,11 @@ html[data-view="pip"] body {
   background: #e5484d;
 }
 
+/* "Back to tab" (MD-16): a still of the last frame flies back into the page, without controls. */
+html[data-still] .pip {
+  visibility: hidden;
+}
+
 /* Corner handles to resize (MD-06); invisible, with the matching cursor. */
 .pip__handle {
   position: absolute;

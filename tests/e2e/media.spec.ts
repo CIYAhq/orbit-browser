@@ -12,8 +12,9 @@ import { join, resolve } from 'node:path'
 import { type ElectronApplication, _electron as electron, expect, type Page, test } from '@playwright/test'
 import type { MediaTestHooks } from '../../src/main/media'
 import type { PlayerInfo } from '../../src/main/media/player'
+import { formatClock } from '../../src/shared/media'
 import type { TabMedia } from '../../src/shared/state'
-import { launchOrbit, type Orbit, state, tabPage, viewPage } from './helpers'
+import { FRAME_SLACK, launchOrbit, type Orbit, state, tabPage, tabView, viewPage } from './helpers'
 import { act, activeId, cmd, newTab, tab, tabsHook, waitTab } from './tabs-support'
 
 // ---- Local media fixtures (ports 3300–3399 are this project's) ----
@@ -335,6 +336,57 @@ async function expectNoPlayer(app: ElectronApplication): Promise<void> {
     .toBe(true)
 }
 
+/** A box once it stops moving (the tray slides controllers in, FL-32). */
+async function stableBox(page: Page, selector: string): Promise<Box> {
+  let box: Box | null = null
+  await expect
+    .poll(async () => {
+      const read = () =>
+        page.evaluate((sel) => {
+          const r = document.querySelector(sel)?.getBoundingClientRect()
+          return r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null
+        }, selector)
+      const a = await read()
+      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+      const b = await read()
+      box = b
+      return !!a && !!b && JSON.stringify(a) === JSON.stringify(b) && b.height > 0
+    })
+    .toBe(true)
+  return box as unknown as Box
+}
+
+/** The player window and the selected tab, sampled in the main process every few ms (MD-16). */
+function sampleBack(
+  app: ElectronApplication,
+  ms = 1000,
+): Promise<(Box & { t: number; visible: boolean; active: string | null })[]> {
+  return app.evaluate(async (_e, duration) => {
+    const g = globalThis as unknown as {
+      __orbitMedia: MediaTestHooks
+      __orbit: {
+        windowIds: () => string[]
+        ctx: { store: { state: { windows: Record<string, { spaceId: string; activeTab: Record<string, string> }> } } }
+      }
+    }
+    const p = g.__orbitMedia.manager.player
+    const out: (Box & { t: number; visible: boolean; active: string | null })[] = []
+    const start = Date.now()
+    while (Date.now() - start < duration) {
+      const info = p.info()
+      const w = g.__orbit.ctx.store.state.windows[g.__orbit.windowIds()[0] as string]
+      out.push({
+        t: Date.now() - start,
+        visible: info.visible,
+        ...(info.bounds ?? { x: 0, y: 0, width: 0, height: 0 }),
+        active: w ? (w.activeTab[w.spaceId] ?? null) : null,
+      })
+      await new Promise((r) => setTimeout(r, 8))
+    }
+    return out
+  }, ms)
+}
+
 /** The player's controls (its own small view). */
 async function pipPage(app: ElectronApplication): Promise<Page> {
   const deadline = Date.now() + 20_000
@@ -416,7 +468,7 @@ test('[MD-01][MD-03][MD-16] leaving a playing video floats it bottom-right out o
 
   // Within about 300 ms (MD-01), bottom-right with a 16 px margin, 320 × 180 for 16:9 (MD-03).
   expect(info.openMs).not.toBeNull()
-  expect(info.openMs as number).toBeLessThan(300)
+  expect(info.openMs as number).toBeLessThan(300 * FRAME_SLACK)
   const area = info.workArea as Box
   expect(info.bounds).toEqual(cornerBox(area, 'bottom-right', 320, 180))
   expect(info.alwaysOnTop).toBe(true)
@@ -437,15 +489,15 @@ test('[MD-01][MD-03][MD-16] leaving a playing video floats it bottom-right out o
   expect(enter.from.height).toBe(270)
   expect(enter.to).toEqual(info.bounds)
   const first = samples[0] as Box & { t: number }
-  expect(first.width).toBeGreaterThan(330)
+  expect(first.width).toBeGreaterThan(FRAME_SLACK > 1 ? 320 : 330)
   const widths = samples.map((s) => s.width)
   for (let i = 1; i < widths.length; i++) expect(widths[i] as number).toBeLessThanOrEqual(widths[i - 1] as number)
   const between = new Set(widths.filter((w) => w > 320 && w < 480))
-  expect(between.size).toBeGreaterThanOrEqual(4)
+  expect(between.size).toBeGreaterThanOrEqual(FRAME_SLACK > 1 ? 2 : 4)
   const done = samples.find((s) => s.width === 320 && s.x === enter.to.x && s.y === enter.to.y)
   expect(done).toBeDefined()
-  expect((done as { t: number }).t - first.t).toBeGreaterThan(150)
-  expect((done as { t: number }).t - first.t).toBeLessThan(700)
+  if (FRAME_SLACK === 1) expect((done as { t: number }).t - first.t).toBeGreaterThan(150)
+  expect((done as { t: number }).t - first.t).toBeLessThan(700 * FRAME_SLACK)
 
   // Back on the tab: the video is in the page again, still playing, and no frame was drawn at the
   // page's size with the video still floating (MD-01: no blank frame).
@@ -503,7 +555,8 @@ test('[MD-04][MD-05] hovering the player shows play/pause, ±15 s, progress and 
   for (const id of ['pip-back', 'pip-more', 'pip-close', 'pip-play', 'pip-back15', 'pip-forward15', 'pip-progress']) {
     await expect(pip.getByTestId(id)).toBeVisible()
   }
-  await expect(pip.getByTestId('pip-duration')).toHaveText(/^1:0\d$/)
+  const length = await v.page.evaluate(() => (document.getElementById('v') as HTMLVideoElement).duration)
+  await expect(pip.getByTestId('pip-duration')).toHaveText(formatClock(length))
   await expect(pip.getByTestId('pip-live')).toHaveCount(0)
 
   // Play/pause.
@@ -524,10 +577,9 @@ test('[MD-04][MD-05] hovering the player shows play/pause, ±15 s, progress and 
 
   // The progress bar seeks where it is clicked; the elapsed time follows.
   const bar = (await pip.getByTestId('pip-progress').boundingBox()) as Box
-  const duration = await v.page.evaluate(() => (document.getElementById('v') as HTMLVideoElement).duration)
   await pip.mouse.click(bar.x + bar.width * 0.75, bar.y + bar.height / 2)
-  await expect.poll(() => currentTime(v.page)).toBeGreaterThan(duration * 0.75 - 3)
-  expect(await currentTime(v.page)).toBeLessThan(duration * 0.75 + 3)
+  await expect.poll(() => currentTime(v.page)).toBeGreaterThan(length * 0.75 - 3)
+  expect(await currentTime(v.page)).toBeLessThan(length * 0.75 + 3)
   await expect(pip.getByTestId('pip-elapsed')).toHaveText(/^0:4\d$/)
 
   // "…": playback speed (MD-04).
@@ -567,22 +619,49 @@ test('[MD-04] a live stream shows a live badge instead of a seekable bar', async
   await expect(pip.getByTestId('pip-play')).toBeVisible()
 })
 
-test('[MD-04][MD-07][MD-10] Back to tab and double-click return to the tab; × keeps it playing in the sidebar, whose PiP button floats it again', async () => {
+test('[MD-04][MD-07][MD-10][MD-16] Back to tab and double-click return to the tab, flying back into the page; × keeps it playing in the sidebar, whose PiP button floats it again', async () => {
   orbit = await launchOrbit()
   const { app } = orbit
   const v = await openPlaying(app, '/media/long-video/Film')
   const pip = await pipPage(app)
   const root = pip.getByTestId('pip')
 
-  // "Back to tab": the source tab is selected and the video plays on in the page.
+  // "Back to tab": the source tab is selected at once (FL-01) and the video plays on in the page,
+  // while the player flies back to the video's place in the page and goes (MD-16).
   const other = await leave(app)
-  await expectPlayer(app, v.id)
+  const corner = (await expectPlayer(app, v.id)).bounds as Box
   await root.hover({ position: { x: 40, y: 60 } })
+  const sampling = sampleBack(app)
   await pip.getByTestId('pip-back').click()
+  const samples = await sampling
   await expect.poll(() => activeId(app)).toBe(v.id)
   await expectNoPlayer(app)
   await expect.poll(() => floated(v.page)).toBe('')
   expect(await paused(v.page, '#v')).toBe(false)
+  const back = (await player(app)).lastBack as { from: Box; to: Box }
+  expect(back.from).toEqual(corner)
+  const content = (await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0]?.getContentBounds(),
+  )) as Box
+  const pane = (await tabView(app, v.id))?.bounds as Box
+  const home = await v.page.evaluate(() => {
+    const r = (document.getElementById('v') as HTMLVideoElement).getBoundingClientRect()
+    return { x: r.x, y: r.y, width: r.width, height: r.height }
+  })
+  expect(Math.abs(back.to.x - (content.x + pane.x + home.x))).toBeLessThanOrEqual(2)
+  expect(Math.abs(back.to.y - (content.y + pane.y + home.y))).toBeLessThanOrEqual(2)
+  expect(Math.abs(back.to.width - home.width)).toBeLessThanOrEqual(2)
+  expect(Math.abs(back.to.height - home.height)).toBeLessThanOrEqual(2)
+  // On its way it grows from the corner towards the page, and the tab is already selected then.
+  const flying = samples.filter((f) => f.visible && f.width > corner.width && f.width < back.to.width)
+  expect(flying.length).toBeGreaterThanOrEqual(FRAME_SLACK > 1 ? 1 : 3)
+  for (const f of flying) expect(f.active).toBe(v.id)
+  const widths = flying.map((f) => f.width)
+  for (let i = 1; i < widths.length; i++) expect(widths[i] as number).toBeGreaterThanOrEqual(widths[i - 1] as number)
+  // It ends there: the last frame the player shows is the video's place in the page.
+  const shown = samples.filter((f) => f.visible)
+  const last = shown.at(-1) as Box
+  expect({ x: last.x, y: last.y, width: last.width, height: last.height }).toEqual(back.to)
 
   // Double-click does the same (MD-07).
   await cmd(app, 'tabs.activate', { tabId: other })
@@ -607,13 +686,12 @@ test('[MD-04][MD-07][MD-10] Back to tab and double-click return to the tab; × k
 
   // The controller's Picture in Picture ("Back to PiP", MD-10): the player grows out of the
   // controller and the controller leaves the tray.
-  const box = (await ctl.boundingBox()) as Box
-  const content = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getContentBounds())
+  const box = await stableBox(orbit.shell, `[data-testid="media-controller"][data-tab-id="${v.id}"]`)
   await ctl.getByTestId('media-pip').click()
   const info = await expectPlayer(app, v.id)
   const from = (info.lastEnter as { from: Box }).from
-  expect(Math.abs(from.x + from.width / 2 - ((content?.x ?? 0) + box.x + box.width / 2))).toBeLessThanOrEqual(2)
-  expect(Math.abs(from.y + from.height / 2 - ((content?.y ?? 0) + box.y + box.height / 2))).toBeLessThanOrEqual(2)
+  expect(Math.abs(from.x + from.width / 2 - (content.x + box.x + box.width / 2))).toBeLessThanOrEqual(2)
+  expect(Math.abs(from.y + from.height / 2 - (content.y + box.y + box.height / 2))).toBeLessThanOrEqual(2)
   expect(info.bounds).toEqual(cornerBox(info.workArea as Box, 'bottom-right', 320, 180))
   await expect(controller(orbit, v.id)).toHaveCount(0)
   expect((await media(app, v.id))?.autoPip).toBeUndefined()
@@ -642,9 +720,13 @@ test('[MD-07][MD-12] closing or navigating the source tab, or the video ending, 
   expect((await media(app, b.id))?.pip).toBeUndefined()
 
   // The video ends: the player closes and the video doesn't start again.
-  const c = await openPlaying(app, '/media/long-video/Short?s=3')
+  const c = await openPlaying(app, '/media/long-video/Ending')
   await cmd(app, 'tabs.activate', { tabId: other })
   await expectPlayer(app, c.id)
+  await c.page.evaluate(() => {
+    const e = document.getElementById('v') as HTMLVideoElement
+    e.currentTime = e.duration - 1
+  })
   await expectNoPlayer(app)
   expect(await c.page.evaluate(() => (document.getElementById('v') as HTMLVideoElement).ended)).toBe(true)
   await expect.poll(() => floated(c.page)).toBe('')
@@ -657,7 +739,7 @@ test('[MD-06][FL-32] the player snaps to the corner a move or fling heads for, r
   const v = await openPlaying(app, '/media/long-video/Film')
   const pip = await pipPage(app)
   const other = await leave(app)
-  let info = await expectPlayer(app, v.id)
+  const info = await expectPlayer(app, v.id)
   const area = info.workArea as Box
   let b = info.bounds as Box
 
@@ -672,17 +754,22 @@ test('[MD-06][FL-32] the player snaps to the corner a move or fling heads for, r
   await expect.poll(async () => (await player(app)).bounds).toEqual(cornerBox(area, 'top-right', 320, 180))
 
   // Dragging the bottom-left corner outwards grows it, keeping 16:9 and the top-right corner put.
+  // (The largest size is half the screen's width: stay under it on small screens.)
+  const max = Math.floor(area.width / 2)
+  const size = Math.min(520, max - 40)
+  const tall = Math.round((size * 9) / 16)
   b = (await player(app)).bounds as Box
-  await dragPlayer(pip, 'bottom-left', { x: b.x, y: b.y + b.height }, { x: b.x - 200, y: b.y + b.height + 112 }, 5, 30)
-  await expect.poll(async () => (await player(app)).bounds).toEqual(cornerBox(area, 'top-right', 520, 293))
-  await expect.poll(async () => (await state(app)).settings.pipPlacement).toEqual({ corner: 'top-right', size: 520 })
+  // Mostly sideways: the axis that moved further (relative to the player) sets the size.
+  const grow = { x: b.x - (size - 320), y: b.y + b.height + (tall - 180) - 4 }
+  await dragPlayer(pip, 'bottom-left', { x: b.x, y: b.y + b.height }, grow, 5, 30)
+  await expect.poll(async () => (await player(app)).bounds).toEqual(cornerBox(area, 'top-right', size, tall))
+  await expect.poll(async () => (await state(app)).settings.pipPlacement).toEqual({ corner: 'top-right', size })
   // The page draws the video at the player's size.
   await expect
     .poll(() => v.page.evaluate(() => (document.getElementById('v') as HTMLVideoElement).getBoundingClientRect().width))
-    .toBe(520)
+    .toBe(size)
 
-  // Past the largest size (half the screen's width) it resists, then springs back on release.
-  const max = Math.floor(area.width / 2)
+  // Past the largest size it resists, then springs back on release.
   b = (await player(app)).bounds as Box
   const t = Date.now()
   const handle = { x: b.x, y: b.y + b.height }
@@ -727,8 +814,8 @@ test('[MD-06][FL-32] the player snaps to the corner a move or fling heads for, r
   await expectNoPlayer(app)
   await cmd(app, 'tabs.activate', { tabId: v.id })
   await cmd(app, 'tabs.activate', { tabId: other })
-  info = await expectPlayer(app, v.id)
-  expect(info.bounds).toEqual(cornerBox(area, 'top-left', 200, 113))
+  await expectPlayer(app, v.id)
+  await expect.poll(async () => (await player(app)).bounds).toEqual(cornerBox(area, 'top-left', 200, 113))
   // The zoom doesn't carry over.
   expect(await v.page.evaluate(() => getComputedStyle(document.getElementById('v') as Element).transform)).toBe('none')
 })

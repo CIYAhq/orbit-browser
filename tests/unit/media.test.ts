@@ -4,13 +4,16 @@ import {
   type AgentSnapshot,
   applySitePip,
   autoPipAllowed,
+  currentPosition,
   emptyMedia,
   endOfDay,
+  formatClock,
   isAnyMediaPlaying,
   isMediaBusy,
   mediaFromSnapshot,
   mediaSubtitle,
   mediaTitle,
+  normalizeMediaSettings,
   sameMedia,
   settleTray,
   shouldAutoPip,
@@ -84,6 +87,22 @@ describe('media records from page reports', () => {
   it('forgets "opened automatically" once picture-in-picture ends', () => {
     const inPip = { ...mediaFromSnapshot(undefined, snap({ pip: true })), autoPip: true }
     expect(mediaFromSnapshot(inPip, snap({ pip: false })).autoPip).toBeUndefined()
+  })
+
+  it('[MD-04] keeps where playback is, how long it is, its speed and whether it is live', () => {
+    const time = { position: 12.34567, duration: 59.8, rate: 1.5, paused: false, live: false, at: 1000 }
+    const m = mediaFromSnapshot(undefined, snap({ video: true, time }))
+    expect(m).toMatchObject({ position: 12.346, duration: 59.8, rate: 1.5, at: 1000 })
+    expect('paused' in m).toBe(false)
+    expect('live' in m).toBe(false)
+    const live = mediaFromSnapshot(
+      m,
+      snap({ time: { ...time, rate: 1, live: true, duration: Number.POSITIVE_INFINITY } }),
+    )
+    expect(live.live).toBe(true)
+    expect('duration' in live).toBe(false)
+    expect('rate' in live).toBe(false)
+    expect(mediaFromSnapshot(m, snap({ time: { ...time, paused: true } })).paused).toBe(true)
   })
 
   it('compares records by value', () => {
@@ -227,5 +246,54 @@ describe('media and the tab lifecycle (MD-12)', () => {
     const state = { tabs: { 't-a': tab('t-a'), 't-b': tab('t-b', { ...emptyMedia(), playing: true }) } }
     expect(isAnyMediaPlaying(state as unknown as OrbitState)).toBe(true)
     expect(isAnyMediaPlaying({ tabs: { 't-a': tab('t-a') } } as unknown as OrbitState)).toBe(false)
+  })
+})
+
+describe('the floating player clock (MD-04)', () => {
+  const at = 10_000
+
+  it('[MD-04] moves on with the clock while playing, at the playback speed, and stops at the end', () => {
+    const m = { position: 30, duration: 60, at }
+    expect(currentPosition(m, at)).toBe(30)
+    expect(currentPosition(m, at + 2000)).toBe(32)
+    expect(currentPosition({ ...m, rate: 2 }, at + 2000)).toBe(34)
+    expect(currentPosition(m, at + 600_000)).toBe(60)
+    expect(currentPosition({ ...m, paused: true }, at + 2000)).toBe(30)
+    // Live streams have no end; nothing reported yet means the start.
+    expect(currentPosition({ position: 30, at }, at + 600_000)).toBe(630)
+    expect(currentPosition({}, at)).toBe(0)
+  })
+
+  it('[MD-04] reads like a clock: 0:05, 1:05, 12:00, 1:02:03', () => {
+    expect(formatClock(5.9)).toBe('0:05')
+    expect(formatClock(65)).toBe('1:05')
+    expect(formatClock(720)).toBe('12:00')
+    expect(formatClock(3723)).toBe('1:02:03')
+    expect(formatClock(-3)).toBe('0:00')
+    expect(formatClock(Number.NaN)).toBe('0:00')
+  })
+})
+
+describe('media settings read back from disk (MD-06, MD-08)', () => {
+  it('[MD-08][MD-06] cleans site lists, drops snoozes that ran out and fixes the player placement', () => {
+    const s = settings({
+      pipOffSites: ['a.example', 'a.example', '', 7 as unknown as string, 'b.example'],
+      pipSnoozed: { 'old.example': NOW - 1, 'today.example': NOW + 3600_000, 'bad.example': 'x' as unknown as number },
+      pipPlacement: { corner: 'nowhere', size: 9 } as unknown as Settings['pipPlacement'],
+    })
+    normalizeMediaSettings(s, NOW)
+    expect(s.pipOffSites).toEqual(['a.example', 'b.example'])
+    expect(s.pipSnoozed).toEqual({ 'today.example': NOW + 3600_000 })
+    expect(s.pipPlacement).toEqual({ corner: 'bottom-right', size: 200 })
+
+    const broken = settings({
+      pipOffSites: 'x' as unknown as string[],
+      pipSnoozed: [] as unknown as Record<string, number>,
+      pipPlacement: undefined,
+    })
+    normalizeMediaSettings(broken, NOW)
+    expect(broken.pipOffSites).toEqual([])
+    expect(broken.pipSnoozed).toEqual({})
+    expect(broken.pipPlacement).toEqual({ corner: 'bottom-right', size: 320 })
   })
 })

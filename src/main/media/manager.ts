@@ -264,8 +264,9 @@ export class MediaManager {
     const tab = state.tabs[tabId]
     if (!agent?.snap || !tab?.media || agent.contents.isDestroyed()) return
     // The engine's own window (opened on the tab) hands its video over to Orbit's player, with
-    // Orbit's controls. The user asked for it, so the automatic-PiP choices don't apply.
-    if (agent.snap.pip && !agent.snap.player) {
+    // Orbit's controls. The user asked for it, so the automatic-PiP choices don't apply. The
+    // tab's state knows first (the page's report of it may still be on its way).
+    if ((agent.snap.pip || tab.media.pip) && !agent.snap.player && !tab.media.player) {
       void this.player.open(tabId, { auto: true, keep: true })
       return
     }

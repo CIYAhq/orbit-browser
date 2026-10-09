@@ -66,6 +66,8 @@ const TAB_BACKGROUND = '#ffffffff'
 const ENTER_MS = 300
 /** Exits are quicker than entrances (FL-01: about 0.7×). */
 const EXIT_MS = 140
+/** "Back to tab": the reverse of the enter motion, a little quicker (MD-16, FL-01). */
+const BACK_MS = 220
 const FRAME_MS = 16
 /** A pause in wheel scrolling ends a hover-scroll move (MD-06). */
 const WHEEL_IDLE_MS = 160
@@ -96,6 +98,8 @@ interface Session {
   zoom: number
   /** Size of the borrowed view (the video can grow up to it). */
   viewSize: { width: number; height: number }
+  /** The video's place in its window's content (DIP) when it left: "Back to tab" flies there (MD-16). */
+  home: Rect | undefined
   dispose: () => void
 }
 
@@ -134,6 +138,8 @@ export interface PlayerInfo {
   animating: boolean
   /** The last enter motion: where the player started and where it went (MD-16). */
   lastEnter: { from: Rect; to: Rect } | null
+  /** The last "Back to tab" motion: from the player's place to the video's place in the page (MD-16). */
+  lastBack: { from: Rect; to: Rect } | null
   /** How long the last opening took, from the request to the window showing (ms; MD-01). */
   openMs: number | null
   /** An opening is under way (the page is being asked for its video). */
@@ -153,6 +159,11 @@ export class PipPlayer {
   private wheelTimer: NodeJS.Timeout | undefined
   private wheelSamples: { x: number; y: number; t: number }[] = []
   private lastEnter: { from: Rect; to: Rect } | null = null
+  private lastBack: { from: Rect; to: Rect } | null = null
+  /** "Back to tab" is under way: the player flies back into the page once the tab is selected. */
+  private backing: { tabId: TabId; to: Rect | undefined } | undefined
+  /** The controls view shows a still of the last frame (while flying back, MD-16). */
+  private still = false
   private openMs: number | null = null
   private hiding: NodeJS.Timeout | undefined
   private opening: { tabId: TabId; done: Promise<boolean> } | undefined
@@ -227,16 +238,22 @@ export class PipPlayer {
     const dims = pipDimensions(aspect, clampPipSize(placement.size, area))
     const target = cornerRect(area, placement.corner, dims.width, dims.height)
 
+    // Where the video sits in its window: the enter motion starts there when leaving the tab, and
+    // "Back to tab" flies back there (MD-16).
+    const home = probe.rect
+      ? {
+          x: Math.round(pane.x + probe.rect.x * zoom),
+          y: Math.round(pane.y + probe.rect.y * zoom),
+          width: Math.round(probe.rect.width * zoom),
+          height: Math.round(probe.rect.height * zoom),
+        }
+      : undefined
+
     // Where the motion starts (MD-16).
     let from: Rect | undefined
-    if (opts.from === 'page' && probe.rect && source && !source.isDestroyed()) {
+    if (opts.from === 'page' && home && source && !source.isDestroyed()) {
       const content = source.getContentBounds()
-      from = {
-        x: Math.round(content.x + pane.x + probe.rect.x * zoom),
-        y: Math.round(content.y + pane.y + probe.rect.y * zoom),
-        width: Math.round(probe.rect.width * zoom),
-        height: Math.round(probe.rect.height * zoom),
-      }
+      from = { ...home, x: content.x + home.x, y: content.y + home.y }
     } else if (opts.from && opts.from !== 'page') {
       const win = this.ctx.windows.get(opts.from.windowId)
       if (win && !win.isDestroyed()) {
@@ -278,6 +295,8 @@ export class PipPlayer {
 
     const { win, ui } = this.ensureWindow()
     this.finishFade?.()
+    this.backing = undefined
+    void this.showStill(null)
     this.ctx.windows.detachView(tabId, view)
     win.contentView.addChildView(view, 0)
     view.setBounds({ x: 0, y: 0, ...viewSize })
@@ -298,6 +317,7 @@ export class PipPlayer {
       auto: opts.auto,
       zoom,
       viewSize,
+      home,
       dispose: () => {
         if (!contents.isDestroyed()) contents.off('destroyed', onGone)
       },
@@ -306,7 +326,7 @@ export class PipPlayer {
     if (!win.isVisible()) win.showInactive()
     this.openMs = Date.now() - began
     this.lastEnter = from ? { from: start, to: target } : null
-    if (from) this.animateTimed(start, target, ms)
+    if (from) this.animateTimed(start, target, ms, () => this.pointerCheck())
     this.host.changed(tabId, true, opts.auto)
     return true
   }
@@ -343,7 +363,16 @@ export class PipPlayer {
       if (!s.contents.isDestroyed()) void this.host.call(s.tabId, 'drop')
     }
     const fade = isMac && richMotion() && (why === 'close' || why === 'off' || why === 'ended')
-    if (win && !win.isDestroyed() && win.isVisible()) {
+    const back = this.backing?.tabId === s.tabId ? this.backing : undefined
+    this.backing = undefined
+    if (win && !win.isDestroyed() && win.isVisible() && why === 'returned' && back?.to && this.still) {
+      // "Back to tab" (MD-16): the tab is already back in its window, playing; a still of the last
+      // frame flies from the player to the video's place in the page, then the player hides.
+      release()
+      const from = win.getBounds()
+      this.lastBack = { from, to: back.to }
+      this.flyBack(win, from, back.to)
+    } else if (win && !win.isDestroyed() && win.isVisible()) {
       if (fade) {
         this.fadeOut(win, () => {
           win.hide()
@@ -357,15 +386,101 @@ export class PipPlayer {
     this.host.changed(s.tabId, false, false)
   }
 
-  /** "Back to tab" and double-click (MD-04, MD-07): select the tab; the player closes as it returns. */
-  back(): void {
+  /**
+   * "Back to tab" and double-click (MD-04, MD-07): select the tab; the player closes as it returns.
+   * With motion on, the player first takes a still of the video, then flies it back to the video's
+   * place in the page while the page already plays it there (MD-16). The tab is selected at once
+   * (FL-01: state first, motion second).
+   */
+  async back(): Promise<void> {
     const s = this.session
-    if (!s) return
+    if (!s || this.backing?.tabId === s.tabId) return
     const windowId =
       s.windowId && this.ctx.windows.get(s.windowId) && !this.ctx.windows.get(s.windowId)?.isDestroyed()
         ? s.windowId
         : (this.ctx.windows.focusedWindowId() ?? this.ctx.windows.ids()[0])
-    if (windowId) this.host.focusTab(s.tabId, windowId)
+    if (!windowId) return
+    const to = windowId === s.windowId ? this.homeOnScreen(s, windowId) : undefined
+    this.backing = { tabId: s.tabId, to }
+    if (to) await this.takeStill(s)
+    if (this.session !== s) return
+    this.host.focusTab(s.tabId, windowId)
+  }
+
+  /**
+   * After the enter motion: if the pointer isn't over the player, its controls hide (it may have
+   * appeared under a resting pointer and moved away, with no pointer event to say so; MD-03).
+   */
+  private pointerCheck(): void {
+    const win = this.win
+    const contents = this.ui?.webContents
+    if (!win || win.isDestroyed() || !contents || contents.isDestroyed()) return
+    const p = screen.getCursorScreenPoint()
+    const b = win.getBounds()
+    if (p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height) return
+    contents.executeJavaScript("window.dispatchEvent(new Event('orbit-pip-pointer-away'))").catch(() => {})
+  }
+
+  /** The video's place in the page on screen, if the motion back there can be seen (MD-16). */
+  private homeOnScreen(s: Session, windowId: WindowId): Rect | undefined {
+    const source = this.ctx.windows.get(windowId)
+    if (!s.home || !richMotion() || !source || source.isDestroyed() || !source.isVisible() || source.isMinimized())
+      return undefined
+    const content = source.getContentBounds()
+    const to = { ...s.home, x: content.x + s.home.x, y: content.y + s.home.y }
+    // Only when the page area still holds it (the window may have shrunk meanwhile).
+    const inside =
+      s.home.x >= 0 &&
+      s.home.y >= 0 &&
+      s.home.x + s.home.width <= content.width + 1 &&
+      s.home.y + s.home.height <= content.height + 1
+    return inside && to.width >= 8 && to.height >= 8 ? to : undefined
+  }
+
+  /** Puts a still of the player's current frame in the controls view, over the video. */
+  private async takeStill(s: Session): Promise<void> {
+    const win = this.win
+    if (!win || win.isDestroyed()) return
+    const b = win.getBounds()
+    try {
+      const image = await s.contents.capturePage({ x: 0, y: 0, width: b.width, height: b.height })
+      // A blank capture (no frame to show) would fly a black box: no motion then.
+      if (this.session !== s || image.isEmpty() || blank(image.toBitmap())) return
+      await this.showStill(`data:image/jpeg;base64,${image.toJPEG(90).toString('base64')}`)
+    } catch {
+      // No still (the page went away): the player just closes.
+    }
+  }
+
+  /** Shows (a data URL) or clears (null) the still in the controls view. */
+  private async showStill(url: string | null): Promise<void> {
+    const contents = this.ui?.webContents
+    if (!contents || contents.isDestroyed() || (!url && !this.still)) return
+    this.still = !!url
+    const css = url ? `#000 0 0 / 100% 100% no-repeat url("${url}")` : ''
+    try {
+      // The controls hide while the still shows; resolves once it has been drawn.
+      await contents.executeJavaScript(
+        `document.documentElement.style.background = ${JSON.stringify(css)};` +
+          `document.documentElement.toggleAttribute('data-still', ${!!url});` +
+          'new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))',
+      )
+    } catch {
+      this.still = false
+    }
+  }
+
+  /** The still flies from the player's place to the video's place in the page, then hides. */
+  private flyBack(win: BaseWindow, from: Rect, to: Rect): void {
+    const done = () => {
+      this.finishFade = undefined
+      this.stopAnimation()
+      if (win.isDestroyed()) return
+      win.hide()
+      void this.showStill(null)
+    }
+    this.finishFade = done
+    this.animateTimed(from, to, BACK_MS, done)
   }
 
   private onWindowClosed(): void {
@@ -469,7 +584,7 @@ export class PipPlayer {
 
   private wheel(dx: number, dy: number): void {
     const win = this.win
-    if (!win || win.isDestroyed()) return
+    if (!win || win.isDestroyed() || !(Number.isFinite(dx) && Number.isFinite(dy)) || (!dx && !dy)) return
     this.stopAnimation()
     const b = win.getBounds()
     // The player follows the fingers (a two-finger scroll moves content the other way).
@@ -534,14 +649,17 @@ export class PipPlayer {
   }
 
   /** The enter motion: window and video change together on the "standard" curve (MD-16). */
-  private animateTimed(from: Rect, to: Rect, ms: number): void {
+  private animateTimed(from: Rect, to: Rect, ms: number, done?: () => void): void {
     this.stopAnimation()
     const ease = cubicBezier(...STANDARD_CURVE)
     const started = Date.now()
     const step = () => {
       const p = Math.min(1, (Date.now() - started) / ms)
       this.place(mixRect(from, to, ease(p)), true)
-      if (p >= 1) this.stopAnimation()
+      if (p >= 1) {
+        this.stopAnimation()
+        done?.()
+      }
     }
     this.anim = setInterval(step, FRAME_MS)
     step()
@@ -708,6 +826,7 @@ export class PipPlayer {
       alwaysOnTop: !!win?.isAlwaysOnTop(),
       animating: !!this.anim,
       lastEnter: this.lastEnter,
+      lastBack: this.lastBack,
       openMs: this.openMs,
       opening: !!this.opening,
     }
@@ -717,6 +836,17 @@ export class PipPlayer {
   uiContents(): WebContents | undefined {
     return this.ui?.webContents
   }
+}
+
+/** True when a captured frame (BGRA) is all black or empty: nothing worth showing. */
+function blank(bitmap: Buffer): boolean {
+  const pixels = Math.floor(bitmap.length / 4)
+  const step = Math.max(1, Math.floor(pixels / 4000))
+  for (let i = 0; i < pixels; i += step) {
+    const o = i * 4
+    if ((bitmap[o] ?? 0) > 8 || (bitmap[o + 1] ?? 0) > 8 || (bitmap[o + 2] ?? 0) > 8) return false
+  }
+  return true
 }
 
 /** Release velocity in px/s from the last ~100 ms of pointer samples. */

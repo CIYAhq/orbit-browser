@@ -50,6 +50,16 @@ export function PipApp() {
   useEffect(() => setOptimistic(null), [reported])
   const drag = useRef<{ kind: 'move' | PipCorner; x: number; y: number; started: boolean } | null>(null)
 
+  // The player appeared under a resting pointer and moved away from it (the enter motion): the
+  // main process says so, as no pointer event may come (MD-03: video only until hovered).
+  useEffect(() => {
+    const away = () => {
+      if (!drag.current) setHover(false)
+    }
+    window.addEventListener('orbit-pip-pointer-away', away)
+    return () => window.removeEventListener('orbit-pip-pointer-away', away)
+  }, [])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!tabId || e.metaKey || e.ctrlKey || e.altKey) return
@@ -106,6 +116,8 @@ export function PipApp() {
   }
 
   const onWheel = (e: React.WheelEvent<HTMLElement>) => {
+    // The engine may end a scroll with an empty wheel event: nothing to move (or to interrupt).
+    if (!e.deltaX && !e.deltaY) return
     const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 160 : 1
     // ⌘ + scroll, or a pinch (which arrives as a wheel with Ctrl), zooms into the video (MD-06).
     if (e.ctrlKey || e.metaKey) {
@@ -133,6 +145,7 @@ export function PipApp() {
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
+      onLostPointerCapture={onPointerUp}
       onWheel={onWheel}
       onDoubleClick={(e) => {
         if ((e.target as HTMLElement).closest('button, .pip__progress')) return

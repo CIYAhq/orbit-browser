@@ -1,6 +1,15 @@
 import { Mic, MicOff, Pause, PictureInPicture2, Play, SkipBack, SkipForward, Video, VideoOff, X } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { type CSSProperties, memo, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import {
+  type CSSProperties,
+  memo,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
 import { inCall, mediaSubtitle, mediaTitle, trayTabIds } from '../../../../shared/media'
 import type { TabId } from '../../../../shared/state'
 import { invoke } from '../../api'
@@ -10,6 +19,14 @@ import { QUICK_EASE, SNAPPY } from '../sidebar/motion-tokens'
 import './media.css'
 
 /**
+ * Controllers whose video was just sent to the floating player: the player grows out of the
+ * controller (MD-10, MD-16), so the controller gives way at once instead of sliding down.
+ */
+const toPlayer = new Set<TabId>()
+
+const FADE = { duration: 0.12, ease: QUICK_EASE }
+
+/**
  * The sidebar media tray (MD-09, MD-10, MD-14; sidebar.md SB-10): one controller per tab playing
  * in the background, newest on top, just above the bottom bar. It slides up when a playing tab is
  * left and down when it goes (FL-32, MD-16); with reduced motion it only fades.
@@ -17,24 +34,34 @@ import './media.css'
 export const MediaTray = memo(function MediaTray() {
   const ids = useOrbitShallow(trayTabIds)
   const reduce = useReducedMotion()
-  const motionProps = reduce
+  const variants = reduce
     ? {
-        initial: { opacity: 0 },
-        animate: { opacity: 1 },
-        exit: { opacity: 0 },
-        transition: { duration: 0.12, ease: QUICK_EASE },
+        hidden: { opacity: 0, transition: FADE },
+        shown: { opacity: 1, transition: FADE },
+        exit: { opacity: 0, transition: FADE },
       }
     : {
-        initial: { opacity: 0, height: 0, y: 16 },
-        animate: { opacity: 1, height: 'auto', y: 0 },
-        exit: { opacity: 0, height: 0, y: 16 },
-        transition: SNAPPY,
+        hidden: { opacity: 0, height: 0, y: 16 },
+        shown: { opacity: 1, height: 'auto', y: 0, transition: SNAPPY },
+        exit: (id: TabId) =>
+          toPlayer.has(id)
+            ? // Gone at once where the player takes over, then the tray closes the gap.
+              { opacity: 0, height: 0, transition: { opacity: { duration: 0.06 }, height: { ...SNAPPY, delay: 0.08 } } }
+            : { opacity: 0, height: 0, y: 16, transition: SNAPPY },
       }
   return (
     <section className="media-tray" data-testid="media-tray" aria-label="Media">
       <AnimatePresence initial={false}>
         {ids.map((id) => (
-          <motion.div key={id} className="media-tray__slot" {...motionProps}>
+          <motion.div
+            key={id}
+            className="media-tray__slot"
+            custom={id}
+            variants={variants}
+            initial="hidden"
+            animate="shown"
+            exit="exit"
+          >
             <MediaController tabId={id} />
           </motion.div>
         ))}
@@ -139,7 +166,13 @@ const MediaController = memo(function MediaController({ tabId }: { tabId: TabId 
           <CtlButton
             label="Picture in Picture"
             testId="media-pip"
-            onClick={() => void invoke('media.pip', { tabId, on: true })}
+            onClick={(e) => {
+              // "Back to PiP" (MD-10): the player grows out of this controller (MD-16).
+              const r = (e.currentTarget.closest('.media-ctl') ?? e.currentTarget).getBoundingClientRect()
+              toPlayer.add(tabId)
+              setTimeout(() => toPlayer.delete(tabId), 1000)
+              void invoke('media.pip', { tabId, on: true, from: { x: r.x, y: r.y, width: r.width, height: r.height } })
+            }}
           >
             <PictureInPicture2 size={14} />
           </CtlButton>
@@ -169,7 +202,7 @@ function CtlButton({
   testId: string
   className?: string
   active?: boolean
-  onClick: () => void
+  onClick: (e: ReactMouseEvent<HTMLButtonElement>) => void
   children: ReactNode
 }) {
   return (
