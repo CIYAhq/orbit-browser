@@ -446,6 +446,15 @@ function remeasure(s: Session): void {
   })
 }
 
+/** Ends a drag: idle state, and keyboard focus back to the page (it moved to the sidebar for Escape). */
+function endSession(s: Session): void {
+  if (session === s) session = null
+  document.documentElement.classList.remove('is-dragging-tab')
+  markSpaceTarget(null)
+  useDrag.setState(IDLE_DRAG)
+  void invoke('tabs.focusPage', {})
+}
+
 /** Commits a drop, then lets the ghost settle into the row's new place. */
 async function drop(s: Session, ev: PointerEvent): Promise<void> {
   const zone = zoneAt(ev.clientX, ev.clientY)
@@ -547,12 +556,7 @@ async function drop(s: Session, ev: PointerEvent): Promise<void> {
 }
 
 function settle(s: Session, landing: 'row' | 'tile' | 'into' | 'away', folderId: string | null): void {
-  const finish = () => {
-    if (session === s) session = null
-    document.documentElement.classList.remove('is-dragging-tab')
-    markSpaceTarget(null)
-    useDrag.setState(IDLE_DRAG)
-  }
+  const finish = () => endSession(s)
   if (reducedMotion()) {
     finish()
     return
@@ -608,12 +612,7 @@ function cancel(s: Session): void {
     intoFolder: null,
     spaceTarget: null,
   })
-  const finish = () => {
-    if (session === s) session = null
-    document.documentElement.classList.remove('is-dragging-tab')
-    markSpaceTarget(null)
-    useDrag.setState(IDLE_DRAG)
-  }
+  const finish = () => endSession(s)
   if (reducedMotion() || ctx.spaceId !== s.spaceAtStart) {
     finish()
     return
