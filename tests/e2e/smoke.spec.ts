@@ -9,6 +9,7 @@ import {
   state,
   tabPage,
   tabView,
+  viewPage,
 } from './helpers'
 
 let fx: Fixtures
@@ -51,4 +52,37 @@ test('opens a page from the command bar into a real web view', async () => {
   await expect(orbit.shell.getByTestId('address-pill')).toContainText('localhost')
   const s = await state(orbit.app)
   expect(Object.keys(s.tabs)).toHaveLength(1)
+})
+
+test('[FL-01] every CSS animation in the shell and the overlay names keyframes defined in that page', async () => {
+  for (const view of ['shell', 'overlay'] as const) {
+    const page = await viewPage(orbit.app, view)
+    const { used, missing } = await page.evaluate(() => {
+      const defined = new Set<string>()
+      const used = new Set<string>()
+      const walk = (rules: CSSRuleList) => {
+        for (const rule of rules) {
+          if (rule instanceof CSSKeyframesRule) defined.add(rule.name)
+          else if (rule instanceof CSSStyleRule) {
+            for (const name of rule.style.animationName.split(',').map((n) => n.trim())) {
+              if (name && name !== 'none') used.add(name)
+            }
+          }
+          const nested = (rule as Partial<CSSGroupingRule>).cssRules
+          if (nested && !(rule instanceof CSSKeyframesRule)) walk(nested)
+        }
+      }
+      for (const sheet of document.styleSheets) {
+        try {
+          walk(sheet.cssRules)
+        } catch {
+          // A sheet the page can't read (none expected).
+        }
+      }
+      return { used: used.size, missing: [...used].filter((name) => !defined.has(name)) }
+    })
+    // Some animations were read at all (a sheet that couldn't be read would pass with nothing checked).
+    expect(used, `${view}: animations found`).toBeGreaterThan(0)
+    expect(missing, `${view}: animations without keyframes`).toEqual([])
+  }
 })

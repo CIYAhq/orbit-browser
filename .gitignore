@@ -10,3 +10,5 @@ playwright-report/
 .DS_Store
 .orbit-test-data/
 perf-results/
+clips/
+screenshots/

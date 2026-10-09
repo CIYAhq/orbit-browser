@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 140 built (45 partial) · 188 tested · 0 feel right.
+**Totals:** 485 spec’d · 140 built (45 partial) · 189 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 97 | 117 |
+| P0 | 174 | 97 | 118 |
 | P1 | 221 | 39 | 66 |
 | P2 | 83 | 4 | 5 |
 
@@ -88,7 +88,7 @@ Spec: `spec/tabs.md`
 | PN-08 | Rename pinned tabs | P1 | ✅ | ✅ e2e | – | custom name kept through resets; breadcrumb 'Name / page' |
 | PN-09 | Collapse the pinned section | P1 | ✅ | ✅ e2e+unit | – | caret on the Space title, peeking selected tab, bold title, Collapse/Expand Pinned action |
 | FV-01 | What Favorites are and how they're shared | P0 | ✅ | ✅ e2e | – | per-profile grid above the Space title |
-| FV-02 | Capacity and grid layout | P0 | ✅ | ✅ e2e | – | max 12 (13th refused with toast), up to 4 per row, fewer stretch |
+| FV-02 | Capacity and grid layout | P0 | ✅ | ✅ e2e+unit | – | max 12 (13th refused with toast), up to 4 per row, fewer stretch |
 | FV-03 | Add a Favorite | P0 | ✅ | ✅ e2e+unit | – | drag to grid (drop zone when empty), menu, Favorite This Tab action |
 | FV-04 | Remove a Favorite | P0 | ✅ | ✅ e2e | – | drag tile into pinned/Today, menu, action toggle |
 | FV-05 | Reorder Favorites | P0 | ✅ | ✅ e2e+unit | – | drag within grid with spring reflow; order persists |
@@ -374,7 +374,7 @@ Spec: `spec/feel.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| FL-01 | Motion principles and shared tokens | P0 | – | ✅ unit | – |  |
+| FL-01 | Motion principles and shared tokens | P0 | – | ✅ e2e+unit | – |  |
 | FL-02 | Sidebar show/hide (docked toggle) | P0 | – | – | – |  |
 | FL-03 | Sidebar hover-reveal overlay | P0 | – | – | – |  |
 | FL-04 | Tab row hover | P0 | – | – | – |  |
@@ -383,7 +383,7 @@ Spec: `spec/feel.md`
 | FL-07 | Rows moving between sections without a drag | P1 | – | ✅ e2e | – |  |
 | FL-08 | Row buttons (close ×, folder search, reset) | P1 | – | – | – |  |
 | FL-09 | Close and archive exit | P0 | – | – | – |  |
-| FL-10 | Drag and drop: lift, follow, spring, drop | P0 | – | – | – |  |
+| FL-10 | Drag and drop: lift, follow, spring, drop | P0 | – | ✅ e2e | – |  |
 | FL-11 | Clear Today: staggered sweep | P1 | – | – | – |  |
 | FL-12 | Folder and pinned-section expand/collapse | P1 | – | – | – |  |
 | FL-13 | Space switching: swipe physics, settle and rubber-band | P0 | ✅ | ✅ e2e+unit | – | strip of pages, 1:1 tracking, commit thresholds, settle/rubber-band springs, one-page slides for clicks and keys, reduced motion cross-fade |
