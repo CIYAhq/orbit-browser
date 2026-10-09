@@ -721,3 +721,35 @@ test('[SV-26] a new pane grows in with a spring and a closed one fades out', asy
   await ghost
   await expect(orbit.shell.locator('[data-testid="split-ghost"]')).toHaveCount(0)
 })
+
+test('[SV-13][SV-26] a divider drag leaves the sidebar untouched and causes no long tasks', async () => {
+  const b = await openTab(orbit.app, 'PerfR')
+  const a = await openTab(orbit.app, 'PerfL')
+  await run(orbit.app, 'split.create', { tabIds: [a, b] })
+  await expectViewsOverPanes(orbit, [a, b])
+  await orbit.shell.evaluate(() => {
+    const w = window as unknown as { __longTasks: number[]; __sidebarMutations: number }
+    w.__longTasks = []
+    w.__sidebarMutations = 0
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) w.__longTasks.push(e.duration)
+    }).observe({ entryTypes: ['longtask'] })
+    const sidebar = document.querySelector('[data-testid="sidebar"]') as Element
+    new MutationObserver((records) => {
+      w.__sidebarMutations += records.length
+    }).observe(sidebar, { subtree: true, childList: true, attributes: true, characterData: true })
+  })
+  const divider = await orbit.shell.getByTestId('split-divider').boundingBox()
+  if (!divider) throw new Error('no divider')
+  const y = divider.y + divider.height / 2
+  await orbit.shell.mouse.move(divider.x + 4, y)
+  await orbit.shell.mouse.down()
+  for (let i = 1; i <= 60; i++) await orbit.shell.mouse.move(divider.x + 4 + Math.sin(i / 6) * 150, y)
+  const mid = await orbit.shell.evaluate(() => {
+    const w = window as unknown as { __longTasks: number[]; __sidebarMutations: number }
+    return { longTasks: w.__longTasks, mutations: w.__sidebarMutations }
+  })
+  await orbit.shell.mouse.up()
+  expect(mid.mutations).toBe(0)
+  expect(mid.longTasks.filter((d) => d > 50)).toEqual([])
+})
