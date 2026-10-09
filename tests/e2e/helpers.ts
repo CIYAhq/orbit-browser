@@ -9,6 +9,12 @@ import type { OrbitState } from '../../src/shared/state'
 export const isMac = process.platform === 'darwin'
 /** Primary modifier for shortcuts: Cmd on macOS, Ctrl elsewhere. */
 export const MOD = isMac ? 'Meta' : 'Control'
+/**
+ * Frame-timed budgets (keystroke → painted, open → painted) hold on Linux CI and dev machines. The
+ * macOS CI runner is a VM without a GPU where one frame can take 100–200 ms, so there they only catch
+ * pathological regressions (D17). Budgets that don't wait for a frame are never scaled.
+ */
+export const FRAME_SLACK = process.env.CI && isMac ? 8 : 1
 
 export interface Orbit {
   app: ElectronApplication

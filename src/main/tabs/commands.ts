@@ -670,7 +670,14 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     'tab.copyUrlMarkdown',
     withActive((tabId, windowId) => void copyLinks(windowId, [tabId], true)),
   )
-  actions.register('tab.pasteAsNewTab', (c) => void pasteUrlAsTab(windowOf(c)))
+  actions.register('tab.pasteAsNewTab', (c) => {
+    const windowId = windowOf(c)
+    // From an open command bar the new tab is the answer: close the bar (review N1).
+    if (windowId && store.state.windows[windowId]?.overlay.kind === 'commandbar') {
+      void commands.run('overlay.close', {}, { windowId })
+    }
+    void pasteUrlAsTab(windowId)
+  })
   actions.register(
     'tab.toggleMute',
     withActive((tabId) => {
