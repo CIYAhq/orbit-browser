@@ -14,11 +14,14 @@ let at = 0
 /** Token of the mounted bar; 0 while none is mounted. */
 let owner = 0
 let nextToken = 1
+/** When the last bar closed: keys right after a close belong to the page, not the next open. */
+let closedAt = Number.NEGATIVE_INFINITY
 
 function opening(): boolean {
-  const win = getOrbitState()?.windows[window.orbit.windowId]
-  // Before the state patch arrives the mirror still says "none".
-  return !win || win.overlay.kind === 'none' || win.overlay.kind === 'commandbar'
+  const kind = getOrbitState()?.windows[window.orbit.windowId]?.overlay.kind
+  if (kind === 'commandbar') return true
+  // Before the state patch arrives the mirror still says "none" (but not while a bar animates out).
+  return (kind === undefined || kind === 'none') && performance.now() - closedAt > 400
 }
 
 export function installTypeahead(): void {
@@ -55,5 +58,9 @@ export function claimTypeahead(): { token: number; text: string; enter: boolean 
 
 /** Called when that bar closes: buffering resumes for the next open. */
 export function releaseTypeahead(token: number): void {
-  if (owner === token) owner = 0
+  if (owner !== token) return
+  owner = 0
+  text = ''
+  enter = false
+  closedAt = performance.now()
 }
