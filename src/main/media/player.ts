@@ -128,6 +128,10 @@ export interface PlayerInfo {
   animating: boolean
   /** The last enter motion: where the player started and where it went (MD-16). */
   lastEnter: { from: Rect; to: Rect } | null
+  /** How long the last opening took, from the request to the window showing (ms; MD-01). */
+  openMs: number | null
+  /** An opening is under way (the page is being asked for its video). */
+  opening: boolean
 }
 
 export class PipPlayer {
@@ -141,6 +145,7 @@ export class PipPlayer {
   private wheelTimer: NodeJS.Timeout | undefined
   private wheelSamples: { x: number; y: number; t: number }[] = []
   private lastEnter: { from: Rect; to: Rect } | null = null
+  private openMs: number | null = null
   private hiding: NodeJS.Timeout | undefined
   private opening: { tabId: TabId; done: Promise<boolean> } | undefined
   /** Finishes a closing fade at once (a new video is about to show). */
@@ -156,6 +161,10 @@ export class PipPlayer {
     // window must not keep the app alive once every Orbit window is closed.
     app.on('browser-window-created', (_e, win) => {
       win.once('closed', () => setImmediate(() => this.onWindowClosed()))
+    })
+    // Orbit's windows coming forward stay below the player.
+    app.on('browser-window-focus', () => {
+      if (this.session && this.win && !this.win.isDestroyed() && this.win.isVisible()) this.win.moveTop()
     })
     screen.on('display-removed', () => this.refit())
     screen.on('display-metrics-changed', () => this.refit())
@@ -186,6 +195,7 @@ export class PipPlayer {
   }
 
   private async start(tabId: TabId, opts: OpenOptions): Promise<boolean> {
+    const began = Date.now()
     const view = this.ctx.tabs.get(tabId)
     const contents = view?.webContents
     if (!view || !contents || contents.isDestroyed()) return false
@@ -240,7 +250,7 @@ export class PipPlayer {
     }
     if (from && (from.width < 8 || from.height < 8 || !richMotion())) from = undefined
     const start = from ?? target
-    const ms = from ? ENTER_MS : 0
+    const ms = ENTER_MS
 
     // The borrowed view: at least the page area, and big enough for the largest player.
     const max = pipDimensions(aspect, maxPipSize(area))
@@ -248,11 +258,12 @@ export class PipPlayer {
       width: Math.max(pane.width, max.width, start.width),
       height: Math.max(pane.height, max.height, start.height) + EXTRA_HEIGHT,
     }
-    const css = (r: { width: number; height: number }) => ({ w: r.width / zoom, h: r.height / zoom })
+    // The page draws the video at the window's size; during the motion it follows frame by frame.
+    const css = { w: start.width / zoom, h: start.height / zoom }
     const lifted = await this.host.call<boolean>(tabId, 'lift', {
-      from: css(start),
-      to: css(target),
-      ms,
+      from: css,
+      to: css,
+      ms: 0,
       arm: { w: Math.round(viewSize.width / zoom), h: Math.round(viewSize.height / zoom) },
     })
     if (!lifted || seq !== this.seq || contents.isDestroyed() || this.isShown(tabId)) {
@@ -286,6 +297,9 @@ export class PipPlayer {
     }
     this.place(start)
     if (!win.isVisible()) win.showInactive()
+    // Above other windows even where the window manager ignores "always on top".
+    win.moveTop()
+    this.openMs = Date.now() - began
     this.lastEnter = from ? { from: start, to: target } : null
     if (from) this.animateTimed(start, target, ms)
     this.host.changed(tabId, true, opts.auto)
@@ -513,7 +527,7 @@ export class PipPlayer {
     const started = Date.now()
     const step = () => {
       const p = Math.min(1, (Date.now() - started) / ms)
-      this.place(mixRect(from, to, ease(p)))
+      this.place(mixRect(from, to, ease(p)), true)
       if (p >= 1) this.stopAnimation()
     }
     this.anim = setInterval(step, FRAME_MS)
@@ -682,6 +696,8 @@ export class PipPlayer {
       alwaysOnTop: !!win?.isAlwaysOnTop(),
       animating: !!this.anim,
       lastEnter: this.lastEnter,
+      openMs: this.openMs,
+      opening: !!this.opening,
     }
   }
 

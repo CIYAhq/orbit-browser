@@ -1,7 +1,8 @@
 /**
- * Media lane e2e (media.md): picture-in-picture, the sidebar media tray, call controls and media
- * in the tab lifecycle. All media is generated locally: a WAV tone written here, a canvas
- * captureStream() video with an oscillator soundtrack, and a short WebM recorded in the page.
+ * Media lane e2e (media.md): Orbit's floating player (picture-in-picture), the sidebar media tray,
+ * call controls and media in the tab lifecycle. All media is generated locally: a WAV tone written
+ * here, canvas captureStream() videos with an oscillator soundtrack, a short WebM recorded in the
+ * page, and a long seekable video built from that recording with Media Source Extensions.
  */
 import { mkdtempSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
@@ -10,9 +11,10 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { type ElectronApplication, _electron as electron, expect, type Page, test } from '@playwright/test'
 import type { MediaTestHooks } from '../../src/main/media'
+import type { PlayerInfo } from '../../src/main/media/player'
 import type { TabMedia } from '../../src/shared/state'
 import { launchOrbit, type Orbit, state, tabPage, viewPage } from './helpers'
-import { act, activeId, cmd, newTab, setState, tab, tabsHook, waitTab } from './tabs-support'
+import { act, activeId, cmd, newTab, tab, tabsHook, waitTab } from './tabs-support'
 
 // ---- Local media fixtures (ports 3300–3399 are this project's) ----
 
@@ -55,9 +57,12 @@ const v = document.getElementById('v'); v.srcObject = stream
 v.play().then(() => { document.body.dataset.state = 'playing' })
 </script>`
 
-/** A real (file-backed) looping video: records a short WebM in the page, then plays it from a blob URL. */
-const FILE_VIDEO = `
-<video id="v" width="320" height="180" loop playsinline></video>
+/**
+ * A real (file-backed) video: records a short WebM in the page, then plays it from a blob URL.
+ * It loops unless `once`.
+ */
+const FILE_VIDEO = (once: boolean) => `
+<video id="v" width="320" height="180" ${once ? '' : 'loop '}playsinline></video>
 <canvas id="c" width="320" height="180" style="position:absolute;left:-9999px"></canvas>
 <script>
 const c = document.getElementById('c'), g = c.getContext('2d'); let n = 0
@@ -74,6 +79,50 @@ rec.onstop = () => {
   v.play().then(() => { document.body.dataset.state = 'playing' })
 }
 rec.start(); setTimeout(() => rec.stop(), 1500)
+</script>`
+
+/**
+ * A long, seekable 16:9 video with sound: one second of picture and one of sound recorded in the
+ * page (MediaRecorder), each appended `seconds` times to its own SourceBuffer in sequence mode, so
+ * neither track has gaps. Nothing is downloaded.
+ */
+const LONG_VIDEO = (seconds: number) => `
+<video id="v" width="480" height="270" playsinline></video>
+<canvas id="c" width="480" height="270" style="position:absolute;left:-9999px"></canvas>
+<script>
+const c = document.getElementById('c'), g = c.getContext('2d'); let n = 0
+const draw = () => {
+  g.fillStyle = 'hsl(' + (n++ * 9 % 360) + ',70%,50%)'; g.fillRect(0, 0, 480, 270)
+  g.fillStyle = '#fff'; g.font = '40px sans-serif'; g.fillText(String(n), 24, 60)
+}
+const timer = setInterval(draw, 40)
+const ac = new AudioContext(), osc = ac.createOscillator(), gain = ac.createGain(); gain.gain.value = 0.05
+const dest = ac.createMediaStreamDestination(); osc.connect(gain).connect(dest); osc.start()
+const record = (stream, type) => new Promise((resolve) => {
+  const rec = new MediaRecorder(stream, { mimeType: type }); const chunks = []
+  rec.ondataavailable = (e) => chunks.push(e.data)
+  rec.onstop = () => resolve(new Blob(chunks, { type }).arrayBuffer())
+  rec.start(); setTimeout(() => rec.stop(), 1000)
+})
+const types = ['video/webm;codecs=vp8', 'audio/webm;codecs=opus']
+Promise.all([record(c.captureStream(25), types[0]), record(dest.stream, types[1])]).then(async (data) => {
+  clearInterval(timer); osc.stop()
+  const source = new MediaSource()
+  const v = document.getElementById('v')
+  v.src = URL.createObjectURL(source)
+  await new Promise((r) => source.addEventListener('sourceopen', r, { once: true }))
+  const buffers = types.map((t) => source.addSourceBuffer(t))
+  await Promise.all(buffers.map(async (b, i) => {
+    b.mode = 'sequence'
+    for (let k = 0; k < ${seconds}; k++) {
+      b.appendBuffer(data[i])
+      await new Promise((r) => b.addEventListener('updateend', r, { once: true }))
+    }
+  }))
+  source.endOfStream()
+  await v.play()
+  document.body.dataset.state = 'playing'
+})
 </script>`
 
 const AUDIO = (session: boolean) => `
@@ -164,7 +213,9 @@ async function startMediaFixtures(): Promise<Fixtures> {
     if (parts[0] === 'media' && parts[1] === 'audio') return html(AUDIO(u.searchParams.has('session')))
     if (parts[0] === 'media' && parts[1] === 'playlist') return html(PLAYLIST)
     if (parts[0] === 'media' && parts[1] === 'video') return html(STREAM_VIDEO)
-    if (parts[0] === 'media' && parts[1] === 'file-video') return html(FILE_VIDEO)
+    if (parts[0] === 'media' && parts[1] === 'file-video') return html(FILE_VIDEO(u.searchParams.has('once')))
+    if (parts[0] === 'media' && parts[1] === 'long-video')
+      return html(LONG_VIDEO(Number(u.searchParams.get('s') ?? 60)))
     if (parts[0] === 'media' && parts[1] === 'call') return html(CALL(u.searchParams.has('participant')))
     if (parts[0] === 'page') return html('<p>A quiet page.</p>')
     res.writeHead(404, { 'content-type': 'text/plain' })
@@ -201,6 +252,13 @@ test.afterEach(async () => {
   await orbit?.app.close()
 })
 
+interface Box {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 async function media(app: ElectronApplication, tabId: string): Promise<TabMedia | undefined> {
   return (await tab(app, tabId))?.media
 }
@@ -214,17 +272,33 @@ async function openPlaying(
   const id = await newTab(app, fx.url(path))
   await waitTab(app, id, path.split('?')[0] as string)
   const p = await tabPage(app, path.split('?')[0] as string)
-  await expect.poll(() => p.evaluate(() => document.body.dataset.state ?? '')).toBe(until)
+  await expect.poll(() => p.evaluate(() => document.body.dataset.state ?? ''), { timeout: 20_000 }).toBe(until)
   return { id, page: p }
 }
 
-const pipShowing = (p: Page) => p.evaluate(() => !!document.pictureInPictureElement)
+/** Selects a quiet tab (leaving the current one). */
+async function leave(app: ElectronApplication): Promise<string> {
+  const id = await newTab(app, fx.url('/page/Other/Quiet'))
+  await waitTab(app, id, '/page/Other')
+  return id
+}
+
+/** The engine's own picture-in-picture window shows a video of the page. */
+const enginePip = (p: Page) => p.evaluate(() => !!document.pictureInPictureElement)
+/** The id of the page's video that floats in Orbit's player ('' when none). */
+const floated = (p: Page) => p.evaluate(() => document.querySelector('video[data-orbit-pip]')?.id ?? '')
 const paused = (p: Page, selector: string) =>
   p.evaluate((s) => (document.querySelector(s) as HTMLMediaElement | null)?.paused ?? null, selector)
+const currentTime = (p: Page, selector = '#v') =>
+  p.evaluate((s) => (document.querySelector(s) as HTMLMediaElement).currentTime, selector)
 const controller = (o: Orbit, tabId: string) =>
   o.shell.locator(`[data-testid="media-controller"][data-tab-id="${tabId}"]`)
 
-function mediaHook<T>(app: ElectronApplication, name: 'lastMenu' | 'clickMenu', arg?: string): Promise<T> {
+function mediaHook<T>(
+  app: ElectronApplication,
+  name: 'lastMenu' | 'clickMenu' | 'playerMenu' | 'clickPlayerMenu',
+  arg?: string,
+): Promise<T> {
   return app.evaluate(
     (_e, [n, a]) => {
       const hooks = (globalThis as unknown as { __orbitMedia: MediaTestHooks }).__orbitMedia
@@ -234,7 +308,538 @@ function mediaHook<T>(app: ElectronApplication, name: 'lastMenu' | 'clickMenu', 
   ) as Promise<T>
 }
 
-// ---- Tests ----
+/** Orbit's floating player, as the main process sees it. */
+function player(app: ElectronApplication): Promise<PlayerInfo> {
+  return app.evaluate(() =>
+    (globalThis as unknown as { __orbitMedia: MediaTestHooks }).__orbitMedia.manager.player.info(),
+  )
+}
+
+/** Waits until the player shows a tab's video. */
+async function expectPlayer(app: ElectronApplication, tabId: string): Promise<PlayerInfo> {
+  await expect
+    .poll(async () => {
+      const p = await player(app)
+      return p.tabId === tabId && p.visible && p.holdsView && !p.animating
+    })
+    .toBe(true)
+  return player(app)
+}
+
+async function expectNoPlayer(app: ElectronApplication): Promise<void> {
+  await expect
+    .poll(async () => {
+      const p = await player(app)
+      return p.tabId === null && !p.visible && !p.opening
+    })
+    .toBe(true)
+}
+
+/** The player's controls (its own small view). */
+async function pipPage(app: ElectronApplication): Promise<Page> {
+  const deadline = Date.now() + 20_000
+  while (Date.now() < deadline) {
+    const found = app.windows().find((p) => p.url().includes('view=pip'))
+    if (found) {
+      await found.waitForLoadState()
+      return found
+    }
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  throw new Error('No player view')
+}
+
+/** The player's place for a corner of the work area (16 px margins). */
+function cornerBox(area: Box, corner: string, width: number, height: number): Box {
+  const left = corner.endsWith('left')
+  const top = corner.startsWith('top')
+  return {
+    x: left ? area.x + 16 : area.x + area.width - 16 - width,
+    y: top ? area.y + 16 : area.y + area.height - 16 - height,
+    width,
+    height,
+  }
+}
+
+/** A pointer gesture on the player, as its view reports them (screen DIPs, ms). */
+function gesture(pip: Page, e: { phase: string; kind?: string; x: number; y: number; t?: number }): Promise<void> {
+  return pip.evaluate((ev) => {
+    ;(window as unknown as { orbit: { send: (n: string, p: unknown) => void } }).orbit.send('media.pipGesture', ev)
+  }, e)
+}
+
+/** Drags with pointer events from `from` by steps of `step` px, `ms` apart, then releases. */
+async function dragPlayer(
+  pip: Page,
+  kind: string,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  steps: number,
+  ms: number,
+): Promise<void> {
+  let t = Date.now()
+  await gesture(pip, { phase: 'start', kind, x: from.x, y: from.y, t })
+  for (let i = 1; i <= steps; i++) {
+    t += ms
+    const x = from.x + ((to.x - from.x) * i) / steps
+    const y = from.y + ((to.y - from.y) * i) / steps
+    await gesture(pip, { phase: i === steps ? 'end' : 'move', kind, x, y, t })
+  }
+}
+
+type Frames = { w: number; h: number; lifted: boolean }[]
+
+// ---- Floating player (MD-01 to MD-08, MD-16) ----
+
+test('[MD-01][MD-03][MD-16] leaving a playing video floats it bottom-right out of its place in the page; returning puts it back with no blank frame', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const v = await openPlaying(app, '/media/long-video/Film')
+  await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
+  await pipPage(app)
+
+  // Sample the player window while it appears (MD-16), then leave the tab.
+  const sampling = app.evaluate(async () => {
+    const p = (globalThis as unknown as { __orbitMedia: MediaTestHooks }).__orbitMedia.manager.player
+    const out: { t: number; x: number; y: number; width: number; height: number }[] = []
+    const start = Date.now()
+    while (Date.now() - start < 1200) {
+      const info = p.info()
+      if (info.visible && info.bounds) out.push({ t: Date.now() - start, ...info.bounds })
+      await new Promise((r) => setTimeout(r, 8))
+    }
+    return out
+  })
+  const other = await newTab(app, fx.url('/page/Other/Quiet'))
+  const samples = await sampling
+  const info = await expectPlayer(app, v.id)
+
+  // Within about 300 ms (MD-01), bottom-right with a 16 px margin, 320 × 180 for 16:9 (MD-03).
+  expect(info.openMs).not.toBeNull()
+  expect(info.openMs as number).toBeLessThan(300)
+  const area = info.workArea as Box
+  expect(info.bounds).toEqual(cornerBox(area, 'bottom-right', 320, 180))
+  expect(info.alwaysOnTop).toBe(true)
+  expect(await floated(v.page)).toBe('v')
+  expect(await paused(v.page, '#v')).toBe(false)
+  expect(await activeId(app)).toBe(other)
+  const m = await media(app, v.id)
+  expect(m?.pip).toBe(true)
+  expect(m?.player).toBe(true)
+  expect(m?.autoPip).toBe(true)
+  // A video in picture-in-picture is not also in the sidebar tray.
+  await expect(controller(orbit, v.id)).toHaveCount(0)
+
+  // The motion starts at the video's place in the page (480 × 270) and shrinks into the corner
+  // over about 300 ms on the standard curve: several in-between frames, never smaller than the end.
+  const enter = info.lastEnter as { from: Box; to: Box }
+  expect(enter.from.width).toBe(480)
+  expect(enter.from.height).toBe(270)
+  expect(enter.to).toEqual(info.bounds)
+  const first = samples[0] as Box & { t: number }
+  expect(first.width).toBeGreaterThan(330)
+  const widths = samples.map((s) => s.width)
+  for (let i = 1; i < widths.length; i++) expect(widths[i] as number).toBeLessThanOrEqual(widths[i - 1] as number)
+  const between = new Set(widths.filter((w) => w > 320 && w < 480))
+  expect(between.size).toBeGreaterThanOrEqual(4)
+  const done = samples.find((s) => s.width === 320 && s.x === enter.to.x && s.y === enter.to.y)
+  expect(done).toBeDefined()
+  expect((done as { t: number }).t - first.t).toBeGreaterThan(150)
+  expect((done as { t: number }).t - first.t).toBeLessThan(700)
+
+  // Back on the tab: the video is in the page again, still playing, and no frame was drawn at the
+  // page's size with the video still floating (MD-01: no blank frame).
+  await v.page.evaluate(() => {
+    const w = window as unknown as { __frames: Frames }
+    w.__frames = []
+    const tick = () => {
+      w.__frames.push({
+        w: innerWidth,
+        h: innerHeight,
+        lifted: !!document.querySelector('video[data-orbit-pip]'),
+      })
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  })
+  await expect
+    .poll(() => v.page.evaluate(() => (window as unknown as { __frames: Frames }).__frames.length))
+    .toBeGreaterThan(3)
+  await cmd(app, 'tabs.activate', { tabId: v.id })
+  await expect.poll(() => floated(v.page)).toBe('')
+  await expectNoPlayer(app)
+  const size = await v.page.evaluate(() => ({ w: innerWidth, h: innerHeight }))
+  await expect
+    .poll(() =>
+      v.page.evaluate(
+        (s) => (window as unknown as { __frames: Frames }).__frames.filter((f) => f.w === s.w && f.h === s.h).length,
+        size,
+      ),
+    )
+    .toBeGreaterThan(2)
+  const frames = await v.page.evaluate(() => (window as unknown as { __frames: Frames }).__frames)
+  expect(frames.some((f) => f.lifted)).toBe(true)
+  expect(frames.filter((f) => f.w === size.w && f.h === size.h && f.lifted)).toEqual([])
+  expect(await paused(v.page, '#v')).toBe(false)
+  await expect.poll(async () => (await media(app, v.id))?.pip).toBe(false)
+  expect((await media(app, v.id))?.player).toBeUndefined()
+})
+
+test('[MD-04][MD-05] hovering the player shows play/pause, ±15 s, progress and speed; Space and arrows work when it has focus', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const v = await openPlaying(app, '/media/long-video/Film')
+  const pip = await pipPage(app)
+  await leave(app)
+  await expectPlayer(app, v.id)
+  const root = pip.getByTestId('pip')
+  await expect(root).toHaveAttribute('data-tab-id', v.id)
+
+  // Video only until hovered (MD-03); hovering reveals the controls.
+  await expect(pip.locator('.pip__top')).toHaveCSS('opacity', '0')
+  await root.hover({ position: { x: 40, y: 60 } })
+  await expect(pip.locator('.pip__top')).toHaveCSS('opacity', '1')
+  await expect(pip.locator('.pip__middle')).toHaveCSS('opacity', '1')
+  for (const id of ['pip-back', 'pip-more', 'pip-close', 'pip-play', 'pip-back15', 'pip-forward15', 'pip-progress']) {
+    await expect(pip.getByTestId(id)).toBeVisible()
+  }
+  await expect(pip.getByTestId('pip-duration')).toHaveText(/^1:0\d$/)
+  await expect(pip.getByTestId('pip-live')).toHaveCount(0)
+
+  // Play/pause.
+  await pip.getByTestId('pip-play').click()
+  await expect.poll(() => paused(v.page, '#v')).toBe(true)
+  await expect(root).toHaveAttribute('data-playing', 'false')
+  await pip.getByTestId('pip-play').click()
+  await expect.poll(() => paused(v.page, '#v')).toBe(false)
+  await expect(root).toHaveAttribute('data-playing', 'true')
+
+  // +15 s and −15 s.
+  const t0 = await currentTime(v.page)
+  await pip.getByTestId('pip-forward15').click()
+  await expect.poll(() => currentTime(v.page)).toBeGreaterThan(t0 + 14)
+  const t1 = await currentTime(v.page)
+  await pip.getByTestId('pip-back15').click()
+  await expect.poll(() => currentTime(v.page)).toBeLessThan(t1 - 13)
+
+  // The progress bar seeks where it is clicked; the elapsed time follows.
+  const bar = (await pip.getByTestId('pip-progress').boundingBox()) as Box
+  const duration = await v.page.evaluate(() => (document.getElementById('v') as HTMLVideoElement).duration)
+  await pip.mouse.click(bar.x + bar.width * 0.75, bar.y + bar.height / 2)
+  await expect.poll(() => currentTime(v.page)).toBeGreaterThan(duration * 0.75 - 3)
+  expect(await currentTime(v.page)).toBeLessThan(duration * 0.75 + 3)
+  await expect(pip.getByTestId('pip-elapsed')).toHaveText(/^0:4\d$/)
+
+  // "…": playback speed (MD-04).
+  await pip.getByTestId('pip-more').click()
+  await expect.poll(() => mediaHook<string[]>(app, 'playerMenu')).toContain('Playback Speed > 1.5×')
+  expect(await mediaHook(app, 'clickPlayerMenu', 'Playback Speed > 1.5×')).toBe(true)
+  await expect
+    .poll(() => v.page.evaluate(() => (document.getElementById('v') as HTMLVideoElement).playbackRate))
+    .toBe(1.5)
+
+  // With focus: Space plays and pauses, arrows seek 5 s (MD-05).
+  await root.click({ position: { x: 40, y: 60 } })
+  await pip.keyboard.press('Space')
+  await expect.poll(() => paused(v.page, '#v')).toBe(true)
+  const t2 = await currentTime(v.page)
+  await pip.keyboard.press('ArrowLeft')
+  await expect.poll(() => currentTime(v.page)).toBeLessThan(t2 - 4)
+  const t3 = await currentTime(v.page)
+  await pip.keyboard.press('ArrowRight')
+  await expect.poll(() => currentTime(v.page)).toBeGreaterThan(t3 + 4)
+  await pip.keyboard.press('Space')
+  await expect.poll(() => paused(v.page, '#v')).toBe(false)
+})
+
+test('[MD-04] a live stream shows a live badge instead of a seekable bar', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const v = await openPlaying(app, '/media/video/Live%20Stream')
+  const pip = await pipPage(app)
+  await leave(app)
+  await expectPlayer(app, v.id)
+  await expect.poll(async () => (await media(app, v.id))?.live).toBe(true)
+  await pip.getByTestId('pip').hover()
+  await expect(pip.getByTestId('pip-live')).toBeVisible()
+  await expect(pip.getByTestId('pip-progress')).toHaveCount(0)
+  await expect(pip.getByTestId('pip-forward15')).toHaveCount(0)
+  await expect(pip.getByTestId('pip-play')).toBeVisible()
+})
+
+test('[MD-04][MD-07][MD-10] Back to tab and double-click return to the tab; × keeps it playing in the sidebar, whose PiP button floats it again', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const v = await openPlaying(app, '/media/long-video/Film')
+  const pip = await pipPage(app)
+  const root = pip.getByTestId('pip')
+
+  // "Back to tab": the source tab is selected and the video plays on in the page.
+  const other = await leave(app)
+  await expectPlayer(app, v.id)
+  await root.hover({ position: { x: 40, y: 60 } })
+  await pip.getByTestId('pip-back').click()
+  await expect.poll(() => activeId(app)).toBe(v.id)
+  await expectNoPlayer(app)
+  await expect.poll(() => floated(v.page)).toBe('')
+  expect(await paused(v.page, '#v')).toBe(false)
+
+  // Double-click does the same (MD-07).
+  await cmd(app, 'tabs.activate', { tabId: other })
+  await expectPlayer(app, v.id)
+  await root.dblclick({ position: { x: 30, y: 60 } })
+  await expect.poll(() => activeId(app)).toBe(v.id)
+  await expectNoPlayer(app)
+  expect(await paused(v.page, '#v')).toBe(false)
+
+  // ×: the floating video closes and the media keeps playing, now in the sidebar (MD-07).
+  await cmd(app, 'tabs.activate', { tabId: other })
+  await expectPlayer(app, v.id)
+  await root.hover({ position: { x: 40, y: 60 } })
+  await pip.getByTestId('pip-close').click()
+  await expectNoPlayer(app)
+  const ctl = controller(orbit, v.id)
+  await expect(ctl).toBeVisible()
+  await expect(ctl.getByTestId('media-title')).toHaveText('Film')
+  expect(await paused(v.page, '#v')).toBe(false)
+  expect(await activeId(app)).toBe(other)
+  await expect.poll(() => floated(v.page)).toBe('')
+
+  // The controller's Picture in Picture ("Back to PiP", MD-10): the player grows out of the
+  // controller and the controller leaves the tray.
+  const box = (await ctl.boundingBox()) as Box
+  const content = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getContentBounds())
+  await ctl.getByTestId('media-pip').click()
+  const info = await expectPlayer(app, v.id)
+  const from = (info.lastEnter as { from: Box }).from
+  expect(Math.abs(from.x + from.width / 2 - ((content?.x ?? 0) + box.x + box.width / 2))).toBeLessThanOrEqual(2)
+  expect(Math.abs(from.y + from.height / 2 - ((content?.y ?? 0) + box.y + box.height / 2))).toBeLessThanOrEqual(2)
+  expect(info.bounds).toEqual(cornerBox(info.workArea as Box, 'bottom-right', 320, 180))
+  await expect(controller(orbit, v.id)).toHaveCount(0)
+  expect((await media(app, v.id))?.autoPip).toBeUndefined()
+})
+
+test('[MD-07][MD-12] closing or navigating the source tab, or the video ending, closes the player', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  // Closing the tab stops its media and the player.
+  const a = await openPlaying(app, '/media/long-video/Closing')
+  const other = await leave(app)
+  await expectPlayer(app, a.id)
+  await cmd(app, 'tabs.close', { tabId: a.id })
+  await expectNoPlayer(app)
+  expect((await state(app)).tabs[a.id]).toBeUndefined()
+
+  // Navigating it elsewhere.
+  const b = await openPlaying(app, '/media/long-video/Navigating')
+  await cmd(app, 'tabs.activate', { tabId: other })
+  await expectPlayer(app, b.id)
+  await b.page.evaluate((url) => {
+    location.href = url
+  }, fx.url('/page/Next/Quiet'))
+  await expectNoPlayer(app)
+  await waitTab(app, b.id, '/page/Next')
+  expect((await media(app, b.id))?.pip).toBeUndefined()
+
+  // The video ends: the player closes and the video doesn't start again.
+  const c = await openPlaying(app, '/media/long-video/Short?s=3')
+  await cmd(app, 'tabs.activate', { tabId: other })
+  await expectPlayer(app, c.id)
+  await expectNoPlayer(app)
+  expect(await c.page.evaluate(() => (document.getElementById('v') as HTMLVideoElement).ended)).toBe(true)
+  await expect.poll(() => floated(c.page)).toBe('')
+  expect(await paused(c.page, '#v')).toBe(true)
+})
+
+test('[MD-06][FL-32] the player snaps to the corner a move or fling heads for, resizes from a corner keeping its shape within limits, zooms, and opens where it was left', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const v = await openPlaying(app, '/media/long-video/Film')
+  const pip = await pipPage(app)
+  const other = await leave(app)
+  let info = await expectPlayer(app, v.id)
+  const area = info.workArea as Box
+  let b = info.bounds as Box
+
+  // A slow drag towards the top-left, released there: it settles in the top-left corner.
+  await dragPlayer(pip, 'move', { x: b.x + 100, y: b.y + 50 }, { x: area.x + 300, y: area.y + 200 }, 10, 60)
+  await expect.poll(async () => (await player(app)).bounds).toEqual(cornerBox(area, 'top-left', 320, 180))
+  await expect.poll(async () => (await state(app)).settings.pipPlacement?.corner).toBe('top-left')
+
+  // A quick flick to the right carries it to the top-right corner, though released on the left.
+  b = (await player(app)).bounds as Box
+  await dragPlayer(pip, 'move', { x: b.x + 160, y: b.y + 90 }, { x: b.x + 220, y: b.y + 90 }, 2, 8)
+  await expect.poll(async () => (await player(app)).bounds).toEqual(cornerBox(area, 'top-right', 320, 180))
+
+  // Dragging the bottom-left corner outwards grows it, keeping 16:9 and the top-right corner put.
+  b = (await player(app)).bounds as Box
+  await dragPlayer(pip, 'bottom-left', { x: b.x, y: b.y + b.height }, { x: b.x - 200, y: b.y + b.height + 112 }, 5, 30)
+  await expect.poll(async () => (await player(app)).bounds).toEqual(cornerBox(area, 'top-right', 520, 293))
+  await expect.poll(async () => (await state(app)).settings.pipPlacement).toEqual({ corner: 'top-right', size: 520 })
+  // The page draws the video at the player's size.
+  await expect
+    .poll(() => v.page.evaluate(() => (document.getElementById('v') as HTMLVideoElement).getBoundingClientRect().width))
+    .toBe(520)
+
+  // Past the largest size (half the screen's width) it resists, then springs back on release.
+  const max = Math.floor(area.width / 2)
+  b = (await player(app)).bounds as Box
+  const t = Date.now()
+  const handle = { x: b.x, y: b.y + b.height }
+  await gesture(pip, { phase: 'start', kind: 'bottom-left', ...handle, t })
+  await gesture(pip, { phase: 'move', kind: 'bottom-left', x: handle.x - 1500, y: handle.y, t: t + 40 })
+  const stretched = (await player(app)).bounds as Box
+  expect(stretched.width).toBeGreaterThan(max)
+  expect(stretched.width).toBeLessThan(max * 1.25 + 1)
+  await gesture(pip, { phase: 'end', kind: 'bottom-left', x: handle.x - 1500, y: handle.y, t: t + 80 })
+  await expect.poll(async () => (await player(app)).bounds?.width).toBe(max)
+
+  // And below the smallest (200 px wide).
+  b = (await player(app)).bounds as Box
+  const t2 = Date.now()
+  const handle2 = { x: b.x, y: b.y + b.height }
+  await gesture(pip, { phase: 'start', kind: 'bottom-left', ...handle2, t: t2 })
+  await gesture(pip, { phase: 'move', kind: 'bottom-left', x: handle2.x + 2000, y: handle2.y, t: t2 + 40 })
+  expect(((await player(app)).bounds as Box).width).toBeLessThan(200)
+  await gesture(pip, { phase: 'end', kind: 'bottom-left', x: handle2.x + 2000, y: handle2.y, t: t2 + 80 })
+  await expect.poll(async () => (await player(app)).bounds).toEqual(cornerBox(area, 'top-right', 200, 113))
+
+  // Hover and scroll sideways: it slides along and settles in the corner it ends up nearest to.
+  const root = pip.getByTestId('pip')
+  await root.hover({ position: { x: 20, y: 20 } })
+  await pip.mouse.wheel(900, 0)
+  await expect.poll(async () => (await player(app)).bounds).toEqual(cornerBox(area, 'top-left', 200, 113))
+
+  // ⌘/Ctrl + scroll zooms into the video inside the same window.
+  await pip.keyboard.down('Control')
+  await pip.mouse.wheel(0, -150)
+  await pip.keyboard.up('Control')
+  await expect
+    .poll(() =>
+      v.page.evaluate(() => new DOMMatrix(getComputedStyle(document.getElementById('v') as Element).transform).a),
+    )
+    .toBeGreaterThan(1.5)
+  expect(((await player(app)).bounds as Box).width).toBe(200)
+
+  // Next time it opens where it was left, at that size.
+  await pip.getByTestId('pip').hover({ position: { x: 100, y: 56 } })
+  await pip.getByTestId('pip-close').click()
+  await expectNoPlayer(app)
+  await cmd(app, 'tabs.activate', { tabId: v.id })
+  await cmd(app, 'tabs.activate', { tabId: other })
+  info = await expectPlayer(app, v.id)
+  expect(info.bounds).toEqual(cornerBox(area, 'top-left', 200, 113))
+  // The zoom doesn't carry over.
+  expect(await v.page.evaluate(() => getComputedStyle(document.getElementById('v') as Element).transform)).toBe('none')
+})
+
+test('[MD-08] the player menu turns automatic picture-in-picture off for today or always; playback continues in the sidebar', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const v = await openPlaying(app, '/media/long-video/Film')
+  const pip = await pipPage(app)
+  const other = await leave(app)
+  await expectPlayer(app, v.id)
+
+  await pip.getByTestId('pip').hover({ position: { x: 40, y: 60 } })
+  await pip.getByTestId('pip-more').click()
+  await expect.poll(() => mediaHook<string[]>(app, 'playerMenu')).toContain('Turn Off for Today')
+  expect(await mediaHook<string[]>(app, 'playerMenu')).toContain('Always Turn Off for This Site')
+  expect(await mediaHook(app, 'clickPlayerMenu', 'Turn Off for Today')).toBe(true)
+  await expectNoPlayer(app)
+  await expect(controller(orbit, v.id)).toBeVisible()
+  expect(await paused(v.page, '#v')).toBe(false)
+  expect(await cmd(app, 'media.sitePip', { url: v.page.url() })).toBe('today')
+
+  // Leaving the tab again: no player, the sidebar controls instead.
+  await cmd(app, 'tabs.activate', { tabId: v.id })
+  await cmd(app, 'tabs.activate', { tabId: other })
+  expect((await player(app)).opening).toBe(false)
+  await expect(controller(orbit, v.id)).toBeVisible()
+  await expectNoPlayer(app)
+
+  // Back on: "Always Turn Off for This Site" from the player.
+  await cmd(app, 'media.setSitePip', { url: v.page.url(), mode: 'on' })
+  await cmd(app, 'tabs.activate', { tabId: v.id })
+  await cmd(app, 'tabs.activate', { tabId: other })
+  await expectPlayer(app, v.id)
+  await cmd(app, 'media.pipMenu', { x: 10, y: 10 })
+  expect(await mediaHook(app, 'clickPlayerMenu', 'Always Turn Off for This Site')).toBe(true)
+  await expectNoPlayer(app)
+  expect(await cmd(app, 'media.sitePip', { url: v.page.url() })).toBe('always')
+  expect((await state(app)).settings.pipOffSites).toContain('localhost')
+})
+
+test('[MD-08] no automatic picture-in-picture when it is off globally or for the site, or the tab is muted', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const v = await openPlaying(app, '/media/long-video/Film')
+  await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
+  const other = await leave(app)
+  await expectPlayer(app, v.id)
+  await cmd(app, 'tabs.activate', { tabId: v.id })
+  await expectNoPlayer(app)
+
+  // Global switch off (Settings › Advanced; also a command bar action): the video shows in the
+  // sidebar instead and keeps playing.
+  await act(app, 'media.toggleAutoPip')
+  expect((await state(app)).settings.autoPip).toBe(false)
+  await cmd(app, 'tabs.activate', { tabId: other })
+  expect((await player(app)).opening).toBe(false)
+  await expect(controller(orbit, v.id)).toBeVisible()
+  await expectNoPlayer(app)
+  expect(await paused(v.page, '#v')).toBe(false)
+  await act(app, 'media.toggleAutoPip')
+  await cmd(app, 'tabs.activate', { tabId: v.id })
+  await expect(controller(orbit, v.id)).toHaveCount(0)
+
+  // Always off for this site.
+  await cmd(app, 'media.setSitePip', { url: fx.url('/'), mode: 'always' })
+  expect(await cmd(app, 'media.sitePip', { url: fx.url('/x') })).toBe('always')
+  await cmd(app, 'tabs.activate', { tabId: other })
+  expect((await player(app)).opening).toBe(false)
+  await expect(controller(orbit, v.id)).toBeVisible()
+  await expectNoPlayer(app)
+  await cmd(app, 'tabs.activate', { tabId: v.id })
+  await cmd(app, 'media.setSitePip', { url: fx.url('/'), mode: 'on' })
+
+  // A muted tab neither floats nor shows in the sidebar.
+  await cmd(app, 'tabs.setMuted', { tabId: v.id, muted: true })
+  await expect.poll(async () => (await tab(app, v.id))?.muted).toBe(true)
+  await cmd(app, 'tabs.activate', { tabId: other })
+  expect((await player(app)).opening).toBe(false)
+  await expectNoPlayer(app)
+  await expect.poll(async () => (await media(app, v.id))?.tray).toBe(false)
+  await expect(controller(orbit, v.id)).toHaveCount(0)
+})
+
+test('[MD-02] Picture in Picture on the selected tab keeps the tab selected; leaving the tab moves the video into the player', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const v = await openPlaying(app, '/media/long-video/Film')
+  await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
+  // On the tab, the page stays on screen: the engine's own window shows the video.
+  await act(app, 'media.togglePip')
+  await expect.poll(() => enginePip(v.page)).toBe(true)
+  expect(await activeId(app)).toBe(v.id)
+  await expect.poll(async () => (await media(app, v.id))?.pip).toBe(true)
+  await act(app, 'media.togglePip')
+  await expect.poll(() => enginePip(v.page)).toBe(false)
+
+  // Leaving the tab hands it over to Orbit's player, with Orbit's controls.
+  await act(app, 'media.togglePip')
+  await expect.poll(() => enginePip(v.page)).toBe(true)
+  await leave(app)
+  await expectPlayer(app, v.id)
+  expect(await enginePip(v.page)).toBe(false)
+  expect(await floated(v.page)).toBe('v')
+  expect(await paused(v.page, '#v')).toBe(false)
+  await cmd(app, 'tabs.activate', { tabId: v.id })
+  await expectNoPlayer(app)
+  expect(await paused(v.page, '#v')).toBe(false)
+})
+
+// ---- Sidebar media controls (MD-09, MD-10) ----
 
 test('[MD-09] background audio shows sidebar controls: pause, play and jump back to the tab', async () => {
   orbit = await launchOrbit()
@@ -244,12 +849,13 @@ test('[MD-09] background audio shows sidebar controls: pause, play and jump back
   // The selected tab never shows its own controller.
   await expect(controller(orbit, a.id)).toHaveCount(0)
 
-  const b = await newTab(app, fx.url('/page/Other/Quiet'))
-  await waitTab(app, b, '/page/Other')
+  await leave(app)
   const ctl = controller(orbit, a.id)
   await expect(ctl).toBeVisible()
   await expect(ctl.getByTestId('media-title')).toHaveText('Track One')
   await expect(ctl).toContainText('Orbit Test')
+  // Audio doesn't open the floating player.
+  expect((await player(app)).tabId).toBeNull()
 
   // Pause there and the tab's audio stops; play resumes it.
   await ctl.getByTestId('media-play').click()
@@ -266,107 +872,6 @@ test('[MD-09] background audio shows sidebar controls: pause, play and jump back
   await expect(controller(orbit, a.id)).toHaveCount(0)
 })
 
-test('[MD-01][MD-03] leaving a tab with a playing video opens picture-in-picture; returning ends it', async () => {
-  orbit = await launchOrbit()
-  const { app } = orbit
-  const v = await openPlaying(app, '/media/video/Video%20Page')
-  await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
-  expect(await pipShowing(v.page)).toBe(false)
-
-  const started = Date.now()
-  const b = await newTab(app, fx.url('/page/Elsewhere/Quiet'))
-  await expect.poll(() => pipShowing(v.page), { timeout: 3000 }).toBe(true)
-  expect(Date.now() - started).toBeLessThan(3000)
-  await expect.poll(async () => (await media(app, v.id))?.autoPip).toBe(true)
-  // A video in picture-in-picture is not also in the sidebar tray.
-  await expect(controller(orbit, v.id)).toHaveCount(0)
-  expect(await activeId(app)).toBe(b)
-
-  // Back on the tab: picture-in-picture ends and the video keeps playing in the page.
-  await cmd(app, 'tabs.activate', { tabId: v.id })
-  await expect.poll(() => pipShowing(v.page)).toBe(false)
-  expect(await paused(v.page, '#v')).toBe(false)
-  await expect.poll(async () => (await media(app, v.id))?.pip).toBe(false)
-})
-
-test('[MD-08] no automatic picture-in-picture when it is off globally or for the site, or the tab is muted', async () => {
-  orbit = await launchOrbit()
-  const { app } = orbit
-  const v = await openPlaying(app, '/media/video/Video%20Page')
-  await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
-  const other = await newTab(app, fx.url('/page/Other/Quiet'))
-  await waitTab(app, other, '/page/Other')
-  await expect.poll(() => pipShowing(v.page)).toBe(true)
-  await cmd(app, 'tabs.activate', { tabId: v.id })
-  await expect.poll(() => pipShowing(v.page)).toBe(false)
-
-  // Global switch off (Settings › Advanced; also a command bar action): the video shows in the
-  // sidebar instead and keeps playing.
-  await act(app, 'media.toggleAutoPip')
-  expect((await state(app)).settings.autoPip).toBe(false)
-  await cmd(app, 'tabs.activate', { tabId: other })
-  await expect(controller(orbit, v.id)).toBeVisible()
-  expect(await pipShowing(v.page)).toBe(false)
-  expect(await paused(v.page, '#v')).toBe(false)
-  await act(app, 'media.toggleAutoPip')
-  await cmd(app, 'tabs.activate', { tabId: v.id })
-  await expect(controller(orbit, v.id)).toHaveCount(0)
-
-  // Always off for this site.
-  await cmd(app, 'media.setSitePip', { url: fx.url('/'), mode: 'always' })
-  expect(await cmd(app, 'media.sitePip', { url: fx.url('/x') })).toBe('always')
-  await cmd(app, 'tabs.activate', { tabId: other })
-  await expect(controller(orbit, v.id)).toBeVisible()
-  expect(await pipShowing(v.page)).toBe(false)
-  await cmd(app, 'tabs.activate', { tabId: v.id })
-  await cmd(app, 'media.setSitePip', { url: fx.url('/'), mode: 'on' })
-
-  // A muted tab neither opens picture-in-picture nor shows in the sidebar.
-  await cmd(app, 'tabs.setMuted', { tabId: v.id, muted: true })
-  await cmd(app, 'tabs.activate', { tabId: other })
-  await expect.poll(async () => (await tab(app, v.id))?.muted).toBe(true)
-  await new Promise((r) => setTimeout(r, 500))
-  expect(await pipShowing(v.page)).toBe(false)
-  await expect(controller(orbit, v.id)).toHaveCount(0)
-})
-
-test('[MD-07][MD-10] closing picture-in-picture keeps the media playing in the sidebar; Picture in Picture sends it back', async () => {
-  orbit = await launchOrbit()
-  const { app } = orbit
-  const v = await openPlaying(app, '/media/video/Video%20Page')
-  await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
-  const other = await newTab(app, fx.url('/page/Other/Quiet'))
-  await waitTab(app, other, '/page/Other')
-  await expect.poll(() => pipShowing(v.page)).toBe(true)
-
-  // The player closes (its ×) without Orbit asking: the video keeps playing, now in the sidebar.
-  await v.page.evaluate(() => document.exitPictureInPicture())
-  const ctl = controller(orbit, v.id)
-  await expect(ctl).toBeVisible()
-  expect(await paused(v.page, '#v')).toBe(false)
-  expect(await activeId(app)).toBe(other)
-
-  // "Back to PiP" from the controller: the floating player opens and the controller leaves the tray.
-  await ctl.getByTestId('media-pip').click()
-  await expect.poll(() => pipShowing(v.page)).toBe(true)
-  await expect(controller(orbit, v.id)).toHaveCount(0)
-})
-
-test('[MD-04][MD-07] Back to tab in the floating player selects the source tab, still playing', async () => {
-  orbit = await launchOrbit()
-  const { app } = orbit
-  const v = await openPlaying(app, '/media/file-video/Film')
-  await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
-  const other = await newTab(app, fx.url('/page/Other/Quiet'))
-  await waitTab(app, other, '/page/Other')
-  await expect.poll(() => pipShowing(v.page)).toBe(true)
-  // The player's "Back to tab" ends picture-in-picture and leaves the video playing.
-  await v.page.evaluate(() => document.exitPictureInPicture())
-  await expect.poll(() => activeId(app)).toBe(v.id)
-  expect(await paused(v.page, '#v')).toBe(false)
-  expect(await pipShowing(v.page)).toBe(false)
-})
-
 test('[MD-10] several background players stack newest first; pausing one pauses only that tab', async () => {
   orbit = await launchOrbit()
   const { app, shell } = orbit
@@ -374,8 +879,7 @@ test('[MD-10] several background players stack newest first; pausing one pauses 
   const two = await openPlaying(app, '/media/audio/Second%20Song')
   // Leaving "one" for "two" put it in the tray; then leave "two" too.
   await expect(controller(orbit, one.id)).toBeVisible()
-  const quiet = await newTab(app, fx.url('/page/Other/Quiet'))
-  await waitTab(app, quiet, '/page/Other')
+  await leave(app)
   await expect(shell.getByTestId('media-controller')).toHaveCount(2)
   await expect(shell.getByTestId('media-controller').first()).toHaveAttribute('data-tab-id', two.id)
   await expect(shell.getByTestId('media-controller').nth(1)).toHaveAttribute('data-tab-id', one.id)
@@ -396,8 +900,7 @@ test('[MD-09] next moves the page on to its next track', async () => {
   orbit = await launchOrbit()
   const { app } = orbit
   const p = await openPlaying(app, '/media/playlist/Playlist')
-  const quiet = await newTab(app, fx.url('/page/Other/Quiet'))
-  await waitTab(app, quiet, '/page/Other')
+  await leave(app)
   const ctl = controller(orbit, p.id)
   await expect(ctl.getByTestId('media-title')).toHaveText('Track One')
   await ctl.getByTestId('media-next').click()
@@ -406,21 +909,30 @@ test('[MD-09] next moves the page on to its next track', async () => {
   expect(await paused(p.page, '#a')).toBe(false)
 })
 
-test('[MD-12][TB-16][TD-02] tabs playing media never sleep or auto-archive; closing one removes its controller', async () => {
+// ---- Tab lifecycle (MD-12) ----
+
+test('[MD-12][TB-16][TD-02] tabs playing media never sleep or auto-archive, muted video and the floating player included', async () => {
   orbit = await launchOrbit()
   const { app } = orbit
   const a = await openPlaying(app, '/media/audio/Long%20Song')
-  const quiet = await newTab(app, fx.url('/page/Other/Quiet'))
-  await waitTab(app, quiet, '/page/Other')
+  const v = await openPlaying(app, '/media/long-video/Film')
+  const m = await openPlaying(app, '/media/file-video/Muted%20Film')
+  await cmd(app, 'tabs.setMuted', { tabId: m.id, muted: true })
+  await leave(app)
   await expect(controller(orbit, a.id)).toBeVisible()
+  await expectPlayer(app, v.id)
   await expect.poll(async () => (await media(app, a.id))?.playing).toBe(true)
+  await expect.poll(async () => (await media(app, m.id))?.active).toBe(true)
 
-  // Far past the sleep and auto-archive times: the playing tab stays awake and in Today.
+  // Far past the sleep and auto-archive times: the playing tabs stay awake and in Today.
   const later = Date.now() + 30 * 24 * 3600_000
   const run = await tabsHook<{ archived: string[]; slept: string[] }>(app, 'maintenance', later)
-  expect(run.archived).not.toContain(a.id)
-  expect(run.slept).not.toContain(a.id)
-  expect((await tab(app, a.id))?.asleep).toBe(false)
+  for (const id of [a.id, v.id, m.id]) {
+    expect(run.archived).not.toContain(id)
+    expect(run.slept).not.toContain(id)
+    expect((await tab(app, id))?.asleep).toBe(false)
+  }
+  expect((await player(app)).tabId).toBe(v.id)
 
   // Paused, it may sleep like any other tab.
   await cmd(app, 'media.control', { tabId: a.id, action: 'pause' })
@@ -435,38 +947,14 @@ test('[MD-07][MD-12] closing a playing tab stops its media and removes its contr
   orbit = await launchOrbit()
   const { app } = orbit
   const a = await openPlaying(app, '/media/audio/Closing%20Song')
-  const quiet = await newTab(app, fx.url('/page/Other/Quiet'))
-  await waitTab(app, quiet, '/page/Other')
+  await leave(app)
   await expect(controller(orbit, a.id)).toBeVisible()
   await cmd(app, 'tabs.close', { tabId: a.id })
   await expect(controller(orbit, a.id)).toHaveCount(0)
   expect((await state(app)).tabs[a.id]).toBeUndefined()
 })
 
-test('[MD-02][MD-08] Picture in Picture on the selected tab; the controller menu turns it off for a site', async () => {
-  orbit = await launchOrbit()
-  const { app } = orbit
-  const v = await openPlaying(app, '/media/video/Video%20Page')
-  await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
-  // Manual picture-in-picture keeps the tab selected.
-  await act(app, 'media.togglePip')
-  await expect.poll(() => pipShowing(v.page)).toBe(true)
-  expect(await activeId(app)).toBe(v.id)
-  await act(app, 'media.togglePip')
-  await expect.poll(() => pipShowing(v.page)).toBe(false)
-
-  // The controller's menu (right-click): the site's automatic picture-in-picture choice.
-  await setState(app, 'd.settings.autoPip = false')
-  const other = await newTab(app, fx.url('/page/Other/Quiet'))
-  await waitTab(app, other, '/page/Other')
-  await controller(orbit, v.id).click({ button: 'right' })
-  await expect
-    .poll(() => mediaHook<string[]>(app, 'lastMenu'))
-    .toContain('Automatic Picture in Picture on localhost > Turn Off for Today')
-  expect(await mediaHook(app, 'clickMenu', 'Automatic Picture in Picture on localhost > Turn Off for Today')).toBe(true)
-  expect(await cmd(app, 'media.sitePip', { url: v.page.url() })).toBe('today')
-  expect((await state(app)).settings.pipSnoozed?.localhost).toBeGreaterThan(Date.now())
-})
+// ---- Calls (MD-11, MD-13, MD-14) ----
 
 /** The user allowed camera and microphone for the fixture site (Orbit asks once per origin). */
 async function allowCamera(app: ElectronApplication): Promise<void> {
@@ -504,8 +992,7 @@ test('[MD-14][MD-11][TB-15] a call tab shows camera and microphone indicators an
   expect((await media(app, c.id))?.mic).toBe(true)
   await expect(shell.locator(`[data-tab-id="${c.id}"] [data-testid="tab-capture"]`)).toBeVisible()
 
-  const quiet = await newTab(app, fx.url('/page/Other/Quiet'))
-  await waitTab(app, quiet, '/page/Other')
+  await leave(app)
   const ctl = controller(orbit, c.id)
   await expect(ctl).toBeVisible()
   await ctl.getByTestId('media-mic').click()
@@ -525,20 +1012,34 @@ test('[MD-14][MD-11][TB-15] a call tab shows camera and microphone indicators an
   await expect.poll(async () => (await media(app, c.id))?.micMuted).toBeUndefined()
 })
 
-test('[MD-13][MD-14] leaving a call shows the participant in picture-in-picture; closing it leaves call controls in the sidebar', async () => {
+test('[MD-13][MD-14] leaving a call floats the participant with call controls; closing it leaves call controls in the sidebar', async () => {
   orbit = await launchWithFakeDevices()
   const { app } = orbit
   await allowCamera(app)
   const c = await openPlaying(app, '/media/call/Standup?participant', 'in-call')
   await expect.poll(async () => (await media(app, c.id))?.camera).toBe(true)
-  const quiet = await newTab(app, fx.url('/page/Other/Quiet'))
-  await waitTab(app, quiet, '/page/Other')
+  const pip = await pipPage(app)
+  await leave(app)
   // The participant (not the self view) floats.
-  await expect.poll(() => c.page.evaluate(() => document.pictureInPictureElement?.id ?? '')).toBe('remote')
+  await expectPlayer(app, c.id)
+  expect(await floated(c.page)).toBe('remote')
   await expect(controller(orbit, c.id)).toHaveCount(0)
 
+  // Hover: microphone and camera toggles and the way back to the call (MD-13).
+  await pip.getByTestId('pip').hover({ position: { x: 40, y: 60 } })
+  await expect(pip.getByTestId('pip-mic')).toBeVisible()
+  await expect(pip.getByTestId('pip-camera')).toBeVisible()
+  await expect(pip.getByTestId('pip-back')).toHaveAttribute('aria-label', 'Back to call tab')
+  await expect(pip.getByTestId('pip-progress')).toHaveCount(0)
+  await pip.getByTestId('pip-mic').click()
+  await expect.poll(async () => (await media(app, c.id))?.micMuted).toBe(true)
+  await expect(pip.getByTestId('pip-mic')).toHaveAttribute('aria-label', 'Turn microphone on')
+  await pip.getByTestId('pip-mic').click()
+  await expect.poll(async () => (await media(app, c.id))?.micMuted).toBeUndefined()
+
   // Closing the call window leaves the call controller in the sidebar (MD-14).
-  await c.page.evaluate(() => document.exitPictureInPicture())
+  await pip.getByTestId('pip-close').click()
+  await expectNoPlayer(app)
   const ctl = controller(orbit, c.id)
   await expect(ctl).toBeVisible()
   await expect(ctl.getByTestId('media-mic')).toBeVisible()

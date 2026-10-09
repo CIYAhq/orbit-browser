@@ -7,6 +7,20 @@ import './styles/global.css'
 
 async function boot(): Promise<void> {
   const view = window.orbit.view
+  // The floating player's controls (media lane): a small view of its own, without the app's shortcuts.
+  if (view === 'pip') {
+    const app = import('./pip/PipApp')
+    await initStore()
+    document.documentElement.dataset.view = view
+    document.documentElement.dataset.platform = window.orbit.platform
+    const { PipApp } = await app
+    createRoot(document.getElementById('root') as HTMLElement).render(
+      <StrictMode>
+        <PipApp />
+      </StrictMode>,
+    )
+    return
+  }
   // Load the view's code while the state snapshot arrives.
   const app = view === 'overlay' ? import('./overlay/OverlayApp') : import('./shell/ShellApp')
   await initStore()
