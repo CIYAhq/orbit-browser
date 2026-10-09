@@ -165,3 +165,36 @@ test('[TB-11][PN-02] pinning the selected tab into another Space selects the nex
   await expect.poll(async () => (await tabView(app, next))?.visible).toBe(true)
   await expect(row(shell, t)).toHaveCount(0)
 })
+
+test('[TB-01] favicons are fetched in the tab session and stored as small data URLs (review F13)', async () => {
+  const { app, shell } = orbit
+  const png = await app.evaluate(({ nativeImage }) =>
+    nativeImage
+      .createFromBitmap(Buffer.alloc(64 * 64 * 4, 200), { width: 64, height: 64 })
+      .toPNG()
+      .toString('base64'),
+  )
+  const { createServer } = await import('node:http')
+  let iconHits = 0
+  const server = createServer((req, res) => {
+    if (req.url === '/icon.png') {
+      iconHits++
+      res.writeHead(200, { 'content-type': 'image/png' })
+      res.end(Buffer.from(png, 'base64'))
+      return
+    }
+    res.writeHead(200, { 'content-type': 'text/html' })
+    res.end('<!doctype html><title>Iconic</title><link rel="icon" href="/icon.png"><p>hi</p>')
+  })
+  await new Promise<void>((r) => server.listen(3390, '127.0.0.1', () => r()))
+  try {
+    const t = await newTab(app, 'http://127.0.0.1:3390/page')
+    await expect.poll(async () => (await state(app)).tabs[t]?.favicon ?? '').toMatch(/^data:image\/png;base64,/)
+    const favicon = (await state(app)).tabs[t]?.favicon as string
+    expect(favicon.length).toBeLessThan(16 * 1024 * 1.4)
+    expect(iconHits).toBeGreaterThan(0)
+    await expect(row(shell, t).locator('img.favicon')).toHaveAttribute('src', /^data:image\/png/)
+  } finally {
+    await new Promise((r) => server.close(() => r(null)))
+  }
+})

@@ -1,4 +1,4 @@
-import { type NavigationEntry, type WebContents, WebContentsView } from 'electron'
+import { type NavigationEntry, nativeImage, type WebContents, WebContentsView } from 'electron'
 import type { Tab, TabId } from '../../shared/state'
 import { isAwayFromPinned, sameDocUrl } from '../../shared/tabs'
 import type { MainContext } from '../context'
@@ -7,7 +7,25 @@ import { showPageContextMenu } from './context-menu'
 /** Input that counts as a user gesture for opening tabs and pop-ups (NV-09). */
 const GESTURE_INPUTS = new Set(['mouseDown', 'mouseUp', 'keyDown', 'rawKeyDown', 'gestureTap', 'touchEnd'])
 const GESTURE_WINDOW_MS = 1000
-const MAX_FAVICON_BYTES = 64 * 1024
+/** Favicons live in state (and on disk): keep each one small. */
+const MAX_FAVICON_BYTES = 16 * 1024
+const MAX_FAVICON_FETCH_BYTES = 512 * 1024
+const FAVICON_PX = 32
+
+/** A small data URL for an icon: raster images are scaled to 32 px PNGs, others kept if small. */
+function faviconDataUrl(buf: Buffer, type: string): string | undefined {
+  if (type !== 'image/svg+xml') {
+    const image = nativeImage.createFromBuffer(buf)
+    if (!image.isEmpty()) {
+      const { width } = image.getSize()
+      const scaled = width > FAVICON_PX ? image.resize({ width: FAVICON_PX, quality: 'best' }) : image
+      const url = scaled.toDataURL()
+      if (url.length <= MAX_FAVICON_BYTES * 1.4) return url
+    }
+  }
+  if (buf.length > MAX_FAVICON_BYTES) return undefined
+  return `data:${type};base64,${buf.toString('base64')}`
+}
 
 /** Script run in an isolated world: is keyboard focus in an editable field of the page? */
 const FOCUS_IS_EDITABLE = `(() => {
@@ -267,8 +285,9 @@ export class TabRuntime {
       const type = (res.headers.get('content-type') ?? 'image/x-icon').split(';')[0]?.trim() || 'image/x-icon'
       if (!type.startsWith('image/')) return
       const buf = Buffer.from(await res.arrayBuffer())
-      if (buf.length === 0 || buf.length > MAX_FAVICON_BYTES) return
-      const data = `data:${type};base64,${buf.toString('base64')}`
+      if (buf.length === 0 || buf.length > MAX_FAVICON_FETCH_BYTES) return
+      const data = faviconDataUrl(buf, type)
+      if (!data) return
       if (this.favicons.size > 500) this.favicons.clear()
       this.favicons.set(url, data)
       if (!contents.isDestroyed()) this.update(tabId, { favicon: data })
