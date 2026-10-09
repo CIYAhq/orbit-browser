@@ -146,8 +146,10 @@ test('[SV-13][SV-24] dragging a divider resizes the native views and the sizes p
   await orbit.shell.mouse.down()
   await orbit.shell.mouse.move(d2.x + 2000, d2.y + d2.height / 2, { steps: 5 })
   await orbit.shell.mouse.up()
-  await expect.poll(async () => (await tabView(orbit.app, b))?.bounds.width).toBeGreaterThanOrEqual(239)
-  expect((await tabView(orbit.app, b))?.bounds.width).toBeLessThanOrEqual(242)
+  // Polled down to the minimum first: the width before this drag already passes ">= 239", and a
+  // one-off read right after it could still see that width (CI saw 365).
+  await expect.poll(async () => (await tabView(orbit.app, b))?.bounds.width).toBeLessThanOrEqual(242)
+  expect((await tabView(orbit.app, b))?.bounds.width).toBeGreaterThanOrEqual(239)
   // Double-click evens the panes out again.
   const d3 = await orbit.shell.getByTestId('split-divider').boundingBox()
   if (!d3) throw new Error('no divider')
@@ -572,9 +574,12 @@ test('[SV-14][SV-15] the split row returns to the last focused pane; ⌘L / Ctrl
   // Leave the split, then click the row's edge (not a segment): the right pane is focused again.
   await run(orbit.app, 'tabs.activate', { tabId: other })
   await expect.poll(async () => (await tabView(orbit.app, b))?.visible).toBe(false)
-  const row = await orbit.shell.getByTestId('split-row').boundingBox()
-  if (!row) throw new Error('no row')
-  await orbit.shell.mouse.click(row.x + 3, row.y + row.height / 2)
+  // A locator click waits for the row to stand still and checks that the row takes the click: on a slow
+  // machine the rows from split.create can still be moving in.
+  const row = orbit.shell.getByTestId('split-row')
+  const box = await row.boundingBox()
+  if (!box) throw new Error('no row')
+  await row.click({ position: { x: 3, y: box.height / 2 } })
   await expect.poll(() => activeTabId(orbit.app)).toBe(b)
   await expectViewsOverPanes(orbit, [a, b])
   // ⌘L / Ctrl+L on the focused pane and pick the open tab: it takes the pane's place, the old page goes to Today.
