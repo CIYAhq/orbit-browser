@@ -77,7 +77,8 @@ src/main/            main process
   peek/ miniwindow/  link preview, mini window                      lane: peek-mini
   media/             PiP, mini player                               lane: peek-mini (media)
   tweaks/ extensions/                                               lane: tweaks-extensions
-  archive/ history/                                                 lane: archive-persistence
+  history/           browsing-history store (per-profile JSONL + index) lane: commandbar (query API used by archive)
+  archive/                                                          lane: archive-persistence
   settings/ import/ downloads/ updates/                             lane: settings-import
 src/shared/          types and pure logic shared by main+renderer (state, tree, url, theme, actions, commands/<area>.ts per lane)
 src/renderer/src/
