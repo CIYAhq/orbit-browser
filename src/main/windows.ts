@@ -5,7 +5,7 @@ import { createWindowState } from '../shared/defaults'
 import type { Rect, RendererView } from '../shared/rpc'
 import type { OrbitState, TabId, WindowId, WindowState } from '../shared/state'
 import { paletteFor } from '../shared/theme'
-import { splitOfTab } from '../shared/tree'
+import { splitLeaves, splitOfTab } from '../shared/tree'
 import type { MainContext } from './context'
 
 interface Pane {
@@ -27,6 +27,12 @@ interface WindowRecord {
   /** Ignore renderer pane reports older than this state sequence (after a main-side fast switch). */
   minPaneSeq: number
   overlayShown: boolean
+}
+
+/** A tab view placed in a window. */
+interface Attachment {
+  view: WebContentsView
+  windowId: WindowId
 }
 
 const isMac = process.platform === 'darwin'
@@ -60,6 +66,15 @@ export function uiWebPreferences(windowId: WindowId, view: RendererView): Electr
   }
 }
 
+/** Tabs a window's current layout should show: the active tab, or every pane of its split. */
+export function shownTabs(state: OrbitState, windowId: WindowId): Set<TabId> {
+  const active = activeTabOf(state, windowId)
+  if (!active) return new Set()
+  const splitId = splitOfTab(state, active)
+  const split = splitId ? state.splits[splitId] : undefined
+  return new Set(split ? splitLeaves(split.layout) : [active])
+}
+
 /** The active tab of a window's current space. */
 export function activeTabOf(state: OrbitState, windowId: WindowId): TabId | null {
   const win = state.windows[windowId]
@@ -78,8 +93,12 @@ export class WindowManager {
   private records = new Map<WindowId, WindowRecord>()
   /** Orbit UI web contents (shell, overlay, settings…) → window. */
   private uiContents = new Map<number, WindowId>()
-  /** Tab view → window it is attached to. */
-  private attached = new Map<TabId, WindowId>()
+  /** Each tab's view that is placed in a window, and which window. Compared by view, not tab id. */
+  private attached = new Map<TabId, Attachment>()
+  /** Tabs whose page closed its own web contents (window.close()): don't silently reopen them. */
+  private selfClosed = new Set<TabId>()
+  /** Main window that most recently had focus (fallback when no window has focus). */
+  private lastFocused: WindowId | undefined
   quitting = false
   private ctx!: MainContext
 
@@ -95,6 +114,7 @@ export class WindowManager {
     nativeTheme.on('updated', () => {
       for (const rec of this.records.values()) this.applyBackground(rec)
     })
+    ctx.hooks.tabCreated.push((tabId, contents) => this.watchTab(tabId, contents))
   }
 
   get(windowId: WindowId): BrowserWindow | undefined {
@@ -117,7 +137,7 @@ export class WindowManager {
 
   /** The window a tab's view is currently attached to. */
   windowOfTab(tabId: TabId): WindowId | undefined {
-    return this.attached.get(tabId)
+    return this.attached.get(tabId)?.windowId
   }
 
   /** The Orbit window a web contents belongs to (UI renderer or attached tab). */
@@ -125,15 +145,51 @@ export class WindowManager {
     const ui = this.uiContents.get(contents.id)
     if (ui) return ui
     const tabId = this.ctx.tabs.tabIdFor(contents)
-    return tabId ? this.attached.get(tabId) : undefined
+    const entry = tabId ? this.attached.get(tabId) : undefined
+    return entry && entry.view.webContents === contents ? entry.windowId : undefined
   }
 
+  /**
+   * The Orbit window the user is working in. Undefined when something that is not an Orbit window
+   * has focus (a page's popup, detached DevTools), so menu actions don't hit a window behind it.
+   * With nothing focused at all (app in the background), the last focused main window.
+   */
   focusedWindowId(): WindowId | undefined {
     const focused = BrowserWindow.getFocusedWindow()
-    for (const rec of this.records.values()) if (rec.win === focused) return rec.id
-    // Fall back to the most recently created main window.
+    if (focused) {
+      for (const rec of this.records.values()) if (rec.win === focused) return rec.id
+      // Orbit's own secondary windows (settings…) act for the window they belong to.
+      return focused.isDestroyed() ? undefined : this.uiContents.get(focused.webContents.id)
+    }
+    const contents = webContents.getFocusedWebContents()
+    if (contents && !contents.isDestroyed()) return this.windowIdFor(contents)
+    const last = this.lastFocused ? this.records.get(this.lastFocused) : undefined
+    if (last && !last.win.isDestroyed()) return last.id
     const all = [...this.records.values()].filter((r) => !r.win.isDestroyed())
     return all[all.length - 1]?.id
+  }
+
+  /**
+   * Closes the focused window when it isn't an Orbit window: a page's popup, or detached DevTools
+   * (closed on the page they inspect). Close Tab does this when such a window has focus.
+   */
+  closeFocusedForeign(): boolean {
+    if (this.focusedWindowId()) return false
+    const focused = BrowserWindow.getFocusedWindow()
+    if (focused && !focused.isDestroyed()) {
+      focused.close()
+      return true
+    }
+    const contents = webContents.getFocusedWebContents()
+    if (!contents) return false
+    for (const tabId of this.ctx.tabs.liveTabIds()) {
+      const page = this.ctx.tabs.contents(tabId)
+      if (page && page.devToolsWebContents === contents) {
+        page.closeDevTools()
+        return true
+      }
+    }
+    return false
   }
 
   /** Opens a window for an existing window state, or a new one showing `spaceId`. */
@@ -193,7 +249,10 @@ export class WindowManager {
         if (!win.isDestroyed()) this.ensureOverlay(rec)
       }, 120)
     })
-    win.on('focus', () => this.setRuntime(id, { focused: true }))
+    win.on('focus', () => {
+      this.lastFocused = id
+      this.setRuntime(id, { focused: true })
+    })
     win.on('blur', () => this.setRuntime(id, { focused: false }))
     win.on('enter-full-screen', () => this.setRuntime(id, { fullscreen: true }))
     win.on('leave-full-screen', () => this.setRuntime(id, { fullscreen: false }))
@@ -216,14 +275,14 @@ export class WindowManager {
     win.on('maximize', saveBounds)
     win.on('unmaximize', saveBounds)
     win.on('closed', () => {
-      for (const [tabId, winId] of [...this.attached]) {
-        if (winId === id) {
+      this.records.delete(id)
+      for (const [tabId, entry] of [...this.attached]) {
+        if (entry.windowId === id) {
           this.attached.delete(tabId)
           this.ctx.tabs.sleep(tabId)
         }
       }
       if (rec.overlay && !rec.overlay.webContents.isDestroyed()) rec.overlay.webContents.close()
-      this.records.delete(id)
       if (!this.quitting) {
         this.ctx.store.update((d) => {
           delete d.windows[id]
@@ -262,7 +321,10 @@ export class WindowManager {
     rec.radius = radius
     const wanted = new Set(panes.map((p) => p.tabId))
     for (const tabId of rec.visible) {
-      if (!wanted.has(tabId)) this.ctx.tabs.get(tabId)?.setVisible(false)
+      if (wanted.has(tabId)) continue
+      // Only hide what this window holds: the view may have moved to another window since.
+      const entry = this.attached.get(tabId)
+      if (entry?.windowId === rec.id) entry.view.setVisible(false)
     }
     for (const pane of panes) {
       const view = this.ctx.tabs.ensure(pane.tabId)
@@ -276,15 +338,14 @@ export class WindowManager {
     if (panes.length === 1) rec.lastSingleRect = panes[0]?.rect
   }
 
-  /** Removes a (sleeping or moving) tab view from whatever window holds it. */
+  /** Removes a (sleeping, closing or replaced) tab view from whatever window holds it. Safe for destroyed views. */
   detachView(tabId: TabId, view: WebContentsView): void {
-    const windowId = this.attached.get(tabId)
-    this.attached.delete(tabId)
-    if (!windowId) return
-    const rec = this.records.get(windowId)
-    if (!rec) return
-    rec.visible.delete(tabId)
-    if (!rec.win.isDestroyed()) rec.win.contentView.removeChildView(view)
+    const entry = this.attached.get(tabId)
+    if (entry?.view === view) {
+      this.attached.delete(tabId)
+      this.records.get(entry.windowId)?.visible.delete(tabId)
+    }
+    this.removeEverywhere(view)
   }
 
   /** Global keyboard shortcuts: every Orbit-owned web contents routes key presses through the action map. */
@@ -295,6 +356,11 @@ export class WindowManager {
       if (!action || !this.ctx.actions.has(action.id)) return
       event.preventDefault()
       const windowId = this.windowIdFor(contents) ?? this.focusedWindowId()
+      // Close Tab in a window that isn't an Orbit window (a page's popup) closes that window.
+      if (!windowId && action.id === 'tab.close') {
+        BrowserWindow.fromWebContents(contents)?.close()
+        return
+      }
       void this.ctx.actions.run(action.id, { windowId })
     })
   }
@@ -306,24 +372,68 @@ export class WindowManager {
     else this.records.get(windowId)?.win.webContents.focus()
   }
 
+  /**
+   * Places a tab's view in a window. Compares views, not tab ids: a tab whose view was replaced
+   * (woken again, or recreated after its contents died) gets the new view and the stale one goes.
+   * Taking a view from another window lays that window out again without it.
+   */
   private attach(rec: WindowRecord, tabId: TabId, view: WebContentsView): void {
     const current = this.attached.get(tabId)
-    if (current === rec.id) return
-    if (current) {
-      const other = this.records.get(current)
-      if (other && !other.win.isDestroyed()) {
-        other.win.contentView.removeChildView(view)
-        other.visible.delete(tabId)
+    const children = rec.win.contentView.children
+    if (current?.view === view && current.windowId === rec.id && children.includes(view)) return
+    let loser: WindowRecord | undefined
+    if (current && current.view !== view) {
+      this.removeEverywhere(current.view)
+    } else if (current && current.windowId !== rec.id) {
+      loser = this.records.get(current.windowId)
+      if (loser) {
+        this.removeChild(loser, view)
+        loser.visible.delete(tabId)
       }
     }
     // Insert below the overlay so menus and the command bar stay on top.
-    const children = rec.win.contentView.children
     const overlayIndex = rec.overlay ? children.indexOf(rec.overlay) : -1
     rec.win.contentView.addChildView(view, overlayIndex >= 0 ? overlayIndex : undefined)
-    this.attached.set(tabId, rec.id)
+    this.attached.set(tabId, { view, windowId: rec.id })
+    this.selfClosed.delete(tabId)
+    if (loser && !loser.win.isDestroyed()) {
+      this.applyPanes(
+        loser.id,
+        loser.panes.filter((p) => p.tabId !== tabId),
+        loser.radius,
+      )
+    }
+  }
+
+  /** Removes a view from every window that holds it (no-op for windows that don't). */
+  private removeEverywhere(view: WebContentsView): void {
+    for (const rec of this.records.values()) this.removeChild(rec, view)
+  }
+
+  private removeChild(rec: WindowRecord, view: WebContentsView): void {
+    if (rec.win.isDestroyed()) return
+    try {
+      rec.win.contentView.removeChildView(view)
+    } catch (err) {
+      console.error('[windows] could not remove a view:', err)
+    }
+  }
+
+  /** Follows a tab's live web contents: a page that closes itself leaves no dead view behind. */
+  private watchTab(tabId: TabId, contents: WebContents): void {
+    contents.once('destroyed', () => {
+      const entry = this.attached.get(tabId)
+      if (!entry || entry.view.webContents !== contents) return // slept or closed by Orbit: already detached
+      // The page closed itself (window.close()) or its contents went away without Orbit asking.
+      this.attached.delete(tabId)
+      this.records.get(entry.windowId)?.visible.delete(tabId)
+      this.removeEverywhere(entry.view)
+      this.selfClosed.add(tabId)
+    })
   }
 
   private onState(next: OrbitState, prev: OrbitState): void {
+    for (const tabId of this.selfClosed) if (!next.tabs[tabId]) this.selfClosed.delete(tabId)
     for (const rec of this.records.values()) {
       const now = next.windows[rec.id]
       const before = prev.windows[rec.id]
@@ -341,7 +451,27 @@ export class WindowManager {
       const spaceNow = next.spaces[now.spaceId]
       const spaceBefore = before ? prev.spaces[before.spaceId] : undefined
       if (spaceNow?.theme !== spaceBefore?.theme) this.applyBackground(rec)
+      if (rec.panes.some((p) => next.tabs[p.tabId]?.asleep && prev.tabs[p.tabId]?.asleep === false)) {
+        this.reviveSoon(rec)
+      }
     }
+  }
+
+  /**
+   * A tab on screen lost its view (put to sleep, e.g. moved to another profile's session, or its
+   * contents died): lay the window out again so the tab gets a new view instead of a blank frame.
+   * Deferred so the code that slept or closed the tab can first move on to another tab.
+   */
+  private reviveSoon(rec: WindowRecord): void {
+    setImmediate(() => {
+      if (this.records.get(rec.id) !== rec || rec.win.isDestroyed()) return
+      const state = this.ctx.store.state
+      const shown = shownTabs(state, rec.id)
+      const missing = rec.panes.some(
+        (p) => shown.has(p.tabId) && !this.selfClosed.has(p.tabId) && !this.ctx.tabs.contents(p.tabId),
+      )
+      if (missing) this.applyPanes(rec.id, rec.panes, rec.radius)
+    })
   }
 
   /** Swap the visible tab immediately in the common single-pane case; the shell confirms the layout. */
