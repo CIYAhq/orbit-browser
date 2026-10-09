@@ -664,3 +664,19 @@ test('[SV-25] a page going full screen in a pane fills the window and comes back
   await expectViewsOverPanes(orbit, [a, b])
   await expect(orbit.shell.getByTestId('split-pane')).toHaveCount(2)
 })
+
+test('[SV-13] resizing the window keeps each pane’s proportion', async () => {
+  const b = await openTab(orbit.app, 'Narrow')
+  const a = await openTab(orbit.app, 'Wide')
+  const splitId = (await run(orbit.app, 'split.create', { tabIds: [a, b] })) as string
+  await run(orbit.app, 'split.resize', { splitId, path: [], sizes: [0.7, 0.3] })
+  await expectViewsOverPanes(orbit, [a, b])
+  await orbit.app.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
+    win?.setSize(1100, 760)
+  })
+  await expect.poll(async () => (await orbit.shell.evaluate(() => window.innerWidth)) === 1100).toBe(true)
+  await expectViewsOverPanes(orbit, [a, b])
+  const [pa, pb] = [await paneBox(orbit.shell, a), await paneBox(orbit.shell, b)]
+  expect(pa.width / pb.width).toBeCloseTo(0.7 / 0.3, 1)
+})
