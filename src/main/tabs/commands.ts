@@ -23,6 +23,7 @@ import {
 import { parseInput } from '../../shared/url'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
+import { tabSplitMenuItems } from '../split/menu'
 import { TabMaintenance } from './maintenance'
 import { findMenuItem, folderMenu, type MenuOps, menuLabels, tabMenu } from './menus'
 import { makeTab, numberedTarget, steppedTarget, todayInsertIndex } from './model'
@@ -204,6 +205,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     duplicateFolder,
     pasteUrlInto: (folderId) => void pasteUrlAsTab(windowId, { kind: 'folder', folderId }),
     deleteFolder: (folderId) => void confirmDeleteFolder(windowId, folderId),
+    splitItems: (tabIds) => tabSplitMenuItems(ctx, tabIds, windowId),
   })
 
   // ---- Commands ----
@@ -261,6 +263,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   commands.register('tabs.moveToSpace', ({ ids, spaceId, section }, c) =>
     ops.moveToSpace(ids, spaceId, section, windowOf(c)),
   )
+  commands.register('tabs.splitWith', ({ tabId, target, side }, c) => ops.splitWith(tabId, target, side, windowOf(c)))
   commands.register('tabs.toNewWindow', ({ tabId, x, y }, c) =>
     ops.toNewWindow(tabId, windowOf(c), x !== undefined && y !== undefined ? { x, y } : undefined),
   )

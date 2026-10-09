@@ -236,6 +236,8 @@ function RowSlot({
   const x = useMotionValue(0)
   const ref = useRef<HTMLDivElement>(null)
   const hidden = useDrag((s) => !!s.hidden[id])
+  // A tab dragged onto this row's half joins it as a split on that side (SV-05).
+  const splitSide = useDrag((s) => (s.target?.type === 'split' && s.target.key === id ? s.target.side : null))
   const present = useIsPresent()
   // A row arriving from another section travels instead of growing in (FL-07).
   const [travel] = useState(() => {
@@ -272,7 +274,7 @@ function RowSlot({
   return (
     <motion.div
       ref={ref}
-      className={`${className}${hidden || leaving ? ' is-drag-hidden' : ''}${flying ? ' is-travelling' : ''}`}
+      className={`${className}${hidden || leaving ? ' is-drag-hidden' : ''}${flying ? ' is-travelling' : ''}${splitSide ? ` is-split-target is-split-${splitSide}` : ''}`}
       style={{ y, x }}
       variants={rowVariants}
       custom={{ stagger: order !== undefined, index: order }}

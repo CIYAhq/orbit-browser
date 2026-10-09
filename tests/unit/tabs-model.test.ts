@@ -22,7 +22,7 @@ import {
 } from '../../src/shared/defaults'
 import type { OrbitState } from '../../src/shared/state'
 import { cleanUrl, isAwayFromPinned, markdownLink, rowTitle } from '../../src/shared/tabs'
-import { canMoveTo, moveItem, visibleTabOrder } from '../../src/shared/tree'
+import { canMoveTo, moveItem, sectionOf, visibleTabOrder } from '../../src/shared/tree'
 
 const HOUR = 60 * 60 * 1000
 
@@ -326,7 +326,7 @@ describe('[TB-03] cheap patches for sidebar lists (review F2)', () => {
 })
 
 describe('[FV-03] review fixes in the tree rules', () => {
-  it('refuses a split view in the Favorites grid', () => {
+  it('[SV-23] lets a whole split be a Favorite, but never a pane on its own', () => {
     const { state, s1, add } = world()
     const a = add(s1, 'today')
     const b = add(s1, 'today')
@@ -343,9 +343,14 @@ describe('[FV-03] review fixes in the tree rules', () => {
         ],
       },
     }
-    expect(canMoveTo(state, 'v-1', { kind: 'favorites', profileId: DEFAULT_PROFILE_ID })).toBe(false)
+    const favorites = { kind: 'favorites', profileId: DEFAULT_PROFILE_ID } as const
+    expect(canMoveTo(state, 'v-1', favorites)).toBe(true)
     // A pane is not an item of its own.
     expect(canMoveTo(state, a, { kind: 'pinned', spaceId: s1 })).toBe(false)
+    expect(canMoveTo(state, a, favorites)).toBe(false)
+    expect(moveItem(state, 'v-1', favorites, 0)).toBe(true)
+    expect(state.profiles[DEFAULT_PROFILE_ID]?.favorites).toEqual(['v-1'])
+    expect(sectionOf(state, b)).toBe('favorite')
   })
 })
 
