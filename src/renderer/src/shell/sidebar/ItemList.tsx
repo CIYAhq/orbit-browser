@@ -1,11 +1,11 @@
 import { ChevronRight, Folder, Volume2, VolumeX, X } from 'lucide-react'
 import { isFolderId, isSplitId, isTabId } from '../../../../shared/ids'
 import type { ContainerRef, ItemId } from '../../../../shared/state'
-import { splitLeaves } from '../../../../shared/tree'
 import { invoke } from '../../api'
 import { activeTabId } from '../../selectors'
 import { useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
+import { SplitRow } from './SplitRow'
 
 /** A list of sidebar items (tabs, folders, split views) in one container. */
 export function ItemList({
@@ -122,21 +122,6 @@ function FolderRow({ folderId, depth }: { folderId: string; depth: number }) {
       {!folder.collapsed && (
         <ItemList container={{ kind: 'folder', folderId }} items={folder.children} depth={depth + 1} />
       )}
-    </div>
-  )
-}
-
-function SplitRow({ splitId, depth }: { splitId: string; depth: number }) {
-  const leaves = useOrbit((s) => {
-    const split = s.splits[splitId]
-    return split ? splitLeaves(split.layout).join(',') : ''
-  })
-  if (!leaves) return null
-  return (
-    <div className="split-row" data-testid="split-row" data-split-id={splitId}>
-      {leaves.split(',').map((tabId) => (
-        <TabRow key={tabId} tabId={tabId} depth={depth} />
-      ))}
     </div>
   )
 }

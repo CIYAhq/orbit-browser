@@ -499,13 +499,236 @@ html.is-resizing * {
   transform: rotate(90deg);
 }
 
+/* Split view row (split lane, SV-21): one pill, one segment per pane. */
 .split-row {
+  position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 2px;
-  border-radius: 10px;
-  box-shadow: inset 0 0 0 1px var(--divider);
+  align-items: center;
+  gap: 4px;
+  height: var(--row-h);
+  padding-right: 4px;
+  border-radius: var(--radius-row);
+  outline: none;
+  transition: background var(--dur-fast) ease;
+}
+
+.split-row:hover {
+  background: var(--hover);
+}
+
+.split-row.is-active {
+  background: var(--active);
+  box-shadow: var(--active-shadow);
+}
+
+.split-row__segments {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.split-segment {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 6px;
+  color: var(--text-muted);
+}
+
+.split-segment + .split-segment {
+  border-left: 1px solid var(--divider);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.split-row.is-active .split-segment,
+.split-row:hover .split-segment {
+  color: var(--text);
+}
+
+.split-segment.is-focused .split-segment__title {
+  font-weight: 600;
+}
+
+.split-segment.is-asleep .split-segment__title {
+  opacity: 0.78;
+}
+
+.split-segment__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+}
+
+.split-segment__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+
+.split-segment__audio,
+.split-row__close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  color: var(--text-muted);
+}
+
+.split-row__close {
+  width: 22px;
+  height: 22px;
+  opacity: 0;
+}
+
+.split-row:hover .split-row__close,
+.split-row.is-active .split-row__close {
+  opacity: 1;
+}
+
+.split-row__close:hover,
+.split-segment__audio:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* ---------- Content frame and split view panes (split lane) ---------- */
+
+.frame-host {
+  position: relative;
+  height: 100%;
+}
+
+/* A page card. Position and size are written by the pane engine (shell/split/engine.ts). */
+.pane {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-frame);
+  background: color-mix(in srgb, var(--frame-top) 30%, white);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.08),
+    0 2px 10px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  will-change: transform, width, height;
+}
+
+.pane--empty {
+  inset: 0;
+  width: auto;
+  height: auto;
+  will-change: auto;
+}
+
+.pane--blank {
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--frame-top) 45%, white);
+  animation: pane-fade-in 120ms ease-out;
+}
+
+.pane__hint {
+  color: var(--text-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* Drop indicator (SV-04, AP-03): translucent, theme-coloured. */
+.pane--drop {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+  animation: pane-fade-in 100ms ease-out;
+}
+
+@keyframes pane-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Divider between panes (SV-13): it is the 8 px gap itself. */
+.split-divider {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  -webkit-app-region: no-drag;
+}
+
+.split-divider--row {
+  cursor: col-resize;
+}
+
+.split-divider--column {
+  cursor: row-resize;
+}
+
+.split-divider::after {
+  content: "";
+  position: absolute;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity var(--dur-fast) ease;
+}
+
+.split-divider--row::after {
+  left: 3px;
+  top: 50%;
+  width: 2px;
+  height: 36px;
+  margin-top: -18px;
+}
+
+.split-divider--column::after {
+  top: 3px;
+  left: 50%;
+  height: 2px;
+  width: 36px;
+  margin-left: -18px;
+}
+
+.split-divider:hover::after,
+html.is-resizing .split-divider::after,
+html.is-resizing-rows .split-divider::after {
+  opacity: 0.55;
+}
+
+html.is-resizing-rows,
+html.is-resizing-rows * {
+  cursor: row-resize !important;
+}
+
+/* Focused pane outline (SV-14): drawn in the gap around the page card. */
+.pane-focus-ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+  pointer-events: none;
+  border: 2px solid color-mix(in srgb, var(--accent) 80%, transparent);
+  border-radius: calc(var(--radius-frame) + 2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pane--blank,
+  .pane--drop {
+    animation-duration: 1ms;
+  }
 }
 
 /* Space bar */
