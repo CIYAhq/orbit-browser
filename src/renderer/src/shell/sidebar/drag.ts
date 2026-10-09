@@ -351,7 +351,10 @@ function clearSplitDwell(s: Session): void {
 function splitTarget(s: Session, y: number): DropTarget | null {
   const first = s.ids[0]
   const scroll = ctx.scroll
-  if (s.ids.length !== 1 || !first || !isTabId(first) || ctx.spaceId !== s.spaceAtStart || !scroll) return null
+  if (s.ids.length !== 1 || !first || !isTabId(first) || ctx.spaceId !== s.spaceAtStart || !scroll) {
+    clearSplitDwell(s)
+    return null
+  }
   const box = scroll.getBoundingClientRect()
   // Rows where they are on screen now; a split target keeps the list as it is (shiftsFor).
   const shifts = useDrag.getState().shifts
@@ -432,9 +435,13 @@ function update(s: Session): void {
     outside: false,
   }
   let target: DropTarget | null = null
+  // No drop target until the rows under the pointer are the measured ones (review V1).
+  const measured = ready && s.measuredSpace === ctx.spaceId
+  // A rest counts only while the pointer stays on the list: a detour off it, however short,
+  // starts the rest over when it comes back (review W1).
+  if (zone.kind !== 'list' || !measured) clearSplitDwell(s)
   if (zone.kind === 'list') {
-    // No drop target until the rows under the pointer are the measured ones (review V1).
-    target = ready && s.measuredSpace === ctx.spaceId ? listTarget(s, useDrag.getState().target) : null
+    target = measured ? listTarget(s, useDrag.getState().target) : null
     patch.target = target
     patch.intoFolder = target?.type === 'into' ? target.folderId : null
   } else if (zone.kind === 'favorites' && s.ids.every((id) => isTabId(id) || isSplitId(id))) {
@@ -562,6 +569,7 @@ function remeasure(s: Session): void {
 /** Ends a drag: idle state, and keyboard focus back to the page (it moved to the sidebar for Escape). */
 function endSession(s: Session): void {
   if (session === s) session = null
+  clearSplitDwell(s)
   document.documentElement.classList.remove('is-dragging-tab')
   markSpaceTarget(null)
   useDrag.setState(IDLE_DRAG)
