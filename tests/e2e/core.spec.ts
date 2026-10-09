@@ -7,8 +7,10 @@ import type { MainContext } from '../../src/main/context'
 import type { SpaceTheme } from '../../src/shared/state'
 import { paletteFor } from '../../src/shared/theme'
 import {
+  action,
   type Fixtures,
   launchOrbit,
+  MOD,
   type Orbit,
   openViaCommandBar,
   run,
@@ -327,6 +329,37 @@ test('[TB-02] opening tabs keeps every UI mirror in step without resyncs (review
   expect(errors.filter((e) => e.includes('[store]') || e.includes('Immer'))).toEqual([])
 })
 
+test('[CB-22] Enter right after typing opens what was typed, not a row left from an earlier query', async () => {
+  const one = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/One') })) as string
+  await expect(orbit.shell.getByTestId('tab-row').first()).toContainText('One')
+  // Answers for typed text come late (as on a slow machine); the empty query's "recent tabs" don't.
+  await orbit.app.evaluate(() => {
+    type Handler = (args: { query: string }, c: unknown) => unknown
+    const commands = (globalThis as unknown as OrbitGlobal).__orbit.ctx.commands as unknown as {
+      handlers: Map<string, Handler>
+    }
+    const original = commands.handlers.get('search.query') as Handler
+    commands.handlers.set('search.query', async (args, c) => {
+      if (args.query) await new Promise((r) => setTimeout(r, 500))
+      return original(args, c)
+    })
+  })
+  await orbit.shell.keyboard.press(`${MOD}+T`)
+  const overlay = await viewPage(orbit.app, 'overlay')
+  const input = overlay.getByTestId('command-input')
+  await expect(input).toBeFocused()
+  await expect(overlay.getByTestId('command-result').filter({ hasText: 'One' }).first()).toBeVisible()
+  const two = fx.url('/page/Two')
+  await input.fill(two)
+  await input.press('Enter')
+  await expect.poll(async () => Object.keys((await state(orbit.app)).tabs).length).toBe(2)
+  const s = await state(orbit.app)
+  const win = Object.values(s.windows)[0]
+  const active = win?.activeTab[win.spaceId]
+  expect(active).not.toBe(one)
+  expect(s.tabs[active ?? '']?.url).toBe(two)
+})
+
 test('[NV-18] links and files from other apps open as tabs in the current Space (review F10)', async () => {
   const s0 = await state(orbit.app)
   const windowId = Object.keys(s0.windows)[0] as string
@@ -353,6 +386,46 @@ test('[NV-18] links and files from other apps open as tabs in the current Space 
   expect(Object.values(s.tabs).every((t) => t.spaceId === spaceId)).toBe(true)
 })
 
+/** Labels of a window's views, bottom to top: OVERLAY, or the path of each tab view's page. */
+async function zOrder(app: Orbit['app']) {
+  return app.evaluate(() => {
+    const ctx = (globalThis as unknown as OrbitGlobal).__orbit.ctx
+    return (ctx.windows.get(ctx.windows.ids()[0] as string)?.contentView.children ?? []).map((v) => {
+      const wc = (v as Electron.WebContentsView).webContents
+      if (!wc || wc.isDestroyed()) return 'dead'
+      const url = wc.getURL()
+      return url.includes('view=overlay') ? 'OVERLAY' : new URL(url || 'about:blank').pathname
+    })
+  })
+}
+
+/** Records the first window's native fullscreen transitions ('enter' / 'leave' when each ends). */
+async function watchNativeFullscreen(app: Orbit['app']) {
+  await app.evaluate(() => {
+    const g = globalThis as unknown as OrbitGlobal & { __fsEvents: string[] }
+    g.__fsEvents = []
+    const win = g.__orbit.ctx.windows.get(g.__orbit.ctx.windows.ids()[0] as string)
+    win?.on('enter-full-screen', () => g.__fsEvents.push('enter'))
+    win?.on('leave-full-screen', () => g.__fsEvents.push('leave'))
+  })
+  return () => app.evaluate(() => (globalThis as unknown as { __fsEvents: string[] }).__fsEvents.join(','))
+}
+
+/** Runs page script in a tab (with a user gesture), giving up after `ms` instead of hanging. */
+async function inPage(app: Orbit['app'], tabId: string, code: string, ms = 15_000) {
+  return app.evaluate(
+    (_e, [id, js, limit]) => {
+      const contents = (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.get(id)?.webContents
+      if (!contents) return Promise.resolve('no page')
+      return Promise.race([
+        contents.executeJavaScript(js, true).then((v) => String(v)),
+        new Promise<string>((r) => setTimeout(() => r('timeout'), limit)),
+      ])
+    },
+    [tabId, code, ms] as const,
+  )
+}
+
 test('[NV-20] HTML fullscreen fills the window and restores the pane on exit (review F11)', async () => {
   const tabId = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/Video') })) as string
   await tabPage(orbit.app, '/page/Video')
@@ -365,26 +438,81 @@ test('[NV-20] HTML fullscreen fills the window and restores the pane on exit (re
     }, tabId)
   const framed = (await bounds()).view
   expect(framed?.x).toBeGreaterThan(0)
-  const fullscreen = (on: boolean) =>
-    orbit.app.evaluate(
-      (_e, [id, enter]) =>
-        (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs
-          .contents(id)
-          ?.executeJavaScript(
-            enter ? 'document.documentElement.requestFullscreen().then(() => true)' : 'document.exitFullscreen()',
-            true,
-          ),
-      [tabId, on] as const,
-    )
-  await fullscreen(true)
+  const transitions = await watchNativeFullscreen(orbit.app)
+  expect(await inPage(orbit.app, tabId, 'document.documentElement.requestFullscreen().then(() => "in")')).toBe('in')
+  // macOS animates into fullscreen: wait for the window to get there, as a person would.
+  await expect.poll(transitions).toContain('enter')
   await expect
     .poll(async () => {
       const b = await bounds()
       return JSON.stringify(b.view) === JSON.stringify(b.content)
     })
     .toBe(true)
-  await fullscreen(false)
+  // The page covers the other tab views but never the overlay (command bar, menus), however
+  // often the window is laid out again while in fullscreen.
+  for (let i = 0; i < 2; i++) {
+    const order = await zOrder(orbit.app)
+    expect(order.slice(-2)).toEqual(['/page/Video', 'OVERLAY'])
+    await orbit.app.evaluate(() => {
+      const ctx = (globalThis as unknown as OrbitGlobal).__orbit.ctx
+      ctx.windows.get(ctx.windows.ids()[0] as string)?.emit('resize')
+    })
+  }
+  expect(await inPage(orbit.app, tabId, 'document.exitFullscreen().then(() => "out")')).toBe('out')
   await expect.poll(async () => (await bounds()).view?.x).toBe(framed?.x)
+  await expect.poll(transitions).toContain('leave')
+  expect(await inPage(orbit.app, tabId, 'String(!!document.fullscreenElement)')).toBe('false')
+})
+
+test('[NV-20] leaving HTML fullscreen right after entering does not leave the page stuck (review F11)', async () => {
+  const tabId = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/Quick') })) as string
+  await tabPage(orbit.app, '/page/Quick')
+  await expect.poll(async () => (await viewPlacement(orbit.app, tabId))?.visible).toBe(true)
+  const framedX = await orbit.app.evaluate(
+    (_e, id) => (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.get(id)?.getBounds().x,
+    tabId,
+  )
+  expect(framedX).toBeGreaterThan(0)
+  const transitions = await watchNativeFullscreen(orbit.app)
+  // On macOS the exit lands while the window is still animating into fullscreen.
+  const result = await inPage(
+    orbit.app,
+    tabId,
+    'document.documentElement.requestFullscreen().then(() => document.exitFullscreen()).then(() => "out")',
+  )
+  expect(result).toBe('out')
+  await expect.poll(() => inPage(orbit.app, tabId, 'String(!!document.fullscreenElement)')).toBe('false')
+  await expect
+    .poll(() =>
+      orbit.app.evaluate(() => {
+        const ctx = (globalThis as unknown as OrbitGlobal).__orbit.ctx
+        return ctx.windows.get(ctx.windows.ids()[0] as string)?.isFullScreen()
+      }),
+    )
+    .toBe(false)
+  await expect
+    .poll(() =>
+      orbit.app.evaluate(
+        (_e, id) => (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.get(id)?.getBounds().x,
+        tabId,
+      ),
+    )
+    .toBe(framedX)
+  if (process.platform === 'darwin') expect(await transitions()).toContain('leave')
+})
+
+test('[TB-19] a tab view that replaces another stays below the open command bar (review R1)', async () => {
+  const opener = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/Alpha') })) as string
+  await tabPage(orbit.app, '/page/Alpha')
+  await action(orbit.app, 'tab.new')
+  const overlay = await viewPage(orbit.app, 'overlay')
+  await expect(overlay.getByTestId('command-input')).toBeFocused()
+  // The page opens a tab while the command bar is up: its first view is replaced by the real one.
+  await inPage(orbit.app, opener, `window.open(${JSON.stringify(fx.url('/page/Ext'))}); 'ok'`)
+  await expect.poll(async () => Object.keys((await state(orbit.app)).tabs).length).toBe(2)
+  await expect.poll(async () => (await zOrder(orbit.app)).filter((l) => l === '/page/Ext').length).toBe(1)
+  await expect.poll(async () => (await zOrder(orbit.app)).at(-1)).toBe('OVERLAY')
+  expect(await overlay.getByTestId('command-input').isVisible()).toBe(true)
 })
 
 test('[NV-14] a crashed shell renderer reloads, and a crashed tab reloads when shown (review F11)', async () => {
