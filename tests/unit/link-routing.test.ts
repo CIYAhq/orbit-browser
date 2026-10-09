@@ -14,6 +14,7 @@ import {
   dragTravel,
   PEEK_CLOSE_MS,
   PEEK_CLOSE_SCALE,
+  PEEK_DISMISS_VELOCITY,
   PEEK_DRAG_UP_MAX,
   PEEK_EXPAND_SPRING,
   PEEK_OPEN_SPRING,
@@ -225,6 +226,16 @@ describe('Peek interactive dismiss (PK-06, FL-19)', () => {
     expect(releaseVelocity(samples, 400)).toBe(0)
     expect(releaseVelocity([], 10)).toBe(0)
     expect(releaseVelocity([{ t: 0, y: 0 }], 0)).toBe(0)
+  })
+
+  it('[PK-06] events delivered together (one timestamp) still read as a flick, not a stop', () => {
+    const together = [
+      { t: 40, y: 0 },
+      { t: 40, y: 15 },
+      { t: 40, y: 30 },
+    ]
+    expect(releaseVelocity(together, 40)).toBeGreaterThan(PEEK_DISMISS_VELOCITY)
+    expect(dismissesOnRelease(30, 600, releaseVelocity(together, 40))).toBe(true)
   })
 })
 

@@ -152,6 +152,7 @@ export function releaseVelocity(samples: readonly { t: number; y: number }[], no
     if (s.t <= now - windowMs) from = s
     else break
   }
-  const dt = now - from.t
-  return dt > 0 ? ((last.y - from.y) / dt) * 1000 : 0
+  // Events delivered together can share a timestamp: moving in no time is a flick, not a stop.
+  const dt = Math.max(1, now - from.t)
+  return ((last.y - from.y) / dt) * 1000
 }

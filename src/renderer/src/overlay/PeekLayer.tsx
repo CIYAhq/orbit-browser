@@ -225,7 +225,8 @@ class PeekAnimator {
     }
     const to = scaleBox(start.rect, PEEK_CLOSE_SCALE)
     // An ease-out starts at 3× its average speed: travel so that matches the release speed.
-    if (dragged) to.y += Math.max(40, (Math.max(0, velocity) * PEEK_CLOSE_MS) / 3000)
+    // Let go moving down: it keeps going that way as it fades, a little further for a faster flick.
+    if (dragged) to.y += Math.min(this.area().height, Math.max(40, (Math.max(0, velocity) * PEEK_CLOSE_MS) / 3000))
     this.tween(
       PEEK_CLOSE_MS,
       (e) =>
@@ -245,9 +246,10 @@ class PeekAnimator {
   /**
    * Starts following a drag or swipe; only an open card can be dragged. A press is a real
    * sample (the pointer was there then); a swipe's first event is its first sample, so a single
-   * wheel tick carries no speed.
+   * wheel tick carries no speed. Samples carry the input's own time (`event.timeStamp`), so a
+   * busy frame that delivers several events at once does not turn into a flick.
    */
-  private beginDrag(pointerY?: number): Drag | null {
+  private beginDrag(pointerY?: number, t = performance.now()): Drag | null {
     if (this.drag) return this.drag
     if ((this.overlay.phase ?? 'open') !== 'open' || this.leaving) return null
     // Interrupts the open spring wherever it is (FL-01).
@@ -257,16 +259,16 @@ class PeekAnimator {
       base: f?.rect ?? peekCard(this.area()),
       dim: f?.dim ?? 1,
       offset: 0,
-      samples: pointerY === undefined ? [] : [{ t: performance.now(), y: 0 }],
+      samples: pointerY === undefined ? [] : [{ t, y: 0 }],
       pointerY,
     }
     return this.drag
   }
 
   /** The card follows the input 1:1 downward, shrinking a little; the dim lifts as it goes. */
-  private moveDrag(d: Drag, offset: number): void {
+  private moveDrag(d: Drag, offset: number, t = performance.now()): void {
     d.offset = offset
-    d.samples.push({ t: performance.now(), y: offset })
+    d.samples.push({ t, y: offset })
     if (d.samples.length > 32) d.samples.shift()
     const restHeight = peekCard(this.area()).height
     const rect = draggedCard(d.base, offset, restHeight)
@@ -320,22 +322,22 @@ class PeekAnimator {
     this.spring(PEEK_OPEN_SPRING, step, undefined, v0)
   }
 
-  pointerDown(clientY: number): boolean {
+  pointerDown(clientY: number, t: number): boolean {
     if (this.drag) return false
-    return !!this.beginDrag(clientY)
+    return !!this.beginDrag(clientY, t)
   }
 
-  pointerMove(clientY: number): void {
+  pointerMove(clientY: number, t: number): void {
     const d = this.drag
-    if (d?.pointerY !== undefined) this.moveDrag(d, clientY - d.pointerY)
+    if (d?.pointerY !== undefined) this.moveDrag(d, clientY - d.pointerY, t)
   }
 
-  pointerUp(): void {
-    if (this.drag?.pointerY !== undefined) this.endDrag()
+  pointerUp(t: number): void {
+    if (this.drag?.pointerY !== undefined) this.endDrag(t)
   }
 
   /** A two-finger swipe over the dimmed page or the handle moves the card the same way. */
-  wheel(deltaY: number, deltaMode: number, pinch: boolean): void {
+  wheel(deltaY: number, deltaMode: number, pinch: boolean, t: number): void {
     if (pinch) return
     const existing = this.drag
     if (existing?.pointerY !== undefined) return
@@ -343,10 +345,9 @@ class PeekAnimator {
     if (!d) return
     // Fingers moving down scroll the content up (negative delta): the card goes down with them.
     const dy = deltaMode === 1 ? deltaY * 16 : deltaMode === 2 ? deltaY * this.area().height : deltaY
-    this.moveDrag(d, d.offset - dy)
+    this.moveDrag(d, d.offset - dy, t)
     clearTimeout(d.wheelTimer)
-    const last = performance.now()
-    d.wheelTimer = window.setTimeout(() => this.drag === d && this.endDrag(last), WHEEL_END_MS)
+    d.wheelTimer = window.setTimeout(() => this.drag === d && this.endDrag(t), WHEEL_END_MS)
   }
 
   /** Runs a unit spring (0 → 1) frame by frame; `done` fires once it rests. */
@@ -442,7 +443,7 @@ export function PeekLayer({ overlay }: { overlay: PeekOverlay }) {
         onMouseDown={(e) => {
           if (e.button === 0) void invoke('peek.close', {})
         }}
-        onWheel={(e) => animator.wheel(e.deltaY, e.deltaMode, e.ctrlKey)}
+        onWheel={(e) => animator.wheel(e.deltaY, e.deltaMode, e.ctrlKey, e.timeStamp)}
       />
       <div
         ref={cardRef}
@@ -459,7 +460,7 @@ export function PeekLayer({ overlay }: { overlay: PeekOverlay }) {
         onPointerDown={(e) => {
           if (e.button !== 0) return
           e.preventDefault()
-          if (!animator.pointerDown(e.clientY)) return
+          if (!animator.pointerDown(e.clientY, e.timeStamp)) return
           try {
             e.currentTarget.setPointerCapture(e.pointerId)
           } catch {
@@ -467,16 +468,16 @@ export function PeekLayer({ overlay }: { overlay: PeekOverlay }) {
           }
           setGrabbing(true)
         }}
-        onPointerMove={(e) => animator.pointerMove(e.clientY)}
-        onPointerUp={() => {
+        onPointerMove={(e) => animator.pointerMove(e.clientY, e.timeStamp)}
+        onPointerUp={(e) => {
           setGrabbing(false)
-          animator.pointerUp()
+          animator.pointerUp(e.timeStamp)
         }}
-        onPointerCancel={() => {
+        onPointerCancel={(e) => {
           setGrabbing(false)
-          animator.pointerUp()
+          animator.pointerUp(e.timeStamp)
         }}
-        onWheel={(e) => animator.wheel(e.deltaY, e.deltaMode, e.ctrlKey)}
+        onWheel={(e) => animator.wheel(e.deltaY, e.deltaMode, e.ctrlKey, e.timeStamp)}
       >
         <span className="peek__grabber" />
       </div>
