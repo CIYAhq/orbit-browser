@@ -894,3 +894,177 @@ test('[SV-17][SV-26] Ctrl+W and Ctrl+Shift+T on a pane never show a page outside
   }
   expect(await activeTabId(orbit.app)).toBe(b)
 })
+
+/** Runs a main-process command for a given window (the helper `run` always uses the first window). */
+async function runIn(app: ElectronApplication, windowIndex: number, name: string, args: unknown = {}) {
+  return app.evaluate(
+    async (_e, [n, a, i]) => {
+      const g = globalThis as unknown as {
+        __orbit: { run: (n: string, a: unknown, w?: string) => unknown; windowIds: () => string[] }
+      }
+      return g.__orbit.run(n as string, a, g.__orbit.windowIds()[i as number])
+    },
+    [name, args, windowIndex] as const,
+  )
+}
+
+async function tabsHook<T>(app: ElectronApplication, name: string, arg?: unknown): Promise<T> {
+  return app.evaluate(
+    (_e, [n, a]) =>
+      (globalThis as unknown as { __orbitTabs: Record<string, (x?: unknown) => unknown> }).__orbitTabs[n as string]?.(
+        a,
+      ) as T,
+    [name, arg] as const,
+  )
+}
+
+test('[SV-05] dropping a tab on the right half of another tab row makes a split there', async () => {
+  const b = await openTab(orbit.app, 'Target')
+  const a = await openTab(orbit.app, 'Dropped')
+  const from = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${a}"]`).boundingBox()
+  const to = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${b}"]`).boundingBox()
+  if (!from || !to) throw new Error('rows')
+  await orbit.shell.mouse.move(from.x + 30, from.y + from.height / 2)
+  await orbit.shell.mouse.down()
+  await orbit.shell.mouse.move(from.x + 40, from.y + from.height / 2 + 6, { steps: 3 })
+  await orbit.shell.mouse.move(to.x + to.width * 0.75, to.y + to.height / 2, { steps: 8 })
+  await expect(orbit.shell.locator('.row-slot.is-split-right')).toHaveCount(1)
+  await orbit.shell.mouse.up()
+  await expect(orbit.shell.getByTestId('split-row')).toHaveCount(1)
+  const split = await splitOf(orbit.app, b)
+  expect(split && JSON.stringify(split.layout).match(/t-[a-z0-9]+/g)).toEqual([b, a])
+  await expectViewsOverPanes(orbit, [a, b])
+})
+
+test('[SV-06] Open in Split View from a multi-selection makes one split in sidebar order', async () => {
+  const c = await openTab(orbit.app, 'Sel3')
+  const b = await openTab(orbit.app, 'Sel2')
+  const a = await openTab(orbit.app, 'Sel1')
+  await run(orbit.app, 'tabs.setSelection', { tabIds: [c, a, b] })
+  await run(orbit.app, 'tabs.contextMenu', { id: b, selection: [c, a, b] })
+  expect(await tabsHook<string[]>(orbit.app, 'lastMenu')).toContain('Open in Split View')
+  expect(await tabsHook<boolean>(orbit.app, 'clickMenu', 'Open in Split View')).toBe(true)
+  await expect(orbit.shell.getByTestId('split-row').getByTestId('split-segment')).toHaveCount(3)
+  const split = await splitOf(orbit.app, a)
+  expect(split && JSON.stringify(split.layout).match(/t-[a-z0-9]+/g)).toEqual([a, b, c])
+  await expectViewsOverPanes(orbit, [a, b, c])
+})
+
+test('[SV-24] Move to Space hands the selection on in the Space the split leaves (TB-11)', async () => {
+  const x = await openTab(orbit.app, 'StaysHere')
+  const b = await openTab(orbit.app, 'MovesB')
+  const a = await openTab(orbit.app, 'MovesA')
+  const splitId = (await run(orbit.app, 'split.create', { tabIds: [a, b] })) as string
+  await expectViewsOverPanes(orbit, [a, b])
+  const s1 = (await state(orbit.app)).tabs[a]?.spaceId as string
+  const s2 = (await run(orbit.app, 'spaces.create', { name: 'Elsewhere', activate: false })) as string
+  expect(await run(orbit.app, 'split.move', { splitId, to: { kind: 'today', spaceId: s2 }, index: 0 })).toBe(true)
+  const s = await state(orbit.app)
+  const win = Object.values(s.windows)[0]
+  expect(win?.spaceId).toBe(s1)
+  expect(win?.activeTab[s1]).toBe(x)
+  expect(s.spaces[s2]?.today).toContain(splitId)
+  await expect(orbit.shell.getByTestId('content-frame')).toHaveAttribute('data-split-id', '')
+  await expect.poll(async () => (await tabView(orbit.app, x))?.visible).toBe(true)
+})
+
+test('[SV-24] two windows never share a split: the other window moves on and keeps its own page', async () => {
+  const x = await openTab(orbit.app, 'OwnPage')
+  const b = await openTab(orbit.app, 'SharedB')
+  const a = await openTab(orbit.app, 'SharedA')
+  await run(orbit.app, 'split.create', { tabIds: [a, b], focus: b })
+  await expectViewsOverPanes(orbit, [a, b])
+  await action(orbit.app, 'window.new')
+  await expect
+    .poll(
+      async () =>
+        (
+          await orbit.app.evaluate(() =>
+            (globalThis as unknown as { __orbit: { windowIds: () => string[] } }).__orbit.windowIds(),
+          )
+        ).length,
+    )
+    .toBe(2)
+  const [w1, w2] = await orbit.app.evaluate(() =>
+    (globalThis as unknown as { __orbit: { windowIds: () => string[] } }).__orbit.windowIds(),
+  )
+  await runIn(orbit.app, 1, 'tabs.activate', { tabId: a })
+  const s = await state(orbit.app)
+  const active1 = s.windows[w1 as string]?.activeTab[s.windows[w1 as string]?.spaceId as string]
+  expect([a, b]).not.toContain(active1)
+  expect(s.windows[w2 as string]?.activeTab[s.windows[w2 as string]?.spaceId as string]).toBe(a)
+  // Both panes live in window 2; window 1 shows its own page, and stays that way after relayouts.
+  const owner = (tabId: string) =>
+    orbit.app.evaluate(
+      (_e, id) =>
+        (
+          globalThis as unknown as { __orbit: { ctx: { windows: { windowOfTab: (t: string) => string } } } }
+        ).__orbit.ctx.windows.windowOfTab(id),
+      tabId,
+    )
+  await expect.poll(() => owner(a)).toBe(w2)
+  await expect.poll(() => owner(b)).toBe(w2)
+  await orbit.app.evaluate(({ BrowserWindow }) => {
+    const first = BrowserWindow.getAllWindows()[0]
+    first?.setSize(1000, 700)
+  })
+  await new Promise((r) => setTimeout(r, 400))
+  expect(await owner(a)).toBe(w2)
+  expect(await owner(b)).toBe(w2)
+  expect(active1).toBe(x)
+})
+
+test('[SV-02] choosing a Space while filling an empty pane pulls nothing into the split', async () => {
+  const a = await openTab(orbit.app, 'Base2')
+  const s2 = (await run(orbit.app, 'spaces.create', { name: 'Other', activate: false })) as string
+  const other = (await run(orbit.app, 'tabs.create', {
+    url: fx.url('/page/OtherSpaceTab'),
+    spaceId: s2,
+    activate: false,
+  })) as string
+  // Space 2 remembers `other` as its selected tab.
+  await orbit.app.evaluate(
+    (_e, [spaceId, tabId]) => {
+      const g = globalThis as unknown as {
+        __orbit: {
+          ctx: {
+            store: {
+              update: (f: (d: { windows: Record<string, { activeTab: Record<string, string> }> }) => void) => void
+            }
+          }
+          windowIds: () => string[]
+        }
+      }
+      const w = g.__orbit.windowIds()[0] as string
+      g.__orbit.ctx.store.update((d) => {
+        const win = d.windows[w]
+        if (win) win.activeTab[spaceId as string] = tabId as string
+      })
+    },
+    [s2, other] as const,
+  )
+  await action(orbit.app, 'split.add')
+  await expect(orbit.shell.getByTestId('split-pane')).toHaveCount(2)
+  // The command bar closes and the window switches Space in the same tick (a Space result).
+  await orbit.app.evaluate(async (_e, id) => {
+    const g = globalThis as unknown as {
+      __orbit: {
+        ctx: { commands: { run: (n: string, a: unknown, c: unknown) => Promise<unknown> } }
+        windowIds: () => string[]
+      }
+    }
+    const windowId = g.__orbit.windowIds()[0]
+    void g.__orbit.ctx.commands.run('overlay.close', {}, { windowId })
+    await g.__orbit.ctx.commands.run('spaces.switch', { spaceId: id }, { windowId })
+  }, s2)
+  await expect.poll(async () => Object.keys((await state(orbit.app)).splits).length).toBe(0)
+  const s = await state(orbit.app)
+  expect(splitOfTab(s, other)).toBeUndefined()
+  expect(s.tabs[other]?.spaceId).toBe(s2)
+  expect(s.tabs[a]).toBeDefined()
+})
+
+function splitOfTab(s: { splits: Record<string, { layout: SplitLayout }> }, tabId: string): string | undefined {
+  for (const [id, split] of Object.entries(s.splits)) if (JSON.stringify(split.layout).includes(`"${tabId}"`)) return id
+  return undefined
+}

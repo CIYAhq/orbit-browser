@@ -30,6 +30,8 @@ export interface MenuOps {
   duplicateFolder(folderId: FolderId): void
   pasteUrlInto(folderId: FolderId): void
   deleteFolder(folderId: FolderId): void
+  /** Split View items for these tabs ("Open in Split View", SV-06/SV-09), from the split lane. */
+  splitItems?(tabIds: TabId[]): MenuItemConstructorOptions[]
 }
 
 /** Folders of a Space's pinned area, depth-first, with indentation for the Move to menu. */
@@ -101,6 +103,7 @@ export function tabMenu(
       items.push({ label: `Unpin ${multi.length} Tabs`, click: () => ops.unpin(multi) })
     items.push(
       { label: 'New Folder with Tabs', click: () => ops.newFolder(multi.map((id) => splitOfTab(state, id) ?? id)) },
+      ...(ops.splitItems?.(multi) ?? []),
       { label: 'Copy Links', click: () => ops.copyLinks(multi, false) },
       { label: 'Copy Links as Markdown', click: () => ops.copyLinks(multi, true) },
       { type: 'separator' },
@@ -146,6 +149,7 @@ export function tabMenu(
     { label: 'Copy Link', click: () => ops.copyLinks([tabId], false) },
     { label: 'Copy Link as Markdown', click: () => ops.copyLinks([tabId], true) },
     { label: 'Duplicate', click: () => ops.duplicate(tabId) },
+    ...(ops.splitItems?.([tabId]) ?? []),
     { label: tab.muted ? 'Unmute Tab' : 'Mute Tab', click: () => ops.setMuted(tabId, !tab.muted) },
     {
       label: 'Move to',

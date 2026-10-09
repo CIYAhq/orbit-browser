@@ -22,6 +22,7 @@ import {
 import { parseInput } from '../../shared/url'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
+import { tabSplitMenuItems } from '../split/menu'
 import { TabMaintenance } from './maintenance'
 import { findMenuItem, folderMenu, type MenuOps, menuLabels, tabMenu } from './menus'
 import { makeTab, numberedTarget, steppedTarget, todayInsertIndex } from './model'
@@ -175,6 +176,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     duplicateFolder,
     pasteUrlInto: (folderId) => void pasteUrlAsTab(windowId, { kind: 'folder', folderId }),
     deleteFolder: (folderId) => void confirmDeleteFolder(windowId, folderId),
+    splitItems: (tabIds) => tabSplitMenuItems(ctx, tabIds, windowId),
   })
 
   // ---- Commands ----

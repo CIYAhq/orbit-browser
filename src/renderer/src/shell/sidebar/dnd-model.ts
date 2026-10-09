@@ -41,6 +41,8 @@ export type DropTarget =
       gapTop: number
     }
   | { type: 'into'; folderId: string; at: number; gapTop: number }
+  /** Onto the left or right half of a tab or split row: the dragged tab joins it as a split (SV-05). */
+  | { type: 'split'; key: string; side: 'left' | 'right' }
 
 /** Spacing between rows (matches the list's CSS gap). */
 export const ROW_GAP = 1
