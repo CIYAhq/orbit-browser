@@ -73,7 +73,8 @@ async function expectViewsOverPanes(o: Orbit, tabIds: string[]): Promise<void> {
       .poll(
         async () => {
           const view = await tabView(o.app, tabId)
-          const pane = await paneBox(o.shell, tabId)
+          // A pane that has only just been added grows in from nothing (SV-26): no box yet, poll on.
+          const pane = await paneBox(o.shell, tabId).catch(() => null)
           return view?.visible === true && near(view.bounds, pane)
         },
         { message: `view of ${tabId} over its pane` },
