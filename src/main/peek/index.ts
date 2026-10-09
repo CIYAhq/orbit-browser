@@ -698,6 +698,12 @@ export function registerPeek(ctx: MainContext): void {
     const url = event.url
     const click = clicks.onLink(contents, url)
     if (!click) return
+    // The click already opened this link. A second navigation to it (a clickable card's script, an
+    // onclick that sets location) is the same click: the tab stays where it is (lead review V1).
+    if (click.opened) {
+      event.preventDefault()
+      return
+    }
     const source = sourceOf(tabId, contents)
     if (!source) return
     const decision = decideLink('navigate', source, url, linkSettings())
@@ -705,16 +711,16 @@ export function registerPeek(ctx: MainContext): void {
       const windowId = windows.windowOfTab(tabId)
       if (!canPeek(windowId)) return
       event.preventDefault()
-      clicks.forget(contents)
+      clicks.markOpened(contents)
       const origin = clickOrigin(tabId, click)
       setImmediate(() => openPeek(windowId, url, { origin }))
     } else if (decision.to === 'tab') {
       event.preventDefault()
-      clicks.forget(contents)
+      clicks.markOpened(contents)
       setImmediate(() => openTab(url, tabId, decision.spaceId))
     } else if (decision.to === 'mini') {
       event.preventDefault()
-      clicks.forget(contents)
+      clicks.markOpened(contents)
       setImmediate(() => openMiniWindow(ctx, url))
     }
   }

@@ -502,6 +502,28 @@ test('[PK-02] a sign-in that posts itself on to another site stays in the pinned
   ])
 })
 
+test('[PK-01][PK-02] one click that starts two navigations to its link opens one Peek, and the pinned tab stays (lead review V1)', async () => {
+  const { tabId } = await pinned('/forms')
+  // A link whose onclick also sets location to its href, then a clickable card around a link. The
+  // clicks go through the page's input: Playwright would wait on the cancelled navigations.
+  for (const [link, path] of [
+    ['#twice', '/site/Twice'],
+    ['#card-link', '/site/Card'],
+  ] as const) {
+    const since = sites.requests().length
+    const box = JSON.parse(
+      await inTab(orbit.app, tabId, `JSON.stringify(document.querySelector('${link}').getBoundingClientRect())`),
+    ) as { x: number; y: number }
+    await clickInTab(orbit.app, tabId, { x: box.x + 6, y: box.y + 6 })
+    const peekTab = await settledPeek()
+    await expect.poll(async () => (await viewInfo(orbit.app, peekTab)).url).toBe(sites.other(path))
+    expect((await viewInfo(orbit.app, tabId)).url).toBe(sites.url('/forms'))
+    expect(receivedAt(since, path)).toEqual([`GET ${path}`])
+    await pressInTab(orbit.app, peekTab, 'Escape')
+    await expect.poll(async () => (await overlayOf(orbit.app)).kind).toBe('none')
+  }
+})
+
 test('[PK-02] Enter on a focused other-site link in a pinned tab opens a Peek', async () => {
   const { tabId: source } = await pinned('/site/Keys')
   // The pointer rests on empty page; the keyboard moves the focus onto the other-site link.

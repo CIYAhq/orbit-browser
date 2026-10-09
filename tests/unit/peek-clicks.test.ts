@@ -95,7 +95,11 @@ describe('Peek link clicks (PK-02)', () => {
     const at = clicks.recent(page.contents)?.at ?? 0
     expect(clicks.onLink(page.contents, 'https://other.org/a', at + 1500)).toBeDefined()
     expect(clicks.onLink(page.contents, 'https://other.org/a', at + 1501)).toBeUndefined()
-    clicks.forget(page.contents)
-    expect(clicks.onLink(page.contents, 'https://other.org/a', at + 10)).toBeUndefined()
+    clicks.markOpened(page.contents)
+    // A repeat navigation to the same link is still the click (marked opened, so it is cancelled);
+    // nothing else counts as caused by it.
+    expect(clicks.onLink(page.contents, 'https://other.org/a', at + 10)).toMatchObject({ opened: true })
+    expect(clicks.onLink(page.contents, 'https://other.org/b', at + 10)).toBeUndefined()
+    expect(clicks.recent(page.contents, at + 10)).toBeUndefined()
   })
 })

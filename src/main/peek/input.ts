@@ -11,6 +11,11 @@ export interface PageClick {
    * click wasn't on a link, absent until the page answers.
    */
   href?: string | null
+  /**
+   * The click has opened its link (in a Peek, a tab or a Mini Window). A second navigation to that
+   * link is the same click and is cancelled; nothing else counts as caused by it any more.
+   */
+  opened?: boolean
   shift: boolean
   alt: boolean
   /** ⌘ on macOS, the Windows/Super key elsewhere. */
@@ -108,10 +113,10 @@ export class ClickTracker {
     })
   }
 
-  /** The page's click from the last moment, if any. */
+  /** The page's click from the last moment, if any, unless it has already opened its link. */
   recent(contents: WebContents, now = Date.now()): PageClick | undefined {
     const click = this.clicks.get(contents.id)
-    return click && now - click.at <= CLICK_WINDOW_MS ? click : undefined
+    return click && !click.opened && now - click.at <= CLICK_WINDOW_MS ? click : undefined
   }
 
   /**
@@ -120,14 +125,15 @@ export class ClickTracker {
    * navigation or a redirect goes somewhere else, so it doesn't count.
    */
   onLink(contents: WebContents, url: string, now = Date.now()): PageClick | undefined {
-    const click = this.recent(contents, now)
-    if (!click) return undefined
+    const click = this.clicks.get(contents.id)
+    if (!click || now - click.at > CLICK_WINDOW_MS) return undefined
     return sameUrl(click.href, url) || sameUrl(this.targets.get(contents.id), url) ? click : undefined
   }
 
-  /** The click has opened its link: later navigations don't count as caused by it. */
-  forget(contents: WebContents): void {
-    this.clicks.delete(contents.id)
+  /** The click has opened its link: a repeat navigation to it is cancelled, and nothing else counts. */
+  markOpened(contents: WebContents): void {
+    const click = this.clicks.get(contents.id)
+    if (click) click.opened = true
   }
 
   /** Keeps the click and asks the page which link it landed on. */

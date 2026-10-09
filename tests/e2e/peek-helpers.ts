@@ -43,7 +43,10 @@ const formsPage = (self: string, other: string) =>
     'Forms',
     `<form method="post" action="${other}/post/target"><input name="user" value="alice"><button id="send">Send</button></form>
      <p><button id="script" onclick="location.href = '${other}/site/Landing'">Sign in with Other</button></p>
-     <form method="post" action="${self}/idp/login"><input type="hidden" name="user" value="alice"><button id="sign-in">Sign in</button></form>`,
+     <form method="post" action="${self}/idp/login"><input type="hidden" name="user" value="alice"><button id="sign-in">Sign in</button></form>
+     <p><a id="twice" href="${other}/site/Twice" onclick="location.href = this.href">Other site, and a script</a></p>
+     <div id="card" onclick="location.href = this.querySelector('a').href" style="padding:8px;border:1px solid #ccc">
+       <a id="card-link" href="${other}/site/Card">A card on another site</a><p>The whole card is clickable.</p></div>`,
     '#fff8ec',
   )
 
