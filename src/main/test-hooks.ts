@@ -18,7 +18,7 @@ export function exposeTestHooks(ctx: MainContext, persistence: Persistence): voi
     liveTabs: () => ctx.tabs.liveTabIds(),
     tabView: (tabId: string) => {
       const view = ctx.tabs.get(tabId)
-      if (!view || view.webContents.isDestroyed()) return null
+      if (!view?.webContents || view.webContents.isDestroyed()) return null
       return { bounds: view.getBounds(), visible: view.getVisible(), url: view.webContents.getURL() }
     },
   }

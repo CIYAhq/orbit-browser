@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { app } from 'electron'
 import type { MainContext } from './context'
+import { captureExternalLinks, registerExternalLinks } from './external-links'
 import { registerFeatures } from './features'
 import { registerIpc } from './ipc'
 import { installMenu } from './menu'
@@ -25,6 +26,7 @@ app.setName('Orbit')
 if (!e2e && !app.requestSingleInstanceLock()) {
   app.quit()
 } else {
+  captureExternalLinks()
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit()
   })
@@ -78,6 +80,7 @@ function start(): void {
   if (saved.length > 0) for (const w of saved) windows.open(store.state.windows[w.id])
   else windows.open()
   perf.mark('windows:opened')
+  registerExternalLinks(ctx)
 
   app.on('activate', () => {
     if (windows.ids().length === 0) windows.open()

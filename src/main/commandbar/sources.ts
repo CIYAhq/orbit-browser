@@ -22,7 +22,15 @@ interface Layout {
 /** Actions the bar never lists (they open the bar itself). */
 const NOT_IN_BAR = new Set(['tab.new', 'url.edit'])
 /** Actions that work without a current tab even though their id says otherwise. */
-const NO_TAB_NEEDED = new Set(['tab.reopenClosed', 'tab.next', 'tab.previous', 'tab.pasteUrl'])
+const NO_TAB_NEEDED = new Set([
+  'tab.reopenClosed',
+  'tab.next',
+  'tab.previous',
+  'tab.recent',
+  'tab.recentBack',
+  'tab.pasteAsNewTab',
+  'tab.undo',
+])
 
 export function actionNeedsTab(id: string, category: string): boolean {
   if (NO_TAB_NEEDED.has(id)) return false
@@ -75,7 +83,9 @@ export class SourceCache {
   archive(state: OrbitState, profileId: ProfileId): ArchiveDoc[] {
     if (this.archiveRef.list === state.archive && this.archiveRef.profileId === profileId) return this.archiveDocs
     this.archiveRef = { list: state.archive, profileId }
-    this.archiveDocs = state.archive
+    // The archive is oldest-first; newest first here so ties go to the most recent entry.
+    this.archiveDocs = [...state.archive]
+      .reverse()
       .filter((a) => a.profileId === profileId && a.url && a.url !== 'about:blank')
       .map((a) => ({
         id: a.id,

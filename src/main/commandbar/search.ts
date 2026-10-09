@@ -2,12 +2,11 @@ import { clipboard, net } from 'electron'
 import type { SearchQueryArgs, SearchResult } from '../../shared/commands/commandbar'
 import type { CommandName } from '../../shared/rpc'
 import type { OrbitState, WindowId } from '../../shared/state'
-import { splitOfTab, tabsInItem } from '../../shared/tree'
+import { splitOfTab } from '../../shared/tree'
 import { fillSearchTemplate, parseInput, SEARCH_ENGINES, topResultUrl } from '../../shared/url'
 import type { MainContext } from '../context'
 import type { HistoryService } from '../history'
 import type { CallContext } from '../registry'
-import { pickNextActive } from '../tabs/model'
 import { activeTabOf } from '../windows'
 import { pastSearchOf, type RankInput, rank } from './rank'
 import { SourceCache } from './sources'
@@ -227,25 +226,15 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
   })
 
   /**
-   * "Move to / Pin to [Space]" (TB-11, PN-02): moves the current tab (or its split) to the
-   * other Space's Today or Pinned section; this Space stays in view with the next tab selected.
+   * "Move to / Pin to [Space]" (TB-11, PN-02): the tabs lane's command moves the current tab (or its
+   * split) to the other Space's Today or Pinned section and keeps this Space in view.
    */
   const moveCurrentTab = async (windowId: WindowId | undefined, spaceId: string | undefined, pin: boolean) => {
     const state = store.state
     const tabId = windowId ? activeTabOf(state, windowId) : null
-    const target = spaceId ? state.spaces[spaceId] : undefined
-    if (!windowId || !tabId || !target) return
+    if (!windowId || !tabId || !spaceId || !state.spaces[spaceId]) return
     const item = splitOfTab(state, tabId) ?? tabId
-    const moved = new Set(tabsInItem(state, item))
-    const to = pin ? { kind: 'pinned' as const, spaceId: target.id } : { kind: 'today' as const, spaceId: target.id }
-    const ok = await commands.run('tabs.move', { id: item, to, index: pin ? target.pinned.length : 0 })
-    if (!ok) return
-    store.update((d) => {
-      const win = d.windows[windowId]
-      if (!win) return
-      const active = win.activeTab[win.spaceId]
-      if (active && moved.has(active)) win.activeTab[win.spaceId] = pickNextActive(d, win.spaceId, moved)
-    })
+    await commands.run('tabs.moveToSpace', { ids: [item], spaceId, section: pin ? 'pinned' : 'today' }, { windowId })
   }
 
   /** Restores an archived tab as a new Today tab in the current Space (no forced Space jump, CB-19). */
@@ -283,15 +272,6 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
         .map((e) => e.url)
       for (const url of urls) await hs.delete(url)
     }
-  })
-
-  // TB-02 / CB-12 / KS-04: ⌘⌥V (Ctrl+Alt+V) opens the clipboard URL as a new Today tab.
-  actions.register('tab.pasteUrl', async (c) => {
-    const windowId = windowOf(c)
-    closeBar(windowId)
-    const url = await clipboardUrl(250)
-    if (url) await commands.run('tabs.create', { url }, { windowId })
-    else ctx.toast(windowId, 'No URL on the clipboard')
   })
 
   // KS-19: while the bar is open, ⌘W closes the bar rather than the tab.

@@ -54,36 +54,81 @@ export const ACTIONS: ActionDef[] = [
     id: 'tab.next',
     title: 'Next Tab',
     category: 'Tabs',
-    mac: ['Ctrl+Tab', 'Cmd+Alt+Down'],
-    other: ['Ctrl+Tab', 'Ctrl+PageDown'],
+    mac: ['Cmd+Alt+Down', 'Cmd+Shift+]'],
+    other: ['Ctrl+Alt+Down', 'Ctrl+PageDown'],
   },
   {
     id: 'tab.previous',
     title: 'Previous Tab',
     category: 'Tabs',
-    mac: ['Ctrl+Shift+Tab', 'Cmd+Alt+Up'],
-    other: ['Ctrl+Shift+Tab', 'Ctrl+PageUp'],
+    mac: ['Cmd+Alt+Up', 'Cmd+Shift+['],
+    other: ['Ctrl+Alt+Up', 'Ctrl+PageUp'],
+  },
+  {
+    id: 'tab.recent',
+    title: 'Switch to Recent Tab',
+    category: 'Tabs',
+    mac: ['Ctrl+Tab'],
+    other: ['Ctrl+Tab'],
+    hidden: true,
+  },
+  {
+    id: 'tab.recentBack',
+    title: 'Switch to Recent Tab (Back)',
+    category: 'Tabs',
+    mac: ['Ctrl+Shift+Tab', 'Ctrl+`'],
+    other: ['Ctrl+Shift+Tab'],
+    hidden: true,
   },
   { id: 'tab.togglePin', title: 'Pin / Unpin Tab', category: 'Tabs', mac: ['Cmd+D'], other: ['Ctrl+D'] },
   { id: 'tab.duplicate', title: 'Duplicate Tab', category: 'Tabs' },
-  { id: 'tab.resetToPinned', title: 'Go Back to Pinned URL', category: 'Tabs', keywords: ['reset', 'home'] },
+  { id: 'tab.resetToPinned', title: 'Reset Tab', category: 'Tabs', keywords: ['pinned url', 'home', 'go back'] },
+  {
+    id: 'tab.favorite',
+    title: 'Favorite This Tab',
+    category: 'Tabs',
+    keywords: ['add to favorites', 'move to favorites', 'unfavorite'],
+  },
   {
     id: 'tab.copyUrl',
     title: 'Copy URL',
     category: 'Tabs',
     mac: ['Cmd+Shift+C'],
-    other: ['Ctrl+Shift+Alt+C'],
+    other: ['Ctrl+Shift+C'],
     keywords: ['link', 'share'],
   },
-  { id: 'tab.toggleMute', title: 'Mute / Unmute Tab', category: 'Tabs', keywords: ['audio', 'sound'] },
   {
-    id: 'tab.pasteUrl',
+    id: 'tab.copyUrlMarkdown',
+    title: 'Copy URL as Markdown',
+    category: 'Tabs',
+    mac: ['Cmd+Shift+Alt+C'],
+    other: ['Ctrl+Shift+Alt+C'],
+    keywords: ['link'],
+  },
+  {
+    id: 'tab.pasteAsNewTab',
     title: 'Paste URL as New Tab',
     category: 'Tabs',
     mac: ['Cmd+Alt+V'],
     other: ['Ctrl+Alt+V'],
-    keywords: ['clipboard', 'open'],
+    keywords: ['clipboard'],
   },
+  { id: 'tab.undo', title: 'Undo Sidebar Change', category: 'Tabs', keywords: ['undo', 'reopen'] },
+  {
+    id: 'pinned.toggleCollapsed',
+    title: 'Collapse / Expand Pinned',
+    category: 'Sidebar',
+    keywords: ['collapse pinned', 'expand pinned'],
+  },
+  {
+    id: 'sidebar.focus',
+    title: 'Focus Sidebar',
+    category: 'Sidebar',
+    mac: ['Cmd+Shift+E'],
+    other: ['Ctrl+Shift+E'],
+    keywords: ['keyboard'],
+  },
+  { id: 'tab.toggleMute', title: 'Mute / Unmute Tab', category: 'Tabs', keywords: ['audio', 'sound'] },
   {
     id: 'tabs.clearToday',
     title: 'Clear Today Tabs',
@@ -249,12 +294,37 @@ const CODE_NAMES: Record<string, string> = {
   NumpadEnter: 'Enter',
 }
 
-/** Physical-key name for an input, so Alt/Shift-modified characters still match. */
+/** Shifted ASCII symbols (US positions) → the unshifted key they share, so "Cmd+Shift+=" matches "+". */
+const SHIFTED_SYMBOLS: Record<string, string> = {
+  '+': '=',
+  _: '-',
+  '{': '[',
+  '}': ']',
+  '<': ',',
+  '>': '.',
+  '?': '/',
+  ':': ';',
+  '"': "'",
+  '~': '`',
+  '|': '\\',
+}
+const ASCII_SYMBOL = /^[!-/:-@[-`{-~]$/
+
+/**
+ * Key name for an input, matched against accelerator keys. Like Chrome:
+ *  - letters follow the keyboard layout (`key`), so AZERTY's Cmd+Z is undo, not the physical W key;
+ *  - digits use the physical key (`code`), so AZERTY's unshifted digit row still selects tabs;
+ *  - ASCII symbols follow the layout too (Dvorak's "." sits on the physical E key);
+ *  - anything else (macOS Option combos, Cyrillic and other non-Latin layouts, dead keys) falls
+ *    back to the physical key, so Cmd+Option+V or Ctrl+T on a Russian layout still work.
+ */
 export function keyName(input: Pick<KeyInput, 'key' | 'code'>): string {
   const { code, key } = input
-  if (code.startsWith('Key') && code.length === 4) return code.slice(3)
+  if (/^[a-z]$/i.test(key)) return key.toUpperCase()
   if (code.startsWith('Digit') && code.length === 6) return code.slice(5)
   if (code.startsWith('Numpad') && code.length === 7 && /\d/.test(code[6] ?? '')) return code.slice(6)
+  if (ASCII_SYMBOL.test(key)) return SHIFTED_SYMBOLS[key] ?? key
+  if (code.startsWith('Key') && code.length === 4) return code.slice(3)
   if (CODE_NAMES[code]) return CODE_NAMES[code] as string
   if (key === ' ') return 'Space'
   return key.length === 1 ? key.toUpperCase() : key
