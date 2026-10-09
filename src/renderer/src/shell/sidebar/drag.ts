@@ -15,13 +15,16 @@ import { invoke } from '../../api'
 import { activeTabId } from '../../selectors'
 import { getOrbitState, getSeq, useMirror } from '../../store'
 import { computeDropTarget, type DropTarget, gridDropIndex, ROW_GAP, rowShifts, type Slot } from './dnd-model'
+import { reducedMotion, STANDARD } from './motion-tokens'
 import { IDLE_DRAG, useDrag, useSelection } from './ui-state'
 
 /** Movement before a press becomes a drag (TB-08: no long-press, a few pixels). */
 export const DRAG_THRESHOLD = 4
-/** Edge band that auto-scrolls the list, and its top speed in px per frame. */
-const SCROLL_EDGE = 44
-const SCROLL_MAX = 18
+/** Edge band that auto-scrolls the list, and its top speed in px per frame (≈1,200 px/s, FL-10). */
+const SCROLL_EDGE = 40
+const SCROLL_MAX = 20
+/** A drop slot only changes once the pointer is this far past the boundary (no flicker, FL-10). */
+const HYSTERESIS = 4
 /** Hold near the sidebar's left/right edge this long to slide to the neighbouring Space (SP-21). */
 const SPACE_DWELL_MS = 500
 /** Distance outside the window before a drop opens a new window (TB-09). */
@@ -32,10 +35,8 @@ export const ghostY = motionValue(0)
 export const ghostScale = motionValue(1)
 export const ghostOpacity = motionValue(1)
 
-const SPRING = { type: 'spring', stiffness: 520, damping: 42, mass: 0.7 } as const
-const SETTLE = { type: 'spring', stiffness: 420, damping: 36, mass: 0.8 } as const
-
-const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
+const SPRING = STANDARD
+const SETTLE = STANDARD
 
 interface Context {
   scroll: HTMLElement | null
@@ -69,6 +70,7 @@ interface Session {
   blockHeight: number
   lastX: number
   lastY: number
+  prevY: number
   raf: number
   dwell: { side: 'left' | 'right'; since: number } | null
   spaceAtStart: SpaceId
@@ -162,6 +164,7 @@ export function pressItem(
     blockHeight: 0,
     lastX: e.clientX,
     lastY: e.clientY,
+    prevY: e.clientY,
     raf: 0,
     dwell: null,
     spaceAtStart: ctx.spaceId,
@@ -169,6 +172,7 @@ export function pressItem(
   }
   const onMove = (ev: PointerEvent) => {
     if (ev.pointerId !== s.pointerId) return
+    s.prevY = s.lastY
     s.lastX = ev.clientX
     s.lastY = ev.clientY
     if (!s.started) {
@@ -236,7 +240,11 @@ function begin(s: Session, rect: DOMRect): void {
   ghostY.jump(rect.top)
   ghostOpacity.jump(1)
   ghostScale.jump(1)
-  if (!reducedMotion()) animate(ghostScale, 1.03, { duration: 0.12 })
+  // Lift (FL-10): a slight scale-up and a touch of transparency over ~110 ms.
+  if (!reducedMotion()) {
+    animate(ghostScale, 1.03, { duration: 0.11 })
+    animate(ghostOpacity, 0.95, { duration: 0.11 })
+  }
   const hidden: Record<string, true> = {}
   for (const id of s.ids) hidden[id] = true
   useDrag.setState({
@@ -279,23 +287,41 @@ function zoneAt(x: number, y: number): Zone {
   return { kind: 'none' }
 }
 
-function listTarget(s: Session): DropTarget | null {
+function listTarget(s: Session, prev: DropTarget | null): DropTarget | null {
   const scroll = ctx.scroll
   if (!scroll) return null
   const y = s.lastY - scroll.getBoundingClientRect().top + scroll.scrollTop
-  const target = computeDropTarget(s.slots, y, s.dragged, {
-    pinnedContainer: `pinned:${ctx.spaceId}`,
-    todayContainer: `today:${ctx.spaceId}`,
-  })
+  const at = (yy: number) =>
+    computeDropTarget(s.slots, yy, s.dragged, {
+      pinnedContainer: `pinned:${ctx.spaceId}`,
+      todayContainer: `today:${ctx.spaceId}`,
+    })
+  let target = at(y)
+  // Hysteresis: keep the current slot until the pointer is a few pixels past the boundary.
+  if (prev && !sameTarget(prev, target)) {
+    const back = y - Math.sign(s.lastY - s.prevY || 1) * HYSTERESIS
+    if (sameTarget(prev, at(back))) target = prev
+  }
   const hasFolder = s.ids.some(isFolderId)
   if (hasFolder && target.type === 'between' && target.container.startsWith('today:')) return null
   return target
 }
 
+function sameTarget(a: DropTarget | null, b: DropTarget | null): boolean {
+  if (!a || !b) return a === b
+  if (a.type === 'into' || b.type === 'into') return a.type === b.type && a.at === b.at
+  return a.container === b.container && a.index === b.index && a.at === b.at
+}
+
 function update(s: Session): void {
-  ghostX.set(s.lastX - s.grabX)
-  ghostY.set(s.lastY - s.grabY)
+  // Re-measure every move: rows may still be growing in, or the list may have changed under the
+  // drag. Layout offsets ignore the drag transforms, so this is cheap and always current.
+  if (ctx.spaceId === s.spaceAtStart) s.slots = measureSlots()
   const zone = zoneAt(s.lastX, s.lastY)
+  // The row stays in the sidebar's column (FL-10) unless it heads for the grid, a Space or out of the window.
+  const free = zone.kind === 'favorites' || zone.kind === 'space' || zone.kind === 'outside'
+  ghostX.set(free ? s.lastX - s.grabX : s.originX)
+  ghostY.set(s.lastY - s.grabY)
   const patch: Partial<typeof IDLE_DRAG> = {
     target: null,
     favIndex: null,
@@ -305,7 +331,7 @@ function update(s: Session): void {
   }
   let target: DropTarget | null = null
   if (zone.kind === 'list') {
-    target = listTarget(s)
+    target = listTarget(s, useDrag.getState().target)
     patch.target = target
     patch.intoFolder = target?.type === 'into' ? target.folderId : null
   } else if (zone.kind === 'favorites' && s.ids.every(isTabId)) {
@@ -518,14 +544,27 @@ function settle(s: Session, landing: 'row' | 'tile' | 'into' | 'away', folderId:
   }
   const r = el.getBoundingClientRect()
   if (landing === 'into') {
+    // Absorbed into the folder (FL-10): shrink to half size and fade into the folder icon, which pulses.
+    const icon = el.querySelector<HTMLElement>('.folder-row__icon')
+    const target = icon?.getBoundingClientRect() ?? r
     void Promise.all([
-      animate(ghostX, r.left + 12, SETTLE),
-      animate(ghostY, r.top, SETTLE),
-      animate(ghostScale, 0.6, { duration: 0.18 }),
+      animate(ghostX, target.left - 4, { duration: 0.18, ease: [0.4, 0, 0.2, 1] }),
+      animate(ghostY, target.top - r.height / 4, { duration: 0.18, ease: [0.4, 0, 0.2, 1] }),
+      animate(ghostScale, 0.5, { duration: 0.18 }),
       animate(ghostOpacity, 0, { duration: 0.18 }),
-    ]).then(finish)
+    ]).then(() => {
+      if (icon) {
+        icon.classList.remove('is-absorbing')
+        void icon.offsetWidth
+        icon.classList.add('is-absorbing')
+        setTimeout(() => icon.classList.remove('is-absorbing'), 260)
+      }
+      finish()
+    })
     return
   }
+  // The shadow eases off as the row settles (FL-10).
+  void animate(ghostOpacity, 1, { duration: 0.15 })
   void Promise.all([
     animate(ghostX, r.left, SETTLE),
     animate(ghostY, r.top, SETTLE),

@@ -46,6 +46,8 @@ export class TabRuntime {
   onUndoShortcut?: (tabId: TabId) => void
   /** A page closed itself (window.close()); treated like closing the tab (TB-06). */
   onPageClosed?: (tabId: TabId) => void
+  /** Control was released in a page (ends recent-tab switching, TB-05). */
+  onControlUp?: () => void
   /** A page tried to open a tab or pop-up without a user gesture. */
   onPopupBlocked?: (tabId: TabId, url: string) => void
   /** Last user gesture per tab, for the pop-up rule (NV-09). */
@@ -152,6 +154,7 @@ export class TabRuntime {
       this.trackPinnedTitle(tabId, title)
     })
     contents.on('before-input-event', (_event, input) => {
+      if (input.type === 'keyUp' && input.key === 'Control') this.onControlUp?.()
       // ⌘Z / Ctrl+Z: the page's own undo wins in text fields; elsewhere it undoes the last sidebar change.
       if (input.type !== 'keyDown' || input.shift || input.alt || input.key.toLowerCase() !== 'z') return
       const mod = process.platform === 'darwin' ? input.meta && !input.control : input.control && !input.meta

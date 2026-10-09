@@ -62,5 +62,6 @@
   "FV-10": { "built": "yes", "note": "see TB-04" },
   "FD-06": { "built": "yes", "note": "nesting by drag or New Folder from children; 14px indent per level" },
   "FD-07": { "built": "partial", "note": "emoji icon via Change Icon; open/closed glyphs; not full-colour" },
-  "FD-09": { "built": "partial", "note": "Rename, Change Icon, Duplicate, Copy All Links, Paste URL, Move to, Delete; no Open [Folder] command" }
+  "FD-09": { "built": "partial", "note": "Rename, Change Icon, Duplicate, Copy All Links, Paste URL, Move to, Delete; no Open [Folder] command" },
+  "TB-05": { "built": "partial", "note": "Ctrl+Tab / Ctrl+Shift+Tab step through the 5 most recent tabs while Ctrl is held (keyboard only); no overlay list yet" }
 }

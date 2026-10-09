@@ -1,3 +1,4 @@
+import { motion } from 'motion/react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { isFolderId } from '../../../../shared/ids'
 import { invoke } from '../../api'
@@ -92,13 +93,16 @@ export function IconPicker() {
   const list = q ? EMOJI.filter(([e, words]) => words.includes(q) || e === q) : EMOJI
   const typed = q && !/^[a-z0-9 ]+$/i.test(q) ? [...q][0] : undefined
   return (
-    <div
+    <motion.div
       className="icon-picker"
       ref={ref}
       style={{ top }}
       data-testid="icon-picker"
       role="dialog"
       aria-label="Choose icon"
+      initial={{ opacity: 0, scale: 0.97 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.15, ease: [0.2, 0.8, 0.2, 1] }}
     >
       <input
         ref={input}
@@ -136,6 +140,6 @@ export function IconPicker() {
       <button type="button" className="icon-picker__remove" onClick={() => set(null)}>
         Remove icon
       </button>
-    </div>
+    </motion.div>
   )
 }

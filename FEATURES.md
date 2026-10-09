@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 42 built (22 partial) · 57 tested · 0 feel right.
+**Totals:** 485 spec’d · 42 built (23 partial) · 59 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 30 | 35 |
-| P1 | 221 | 11 | 20 |
+| P0 | 174 | 30 | 36 |
+| P1 | 221 | 11 | 21 |
 | P2 | 83 | 1 | 2 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -60,7 +60,7 @@ Spec: `spec/tabs.md`
 | TB-02 | Create a new tab | P0 | ✅ | ✅ e2e | – | Cmd+T / + New Tab / link drop / Cmd+Alt+V paste; background link tabs gesture-gated |
 | TB-03 | Where new tabs are inserted | P0 | ✅ | ✅ e2e+unit | – | single rule todayInsertIndex(): top of Today |
 | TB-04 | Switching between tabs (pointer and keyboard) | P0 | ✅ | ✅ e2e+unit | – | click, Cmd+1-9 (Favorites setting, Cmd+9 last), Cmd+Alt+Up/Down skip collapsed rows |
-| TB-05 | Recent-tab switcher (Ctrl+Tab) | P1 | – | – | – |  |
+| TB-05 | Recent-tab switcher (Ctrl+Tab) | P1 | 🟡 partial | ✅ e2e | – | Ctrl+Tab / Ctrl+Shift+Tab step through the 5 most recent tabs while Ctrl is held (keyboard only); no overlay list yet |
 | TB-06 | Closing a tab | P0 | ✅ | ✅ e2e+unit | – | Today -> Archive, pinned/Favorites unload; next selection below/above/MRU; middle-click; Cmd+W closes window when empty |
 | TB-07 | Reopen the last closed tab | P0 | ✅ | ✅ e2e | – | Cmd+Shift+T stack with full history; Cmd+Z reopens too |
 | TB-08 | Reorder tabs by drag and drop | P0 | ✅ | ✅ e2e+unit | – | pointer drag, 4px threshold, rows spring apart, ghost lift/settle, auto-scroll, Escape cancel, undo; no haptics |
@@ -394,7 +394,7 @@ Spec: `spec/feel.md`
 | FL-18 | Split view create and resize | P1 | – | – | – |  |
 | FL-19 | Link preview open, expand, close | P1 | – | – | – |  |
 | FL-20 | Favorites tiles | P1 | – | – | – |  |
-| FL-21 | Sidebar scrolling and large-sidebar performance | P0 | – | – | – |  |
+| FL-21 | Sidebar scrolling and large-sidebar performance | P0 | – | ✅ e2e | – |  |
 | FL-22 | Toasts | P1 | – | – | – |  |
 | FL-23 | Page loading indicator | P1 | – | – | – |  |
 | FL-24 | Library and Archive motion | P2 | – | – | – |  |

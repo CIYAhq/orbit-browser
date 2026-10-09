@@ -1,5 +1,5 @@
-import { LayoutGroup, motion } from 'motion/react'
-import { forwardRef, memo, useMemo } from 'react'
+import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
+import { forwardRef, memo, useMemo, useState } from 'react'
 import { MAX_FAVORITES } from '../../../../shared/defaults'
 import { isTabId } from '../../../../shared/ids'
 import { isAwayFromPinned, tabTitle } from '../../../../shared/tabs'
@@ -8,6 +8,7 @@ import { activeTabId } from '../../selectors'
 import { useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
 import { pressItem } from './drag'
+import { POP, SNAPPY } from './motion-tokens'
 import { clearSelection, useDrag } from './ui-state'
 
 /** Stable empty list (a fresh [] per call would re-render forever). */
@@ -16,7 +17,7 @@ const NO_ITEMS: string[] = []
 /** Most tiles per grid row at the default width (FV-02). */
 const MAX_COLUMNS = 4
 
-const TILE_SPRING = { type: 'spring', stiffness: 520, damping: 40, mass: 0.7 } as const
+const TILE_SPRING = SNAPPY
 
 /**
  * The Favorites grid at the top of the sidebar (FV-01, FV-02), shared by every Space of
@@ -42,23 +43,25 @@ export const Favorites = memo(
         style={tiles.length > 0 ? { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` } : undefined}
       >
         <LayoutGroup id={`favorites-${profileId}`}>
-          {tiles.map((id) =>
-            id ? (
-              <FavoriteTile key={id} tabId={id} />
-            ) : (
-              <motion.div
-                key="placeholder"
-                layout
-                className="favorite favorite--placeholder"
-                data-testid="favorite-placeholder"
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={TILE_SPRING}
-              >
-                {visible.length === 0 && <span className="favorites__hint">Drop to add to Favorites</span>}
-              </motion.div>
-            ),
-          )}
+          <AnimatePresence initial={false} mode="popLayout">
+            {tiles.map((id) =>
+              id ? (
+                <FavoriteTile key={id} tabId={id} />
+              ) : (
+                <motion.div
+                  key="placeholder"
+                  layout
+                  className="favorite favorite--placeholder"
+                  data-testid="favorite-placeholder"
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={TILE_SPRING}
+                >
+                  {visible.length === 0 && <span className="favorites__hint">Drop to add to Favorites</span>}
+                </motion.div>
+              ),
+            )}
+          </AnimatePresence>
         </LayoutGroup>
       </div>
     )
@@ -69,6 +72,8 @@ const FavoriteTile = memo(function FavoriteTile({ tabId }: { tabId: string }) {
   const tab = useOrbit((s) => s.tabs[tabId])
   const active = useOrbit((s) => activeTabId(s) === tabId)
   const hidden = useDrag((s) => !!s.hidden[tabId])
+  // Tiles that arrive by drag appear at once under the ghost; others pop in (FL-20).
+  const [instant] = useState(() => hidden)
   if (!tab) return null
   const away = isAwayFromPinned(tab)
   const title = tabTitle(tab)
@@ -76,9 +81,12 @@ const FavoriteTile = memo(function FavoriteTile({ tabId }: { tabId: string }) {
     <motion.button
       layout
       transition={TILE_SPRING}
+      initial={instant ? false : { scale: 0.85, opacity: 0 }}
+      animate={{ scale: 1, opacity: hidden ? 0 : 1, transition: hidden ? { duration: 0 } : POP }}
+      exit={{ scale: 0.85, opacity: 0, transition: { duration: 0.15 } }}
+      whileTap={{ scale: 0.94 }}
       type="button"
       className={`favorite${active ? ' is-active' : ''}${tab.asleep ? ' is-asleep' : ''}${away ? ' is-away' : ''}`}
-      style={{ opacity: hidden ? 0 : 1 }}
       data-testid="favorite-tile"
       data-tab-id={tabId}
       data-fav-id={tabId}

@@ -17,30 +17,43 @@ import { activeTabId } from '../../selectors'
 import { getOrbitState, useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
 import { pressItem } from './drag'
+import { QUICK_EASE, reducedMotion, SNAPPY, SNAPPY_EASE } from './motion-tokens'
 import { RenameField } from './RenameField'
 import { clearSelection, startRename, useDrag, useKeyboardFocus, useRename, useSelection } from './ui-state'
 
 /** Indent per folder level (FD-06). */
 export const INDENT = 14
 
-const ROW_SPRING = { type: 'spring', stiffness: 560, damping: 44, mass: 0.7 } as const
-const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
+const ROW_SPRING = SNAPPY
+const EASE_OUT = SNAPPY_EASE
+/** Rows beyond this many in a batch leave together (FL-11 caps the sweep at about 450 ms). */
+const MAX_STAGGER_ROWS = 12
 
-/** Exit/enter of rows: height collapse so neighbours glide (FL-09); Clear sweeps out staggered (TD-04). */
-const EASE_OUT: [number, number, number, number] = [0.4, 0, 0.2, 1]
+/**
+ * Row enter/exit (FL-06, FL-09, FL-11): the row's height grows or collapses with the snappy
+ * spring so neighbours glide; content fades in over the last part of the growth; a closing
+ * row slides left 12 px as it fades; a Clear batch sweeps 24 px, 25 ms apart.
+ */
 const rowVariants: Variants = {
   hidden: { height: 0, opacity: 0 },
-  shown: { height: 'auto', opacity: 1, transition: { height: ROW_SPRING, opacity: { duration: 0.14 } } },
-  exit: (c: { stagger?: boolean; index?: number } | undefined) => ({
-    height: 0,
-    opacity: 0,
-    x: c?.stagger ? -16 : 0,
-    transition: {
-      height: { duration: 0.16, ease: EASE_OUT, delay: c?.stagger ? (c.index ?? 0) * 0.02 : 0 },
-      opacity: { duration: 0.1, delay: c?.stagger ? (c.index ?? 0) * 0.02 : 0 },
-      x: { duration: 0.14 },
-    },
-  }),
+  shown: {
+    height: 'auto',
+    opacity: 1,
+    transition: { height: ROW_SPRING, opacity: { duration: 0.12, delay: 0.07, ease: QUICK_EASE } },
+  },
+  exit: (c: { stagger?: boolean; index?: number } | undefined) => {
+    const delay = c?.stagger ? Math.min(c.index ?? 0, MAX_STAGGER_ROWS) * 0.025 : 0
+    return {
+      height: 0,
+      opacity: 0,
+      x: c?.stagger ? -24 : -12,
+      transition: {
+        height: { ...ROW_SPRING, delay: delay + 0.04 },
+        opacity: { duration: c?.stagger ? 0.16 : 0.13, ease: QUICK_EASE, delay },
+        x: { duration: c?.stagger ? 0.16 : 0.13, ease: QUICK_EASE, delay },
+      },
+    }
+  },
 }
 
 /** Rows leaving together, in list order (drives the cascade delay). */
@@ -156,8 +169,8 @@ function RowSlot({
   const order = present ? undefined : exitOrder.get(id)
   return (
     <motion.div
-      className={className}
-      style={{ y, opacity: hidden ? 0 : undefined }}
+      className={`${className}${hidden ? ' is-drag-hidden' : ''}`}
+      style={{ y }}
       variants={rowVariants}
       custom={{ stagger: order !== undefined, index: order }}
       onAnimationComplete={() => {
@@ -245,6 +258,8 @@ export const TabRowBody = memo(function TabRowBody({ tabId, depth }: { tabId: st
   const focused = useKeyboardFocus((s) => s.id === tabId)
   const renaming = useRename((s) => (s.id === tabId ? s.mode : null))
   const [iconHover, setIconHover] = useState(false)
+  // A tab that just opened in the background glows once so the eye finds it (FL-06).
+  const [fresh] = useState(() => !!tab && !active && Date.now() - tab.createdAt < 1500)
   if (!tab) return null
   const { prefix, title } = rowTitle(tab)
   const away = isAwayFromPinned(tab)
@@ -255,7 +270,7 @@ export const TabRowBody = memo(function TabRowBody({ tabId, depth }: { tabId: st
       tabIndex={-1}
       aria-selected={active}
       aria-label={prefix ? `${prefix} / ${title}` : title}
-      className={`tab-row${active ? ' is-active' : ''}${selected ? ' is-selected' : ''}${tab.asleep ? ' is-asleep' : ''}${tab.loading ? ' is-loading' : ''}${away ? ' is-away' : ''}${focused ? ' is-focused' : ''}`}
+      className={`tab-row${active ? ' is-active' : ''}${selected ? ' is-selected' : ''}${tab.asleep ? ' is-asleep' : ''}${tab.loading ? ' is-loading' : ''}${away ? ' is-away' : ''}${focused ? ' is-focused' : ''}${fresh ? ' is-new-background' : ''}`}
       style={{ paddingLeft: 8 + depth * INDENT }}
       data-testid="tab-row"
       data-tab-id={tabId}
@@ -366,7 +381,7 @@ const FolderRow = memo(function FolderRow({
   const open = !folder.collapsed
   const FolderIcon = open ? FolderOpen : Folder
   return (
-    <div className="folder" data-testid="folder" data-folder-id={folderId} style={{ opacity: hidden ? 0 : undefined }}>
+    <div className={`folder${hidden ? ' is-drag-hidden' : ''}`} data-testid="folder" data-folder-id={folderId}>
       <RowSlot
         id={folderId}
         folder={open ? 'open' : 'closed'}

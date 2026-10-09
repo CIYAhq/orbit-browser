@@ -259,6 +259,8 @@ test('[TB-08][PN-02] drag reorders Today, pins above the divider, unpins below, 
   const last = row(shell, before[before.length - 1] as string)
   await drag(shell, last, { x: firstToday.x, y: firstToday.box.y + 2 }, { hold: true })
   await expect(shell.getByTestId('drag-ghost')).toBeVisible()
+  // The source row is not drawn while its ghost is lifted (only the gap remains).
+  await expect(last).toBeHidden()
   await shell.keyboard.press('Escape')
   await shell.mouse.up()
   await expect(shell.getByTestId('drag-ghost')).toHaveCount(0)

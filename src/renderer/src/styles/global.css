@@ -860,12 +860,48 @@ html.is-dragging-tab * {
   background: color-mix(in srgb, var(--active) 100%, transparent);
   backdrop-filter: blur(14px);
   box-shadow:
-    0 10px 28px rgba(0, 0, 0, 0.18),
-    0 2px 6px rgba(0, 0, 0, 0.12),
+    0 6px 16px rgba(0, 0, 0, 0.22),
     0 0 0 0.5px rgba(0, 0, 0, 0.08);
   transform-origin: 30% 50%;
   white-space: nowrap;
   overflow: hidden;
+}
+
+.folder-row__icon.is-absorbing {
+  animation: folder-absorb 220ms ease-out;
+}
+
+@keyframes folder-absorb {
+  50% {
+    transform: scale(1.1);
+  }
+}
+
+/* The dragged rows' slots stay in layout (the gap) but are not drawn. */
+.is-drag-hidden {
+  visibility: hidden;
+}
+
+/* Same-frame press feedback before the selection round-trip lands (FL-05, FL-29). */
+.tab-row:active:not(.is-active) {
+  background: color-mix(in srgb, var(--active) 70%, transparent);
+}
+
+/* Off-screen rows stay out of layout and paint work (FL-21). */
+.row-slot {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 32px;
+}
+
+/* A tab opened in the background glows briefly so the eye finds it (FL-06). */
+.tab-row.is-new-background {
+  animation: row-glow 420ms ease-out;
+}
+
+@keyframes row-glow {
+  30% {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
 }
 
 .drag-ghost--tile {

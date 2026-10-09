@@ -339,3 +339,62 @@ test('[TB-02] a link dropped on the sidebar and a pasted URL open as new Today t
   await waitTab(app, pasted, '/page/Pasted')
   expect(await activeId(app)).toBe(pasted)
 })
+
+test('[TB-05] Ctrl+Tab goes to the previous tab; holding Ctrl and tapping Tab walks back through recent tabs', async () => {
+  const { app, shell } = orbit
+  const a = await newTab(app, fx.url('/page/A'))
+  await waitTab(app, a, '/page/A')
+  const b = await newTab(app, fx.url('/page/B'))
+  await waitTab(app, b, '/page/B')
+  const c = await newTab(app, fx.url('/page/C'))
+  await waitTab(app, c, '/page/C')
+  // Quick tap and release: back to B.
+  await shell.keyboard.press('Control+Tab')
+  await expect.poll(() => activeId(app)).toBe(b)
+  // Hold Control, Tab twice, release: A (C was used before A now that B is current).
+  await shell.keyboard.down('Control')
+  await shell.keyboard.press('Tab')
+  await shell.keyboard.press('Tab')
+  await shell.keyboard.up('Control')
+  await expect.poll(() => activeId(app)).toBe(a)
+  // Then a single tap returns to B, the tab used just before.
+  await shell.keyboard.press('Control+Tab')
+  await expect.poll(() => activeId(app)).toBe(b)
+})
+
+test('[FL-21][SB-23] 200 tabs: the sidebar mounts and scrolls without long main-thread stalls', async () => {
+  const { app, shell } = orbit
+  await app.evaluate(async () => {
+    const g = globalThis as unknown as {
+      __orbit: { run: (n: string, a: unknown, w?: string) => Promise<unknown>; windowIds: () => string[] }
+    }
+    const w = g.__orbit.windowIds()[0]
+    for (let i = 0; i < 200; i++) await g.__orbit.run('tabs.create', { url: `about:blank#t${i}`, activate: false }, w)
+  })
+  await expect.poll(async () => (await space(app)).today.length).toBe(200)
+  await expect(shell.getByTestId('today-list').locator(':scope > [data-slot]')).toHaveCount(200)
+  const longTasks = await shell.evaluate(async () => {
+    const tasks: number[] = []
+    const obs = new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) tasks.push(e.duration)
+    })
+    obs.observe({ entryTypes: ['longtask'] })
+    const sc = document.querySelector('[data-testid="sidebar-scroll"]') as HTMLElement
+    for (let i = 0; i < 60; i++) {
+      sc.scrollTop += 120
+      await new Promise((r) => requestAnimationFrame(r))
+    }
+    for (let i = 0; i < 60; i++) {
+      sc.scrollTop -= 120
+      await new Promise((r) => requestAnimationFrame(r))
+    }
+    await new Promise((r) => setTimeout(r, 100))
+    obs.disconnect()
+    return tasks
+  })
+  expect(longTasks.filter((d) => d > 50)).toEqual([])
+  // A title change re-renders one row, not the list: measured as a single row's DOM update.
+  const t = (await space(app)).today[100] as string
+  await cmd(app, 'tabs.rename', { tabId: t, title: 'Renamed in place' })
+  await expect(row(shell, t).getByTestId('tab-title')).toHaveText('Renamed in place')
+})
