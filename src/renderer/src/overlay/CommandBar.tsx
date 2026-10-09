@@ -311,7 +311,15 @@ export function CommandBar({
   // Stable callbacks for memoized rows.
   const latest = useRef({ select, choose, removeRow })
   latest.current = { select, choose, removeRow }
-  const onRowHover = useCallback((i: number) => latest.current.select(i), [])
+  // A row follows the mouse only once the pointer moves. A bar that opens under a resting pointer
+  // gets a mouse-move at an unchanged spot (macOS sends one), and rows re-ranked under a still
+  // pointer can too: neither may select the row under it, or Enter would run that row (CB-18).
+  const pointer = useRef<{ x: number; y: number } | null>(null)
+  const onRowHover = useCallback((i: number, e: MouseEvent) => {
+    const last = pointer.current
+    pointer.current = { x: e.screenX, y: e.screenY }
+    if (last && (last.x !== e.screenX || last.y !== e.screenY)) latest.current.select(i)
+  }, [])
   const onRowChoose = useCallback(
     (r: SearchResult, e: MouseEvent) => latest.current.choose(r, e.metaKey || e.ctrlKey ? 'new-tab' : undefined),
     [],

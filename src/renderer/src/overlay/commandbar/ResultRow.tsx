@@ -53,7 +53,7 @@ interface RowProps {
   r: SearchResult
   index: number
   selected: boolean
-  onHover: (index: number) => void
+  onHover: (index: number, e: MouseEvent) => void
   onChoose: (r: SearchResult, e: MouseEvent) => void
   onRemove: (r: SearchResult) => void
   /** False while the bar animates out: no test ids then. */
@@ -87,7 +87,7 @@ export const ResultRow = memo(
         data-id={r.id}
         data-kind={r.kind}
         data-label={r.label}
-        onMouseMove={() => onHover(index)}
+        onMouseMove={(e) => onHover(index, e)}
         onMouseDown={(e) => {
           e.preventDefault()
           if (e.button === 0) onChoose(r, e)
