@@ -25,6 +25,7 @@ import {
   neighborPane,
   normalizeLayout,
   PANE_GAP,
+  paneDropZone,
   paneOrder,
   removePane,
   rowDropSide,
@@ -158,6 +159,15 @@ describe('split layout tree', () => {
     expect(rowDropSide(r, 150, 16)).toBe('right')
     expect(rowDropSide(r, 150, 2)).toBeNull()
     expect(rowDropSide(r, 150, 30)).toBeNull()
+  })
+
+  it('picks swap or move zones when a pane is dragged onto another', () => {
+    const r = { x: 0, y: 0, width: 400, height: 300 }
+    expect(paneDropZone(r, 200, 150)).toBe('center')
+    expect(paneDropZone(r, 20, 150)).toBe('left')
+    expect(paneDropZone(r, 390, 150)).toBe('right')
+    expect(paneDropZone(r, 200, 10)).toBe('top')
+    expect(paneDropZone(r, 200, 295)).toBe('bottom')
   })
 
   it('builds even layouts', () => {
