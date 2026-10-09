@@ -251,12 +251,18 @@ test('[SV-03][SV-11] Add Split Below from the command bar stacks a pane; flip tu
   const bottom = JSON.stringify(split?.layout)
     .match(/t-[a-z0-9]+/g)
     ?.find((id) => id !== a) as string
+  // Panes move to their new places over a few frames (slow ones on the macOS runner): poll for
+  // the arrangement, then check the native views over it.
+  await expect
+    .poll(async () => (await paneBox(orbit.shell, bottom)).y - (await paneBox(orbit.shell, a)).y)
+    .toBeGreaterThan(100)
   await expectViewsOverPanes(orbit, [a, bottom])
-  expect((await paneBox(orbit.shell, bottom)).y).toBeGreaterThan((await paneBox(orbit.shell, a)).y)
   await action(orbit.app, 'split.flip')
   await expect.poll(async () => (await splitOf(orbit.app, a))?.layout.type).toBe('row')
+  await expect
+    .poll(async () => (await paneBox(orbit.shell, bottom)).x - (await paneBox(orbit.shell, a)).x)
+    .toBeGreaterThan(100)
   await expectViewsOverPanes(orbit, [a, bottom])
-  expect((await paneBox(orbit.shell, bottom)).x).toBeGreaterThan((await paneBox(orbit.shell, a)).x)
 })
 
 test('[SV-04][SV-25] dragging a tab row onto the page makes a split; a full split refuses', async () => {
