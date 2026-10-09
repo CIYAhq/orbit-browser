@@ -20,7 +20,12 @@ export function installMenu(ctx: MainContext): void {
     return {
       label: label ?? action?.title ?? id,
       accelerator: accel ? toElectronAccelerator(accel) : undefined,
-      click: () => void ctx.actions.run(id, { windowId: ctx.windows.focusedWindowId() }),
+      click: () => {
+        const windowId = ctx.windows.focusedWindowId()
+        // With a page's popup or detached DevTools focused, Close Tab closes that window instead.
+        if (!windowId && id === 'tab.close' && ctx.windows.closeFocusedForeign()) return
+        void ctx.actions.run(id, { windowId })
+      },
     }
   }
   const template: MenuItemConstructorOptions[] = [

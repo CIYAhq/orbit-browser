@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 46 built (21 partial) · 61 tested · 0 feel right.
+**Totals:** 485 spec’d · 46 built (21 partial) · 69 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 30 | 36 |
-| P1 | 221 | 15 | 23 |
+| P0 | 174 | 30 | 40 |
+| P1 | 221 | 15 | 27 |
 | P2 | 83 | 1 | 2 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -133,14 +133,14 @@ Spec: `spec/spaces.md`
 | SP-08 | Switch Spaces with a trackpad swipe | P0 | – | – | – |  |
 | SP-09 | Switch Spaces with the keyboard, mouse buttons and command bar | P0 | – | – | – |  |
 | SP-10 | What switching Space does | P0 | – | – | – |  |
-| SP-11 | Reorder Spaces | P1 | – | – | – |  |
+| SP-11 | Reorder Spaces | P1 | – | ✅ e2e | – |  |
 | SP-12 | Delete a Space | P0 | – | – | – |  |
 | SP-13 | Spaces overview in the Library | P1 | – | – | – |  |
 | SP-14 | Open the theme picker | P0 | – | – | – |  |
 | SP-15 | Theme colours and gradients | P0 | – | – | – |  |
 | SP-16 | How the Space theme colours the sidebar, frame and other surfaces | P0 | – | – | – |  |
 | SP-17 | Grain, intensity, presets and reset | P1 | – | – | – |  |
-| SP-18 | Light / Dark / Automatic switch in the theme picker | P1 | – | – | – |  |
+| SP-18 | Light / Dark / Automatic switch in the theme picker | P1 | – | ✅ e2e | – |  |
 | SP-19 | Theme transition between Spaces | P1 | – | – | – |  |
 | SP-20 | Per-Space pinned and Today sections | P0 | – | – | – |  |
 | SP-21 | Move tabs between Spaces | P0 | – | – | – |  |
@@ -242,13 +242,13 @@ Spec: `spec/navigation.md`
 | NV-11 | Private (incognito) window | P0 | – | – | – |  |
 | NV-12 | Page context menu | P0 | – | – | – |  |
 | NV-13 | Load-error pages | P1 | – | – | – |  |
-| NV-14 | Crashed or unresponsive tab | P1 | – | – | – |  |
-| NV-15 | Permission prompts | P0 | – | – | – |  |
+| NV-14 | Crashed or unresponsive tab | P1 | – | ✅ e2e | – |  |
+| NV-15 | Permission prompts | P0 | – | ✅ e2e | – |  |
 | NV-16 | Site controls panel | P0 | – | – | – |  |
 | NV-17 | Copy the current URL | P0 | – | – | – |  |
-| NV-18 | Links from other apps (Orbit as the default browser) | P0 | – | – | – |  |
+| NV-18 | Links from other apps (Orbit as the default browser) | P0 | – | ✅ e2e | – |  |
 | NV-19 | Links that open other apps (external protocols) | P1 | – | – | – |  |
-| NV-20 | Full screen | P1 | – | – | – |  |
+| NV-20 | Full screen | P1 | – | ✅ e2e | – |  |
 | NV-21 | Save page and view source | P2 | – | – | – |  |
 | NV-22 | Translate a page | P2 | – | – | – |  |
 | NV-23 | Reader mode | P2 | – | – | – |  |
@@ -347,7 +347,7 @@ Spec: `spec/shortcuts.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| KS-01 | One keymap, remapping and persistence | P0 | – | – | – |  |
+| KS-01 | One keymap, remapping and persistence | P0 | – | ✅ e2e | – |  |
 | KS-02 | Conflicts with web pages ("prefer websites" vs "prefer Orbit") | P0 | – | – | – |  |
 | KS-03 | Platform mapping rules | P0 | – | – | – |  |
 | KS-04 | Command bar and address | P0 | – | – | – |  |
@@ -413,7 +413,7 @@ Spec: `spec/appearance.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| AP-01 | Light, Dark or Match system | P0 | – | – | – |  |
+| AP-01 | Light, Dark or Match system | P0 | – | ✅ e2e | – |  |
 | AP-02 | Theme colours carry through the whole interface | P1 | – | – | – |  |
 | AP-03 | Restore the default (neutral) theme | P1 | – | – | – |  |
 | AP-04 | Dark mode quality | P1 | – | – | – |  |

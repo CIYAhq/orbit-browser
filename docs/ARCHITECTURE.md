@@ -77,7 +77,8 @@ src/main/            main process
   peek/ miniwindow/  link preview, mini window                      lane: peek-mini
   media/             PiP, mini player                               lane: peek-mini (media)
   tweaks/ extensions/                                               lane: tweaks-extensions
-  archive/ history/                                                 lane: archive-persistence
+  history/           browsing-history store (per-profile JSONL + index) lane: commandbar (query API used by archive)
+  archive/                                                          lane: archive-persistence
   settings/ import/ downloads/ updates/                             lane: settings-import
 src/shared/          types and pure logic shared by main+renderer (state, tree, url, theme, actions, commands/<area>.ts per lane)
 src/renderer/src/
@@ -113,7 +114,7 @@ Rules: no synchronous disk I/O on hot paths after boot, no full-state broadcasts
 - **Unit** (`vitest`): shared logic (tree moves, URL parsing, accelerators, theme math, persistence normalization), main-process models with fakes. Fast; run on every commit.
 - **E2E** (`@playwright/test` `_electron`): `tests/e2e/helpers.ts` launches the built app with an isolated `userData` and `ORBIT_E2E=1`. That exposes `globalThis.__orbit` test hooks in main (state, view bounds, run command) and serves local fixture pages from a loopback HTTP server, so there's no network dependence. **Every test title starts with the feature IDs it covers**, e.g. `test('[TB-06][TB-07] close and reopen a tab', …)`. `scripts/features.mjs` reads those IDs to mark rows tested in `FEATURES.md`.
 - **CI** (`.github/workflows/ci.yml`): typecheck + lint + unit (Linux), e2e under Xvfb (Linux), and build + unit + e2e + unsigned `.dmg`/`.zip` packaging (macOS). Green CI is required before merge.
-- **Feel checks**: screen captures under Xvfb (`ffmpeg -f x11grab`) for each feature ID go to `clips/` in the Orca context directory. "Feels right" in `FEATURES.md` is a lead sign-off against `feel.md`.
+- **Feel checks and clips**: `scripts/capture/record.mjs <scenario>` drives the built app through `scripts/capture/scenarios/<scenario>.mjs` while ffmpeg (`ORBIT_FFMPEG`, needs x11grab) records the X display, so native tab views are captured exactly as composited. Clips are named by feature ID and stored in `clips/` in the Orca context directory, screenshots in `screenshots/`. "Feels right" in `FEATURES.md` is a lead sign-off against `feel.md`.
 
 ## 10. Security baseline
 
@@ -121,4 +122,6 @@ Sandboxed, context-isolated renderers everywhere. No Node in pages. Pages never 
 
 ## 11. Packaging and updates
 
-`electron-builder` produces unsigned macOS `.dmg` and `.zip` (arm64 + x64) in CI, and a Linux `dir` build for local testing. The updater is a stub for now (UP-10): it checks a release feed, says when a newer version exists, and links to it. There's no silent install until signing exists.
+`electron-builder` produces ad-hoc signed macOS `.dmg` and `.zip` (arm64 + x64) in CI, and a Linux `dir` build for local testing. Ad-hoc signing (`mac.identity: '-'`, no certificate) keeps arm64 Macs from rejecting the bundle as "damaged"; until Orbit has a Developer ID, a downloaded build still needs right-click → Open once (or `xattr -dr com.apple.quarantine /Applications/Orbit.app`). The updater is a stub for now (UP-10): it checks a release feed, says when a newer version exists, and links to it. There's no silent install until signing exists.
+
+Only packages the main process imports at runtime belong in `dependencies` (today just `immer`); they are the only `node_modules` packed into `app.asar`. Renderer packages (React, motion, lucide, dnd-kit, zustand) are bundled by Vite and live in `devDependencies`.
