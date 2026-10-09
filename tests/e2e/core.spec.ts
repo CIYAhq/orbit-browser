@@ -362,7 +362,13 @@ test('[CB-22] Enter right after typing opens what was typed, not a row left from
   expect(s.tabs[active ?? '']?.url).toBe(two)
 })
 
-test('[NV-18] links and files from other apps open as tabs in the current Space (review F10)', async () => {
+test('[NV-18][MW-11] links and files from other apps open as tabs in the current Space (review F10)', async () => {
+  // Mini Windows off (MW-11): links from other apps open as tabs. mini-window.spec.ts covers the default.
+  await orbit.app.evaluate(() => {
+    ;(globalThis as unknown as OrbitGlobal).__orbit.ctx.store.update((d) => {
+      d.settings.miniWindowForExternalLinks = false
+    })
+  })
   const s0 = await state(orbit.app)
   const windowId = Object.keys(s0.windows)[0] as string
   const spaceId = s0.windows[windowId]?.spaceId as string

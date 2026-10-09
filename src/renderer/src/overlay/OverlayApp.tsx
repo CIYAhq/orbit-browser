@@ -5,6 +5,7 @@ import { isSpacePanel, SpacePanels } from '../shell/spaces/SpacePanels'
 import { useWindow } from '../store'
 import { paletteVars, usePalette } from '../theme'
 import { CommandBar } from './CommandBar'
+import { PeekLayer } from './PeekLayer'
 
 /**
  * Transparent full-window layer above the tab views. It is only visible while
@@ -54,6 +55,7 @@ export function OverlayApp() {
           {overlay?.kind === 'panel' && isSpacePanel(overlay.panel) && (
             <SpacePanels key={overlay.nonce} overlay={overlay} />
           )}
+          {overlay?.kind === 'peek' && <PeekLayer key={overlay.nonce} overlay={overlay} />}
         </div>
       </MotionConfig>
     </LazyMotion>
