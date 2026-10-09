@@ -694,7 +694,9 @@ export class WindowManager {
         continue
       }
       if (now.overlay !== before?.overlay) {
-        if (now.overlay.kind === 'none') this.hideOverlay(rec)
+        // A Peek has played its own close by now (or was dismissed outright): its layer goes at
+        // once so the page takes clicks again (FL-19). Other overlays linger to animate out.
+        if (now.overlay.kind === 'none') this.hideOverlay(rec, before?.overlay.kind === 'peek')
         else if (!rec.overlayShown || overlayKey(now.overlay) !== overlayKey(before?.overlay)) this.showOverlay(rec)
         // The same overlay changed (e.g. a Peek's phase or area): keep its place and focus.
         else this.fitOverlay(rec)
@@ -771,7 +773,7 @@ export class WindowManager {
     overlay.webContents.focus()
   }
 
-  private hideOverlay(rec: WindowRecord): void {
+  private hideOverlay(rec: WindowRecord, immediately = false): void {
     if (!rec.overlayShown || !rec.overlay) return
     rec.overlayShown = false
     // Focus returns to the page at once (or when the window is next focused); the view stays up
@@ -780,6 +782,10 @@ export class WindowManager {
     else rec.refocusPage = true
     const overlay = rec.overlay
     clearTimeout(rec.overlayHideTimer)
+    if (immediately) {
+      overlay.setVisible(false)
+      return
+    }
     rec.overlayHideTimer = setTimeout(() => {
       rec.overlayHideTimer = undefined
       if (rec.overlayShown || rec.win.isDestroyed() || overlay.webContents.isDestroyed()) return

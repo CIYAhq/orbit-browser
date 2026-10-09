@@ -179,6 +179,31 @@ test('[PK-01][PK-09] the Peek page takes the keyboard when it opens and the sour
   await expect.poll(() => focused(source)).toBe(true)
 })
 
+test('[PK-09][FL-19] a closed Peek leaves no layer over the page: it takes clicks again at once', async () => {
+  const { source, peekTab } = await openPeekFromPinned()
+  // In main, note whether the overlay view is still up at the moment the Peek ends.
+  await orbit.app.evaluate(() => {
+    const g = globalThis as unknown as OrbitGlobal & { __overlayUp?: boolean[] }
+    const ctx = g.__orbit.ctx
+    g.__overlayUp = []
+    ctx.store.subscribe((next, prev) => {
+      for (const [id, w] of Object.entries(next.windows)) {
+        if (w.overlay.kind !== 'none' || prev.windows[id]?.overlay.kind !== 'peek') continue
+        const overlay = ctx.windows
+          .get(id)
+          ?.contentView.children.find((v) =>
+            (v as Electron.WebContentsView).webContents?.getURL().includes('view=overlay'),
+          )
+        g.__overlayUp?.push(overlay?.getVisible() ?? false)
+      }
+    })
+  })
+  await pressInTab(orbit.app, peekTab, 'Escape')
+  await expectClosed(source, peekTab)
+  const up = await orbit.app.evaluate(() => (globalThis as unknown as { __overlayUp?: boolean[] }).__overlayUp)
+  expect(up).toEqual([false])
+})
+
 test('[PK-09] ⌘W closes the Peek only, never the source tab', async () => {
   const { source, peekTab } = await openPeekFromPinned()
   await pressInTab(orbit.app, peekTab, 'Mod+W')
