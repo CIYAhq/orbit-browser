@@ -35,6 +35,8 @@ interface WindowRecord {
 interface Attachment {
   view: WebContentsView
   windowId: WindowId
+  /** Id of the view's web contents, taken while it was alive (a destroyed one can't be asked). */
+  contentsId: number
 }
 
 const isMac = process.platform === 'darwin'
@@ -99,7 +101,7 @@ export class WindowManager {
   private uiContents = new Map<number, WindowId>()
   /** Each tab's view that is placed in a window, and which window. Compared by view, not tab id. */
   private attached = new Map<TabId, Attachment>()
-  /** Tabs whose page closed its own web contents (window.close()): don't silently reopen them. */
+  /** Tabs whose page closed its own web contents (window.close()): not reopened until selected again. */
   private selfClosed = new Set<TabId>()
   /** Main window that most recently had focus (fallback when no window has focus). */
   private lastFocused: WindowId | undefined
@@ -153,7 +155,7 @@ export class WindowManager {
     if (ui) return ui
     const tabId = this.ctx.tabs.tabIdFor(contents)
     const entry = tabId ? this.attached.get(tabId) : undefined
-    return entry && entry.view.webContents === contents ? entry.windowId : undefined
+    return entry && entry.contentsId === contents.id ? entry.windowId : undefined
   }
 
   /**
@@ -169,7 +171,12 @@ export class WindowManager {
       return focused.isDestroyed() ? undefined : this.uiContents.get(focused.webContents.id)
     }
     const contents = webContents.getFocusedWebContents()
-    if (contents && !contents.isDestroyed()) return this.windowIdFor(contents)
+    if (contents && !contents.isDestroyed()) {
+      const owner = this.windowIdFor(contents)
+      if (owner) return owner
+      // Focus in contents Orbit doesn't own (detached DevTools): not an Orbit window.
+      if (!this.isUi(contents) && !this.ctx.tabs.tabIdFor(contents)) return undefined
+    }
     const last = this.lastFocused ? this.records.get(this.lastFocused) : undefined
     if (last && !last.win.isDestroyed()) return last.id
     const all = [...this.records.values()].filter((r) => !r.win.isDestroyed())
@@ -190,7 +197,7 @@ export class WindowManager {
     const contents = webContents.getFocusedWebContents()
     if (!contents) return false
     for (const tabId of this.ctx.tabs.liveTabIds()) {
-      const page = this.ctx.tabs.contents(tabId)
+      const page = this.liveContents(tabId)
       if (page && page.devToolsWebContents === contents) {
         page.closeDevTools()
         return true
@@ -382,7 +389,9 @@ export class WindowManager {
       if (entry?.windowId === rec.id) entry.view.setVisible(false)
     }
     for (const pane of panes) {
-      const view = this.ctx.tabs.ensure(pane.tabId)
+      // A page that closed itself stays closed until the tab is selected again (onState).
+      if (this.selfClosed.has(pane.tabId)) continue
+      const view = this.ensureView(pane.tabId)
       if (!view) continue
       this.attach(rec, pane.tabId, view)
       view.setBounds(roundRect(pane.rect))
@@ -405,7 +414,7 @@ export class WindowManager {
     const entry = tabId ? this.attached.get(tabId) : undefined
     if (!tabId || !entry || entry.windowId !== rec.id || !shown.has(tabId)) {
       rec.htmlFullscreen = undefined
-      const contents = tabId ? this.ctx.tabs.contents(tabId) : undefined
+      const contents = tabId ? this.liveContents(tabId) : undefined
       contents
         ?.executeJavaScriptInIsolatedWorld(EXIT_FULLSCREEN_WORLD, [
           { code: 'document.fullscreenElement && document.exitFullscreen()' },
@@ -424,10 +433,10 @@ export class WindowManager {
     entry.view.setBorderRadius(0)
   }
 
-  private setHtmlFullscreen(tabId: TabId, contents: WebContents, on: boolean): void {
+  private setHtmlFullscreen(tabId: TabId, contentsId: number, on: boolean): void {
     if (on) {
       const entry = this.attached.get(tabId)
-      const rec = entry && entry.view.webContents === contents ? this.records.get(entry.windowId) : undefined
+      const rec = entry?.contentsId === contentsId ? this.records.get(entry.windowId) : undefined
       if (!rec) return
       rec.htmlFullscreen = tabId
       this.applyPanes(rec.id, rec.panes, rec.radius)
@@ -442,7 +451,7 @@ export class WindowManager {
 
   /** Reloads a tab whose page crashed (e.g. when the user selects it again). True if it did. */
   reloadIfCrashed(tabId: TabId): boolean {
-    const contents = this.ctx.tabs.contents(tabId)
+    const contents = this.liveContents(tabId)
     if (!contents?.isCrashed()) return false
     contents.reload()
     return true
@@ -494,7 +503,7 @@ export class WindowManager {
 
   focusActiveTab(windowId: WindowId): void {
     const tabId = activeTabOf(this.ctx.store.state, windowId)
-    const contents = tabId ? this.ctx.tabs.contents(tabId) : undefined
+    const contents = tabId ? this.liveContents(tabId) : undefined
     if (contents) contents.focus()
     else this.records.get(windowId)?.win.webContents.focus()
   }
@@ -521,7 +530,7 @@ export class WindowManager {
     // Insert below the overlay so menus and the command bar stay on top.
     const overlayIndex = rec.overlay ? children.indexOf(rec.overlay) : -1
     rec.win.contentView.addChildView(view, overlayIndex >= 0 ? overlayIndex : undefined)
-    this.attached.set(tabId, { view, windowId: rec.id })
+    this.attached.set(tabId, { view, windowId: rec.id, contentsId: view.webContents.id })
     this.selfClosed.delete(tabId)
     if (loser && !loser.win.isDestroyed()) {
       this.applyPanes(
@@ -529,6 +538,25 @@ export class WindowManager {
         loser.panes.filter((p) => p.tabId !== tabId),
         loser.radius,
       )
+    }
+  }
+
+  /**
+   * A tab's live web contents. Reads the view directly: while a page closes itself the view's
+   * webContents is already gone before 'destroyed' fires, and must not throw here.
+   */
+  private liveContents(tabId: TabId): WebContents | undefined {
+    const contents = this.ctx.tabs.get(tabId)?.webContents as WebContents | undefined
+    return contents && !contents.isDestroyed() ? contents : undefined
+  }
+
+  /** The tab's view, woken if needed; undefined (not a throw) while its old contents is half gone. */
+  private ensureView(tabId: TabId): WebContentsView | undefined {
+    try {
+      return this.ctx.tabs.ensure(tabId)
+    } catch (err) {
+      console.error('[windows] could not show tab', tabId, err)
+      return undefined
     }
   }
 
@@ -548,11 +576,12 @@ export class WindowManager {
 
   /** Follows a tab's live web contents: fullscreen requests, and pages that close themselves. */
   private watchTab(tabId: TabId, contents: WebContents): void {
-    contents.on('enter-html-full-screen', () => this.setHtmlFullscreen(tabId, contents, true))
-    contents.on('leave-html-full-screen', () => this.setHtmlFullscreen(tabId, contents, false))
+    const contentsId = contents.id
+    contents.on('enter-html-full-screen', () => this.setHtmlFullscreen(tabId, contentsId, true))
+    contents.on('leave-html-full-screen', () => this.setHtmlFullscreen(tabId, contentsId, false))
     contents.once('destroyed', () => {
       const entry = this.attached.get(tabId)
-      if (!entry || entry.view.webContents !== contents) return // slept or closed by Orbit: already detached
+      if (!entry || entry.contentsId !== contentsId) return // slept or closed by Orbit: already detached
       // The page closed itself (window.close()) or its contents went away without Orbit asking.
       this.attached.delete(tabId)
       this.records.get(entry.windowId)?.visible.delete(tabId)
@@ -580,7 +609,10 @@ export class WindowManager {
       }
       const tabNow = activeTabOf(next, rec.id)
       const tabBefore = before ? activeTabOf(prev, rec.id) : null
-      if (tabNow !== tabBefore) this.fastSwitch(rec, next, tabNow)
+      if (tabNow !== tabBefore) {
+        if (tabNow) this.selfClosed.delete(tabNow)
+        this.fastSwitch(rec, next, tabNow)
+      }
       const spaceNow = next.spaces[now.spaceId]
       const spaceBefore = before ? prev.spaces[before.spaceId] : undefined
       if (spaceNow?.theme !== spaceBefore?.theme) this.applyBackground(rec)
@@ -601,7 +633,7 @@ export class WindowManager {
       const state = this.ctx.store.state
       const shown = shownTabs(state, rec.id)
       const missing = rec.panes.some(
-        (p) => shown.has(p.tabId) && !this.selfClosed.has(p.tabId) && !this.ctx.tabs.contents(p.tabId),
+        (p) => shown.has(p.tabId) && !this.selfClosed.has(p.tabId) && !this.liveContents(p.tabId),
       )
       if (missing) this.applyPanes(rec.id, rec.panes, rec.radius)
     })
@@ -617,7 +649,7 @@ export class WindowManager {
       rec.minPaneSeq = this.ctx.store.seq + 1
       this.applyPanes(rec.id, [], rec.radius)
     }
-    if (tabId && !rec.overlayShown) this.ctx.tabs.contents(tabId)?.focus()
+    if (tabId && !rec.overlayShown) this.liveContents(tabId)?.focus()
   }
 
   /** The transparent overlay view (command bar, Peek chrome, menus), created on first need. */

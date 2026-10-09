@@ -32,10 +32,16 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await fx.close()
 })
+let mainLog: string[] = []
 test.beforeEach(async () => {
   orbit = await launchOrbit()
+  mainLog = []
+  orbit.app.process().stderr?.on('data', (d) => mainLog.push(String(d)))
 })
 test.afterEach(async () => {
+  // The main process's own errors explain most failures here: keep them with the report.
+  const info = test.info()
+  if (info.status !== info.expectedStatus) await info.attach('main-process.log', { body: mainLog.join('') })
   await orbit.app.close().catch(() => {})
 })
 
@@ -85,7 +91,7 @@ async function viewPlacement(app: Orbit['app'], tabId: string) {
   return app.evaluate((_e, id) => {
     const ctx = (globalThis as unknown as OrbitGlobal).__orbit.ctx
     const view = ctx.tabs.get(id)
-    if (!view || view.webContents.isDestroyed()) return null
+    if (!view?.webContents || view.webContents.isDestroyed()) return null
     const hosts = ctx.windows.ids().filter((w) => ctx.windows.get(w)?.contentView.children.includes(view))
     return { hosts, visible: view.getVisible(), managedBy: ctx.windows.windowOfTab(id) ?? null }
   }, tabId)
@@ -100,7 +106,10 @@ async function placedUrls(app: Orbit['app'], windowId: string) {
       .filter((v) => 'webContents' in v)
       .map((v) => {
         const wc = (v as Electron.WebContentsView).webContents
-        return { url: wc.isDestroyed() ? 'destroyed' : wc.getURL(), current: live.has(v as Electron.WebContentsView) }
+        return {
+          url: !wc || wc.isDestroyed() ? 'destroyed' : wc.getURL(),
+          current: live.has(v as Electron.WebContentsView),
+        }
       })
       .filter((v) => !v.url.includes('view=overlay'))
   }, windowId)
@@ -130,8 +139,17 @@ test('[TB-06] a page that closes itself leaves no dead view; the tab shows again
   const b = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/Other') })) as string
   await run(orbit.app, 'tabs.activate', { tabId: a })
   await expect.poll(async () => (await viewPlacement(orbit.app, a))?.visible).toBe(true)
+  const live = () =>
+    orbit.app.evaluate((_e, id) => {
+      const contents = (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.get(id)?.webContents
+      return !!contents && !contents.isDestroyed()
+    }, a)
   await page.evaluate(() => window.close())
-  await expect.poll(async () => (await state(orbit.app)).tabs[a]?.asleep).toBe(true)
+  await expect.poll(live).toBe(false)
+  // The page asked to close: Orbit must not quietly load it again behind the user's back.
+  await new Promise((r) => setTimeout(r, 300))
+  expect(await live()).toBe(false)
+  expect((await state(orbit.app)).tabs[a]?.asleep).toBe(true)
   const windowId = Object.keys((await state(orbit.app)).windows)[0] as string
   await expect
     .poll(async () => (await placedUrls(orbit.app, windowId)).filter((v) => v.url.includes('Closer')))
@@ -195,29 +213,59 @@ test('[SP-11] a visible tab moved to another profile gets a new view instead of 
 })
 
 test('[KS-01] menu actions skip windows that are not Orbit windows (review M6)', async () => {
-  const result = await orbit.app.evaluate(async ({ BrowserWindow }) => {
+  // Focus is stubbed: parallel test apps share one X display and would steal it from each other.
+  const result = await orbit.app.evaluate(async ({ BrowserWindow, webContents, WebContentsView }) => {
     const ctx = (globalThis as unknown as OrbitGlobal).__orbit.ctx
-    const main = ctx.windows.get(ctx.windows.ids()[0] as string)
-    main?.focus()
-    await new Promise((r) => setTimeout(r, 200))
-    const withMain = ctx.windows.focusedWindowId()
-    const popup = new BrowserWindow({ width: 300, height: 200, show: true })
-    popup.focus()
-    await new Promise((r) => setTimeout(r, 300))
-    const focusedIsPopup = BrowserWindow.getFocusedWindow() === popup
-    const withPopup = ctx.windows.focusedWindowId()
-    const closed = ctx.windows.closeFocusedForeign()
-    await new Promise((r) => setTimeout(r, 200))
-    return { withMain, focusedIsPopup, withPopup, closed, popupGone: popup.isDestroyed() }
+    const mainId = ctx.windows.ids()[0] as string
+    const main = ctx.windows.get(mainId) ?? null
+    const popup = new BrowserWindow({ width: 300, height: 200, show: false })
+    const devtools = new WebContentsView()
+    const focusedWindow = BrowserWindow.getFocusedWindow
+    const focusedContents = webContents.getFocusedWebContents
+    const focus = (win: Electron.BrowserWindow | null, contents: Electron.WebContents | null) => {
+      BrowserWindow.getFocusedWindow = () => win
+      webContents.getFocusedWebContents = () => contents
+    }
+    try {
+      focus(main, main?.webContents ?? null)
+      const withMain = ctx.windows.focusedWindowId()
+      const closedWithMain = ctx.windows.closeFocusedForeign()
+      focus(popup, popup.webContents)
+      const withPopup = ctx.windows.focusedWindowId()
+      focus(null, devtools.webContents)
+      const withDevTools = ctx.windows.focusedWindowId()
+      focus(null, null)
+      const inBackground = ctx.windows.focusedWindowId()
+      focus(popup, popup.webContents)
+      const closedPopup = ctx.windows.closeFocusedForeign()
+      await new Promise((r) => setTimeout(r, 200))
+      return {
+        mainId,
+        withMain,
+        closedWithMain,
+        withPopup: withPopup ?? null,
+        withDevTools: withDevTools ?? null,
+        inBackground,
+        closedPopup,
+        popupGone: popup.isDestroyed(),
+      }
+    } finally {
+      BrowserWindow.getFocusedWindow = focusedWindow
+      webContents.getFocusedWebContents = focusedContents
+      devtools.webContents.close()
+      if (!popup.isDestroyed()) popup.destroy()
+    }
   })
-  expect(result.withMain).toBeTruthy()
-  // Xvfb gives the popup focus; a macOS runner in the background may not, so only Linux insists.
-  if (process.platform === 'linux') expect(result.focusedIsPopup).toBe(true)
-  if (result.focusedIsPopup) {
-    expect(result.withPopup).toBeUndefined()
-    expect(result.closed).toBe(true)
-    expect(result.popupGone).toBe(true)
-  }
+  expect(result).toEqual({
+    mainId: result.mainId,
+    withMain: result.mainId,
+    closedWithMain: false,
+    withPopup: null,
+    withDevTools: null,
+    inBackground: result.mainId,
+    closedPopup: true,
+    popupGone: true,
+  })
 })
 
 test('[TB-22] closing the last window keeps it for the next launch (review F1)', async () => {
@@ -257,10 +305,16 @@ test('[TB-02] opening tabs keeps every UI mirror in step without resyncs (review
   await openViaCommandBar(orbit, fx.url('/page/Two'))
   await expect(orbit.shell.getByTestId('tab-row')).toHaveCount(2)
   await expect(orbit.shell.getByTestId('tab-row').first()).toContainText('Two')
-  const mainSeq = await orbit.app.evaluate(() => (globalThis as unknown as OrbitGlobal).__orbit.ctx.store.seq)
   type Mirror = { __orbitMirror: { resyncs: () => number; seq: () => number } }
   for (const page of [orbit.shell, overlay]) {
-    await expect.poll(() => page.evaluate(() => (globalThis as unknown as Mirror).__orbitMirror.seq())).toBe(mainSeq)
+    // Pages keep loading (titles, favicons), so compare against main's seq at the same moment.
+    await expect
+      .poll(async () => {
+        const mirror = await page.evaluate(() => (globalThis as unknown as Mirror).__orbitMirror.seq())
+        const main = await orbit.app.evaluate(() => (globalThis as unknown as OrbitGlobal).__orbit.ctx.store.seq)
+        return mirror === main
+      })
+      .toBe(true)
     // Only the first load: no batch failed to apply and no gap forced a snapshot.
     expect(await page.evaluate(() => (globalThis as unknown as Mirror).__orbitMirror.resyncs())).toBe(1)
   }
