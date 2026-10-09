@@ -271,20 +271,21 @@ describe('split model', () => {
     expect(locate(state, b)?.container).toEqual({ kind: 'today', spaceId })
   })
 
-  it('[SV-24] drops panes still waiting for a page when state loads', () => {
+  it('[SV-24][SV-02] drops only panes still waiting for a page when state loads', () => {
     const { state, spaceId, add } = world()
     const [a, b] = [add(), add('today', 'about:blank')]
     const c = add()
     const id = createSplitInDraft(state, [a, b, c]) as string
+    const split = state.splits[id] as NonNullable<OrbitState['splits'][string]>
     const win = Object.values(state.windows)[0]
     if (win) win.activeTab[spaceId] = b
+    // A page that merely shows about:blank is a real tab and stays.
+    expect(dropBlankPanes(state)).toEqual([])
+    split.pending = b
     expect(dropBlankPanes(state)).toEqual([b])
-    expect(win?.activeTab[spaceId]).toBe(c)
     expect(layoutLeaves(state.splits[id]?.layout as SplitLayout)).toEqual([a, c])
     expect(state.tabs[b]).toBeUndefined()
-    createSplitInDraft(state, [a, add('today', 'about:blank')])
-    dropBlankPanes(state)
-    expect(today(state, spaceId)).toContain(a)
+    expect(win?.activeTab[spaceId]).toBe(c)
   })
 
   it('lays out splits on the fast path only for unrelated selections', () => {

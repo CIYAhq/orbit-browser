@@ -37,8 +37,16 @@ export interface Tab {
   favicon?: string
   /** For pinned tabs and favorites: the URL the tab resets to. */
   pinnedUrl?: string
-  /** User-chosen name for a pinned tab or favorite (overrides the page title). */
+  /** User-chosen name (overrides the page title). */
   customTitle?: string
+  /** Pinned tabs and favorites: title of the pinned page (the breadcrumb's first part, PN-03). */
+  pinnedTitle?: string
+  /** Pinned tabs and favorites: where the pinned URL resolved to after redirects (PN-03). */
+  pinnedResolvedUrl?: string
+  /** User-chosen emoji that replaces the favicon (TB-12). */
+  icon?: string
+  /** Tab whose link opened this tab (TB-19). */
+  openerTabId?: TabId
   createdAt: number
   lastActiveAt: number
   /** Runtime-only fields (not persisted): */
@@ -61,6 +69,8 @@ export interface Folder {
   children: ItemId[]
   collapsed: boolean
   createdAt: number
+  /** User-chosen emoji for the folder (FD-07). */
+  icon?: string
 }
 
 /** Split view layout tree. Leaves are tabs; max 4 leaves per split. */
@@ -74,6 +84,10 @@ export interface Split {
   createdAt: number
   /** User-chosen name; when set, the sidebar row shows it instead of the pane titles (SV-21, SV-22). */
   name?: string
+  /** The pane focused last: selecting the split returns to it (SV-14). */
+  focus?: TabId
+  /** A pane still waiting for its first page while the command bar is open for it (SV-02). */
+  pending?: TabId
 }
 
 export type ColorMode = 'system' | 'light' | 'dark'
@@ -96,6 +110,8 @@ export interface Space {
   pinned: ItemId[]
   today: ItemId[]
   createdAt: number
+  /** Pinned section collapsed under the Space title (PN-09). */
+  pinnedCollapsed?: boolean
 }
 
 export interface Profile {
@@ -106,6 +122,8 @@ export interface Profile {
   /** Favorites are shared by every Space that uses this profile. */
   favorites: ItemId[]
   createdAt: number
+  /** Per-profile auto-archive period for Today tabs (TD-03); falls back to settings.archiveAfterMs. */
+  archiveAfterMs?: number
 }
 
 export type CommandBarMode = 'new-tab' | 'edit-url' | 'search-tabs'
@@ -156,6 +174,10 @@ export interface Settings {
   /** Links opened from other apps open in a Mini Window. */
   miniWindowForExternalLinks: boolean
   onboarded: boolean
+  /** ⌘1–⌘8 count Favorites first (TB-04, FV-10). */
+  countFavoritesInShortcuts: boolean
+  /** ⌘9 selects the last tab (true) or the 9th item (false) (TB-04). */
+  lastTabOnCmd9: boolean
 }
 
 export interface ArchivedTab {
@@ -166,7 +188,9 @@ export interface ArchivedTab {
   spaceId: SpaceId
   profileId: ProfileId
   archivedAt: number
-  reason: 'auto' | 'closed'
+  reason: 'auto' | 'closed' | 'cleared'
+  /** Section the tab left from (AR-01). */
+  section?: 'today' | 'pinned'
 }
 
 export interface Download {
@@ -201,6 +225,7 @@ export interface OrbitState {
   tabs: Record<TabId, Tab>
   folders: Record<FolderId, Folder>
   splits: Record<SplitId, Split>
+  /** Oldest first: new entries are appended (cheap patches) and the list is trimmed in chunks. */
   archive: ArchivedTab[]
   settings: Settings
   downloads: Record<string, Download>

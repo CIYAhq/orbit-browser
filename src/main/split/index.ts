@@ -1,26 +1,25 @@
 import { clipboard, Menu, type MenuItemConstructorOptions, nativeTheme } from 'electron'
 import { newId } from '../../shared/ids'
 import {
-  anchorOf,
   equalizeLayout,
   flipLayout,
-  insertBeside,
+  isPendingPane,
   layoutLeaves,
   MAX_PANES,
   neighborPane,
+  noteSplitFocus,
   type PaneSide,
+  paneAfterClose,
   paneOrder,
-  removePane,
   replacePane,
   SPLIT_FULL_MESSAGE,
-  sameLayout,
   setSizesAt,
   siblingOf,
   swapPanes,
 } from '../../shared/split'
 import type { ContainerRef, OrbitState, SplitId, SplitLayout, TabId, WindowId } from '../../shared/state'
 import { paletteFor } from '../../shared/theme'
-import { insertItem, locate, moveItem, sectionOf, splitOfTab } from '../../shared/tree'
+import { insertItem, locate, sectionOf, splitOfTab } from '../../shared/tree'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
 import { makeTab } from '../tabs/model'
@@ -66,6 +65,8 @@ interface PaneSession {
   chosen?: TabId | null
   /** Grace timer while a slow choice may still fill the empty pane. */
   timer?: NodeJS.Timeout
+  /** The window's Space when the bar closed (choosing a Space is not choosing a tab). */
+  spaceAtClose?: string
 }
 
 /** How long an empty pane waits for the command bar's choice before it is removed. */
@@ -217,6 +218,9 @@ export function registerSplit(ctx: MainContext): void {
         return
       }
       ok = true
+      // Marked as waiting for its first page until the command bar fills it (SV-02).
+      const split = d.splits[result]
+      if (split) split.pending = blank.id
       focusInDraft(d, windowId, blank.id)
     })
     if (!ok) return
@@ -265,6 +269,8 @@ export function registerSplit(ctx: MainContext): void {
     if (!opts.cancel && !isBlankPane(tab)) {
       // Filled with a URL or search: a pinned split remembers it as the pane's pinned URL.
       store.update((d) => {
+        const split = d.splits[splitId]
+        if (split?.pending === session.tabId) delete split.pending
         adoptPlacement(d, [session.tabId], locate(d, splitId)?.container)
       })
       return
@@ -277,6 +283,7 @@ export function registerSplit(ctx: MainContext): void {
         const split = d.splits[splitId]
         if (!split) return
         split.layout = replacePane(split.layout, session.tabId, chosen)
+        if (split.pending === session.tabId) delete split.pending
         delete d.tabs[session.tabId]
         adoptPlacement(d, [chosen], locate(d, splitId)?.container)
         restoreOtherSpaces(d, session, chosen)
@@ -291,6 +298,8 @@ export function registerSplit(ctx: MainContext): void {
       if (url && !isBlankPane({ url })) {
         store.update((d) => {
           const blank = d.tabs[session.tabId]
+          const split = d.splits[splitId]
+          if (split?.pending === session.tabId) delete split.pending
           if (blank) {
             blank.url = url
             blank.title = d.tabs[chosen]?.title ?? blank.title
@@ -353,6 +362,7 @@ export function registerSplit(ctx: MainContext): void {
       session.activeAtClose = activeTabOf(next, session.windowId)
       session.activeTabsAtClose = { ...(next.windows[session.windowId]?.activeTab ?? {}) }
       session.tabsAtClose = next.tabs
+      session.spaceAtClose = next.windows[session.windowId]?.spaceId
       // The command bar's choice (navigate / switch tab) runs synchronously right after the
       // overlay closes, so a microtask sees its result and still lands in the same patch batch.
       // Selection changes after that are the user's own and never count as the choice.
@@ -360,7 +370,9 @@ export function registerSplit(ctx: MainContext): void {
         if (sessions.get(session.windowId) !== session) return
         const state = store.state
         const active = activeTabOf(state, session.windowId)
-        session.chosen = session.activeAtClose === session.tabId && active && active !== session.tabId ? active : null
+        const sameSpace = state.windows[session.windowId]?.spaceId === session.spaceAtClose
+        session.chosen =
+          sameSpace && session.activeAtClose === session.tabId && active && active !== session.tabId ? active : null
         const tab = state.tabs[session.tabId]
         if (session.chosen || !session.blank || (tab && !isBlankPane(tab))) settle(session)
         // Escape, a click outside, or a choice still on its way: a late page can still fill the pane.
@@ -376,153 +388,49 @@ export function registerSplit(ctx: MainContext): void {
     }
   })
 
-  /** Closed panes and the neighbour they sat beside (most recent last). */
-  const closedPanes = new Map<TabId, { target: TabId; targets: TabId[]; side: PaneSide }>()
-  const rememberClosed = (layout: SplitLayout, tabId: TabId) => {
-    const anchor = anchorOf(layout, tabId)
-    if (!anchor) return
-    closedPanes.delete(tabId)
-    closedPanes.set(tabId, anchor)
-    if (closedPanes.size > 50) closedPanes.delete(closedPanes.keys().next().value as TabId)
-  }
-  /** A reopened tab that was a pane goes back beside its old neighbour (re-forming the split if needed). */
-  const putBack = (tabId: TabId) => {
-    const anchor = closedPanes.get(tabId)
-    closedPanes.delete(tabId)
-    const state = store.state
-    const tab = state.tabs[tabId]
-    const target = anchor ? state.tabs[anchor.target] : undefined
-    if (!anchor || !tab || !target || splitOfTab(state, tabId) || tab.profileId !== target.profileId) return
-    if (leavesOf(state, splitOfTab(state, anchor.target)).length >= MAX_PANES) return
-    updateMoving([tabId], (d) => {
-      const splitId = splitOfTab(d, anchor.target)
-      const split = splitId ? d.splits[splitId] : undefined
-      if (!splitId || !split) {
-        addPaneInDraft(d, tabId, anchor.target, anchor.side)
-        return
-      }
-      // Beside the same group of panes it sat next to, so the arrangement comes back as it was.
-      detachTab(d, tabId)
-      const current = d.splits[splitId]
-      if (!current) return
-      const targets = anchor.targets.filter((id) => d.tabs[id])
-      current.layout = insertBeside(current.layout, targets, tabId, anchor.side)
-      adoptPlacement(d, [tabId], locate(d, splitId)?.container)
-    })
-  }
-
-  // When the tab model closes a pane (e.g. ⌘W on the focused pane, SV-17), keep the remaining panes'
-  // arrangement and sizes, and keep the split on screen with a neighbouring pane focused. Runs in a
-  // microtask queued before the patch flush, so renderers only ever see the repaired state.
-  const leafSet = (layout: SplitLayout) => layoutLeaves(layout).sort().join()
-  store.subscribe((next, prev) => {
-    // Remember where closed panes sat; bring reopened ones back into place (⌘⇧T, SV-17/SV-19).
-    if (next.tabs !== prev.tabs) {
-      for (const split of Object.values(prev.splits)) {
-        for (const id of layoutLeaves(split.layout)) {
-          if (!next.tabs[id] && !isBlankPane(prev.tabs[id])) rememberClosed(split.layout, id)
-        }
-      }
-      for (const id of closedPanes.keys()) {
-        if (next.tabs[id] && !prev.tabs[id]) queueMicrotask(() => putBack(id))
-      }
-    }
-    const arrangements: { splitId: SplitId; layout: SplitLayout }[] = []
-    for (const [splitId, split] of Object.entries(prev.splits)) {
-      const now = next.splits[splitId]
-      if (!now || now.layout === split.layout) continue
-      // Only when panes left because their tabs were closed (not on resizes, flips, adds…).
-      const closed = layoutLeaves(split.layout).filter((id) => !next.tabs[id])
-      if (closed.length === 0) continue
-      let kept: SplitLayout | null = split.layout
-      for (const id of closed) kept = kept ? removePane(kept, id) : null
-      if (kept && kept.type !== 'leaf' && leafSet(kept) === leafSet(now.layout) && !sameLayout(kept, now.layout)) {
-        arrangements.push({ splitId, layout: kept })
-      }
-    }
-    const focus: { windowId: WindowId; target: TabId; expected: TabId | null; spaceId: string }[] = []
-    for (const win of Object.values(next.windows)) {
-      const before = activeTabOf(prev, win.id)
-      const after = activeTabOf(next, win.id)
-      if (!before || before === after || next.tabs[before]) continue
-      const splitId = splitOfTab(prev, before)
-      const split = splitId ? prev.splits[splitId] : undefined
-      if (!split || prev.windows[win.id]?.spaceId !== win.spaceId) continue
-      const survivors = layoutLeaves(split.layout).filter((id) => id !== before && next.tabs[id])
-      if (survivors.length === 0 || (after && survivors.includes(after))) continue
-      const sibling = siblingOf(split.layout, before)
-      const target = sibling && survivors.includes(sibling) ? sibling : survivors[0]
-      if (target) focus.push({ windowId: win.id, target, expected: after, spaceId: win.spaceId })
-    }
-    if (arrangements.length === 0 && focus.length === 0) return
-    queueMicrotask(() =>
-      store.update((d) => {
-        for (const { splitId, layout } of arrangements) {
-          const current = d.splits[splitId]
-          if (current && leafSet(current.layout) === leafSet(layout)) current.layout = layout
-        }
-        for (const f of focus) {
-          const win = d.windows[f.windowId]
-          if (!win || win.spaceId !== f.spaceId || !d.tabs[f.target]) continue
-          if ((win.activeTab[win.spaceId] ?? null) !== f.expected) continue
-          focusInDraft(d, f.windowId, f.target)
-        }
-      }),
-    )
-  })
-
   // ---- Closing, separating, rearranging ----
 
-  const closePane = (tabId: TabId) => {
-    const state = store.state
-    const splitId = splitOfTab(state, tabId)
-    const split = splitId ? state.splits[splitId] : undefined
-    if (!splitId || !split) {
-      void commands.run('tabs.close', { tabId })
-      return
+  /** Removes a pane still waiting for its first page, without archiving it. */
+  const dropPending = (tabId: TabId) => {
+    for (const [windowId, session] of sessions) {
+      if (session.tabId !== tabId) continue
+      sessions.delete(windowId)
+      clearTimeout(session.timer)
     }
-    const sibling = siblingOf(split.layout, tabId) ?? layoutLeaves(split.layout).find((id) => id !== tabId)
-    const blank = isBlankPane(state.tabs[tabId])
-    if (!blank) rememberClosed(split.layout, tabId)
-    for (const [windowId, s] of sessions) if (s.tabId === tabId) sessions.delete(windowId)
     store.update((d) => {
-      const now = Date.now()
+      const next = paneAfterClose(d, tabId, new Set([tabId]))
       for (const { windowId, spaceId } of windowsShowing(d, [tabId])) {
         const win = d.windows[windowId]
-        if (!win || !sibling) continue
-        win.activeTab[spaceId] = sibling
-        const t = d.tabs[sibling]
-        if (t) t.lastActiveAt = now
+        if (win) win.activeTab[spaceId] = next
       }
-      if (blank) {
-        detachTab(d, tabId)
-        delete d.tabs[tabId]
-      } else {
-        // As an ordinary Today tab it is closed and archived by the tab model (TB-06, TB-07).
-        popOutInDraft(d, tabId, { toToday: true })
-      }
+      detachTab(d, tabId)
+      delete d.tabs[tabId]
+      if (next) noteSplitFocus(d, next)
     })
-    if (blank) ctx.tabs.destroy(tabId)
+    ctx.tabs.destroy(tabId)
+  }
+
+  /**
+   * Closes one pane. The tab model archives it, keeps the other panes' arrangement and focuses
+   * a neighbouring pane, all in one update (SV-17); reopening puts it back in its split.
+   */
+  const closePane = (tabId: TabId) => {
+    if (isPendingPane(store.state, tabId)) dropPending(tabId)
     else void commands.run('tabs.close', { tabId })
   }
 
   commands.register('split.closePane', ({ tabId }) => closePane(tabId))
 
-  commands.register('split.close', ({ splitId }) => {
-    const state = store.state
-    const leaves = leavesOf(state, splitId)
-    for (const id of leaves) {
-      if (isBlankPane(state.tabs[id])) closePane(id)
-    }
-    for (const id of leaves)
-      if (store.state.tabs[id] && !isBlankPane(store.state.tabs[id])) {
-        void commands.run('tabs.close', { tabId: id })
-      }
+  /** Closes the whole split as one unit (SV-19): a Today split is archived, a pinned one unloads. */
+  commands.register('split.close', ({ splitId }, c) => {
+    const leaves = leavesOf(store.state, splitId)
+    for (const id of leaves) if (isPendingPane(store.state, id)) dropPending(id)
+    const rest = leaves.filter((id) => store.state.tabs[id])
+    if (rest.length > 0) void commands.run('tabs.close', { tabIds: rest }, { windowId: windowOf(c) })
   })
 
   commands.register('split.separate', ({ splitId }) => {
-    const blanks = leavesOf(store.state, splitId).filter((id) => isBlankPane(store.state.tabs[id]))
-    for (const id of blanks) closePane(id)
+    for (const id of leavesOf(store.state, splitId)) if (isPendingPane(store.state, id)) dropPending(id)
     store.update((d) => {
       separateInDraft(d, splitId)
     })
@@ -611,18 +519,13 @@ export function registerSplit(ctx: MainContext): void {
     return id
   })
 
-  /** Moves a whole split to another container (pin, Favorites, another Space), keeping its panes. */
-  const moveSplit = (splitId: SplitId, to: ContainerRef, index: number): boolean => {
-    let ok = false
-    let moved: TabId[] = []
-    store.update((d) => {
-      if (!d.splits[splitId] || !locate(d, splitId) || !moveItem(d, splitId, to, index)) return
-      ok = true
-      moved = adoptPlacement(d, leavesOf(d, splitId), to)
-    })
-    reloadMoved(moved)
-    return ok
-  }
+  /**
+   * Moves a whole split (pin, Favorites, another Space) through the tab model, which keeps its
+   * panes together, fixes every pane's placement and hands the selection on in the Space it
+   * leaves (TB-11).
+   */
+  const moveSplit = (splitId: SplitId, to: ContainerRef, index: number, windowId?: WindowId): Promise<boolean> =>
+    commands.run('tabs.move', { id: splitId, to, index }, { windowId })
 
   commands.register('split.rename', ({ splitId, name }) => {
     store.update((d) => {
@@ -634,7 +537,11 @@ export function registerSplit(ctx: MainContext): void {
     })
   })
 
-  commands.register('split.move', ({ splitId, to, index }) => moveSplit(splitId, to, index ?? Number.MAX_SAFE_INTEGER))
+  commands.register('split.addPane', ({ side = 'right' }, c) => addPane(windowOf(c), side))
+
+  commands.register('split.move', ({ splitId, to, index }, c) =>
+    moveSplit(splitId, to, index ?? Number.MAX_SAFE_INTEGER, windowOf(c)),
+  )
 
   // ---- Menus ----
 
@@ -734,23 +641,26 @@ export function registerSplit(ctx: MainContext): void {
     if (spaceId && section === 'today') {
       items.push({
         label: 'Pin Split',
-        click: () => moveSplit(splitId, { kind: 'pinned', spaceId }, Number.MAX_SAFE_INTEGER),
+        click: () => void moveSplit(splitId, { kind: 'pinned', spaceId }, Number.MAX_SAFE_INTEGER, windowId),
       })
     }
     if (spaceId && section === 'pinned') {
-      items.push({ label: 'Unpin Split', click: () => moveSplit(splitId, { kind: 'today', spaceId }, 0) })
+      items.push({
+        label: 'Unpin Split',
+        click: () => void moveSplit(splitId, { kind: 'today', spaceId }, 0, windowId),
+      })
     }
     const profileId = spaceId ? state.spaces[spaceId]?.profileId : undefined
     if (profileId && section !== 'favorite') {
       items.push({
         label: 'Add to Favorites',
-        click: () => moveSplit(splitId, { kind: 'favorites', profileId }, Number.MAX_SAFE_INTEGER),
+        click: () => void moveSplit(splitId, { kind: 'favorites', profileId }, Number.MAX_SAFE_INTEGER, windowId),
       })
     }
     if (spaceId && section === 'favorite') {
       items.push({
         label: 'Remove from Favorites',
-        click: () => moveSplit(splitId, { kind: 'pinned', spaceId }, Number.MAX_SAFE_INTEGER),
+        click: () => void moveSplit(splitId, { kind: 'pinned', spaceId }, Number.MAX_SAFE_INTEGER, windowId),
       })
     }
     const otherSpaces = state.spaceOrder.filter((s) => s !== spaceId)
@@ -759,7 +669,7 @@ export function registerSplit(ctx: MainContext): void {
         label: 'Move to Space',
         submenu: otherSpaces.map((id) => ({
           label: state.spaces[id]?.name ?? id,
-          click: () => moveSplit(splitId, { kind: 'today', spaceId: id }, 0),
+          click: () => void moveSplit(splitId, { kind: 'today', spaceId: id }, 0, windowId),
         })),
       })
     }
@@ -809,17 +719,6 @@ export function registerSplit(ctx: MainContext): void {
       strip.onPageMouse(tabId, mouse)
     })
     placeholderUntilLoaded(tabId, contents)
-    // A page going full screen (e.g. a video) fills the window; leaving returns to the split (SV-25).
-    // The window is remembered: by the time a closing page leaves full screen it has no window.
-    let fullscreenWindow: WindowId | undefined
-    const fullscreen = (on: boolean) => {
-      const windowId = on ? windows.windowOfTab(tabId) : fullscreenWindow
-      fullscreenWindow = on ? windowId : undefined
-      if (windowId) windows.sendToWindow(windowId, 'split:fullscreen', { tabId: on ? tabId : null })
-    }
-    contents.on('enter-html-full-screen', () => fullscreen(true))
-    contents.on('leave-html-full-screen', () => fullscreen(false))
-    contents.once('destroyed', () => fullscreen(false))
   })
 
   /** A page starting in a split pane shows the frame colour until it has loaded, never a white flash (SV-26). */

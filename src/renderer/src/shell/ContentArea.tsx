@@ -20,8 +20,6 @@ interface FrameInfo {
   blank: string[]
 }
 
-const isBlank = (url: string | undefined) => !url || url === 'about:blank'
-
 /** Everything the frame's structure depends on, as one string, so unrelated state changes don't re-render it. */
 function frameKey(s: OrbitState, winId: string): string {
   const tabId = activeTabId(s, winId)
@@ -29,7 +27,8 @@ function frameKey(s: OrbitState, winId: string): string {
   const splitId = splitOfTab(s, tabId)
   const split = splitId ? s.splits[splitId] : undefined
   if (!split) return JSON.stringify({ tabId, layout: leaf(tabId), blank: [] } satisfies FrameInfo)
-  const blank = layoutLeaves(split.layout).filter((id) => isBlank(s.tabs[id]?.url))
+  // A pane waiting for its first page is drawn by the shell, not by a page view (SV-02).
+  const blank = split.pending && layoutLeaves(split.layout).includes(split.pending) ? [split.pending] : []
   return JSON.stringify({ tabId, splitId, layout: split.layout, blank } satisfies FrameInfo)
 }
 
@@ -59,16 +58,7 @@ export function ContentArea({ win }: { win: WindowState }) {
     })
   }, [engine, frame])
   useLayoutEffect(() => engine.setPreview(drop), [engine, drop])
-  useLayoutEffect(() => {
-    const offFullscreen = window.orbit.on('split:fullscreen', (payload) => {
-      engine.setFullscreen((payload as { tabId: string | null }).tabId)
-    })
-    const offRelayout = window.orbit.on('split:relayout', () => engine.invalidate())
-    return () => {
-      offFullscreen()
-      offRelayout()
-    }
-  }, [engine])
+  useLayoutEffect(() => window.orbit.on('split:relayout', () => engine.invalidate()), [engine])
   useTabDrop(engine, setDrop)
   usePaneDrag(engine, setDrop)
   useAltClickSplit()

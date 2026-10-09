@@ -1,10 +1,13 @@
 import { Volume2, VolumeX, X } from 'lucide-react'
 import { memo, useEffect, useRef, useState } from 'react'
+import { isPendingPane } from '../../../../shared/split'
 import { sectionOf } from '../../../../shared/tree'
 import { invoke } from '../../api'
 import { getOrbitState, useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
 import { focusedPaneOf, lastFocusedPane, paneOrderKey } from '../split/selectors'
+import { pressItem } from './drag'
+import { clearSelection } from './ui-state'
 
 /**
  * A split view as one sidebar row (SV-21): one favicon + title segment per pane, in reading
@@ -40,15 +43,21 @@ export function SplitRow({ splitId, depth }: { splitId: string; depth: number })
       data-testid="split-row"
       data-split-id={splitId}
       data-panes={panes.length}
-      onMouseDown={(e) => {
-        if (e.button !== 0) return
-        if (e.altKey) {
+      onPointerDown={(e) => {
+        if (e.button !== 0 || renaming) return
+        if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
           void invoke('split.separate', { splitId })
           return
         }
+        // Modified presses (multi-selection) are left to the sidebar list.
+        if (e.metaKey || e.ctrlKey || e.shiftKey) return
+        // Selection moves on press (FL-05): the pressed pane, or the one focused last.
         const segment = (e.target as Element).closest('[data-testid="split-segment"]') as HTMLElement | null
-        const tabId = segment?.dataset.tabId ?? lastFocusedPane(getOrbitState(), panes)
+        const tabId = segment?.dataset.tabId ?? lastFocusedPane(getOrbitState(), splitId)
+        clearSelection()
         if (tabId) void invoke('tabs.activate', { tabId })
+        // The press can become a drag of the whole split (the list's drag-and-drop).
+        pressItem(e, splitId, 'list')
       }}
       onAuxClick={(e) => {
         if (e.button === 1) void invoke('split.close', { splitId })
@@ -85,7 +94,7 @@ export function SplitRow({ splitId, depth }: { splitId: string; depth: number })
         aria-label={closeLabel}
         title={closeLabel}
         data-testid="split-close"
-        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
         onClick={() => void invoke('split.close', { splitId })}
       >
         <X size={13} strokeWidth={2.2} />
@@ -111,7 +120,7 @@ function RenameField({ initial, onDone }: { initial: string; onDone: (value: str
       // biome-ignore lint/a11y/noAutofocus: the field opens on an explicit rename request
       autoFocus
       onFocus={(e) => e.currentTarget.select()}
-      onMouseDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         e.stopPropagation()
         if (e.key === 'Enter') end(e.currentTarget.value)
@@ -133,8 +142,8 @@ const PaneIcon = memo(function PaneIcon({ tabId }: { tabId: string }) {
 
 const Segment = memo(function Segment({ tabId, focused }: { tabId: string; focused: boolean }) {
   const tab = useOrbit((s) => s.tabs[tabId])
+  const blank = useOrbit((s) => isPendingPane(s, tabId))
   if (!tab) return null
-  const blank = !tab.url || tab.url === 'about:blank'
   const title = blank ? 'New pane' : (tab.customTitle ?? tab.title)
   return (
     <span
@@ -152,7 +161,7 @@ const Segment = memo(function Segment({ tabId, focused }: { tabId: string; focus
           type="button"
           className="split-segment__audio"
           aria-label={tab.muted ? 'Unmute pane' : 'Mute pane'}
-          onMouseDown={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={() => void invoke('tabs.setMuted', { tabId, muted: !tab.muted })}
         >
           {tab.muted ? <VolumeX size={12} /> : <Volume2 size={12} />}

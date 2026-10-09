@@ -9,11 +9,42 @@ const ALWAYS_ALLOW = new Set([
   'clipboard-sanitized-write',
   'pointerLock',
   'keyboardLock',
-  'window-management',
   'speaker-selection',
 ])
-/** Permissions Orbit asks about once per origin per run. */
-const ASK = new Set(['media', 'geolocation', 'notifications', 'midi', 'midiSysex', 'clipboard-read', 'idle-detection'])
+/**
+ * Permissions Orbit asks about, once per origin and profile. Until the user allows one, permission
+ * checks report it as not granted, so `Notification.permission` and `permissions.query()` don't
+ * claim access the user never gave. Electron's check handler is boolean, so "not decided yet" reads
+ * as 'denied' (Chromium would say 'default'); `Notification.requestPermission()` and other requests
+ * still reach the request handler and its prompt. `window-management` exposes the full screen
+ * layout, so Chrome asks for it too.
+ */
+const ASK = new Set([
+  'media',
+  'geolocation',
+  'notifications',
+  'midi',
+  'midiSysex',
+  'clipboard-read',
+  'idle-detection',
+  'window-management',
+])
+
+/** Origin of a URL or origin string ("this site" when it has none). */
+export function originOf(urlOrOrigin: string | undefined): string {
+  if (!urlOrOrigin) return 'this site'
+  try {
+    const origin = new URL(urlOrOrigin).origin
+    return origin === 'null' ? urlOrOrigin : origin
+  } catch {
+    return urlOrOrigin
+  }
+}
+
+/** Decisions are per profile (session partition), origin and permission. */
+export function permissionKey(partition: string, origin: string, permission: string): string {
+  return `${partition}|${origin}|${permission}`
+}
 
 /**
  * One Electron session per Orbit profile. Profiles isolate cookies, storage,
@@ -41,27 +72,36 @@ export class Sessions {
     const ses = session.fromPartition(profile.partition)
     if (!this.configured.has(profile.partition)) {
       this.configured.add(profile.partition)
-      this.configure(ses)
+      this.configure(ses, profile.partition)
       for (const listener of this.listeners) listener(ses, profile.id)
     }
     return ses
   }
 
-  private configure(ses: Session): void {
+  /** The user's decision for a permission on an origin in a profile, if they made one. */
+  decision(partition: string, origin: string, permission: string): boolean | undefined {
+    return this.decisions.get(permissionKey(partition, originOf(origin), permission))
+  }
+
+  /** Records a decision (from the prompt; later from site controls). */
+  decide(partition: string, origin: string, permission: string, allowed: boolean): void {
+    this.decisions.set(permissionKey(partition, originOf(origin), permission), allowed)
+  }
+
+  private configure(ses: Session, partition: string): void {
     // Present as plain Chrome: some sites block "embedded" browsers by user agent.
     ses.setUserAgent(cleanUserAgent(ses.getUserAgent()))
-    ses.setPermissionCheckHandler((_wc, permission) => ALWAYS_ALLOW.has(permission) || ASK.has(permission))
+    ses.setPermissionCheckHandler((_wc, permission, requestingOrigin) => {
+      if (ALWAYS_ALLOW.has(permission)) return true
+      if (!ASK.has(permission)) return false
+      // Granted only when the user allowed it for this origin in this profile.
+      return this.decision(partition, requestingOrigin, permission) === true
+    })
     ses.setPermissionRequestHandler((wc, permission, callback, details) => {
       if (ALWAYS_ALLOW.has(permission)) return callback(true)
       if (!ASK.has(permission)) return callback(false)
-      let origin = 'this site'
-      try {
-        origin = new URL(details.requestingUrl ?? wc.getURL()).origin
-      } catch {
-        // keep generic label
-      }
-      const key = `${origin}|${permission}`
-      const known = this.decisions.get(key)
+      const origin = originOf(details.requestingUrl || wc.getURL())
+      const known = this.decision(partition, origin, permission)
       if (known !== undefined) return callback(known)
       if (process.env.ORBIT_E2E === '1') return callback(false)
       const label = permission === 'media' ? 'use your camera and/or microphone' : `use ${permission}`
@@ -75,7 +115,7 @@ export class Sessions {
         })
         .then(({ response }) => {
           const allowed = response === 0
-          this.decisions.set(key, allowed)
+          this.decide(partition, origin, permission, allowed)
           callback(allowed)
         })
     })

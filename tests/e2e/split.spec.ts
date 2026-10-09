@@ -655,16 +655,15 @@ test('[SV-25] a page going full screen in a pane fills the window and comes back
     document.body.prepend(button)
   })
   await video.click('#fs')
-  const size = await orbit.shell.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }))
+  // In one look: the page covers the whole window and the other pane is hidden.
   await expect
     .poll(async () => {
       const v = await tabView(orbit.app, b)
+      const other = await tabView(orbit.app, a)
       const w = await orbit.shell.evaluate(() => window.innerWidth)
-      return v?.bounds.x === 0 && v.bounds.y === 0 && v.bounds.width === w
+      return v?.bounds.x === 0 && v.bounds.y === 0 && v.bounds.width === w && other?.visible === false
     })
     .toBe(true)
-  expect((await tabView(orbit.app, a))?.visible).toBe(false)
-  expect(size.width).toBeGreaterThan(0)
   await video.evaluate(() => document.exitFullscreen())
   await expectViewsOverPanes(orbit, [a, b])
   await expect(orbit.shell.getByTestId('split-pane')).toHaveCount(2)
@@ -827,4 +826,71 @@ test('[SV-17] a reopened pane returns to its exact spot beside a stacked pair', 
   await expect(orbit.shell.getByTestId('split-segment')).toHaveCount(3)
   expect(JSON.stringify((await state(orbit.app)).splits[splitId]?.layout)).toBe(JSON.stringify(before))
   await expectViewsOverPanes(orbit, [a, b, c])
+})
+
+/** Records every native placement the window manager makes (tab ids and widths). */
+async function logPlacements(app: ElectronApplication): Promise<void> {
+  await app.evaluate(() => {
+    const g = globalThis as unknown as {
+      __orbit: { ctx: { windows: { applyPanes: (...a: unknown[]) => void } } }
+      __placements: { tabId: string; width: number }[][]
+    }
+    const wm = g.__orbit.ctx.windows
+    const original = wm.applyPanes.bind(wm)
+    g.__placements = []
+    wm.applyPanes = (...args: unknown[]) => {
+      const panes = args[1] as { tabId: string; rect: { width: number } }[]
+      g.__placements.push(panes.map((p) => ({ tabId: p.tabId, width: Math.round(p.rect.width) })))
+      original(...args)
+    }
+  })
+}
+
+async function takePlacements(app: ElectronApplication) {
+  return app.evaluate(() => {
+    const g = globalThis as unknown as { __placements: { tabId: string; width: number }[][] }
+    const out = g.__placements
+    g.__placements = []
+    return out
+  })
+}
+
+test('[SV-17][SV-26] Ctrl+W and Ctrl+Shift+T on a pane never show a page outside the split', async () => {
+  const x = await openTab(orbit.app, 'Neighbour')
+  const c = await openTab(orbit.app, 'PaneC')
+  const b = await openTab(orbit.app, 'PaneB')
+  const a = await openTab(orbit.app, 'PaneA')
+  await run(orbit.app, 'split.create', { tabIds: [a, b, c], focus: b })
+  await expectViewsOverPanes(orbit, [a, b, c])
+  // Visit the neighbouring tab and come back, as in the review's scenario.
+  await run(orbit.app, 'tabs.activate', { tabId: x })
+  await expect.poll(async () => (await tabView(orbit.app, x))?.visible).toBe(true)
+  await run(orbit.app, 'tabs.activate', { tabId: b })
+  await expectViewsOverPanes(orbit, [a, b, c])
+  await logPlacements(orbit.app)
+  await orbit.shell.keyboard.press('Control+W')
+  await expect(orbit.shell.getByTestId('split-row').getByTestId('split-segment')).toHaveCount(2)
+  await expectViewsOverPanes(orbit, [a, c])
+  const closing = await takePlacements(orbit.app)
+  expect(closing.length).toBeGreaterThan(0)
+  for (const placed of closing) {
+    expect(placed.map((p) => p.tabId)).not.toContain(x)
+    expect(placed.length).toBeGreaterThanOrEqual(2)
+  }
+  // The remaining panes only ever grow (no snap back to their old thirds).
+  for (const id of [a, c]) {
+    const widths = closing.flatMap((placed) => placed.filter((p) => p.tabId === id).map((p) => p.width))
+    for (let i = 1; i < widths.length; i++) expect(widths[i]).toBeGreaterThanOrEqual((widths[i - 1] ?? 0) - 1)
+  }
+  expect([a, c]).toContain(await activeTabId(orbit.app))
+  // Reopening puts the pane straight back into the split: it is never placed alone.
+  await orbit.shell.keyboard.press('Control+Shift+T')
+  await expect(orbit.shell.getByTestId('split-row').getByTestId('split-segment')).toHaveCount(3)
+  await expectViewsOverPanes(orbit, [a, b, c])
+  const reopening = await takePlacements(orbit.app)
+  for (const placed of reopening) {
+    expect(placed.map((p) => p.tabId)).not.toContain(x)
+    expect(placed.length).toBeGreaterThanOrEqual(2)
+  }
+  expect(await activeTabId(orbit.app)).toBe(b)
 })

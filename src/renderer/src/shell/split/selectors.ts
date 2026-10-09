@@ -1,4 +1,4 @@
-import { layoutLeaves, paneOrder } from '../../../../shared/split'
+import { focusedPaneOfSplit, layoutLeaves, paneOrder } from '../../../../shared/split'
 import type { OrbitState } from '../../../../shared/state'
 import { activeTabId } from '../../selectors'
 
@@ -15,12 +15,7 @@ export function focusedPaneOf(s: OrbitState, splitId: string): string {
   return active && split && layoutLeaves(split.layout).includes(active) ? active : ''
 }
 
-/** The pane focused most recently (selecting the split returns to it, SV-14). */
-export function lastFocusedPane(s: OrbitState, panes: string[]): string | undefined {
-  let best: string | undefined
-  for (const id of panes) {
-    const t = s.tabs[id]
-    if (t && (!best || t.lastActiveAt > (s.tabs[best]?.lastActiveAt ?? 0))) best = id
-  }
-  return best
+/** The pane focused last (selecting the split returns to it, SV-14). */
+export function lastFocusedPane(s: OrbitState, splitId: string): string | undefined {
+  return focusedPaneOfSplit(s, splitId)
 }

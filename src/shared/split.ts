@@ -9,7 +9,8 @@
  * to 1. Canonical form: no single-child containers, no container directly
  * inside a container of the same type, at most MAX_PANES leaves.
  */
-import type { SplitLayout, TabId } from './state'
+import type { OrbitState, SplitLayout, TabId } from './state'
+import { splitOfTab } from './tree'
 
 export const MAX_PANES = 4
 /** Gap between panes in px (matches the frame gutter). */
@@ -446,7 +447,11 @@ export function insertBeside(layout: SplitLayout, targets: TabId[], newTabId: Ta
   const leaves = layoutLeaves(layout)
   if (leaves.includes(newTabId) || leaves.length >= MAX_PANES) return layout
   const path = targets.length > 0 ? pathOfGroup(layout, targets) : undefined
-  if (!path) return targets[0] ? insertPane(layout, targets[0], newTabId, side) : layout
+  if (!path) {
+    // The group changed: beside the first of its panes that is still here, if any.
+    const still = targets.find((id) => leaves.includes(id))
+    return still ? insertPane(layout, still, newTabId, side) : layout
+  }
   const axis = axisOfSide(side)
   const before = sideIsBefore(side)
   const parent = path.length > 0 ? nodeAt(layout, path.slice(0, -1)) : undefined
@@ -553,4 +558,54 @@ export function intersect(a: Box, b: Box): Box {
   const right = Math.min(a.x + a.width, b.x + b.width)
   const bottom = Math.min(a.y + a.height, b.y + b.height)
   return { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) }
+}
+
+// ---- Splits in state (helpers shared with the tab model) ----
+
+/** Tabs shown together with `tabId`: every pane of its split, or just the tab. */
+export function groupOf(state: OrbitState, tabId: TabId): TabId[] {
+  const splitId = splitOfTab(state, tabId)
+  const split = splitId ? state.splits[splitId] : undefined
+  return split ? layoutLeaves(split.layout) : [tabId]
+}
+
+/**
+ * The pane to focus when `tabId`, a pane of a split, closes together with `closing`: its
+ * nearest remaining neighbour in the same split, or null when no pane of the split stays.
+ */
+export function paneAfterClose(state: OrbitState, tabId: TabId, closing: Set<TabId>): TabId | null {
+  const splitId = splitOfTab(state, tabId)
+  const split = splitId ? state.splits[splitId] : undefined
+  if (!split) return null
+  const left = layoutLeaves(split.layout).filter((id) => !closing.has(id) && state.tabs[id])
+  if (left.length === 0) return null
+  const sibling = siblingOf(split.layout, tabId)
+  return sibling && left.includes(sibling) ? sibling : (left[0] as TabId)
+}
+
+/** Remembers the focused pane of a split, so selecting the split returns to it (SV-14). Draft helper. */
+export function noteSplitFocus(d: OrbitState, tabId: TabId): void {
+  const splitId = splitOfTab(d, tabId)
+  const split = splitId ? d.splits[splitId] : undefined
+  if (split && split.focus !== tabId) split.focus = tabId
+}
+
+/** The pane a split stands for: the one focused last (falls back to the most recently used). */
+export function focusedPaneOfSplit(state: OrbitState, splitId: string): TabId | undefined {
+  const split = state.splits[splitId]
+  if (!split) return undefined
+  const leaves = layoutLeaves(split.layout)
+  if (split.focus && leaves.includes(split.focus) && state.tabs[split.focus]) return split.focus
+  let best: TabId | undefined
+  for (const id of leaves) {
+    const t = state.tabs[id]
+    if (t && (!best || t.lastActiveAt > (state.tabs[best]?.lastActiveAt ?? 0))) best = id
+  }
+  return best
+}
+
+/** True for the pane of a split that is still waiting for its first page (SV-02). */
+export function isPendingPane(state: OrbitState, tabId: TabId): boolean {
+  const splitId = splitOfTab(state, tabId)
+  return !!splitId && state.splits[splitId]?.pending === tabId
 }

@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { app } from 'electron'
 import type { MainContext } from './context'
+import { captureExternalLinks, registerExternalLinks } from './external-links'
 import { registerFeatures } from './features'
 import { registerIpc } from './ipc'
 import { installMenu } from './menu'
@@ -25,6 +26,7 @@ app.setName('Orbit')
 if (!e2e && !app.requestSingleInstanceLock()) {
   app.quit()
 } else {
+  captureExternalLinks()
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit()
   })
@@ -36,6 +38,7 @@ function start(): void {
   const userData = app.getPath('userData')
   const stateFile = join(userData, 'orbit-state.json')
   const { state } = loadState(stateFile)
+  perf.mark('state:loaded')
   const store = new Store(state)
   const persistence = new Persistence(store, stateFile)
   const windows = new WindowManager()
@@ -57,10 +60,16 @@ function start(): void {
     },
   }
   ctx.tabs.init(ctx)
+  // PERF.md cold-start metric: when each tab's page first finishes loading.
+  ctx.hooks.tabCreated.push((tabId, contents) => {
+    contents.once('did-finish-load', () => perf.mark(`tab:${tabId}:loaded`))
+  })
   windows.init(ctx)
   registerIpc(ctx)
   registerFeatures(ctx)
+  perf.mark('features:registered')
   installMenu(ctx)
+  perf.mark('menu:installed')
   if (e2e) exposeTestHooks(ctx, persistence)
 
   // Mini windows are transient; restore only main windows.
@@ -71,6 +80,7 @@ function start(): void {
   if (saved.length > 0) for (const w of saved) windows.open(store.state.windows[w.id])
   else windows.open()
   perf.mark('windows:opened')
+  registerExternalLinks(ctx)
 
   app.on('activate', () => {
     if (windows.ids().length === 0) windows.open()

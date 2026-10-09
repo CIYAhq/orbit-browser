@@ -6,6 +6,8 @@
  */
 import { newId } from '../../shared/ids'
 import {
+  anchorOf,
+  insertBeside,
   insertPane,
   layoutLeaves,
   leaf,
@@ -103,6 +105,8 @@ export function detachTab(d: OrbitState, tabId: TabId): ItemLocation | undefined
   const loc = locate(d, splitId)
   if (next && remaining.length >= 2) {
     split.layout = next
+    if (split.focus === tabId) delete split.focus
+    if (split.pending === tabId) delete split.pending
     return loc
   }
   delete d.splits[splitId]
@@ -249,18 +253,6 @@ export function windowsShowing(d: OrbitState, tabIds: TabId[]): { windowId: Wind
   return out
 }
 
-/** The pane a split row stands for: the one focused most recently. */
-export function lastFocusedPane(state: OrbitState, splitId: SplitId): TabId | undefined {
-  const leaves = leavesOf(state, splitId)
-  let best: TabId | undefined
-  for (const id of leaves) {
-    const t = state.tabs[id]
-    if (!t) continue
-    if (!best || t.lastActiveAt > (state.tabs[best]?.lastActiveAt ?? 0)) best = id
-  }
-  return best
-}
-
 /** Tabs sorted the way the sidebar shows them (unknown ones last, keeping their order). */
 export function sidebarSorted(state: OrbitState, tabIds: TabId[]): TabId[] {
   const order = new Map<TabId, number>()
@@ -281,10 +273,11 @@ export function dropBlankPanes(d: OrbitState): TabId[] {
   const removed: TabId[] = []
   for (const split of Object.values(d.splits)) {
     for (const id of layoutLeaves(split.layout)) {
-      if (!isBlankPane(d.tabs[id])) continue
+      // Only a pane that was waiting for the command bar; a page showing about:blank is a real tab.
+      if (split.pending !== id) continue
       // A window that was focused on the empty pane focuses its neighbour instead.
       const current = d.splits[split.id]?.layout ?? split.layout
-      const neighbor = siblingOf(current, id) ?? layoutLeaves(current).find((t) => t !== id && !isBlankPane(d.tabs[t]))
+      const neighbor = siblingOf(current, id) ?? layoutLeaves(current).find((t) => t !== id)
       for (const win of Object.values(d.windows)) {
         for (const [spaceId, active] of Object.entries(win.activeTab)) {
           if (active === id) win.activeTab[spaceId] = neighbor ?? null
@@ -296,6 +289,130 @@ export function dropBlankPanes(d: OrbitState): TabId[] {
     }
   }
   return removed
+}
+
+// ---- Closing and reopening panes with the tab model (SV-17, SV-19) ----
+
+/** Where a pane closed on its own sat: beside the group `targets` of split `splitId`. */
+export interface PaneAnchor {
+  splitId: SplitId
+  targets: TabId[]
+  side: PaneSide
+}
+
+/** A whole split closed as one unit (Close Split): reopening brings it back as it was. */
+export interface SplitUnit {
+  id: SplitId
+  layout: SplitLayout
+  name?: string
+  focus?: TabId
+  location?: ItemLocation
+  tabIds: TabId[]
+}
+
+/**
+ * For tabs about to close: which are panes closing on their own (with the spot to restore them
+ * to) and which close together with every other pane of their split (one unit).
+ */
+export function splitCloseInfo(
+  state: OrbitState,
+  closing: Set<TabId>,
+): Map<TabId, { pane?: PaneAnchor; unit?: SplitUnit }> {
+  const out = new Map<TabId, { pane?: PaneAnchor; unit?: SplitUnit }>()
+  for (const split of Object.values(state.splits)) {
+    const leaves = layoutLeaves(split.layout)
+    const leaving = leaves.filter((id) => closing.has(id))
+    if (leaving.length === 0) continue
+    if (leaving.length === leaves.length) {
+      const unit: SplitUnit = {
+        id: split.id,
+        layout: split.layout,
+        name: split.name,
+        focus: split.focus,
+        location: locate(state, split.id),
+        tabIds: leaves.filter((id) => split.pending !== id),
+      }
+      for (const id of leaves) out.set(id, { unit })
+      continue
+    }
+    let layout: SplitLayout | null = split.layout
+    for (const id of leaving) {
+      const anchor = layout ? anchorOf(layout, id) : undefined
+      if (anchor) out.set(id, { pane: { splitId: split.id, targets: anchor.targets, side: anchor.side } })
+      layout = layout ? removePane(layout, id) : null
+    }
+  }
+  return out
+}
+
+/**
+ * Puts a reopened tab (in state, in no container yet) back beside its old neighbours: into its
+ * split, or into a split re-formed around the neighbour if that split dissolved. Returns where it
+ * landed, or undefined (nothing changed: the caller places the tab as an ordinary tab).
+ */
+export function restorePaneInDraft(d: OrbitState, tabId: TabId, anchor: PaneAnchor): ContainerRef | undefined {
+  const targets = anchor.targets.filter((id) => id !== tabId && d.tabs[id])
+  if (targets.length === 0 || splitOfTab(d, tabId) || locate(d, tabId)) return undefined
+  const home = targets.some((id) => splitOfTab(d, id) === anchor.splitId) ? anchor.splitId : undefined
+  const splitId = home ?? splitOfTab(d, targets[0] as TabId)
+  if (splitId) {
+    const split = d.splits[splitId]
+    if (!split) return undefined
+    const leaves = layoutLeaves(split.layout)
+    if (leaves.length >= MAX_PANES) return undefined
+    const next = insertBeside(
+      split.layout,
+      targets.filter((id) => leaves.includes(id)),
+      tabId,
+      anchor.side,
+    )
+    if (!layoutLeaves(next).includes(tabId)) return undefined
+    split.layout = next
+    const container = locate(d, splitId)?.container
+    adoptPlacement(d, [tabId], container)
+    return container
+  }
+  const target = targets[0] as TabId
+  if (!locate(d, target)) return undefined
+  const created = createSplitInDraft(d, [target, tabId], {
+    at: target,
+    layout: insertPane(leaf(target), target, tabId, anchor.side),
+  })
+  return isFailure(created) ? undefined : locate(d, created)?.container
+}
+
+/**
+ * Brings back a split closed as one unit once its tabs are back in state (and in no container):
+ * same arrangement, sizes, name and place. Returns where it landed, or undefined when fewer than
+ * two of its tabs came back (the caller places them as ordinary tabs).
+ */
+export function restoreUnitInDraft(d: OrbitState, unit: SplitUnit, now = Date.now()): ContainerRef | undefined {
+  const present = unit.tabIds.filter((id) => d.tabs[id] && !splitOfTab(d, id) && !locate(d, id))
+  if (present.length < 2) return undefined
+  let layout: SplitLayout | null = unit.layout
+  for (const id of layoutLeaves(unit.layout)) if (!present.includes(id) && layout) layout = removePane(layout, id)
+  const canonical = normalizeLayout(layout)
+  if (!canonical || canonical.type === 'leaf') return undefined
+  const first = present[0] as TabId
+  const where =
+    unit.location && containerItems(d, unit.location.container)
+      ? unit.location
+      : (() => {
+          const today = todayOf(d, first)
+          return today ? { container: today, index: 0 } : undefined
+        })()
+  if (!where) return undefined
+  const id = d.splits[unit.id] ? newId('v') : unit.id
+  insertItem(d, where.container, where.index, id)
+  d.splits[id] = {
+    id,
+    layout: canonical,
+    createdAt: now,
+    ...(unit.name ? { name: unit.name } : {}),
+    ...(unit.focus && present.includes(unit.focus) ? { focus: unit.focus } : {}),
+  }
+  adoptPlacement(d, present, where.container)
+  return where.container
 }
 
 /** Copies a tab (same page, fresh id) for Duplicate. */

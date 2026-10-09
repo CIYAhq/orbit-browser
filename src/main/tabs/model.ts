@@ -1,9 +1,21 @@
 /**
- * Pure tab-model helpers operating on state drafts (no Electron imports, unit-testable).
+ * Pure tab-model helpers operating on state or drafts (no Electron imports, unit-testable).
  */
+import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
-import type { OrbitState, Tab, TabId, WindowId } from '../../shared/state'
-import { containerItems, locate, sectionOf, sidebarTabOrder, splitLeaves, splitOfTab } from '../../shared/tree'
+import { groupOf, noteSplitFocus, removePane } from '../../shared/split'
+import type { ItemId, OrbitState, Space, SpaceId, Tab, TabId, WindowId } from '../../shared/state'
+import {
+  containerItems,
+  locate,
+  sectionOf,
+  setContainerItems,
+  sidebarTabOrder,
+  splitLeaves,
+  splitOfTab,
+  tabsInItem,
+  visibleSections,
+} from '../../shared/tree'
 import { fallbackTitle } from '../../shared/url'
 
 export function makeTab(fields: Pick<Tab, 'spaceId' | 'profileId' | 'url'> & Partial<Tab>, now = Date.now()): Tab {
@@ -20,6 +32,17 @@ export function makeTab(fields: Pick<Tab, 'spaceId' | 'profileId' | 'url'> & Par
     asleep: true,
     ...fields,
   }
+}
+
+/** Why a tab is being placed in Today (TB-03). */
+export type TodayInsertReason = 'new' | 'background' | 'unpin' | 'restore' | 'reopen' | 'move'
+
+/**
+ * Where a tab lands in a Space's Today section. One tunable rule (TB-03 build note):
+ * everything currently goes to the top, directly under the "+ New Tab" row.
+ */
+export function todayInsertIndex(_space: Pick<Space, 'today'>, _reason: TodayInsertReason): number {
+  return 0
 }
 
 /** Makes `tabId` the active tab of a window (switching Space when needed). Draft helper. */
@@ -39,40 +62,201 @@ export function activateInDraft(d: OrbitState, windowId: WindowId, tabId: TabId,
   }
   win.activeTab[win.spaceId] = tabId
   tab.lastActiveAt = now
+  noteSplitFocus(d, tabId)
+  // A page is live in one window at a time (TB-17): a window that was showing this tab, or any
+  // pane of its split view (a split is shown as one unit, SV-24), hands it over and shows its
+  // next most recent tab instead.
+  const group = new Set(groupOf(d, tabId))
+  for (const other of Object.values(d.windows)) {
+    const shown = other.activeTab[other.spaceId]
+    if (other.id === windowId || !shown || !group.has(shown)) continue
+    other.activeTab[other.spaceId] = mostRecentTab(d, other.spaceId, group)
+  }
 }
 
-/** Most recently used other tab visible in a Space (prefers awake tabs). */
-export function pickNextActive(state: OrbitState, spaceId: string, excluding: Set<TabId>): TabId | null {
-  const candidates = sidebarTabOrder(state, spaceId)
-    .filter((id) => !excluding.has(id))
-    .map((id) => state.tabs[id])
-    .filter((t): t is Tab => !!t)
-  if (candidates.length === 0) return null
-  const awake = candidates.filter((t) => !t.asleep)
-  const pool = awake.length > 0 ? awake : candidates.filter((t) => sectionOf(state, t.id) === 'today')
-  if (pool.length === 0) return null
-  return pool.reduce((best, t) => (t.lastActiveAt > best.lastActiveAt ? t : best)).id
+/** Tabs currently on screen: each window's selected tab, with all panes of its split view. */
+export function displayedTabs(state: OrbitState): Set<TabId> {
+  const out = new Set<TabId>()
+  for (const win of Object.values(state.windows)) {
+    const id = win.activeTab[win.spaceId]
+    if (!id || !state.tabs[id]) continue
+    const split = splitOfTab(state, id)
+    const s = split ? state.splits[split] : undefined
+    if (s) for (const leaf of splitLeaves(s.layout)) out.add(leaf)
+    else out.add(id)
+  }
+  return out
 }
 
-/** Removes a tab from a split view, dissolving the split when one pane is left. Draft helper. */
+/** Most recently used tab of a Space (Favorites included), skipping `excluding`. */
+export function mostRecentTab(
+  state: OrbitState,
+  spaceId: SpaceId,
+  excluding: Set<TabId>,
+  filter: (tab: Tab) => boolean = () => true,
+): TabId | null {
+  let best: Tab | undefined
+  for (const id of sidebarTabOrder(state, spaceId)) {
+    if (excluding.has(id)) continue
+    const tab = state.tabs[id]
+    if (!tab || !filter(tab)) continue
+    if (!best || tab.lastActiveAt > best.lastActiveAt) best = tab
+  }
+  return best?.id ?? null
+}
+
+/**
+ * The tab to select after `closedTabId` leaves (TB-06): the tab directly below in the
+ * same section, else the one above, else the most recently used tab in this Space,
+ * else nothing (empty Space state).
+ */
+export function nextAfterClose(
+  state: OrbitState,
+  spaceId: SpaceId,
+  closedTabId: TabId,
+  closing: Set<TabId> = new Set([closedTabId]),
+): TabId | null {
+  const sections = visibleSections(state, spaceId, { activeTabId: closedTabId })
+  for (const list of [sections.favorites, sections.pinned, sections.today]) {
+    const i = list.indexOf(closedTabId)
+    if (i < 0) continue
+    for (let j = i + 1; j < list.length; j++) {
+      const id = list[j] as TabId
+      if (!closing.has(id)) return id
+    }
+    for (let j = i - 1; j >= 0; j--) {
+      const id = list[j] as TabId
+      if (!closing.has(id)) return id
+    }
+    break
+  }
+  return mostRecentTab(state, spaceId, closing)
+}
+
+/** Replaces the selection in every window/Space that selected one of `tabIds`. Draft helper. */
+export function reselectAway(
+  d: OrbitState,
+  tabIds: Set<TabId>,
+  pick: (spaceId: SpaceId, current: TabId) => TabId | null = (spaceId, current) =>
+    nextAfterClose(d, spaceId, current, tabIds),
+  now = Date.now(),
+): void {
+  for (const win of Object.values(d.windows)) {
+    for (const [spaceId, active] of Object.entries(win.activeTab)) {
+      if (!active || !tabIds.has(active)) continue
+      const next = pick(spaceId, active)
+      win.activeTab[spaceId] = next
+      const tab = next ? d.tabs[next] : undefined
+      if (tab && spaceId === win.spaceId) tab.lastActiveAt = now
+      if (next) noteSplitFocus(d, next)
+    }
+  }
+}
+
+/**
+ * Removes a tab from a split view, dissolving the split when one pane is left. The other panes
+ * keep their arrangement and sizes (SV-17). Draft helper.
+ */
 export function detachFromSplit(d: OrbitState, tabId: TabId): void {
   const splitId = splitOfTab(d, tabId)
   if (!splitId) return
   const split = d.splits[splitId]
   if (!split) return
-  const remaining = splitLeaves(split.layout).filter((id) => id !== tabId)
+  const kept = removePane(split.layout, tabId)
+  const remaining = kept ? splitLeaves(kept) : []
   const loc = locate(d, splitId)
-  if (remaining.length >= 2) {
-    split.layout = {
-      type: 'row',
-      children: remaining.map((id) => ({ type: 'leaf', tabId: id })),
-      sizes: remaining.map(() => 1 / remaining.length),
-    }
+  if (kept && remaining.length >= 2) {
+    split.layout = kept
+    if (split.focus === tabId) delete split.focus
+    if (split.pending === tabId) delete split.pending
     return
   }
   delete d.splits[splitId]
   if (loc) {
     const list = containerItems(d, loc.container)
-    if (list) list.splice(loc.index, 1, ...remaining)
+    if (list) {
+      setContainerItems(d, loc.container, [...list.slice(0, loc.index), ...remaining, ...list.slice(loc.index + 1)])
+    }
   }
+}
+
+/**
+ * Auto-archive period for a Space's Today tabs (TD-03): its profile's value; profiles without
+ * one inherit the Default profile's, then the global setting.
+ */
+export function archiveAfterFor(state: OrbitState, spaceId: SpaceId): number {
+  const space = state.spaces[spaceId]
+  const profile = space ? state.profiles[space.profileId] : undefined
+  return profile?.archiveAfterMs ?? state.profiles[DEFAULT_PROFILE_ID]?.archiveAfterMs ?? state.settings.archiveAfterMs
+}
+
+/**
+ * Today items (tabs or whole split views) idle longer than their Space's archive period
+ * (TD-02). Never: tabs on screen, tabs playing audio, anything outside Today.
+ */
+export function autoArchiveCandidates(state: OrbitState, now: number): ItemId[] {
+  const shown = displayedTabs(state)
+  const out: ItemId[] = []
+  for (const space of Object.values(state.spaces)) {
+    const after = archiveAfterFor(state, space.id)
+    if (!(after > 0)) continue
+    for (const id of space.today) {
+      const tabs = tabsInItem(state, id)
+        .map((t) => state.tabs[t])
+        .filter((t): t is Tab => !!t)
+      if (tabs.length === 0) continue
+      if (tabs.some((t) => shown.has(t.id) || t.audible)) continue
+      const last = Math.max(...tabs.map((t) => t.lastActiveAt))
+      if (now - last >= after) out.push(id)
+    }
+  }
+  return out
+}
+
+/** Favorites stay warm this many times longer than other tabs (FV-08). */
+export const FAVORITE_WARM_FACTOR = 4
+
+/**
+ * Awake tabs idle longer than the sleep period (TB-16). Never: tabs on screen or playing
+ * audio. Favorites stay loaded for longer (FV-08).
+ */
+export function sleepCandidates(state: OrbitState, now: number, awake: Iterable<TabId>): TabId[] {
+  const after = state.settings.sleepAfterMs
+  if (!(after > 0)) return []
+  const shown = displayedTabs(state)
+  const out: TabId[] = []
+  for (const id of awake) {
+    const tab = state.tabs[id]
+    if (!tab || shown.has(id) || tab.audible) continue
+    const limit = sectionOf(state, id) === 'favorite' ? after * FAVORITE_WARM_FACTOR : after
+    if (now - tab.lastActiveAt >= limit) out.push(id)
+  }
+  return out
+}
+
+/** The tab ⌘N jumps to (TB-04, FV-10). `n` is 1–9. */
+export function numberedTarget(state: OrbitState, windowId: WindowId, n: number): TabId | undefined {
+  const win = state.windows[windowId]
+  if (!win) return undefined
+  const active = win.activeTab[win.spaceId] ?? null
+  const s = visibleSections(state, win.spaceId, {
+    activeTabId: active,
+    includeFavorites: state.settings.countFavoritesInShortcuts,
+  })
+  const order = [...s.favorites, ...s.pinned, ...s.today]
+  if (n === 9 && state.settings.lastTabOnCmd9) return order[order.length - 1]
+  return order[n - 1]
+}
+
+/** Next/previous tab in sidebar order, skipping rows hidden in collapsed sections (TB-04). */
+export function steppedTarget(state: OrbitState, windowId: WindowId, delta: number): TabId | undefined {
+  const win = state.windows[windowId]
+  if (!win) return undefined
+  const active = win.activeTab[win.spaceId] ?? null
+  const s = visibleSections(state, win.spaceId, { activeTabId: active })
+  const order = [...s.favorites, ...s.pinned, ...s.today]
+  if (order.length === 0) return undefined
+  const i = active ? order.indexOf(active) : -1
+  if (i < 0) return delta > 0 ? order[0] : order[order.length - 1]
+  return order[(i + delta + order.length) % order.length]
 }

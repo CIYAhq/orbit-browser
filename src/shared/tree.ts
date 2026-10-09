@@ -153,10 +153,38 @@ export function sidebarTabOrder(state: OrbitState, spaceId: SpaceId): TabId[] {
 
 // ---- Draft mutations (call inside store.update) ----
 
+/**
+ * Replaces a container's list. On an Immer draft this yields one `replace` patch instead
+ * of one patch per shifted index (inserting at the top of a 200-tab Today list would
+ * otherwise emit 201 patches).
+ */
+export function setContainerItems(state: OrbitState, ref: ContainerRef, items: ItemId[]): void {
+  switch (ref.kind) {
+    case 'favorites': {
+      const p = state.profiles[ref.profileId]
+      if (p) p.favorites = items
+      return
+    }
+    case 'pinned':
+    case 'today': {
+      const s = state.spaces[ref.spaceId]
+      if (s) s[ref.kind] = items
+      return
+    }
+    case 'folder': {
+      const f = state.folders[ref.folderId]
+      if (f) f.children = items
+    }
+  }
+}
+
 export function removeItem(state: OrbitState, id: ItemId): ItemLocation | undefined {
   const loc = locate(state, id)
   if (!loc) return undefined
-  containerItems(state, loc.container)?.splice(loc.index, 1)
+  const list = containerItems(state, loc.container)
+  if (!list) return undefined
+  if (loc.index === list.length - 1) list.pop()
+  else setContainerItems(state, loc.container, [...list.slice(0, loc.index), ...list.slice(loc.index + 1)])
   return loc
 }
 
@@ -164,7 +192,8 @@ export function insertItem(state: OrbitState, ref: ContainerRef, index: number, 
   const list = containerItems(state, ref)
   if (!list) throw new Error(`Unknown container ${JSON.stringify(ref)}`)
   const at = Math.max(0, Math.min(index, list.length))
-  list.splice(at, 0, id)
+  if (at === list.length) list.push(id)
+  else setContainerItems(state, ref, [...list.slice(0, at), id, ...list.slice(at)])
 }
 
 /**
@@ -172,10 +201,125 @@ export function insertItem(state: OrbitState, ref: ContainerRef, index: number, 
  * Returns false when the move is invalid (e.g. a folder into itself).
  */
 export function moveItem(state: OrbitState, id: ItemId, to: ContainerRef, index: number): boolean {
-  if (to.kind === 'folder' && isFolderId(id) && isWithin(state, to.folderId, id)) return false
-  if (to.kind === 'favorites' && isFolderId(id)) return false
-  if (!containerItems(state, to)) return false
+  if (!canMoveTo(state, id, to)) return false
   removeItem(state, id)
   insertItem(state, to, index, id)
   return true
+}
+
+/**
+ * Whether an item may live in a container. Folders exist only in the pinned area
+ * (FD-01): never in Favorites or Today, and never inside themselves.
+ */
+export function canMoveTo(state: OrbitState, id: ItemId, to: ContainerRef): boolean {
+  if (!containerItems(state, to)) return false
+  // Unknown ids and split panes (which live inside a split, not in a container) can't move on their own.
+  if (!locate(state, id)) return false
+  if (isFolderId(id)) {
+    if (to.kind === 'favorites' || to.kind === 'today') return false
+    if (to.kind === 'folder' && isWithin(state, to.folderId, id)) return false
+  }
+  // A split pane can't move on its own (no location, above); a whole split may be a Favorite (SV-23).
+  if (to.kind === 'folder') {
+    // A folder must itself sit in a pinned area.
+    const root = rootContainerOf(state, { kind: 'folder', folderId: to.folderId })
+    if (root && root.kind !== 'pinned') return false
+  }
+  return true
+}
+
+/** The top-level container (favorites, pinned or today) that a container sits in. */
+export function rootContainerOf(state: OrbitState, ref: ContainerRef): ContainerRef | undefined {
+  let current = ref
+  for (let depth = 0; depth < 64; depth++) {
+    if (current.kind !== 'folder') return current
+    const loc = locate(state, current.folderId)
+    if (!loc) return undefined
+    current = loc.container
+  }
+  return undefined
+}
+
+/** Key that identifies a container (stable string, handy for maps and DOM attributes). */
+export function containerKey(ref: ContainerRef): string {
+  switch (ref.kind) {
+    case 'favorites':
+      return `favorites:${ref.profileId}`
+    case 'pinned':
+      return `pinned:${ref.spaceId}`
+    case 'today':
+      return `today:${ref.spaceId}`
+    case 'folder':
+      return `folder:${ref.folderId}`
+  }
+}
+
+export function parseContainerKey(key: string): ContainerRef | undefined {
+  const i = key.indexOf(':')
+  const kind = key.slice(0, i)
+  const id = key.slice(i + 1)
+  if (!id) return undefined
+  if (kind === 'favorites') return { kind, profileId: id }
+  if (kind === 'pinned' || kind === 'today') return { kind, spaceId: id }
+  if (kind === 'folder') return { kind, folderId: id }
+  return undefined
+}
+
+// ---- Visible order (what the sidebar shows, top to bottom) ----
+
+export interface VisibleOrderOptions {
+  /** The window's selected tab: it stays visible inside a collapsed folder or pinned section (FD-04, PN-09). */
+  activeTabId?: TabId | null
+  /** Count Favorites first (default true). */
+  includeFavorites?: boolean
+}
+
+/** The tab a split view stands for in keyboard order: its most recently used pane. */
+function splitStop(state: OrbitState, splitId: SplitId): TabId[] {
+  const split = state.splits[splitId]
+  if (!split) return []
+  const leaves = splitLeaves(split.layout).filter((id) => state.tabs[id])
+  if (leaves.length === 0) return []
+  const best = leaves.reduce((a, b) =>
+    (state.tabs[b]?.lastActiveAt ?? 0) > (state.tabs[a]?.lastActiveAt ?? 0) ? b : a,
+  )
+  return [best]
+}
+
+function visibleIn(state: OrbitState, items: ItemId[], active: TabId | null | undefined): TabId[] {
+  const out: TabId[] = []
+  for (const id of items) {
+    if (isTabId(id)) {
+      if (state.tabs[id]) out.push(id)
+    } else if (isSplitId(id)) {
+      out.push(...splitStop(state, id))
+    } else if (isFolderId(id)) {
+      const folder = state.folders[id]
+      if (!folder) continue
+      if (!folder.collapsed) out.push(...visibleIn(state, folder.children, active))
+      else if (active && tabsInItem(state, id).includes(active)) out.push(active)
+    }
+  }
+  return out
+}
+
+/** Tabs per section in the order the sidebar shows them, skipping rows hidden in collapsed sections. */
+export function visibleSections(
+  state: OrbitState,
+  spaceId: SpaceId,
+  opts: VisibleOrderOptions = {},
+): { favorites: TabId[]; pinned: TabId[]; today: TabId[] } {
+  const space = state.spaces[spaceId]
+  if (!space) return { favorites: [], pinned: [], today: [] }
+  const active = opts.activeTabId
+  const favorites = visibleIn(state, state.profiles[space.profileId]?.favorites ?? [], active)
+  let pinned = visibleIn(state, space.pinned, active)
+  if (space.pinnedCollapsed) pinned = active && pinned.includes(active) ? [active] : []
+  const today = visibleIn(state, space.today, active)
+  return { favorites: opts.includeFavorites === false ? [] : favorites, pinned, today }
+}
+
+export function visibleTabOrder(state: OrbitState, spaceId: SpaceId, opts: VisibleOrderOptions = {}): TabId[] {
+  const s = visibleSections(state, spaceId, opts)
+  return [...s.favorites, ...s.pinned, ...s.today]
 }

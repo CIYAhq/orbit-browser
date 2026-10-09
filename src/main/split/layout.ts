@@ -8,7 +8,6 @@ import type { Rect } from '../../shared/rpc'
 import { layoutBoxes, layoutLeaves, PANE_GAP } from '../../shared/split'
 import type { OrbitState, TabId } from '../../shared/state'
 import { splitOfTab } from '../../shared/tree'
-import { isBlankPane } from './model'
 
 export interface PlacedPane {
   tabId: TabId
@@ -20,7 +19,7 @@ export function panesFor(state: OrbitState, tabId: TabId, frame: Rect): PlacedPa
   const splitId = splitOfTab(state, tabId)
   const split = splitId ? state.splits[splitId] : undefined
   if (!split) return [{ tabId, rect: frame }]
-  return layoutBoxes(split.layout, frame, PANE_GAP).panes.filter((p) => !isBlankPane(state.tabs[p.tabId]))
+  return layoutBoxes(split.layout, frame, PANE_GAP).panes.filter((p) => p.tabId !== split.pending)
 }
 
 function groupOf(state: OrbitState, tabId: TabId | null): TabId[] {
