@@ -704,6 +704,11 @@ html.is-resizing * {
   will-change: transform, width, height;
 }
 
+/* Dark rendition (AP-04): page cards, empty panes and closing cards are dark too. */
+.shell[data-dark] .pane:not(.pane--drop) {
+  background: color-mix(in srgb, var(--frame-top) 40%, #19191c);
+}
+
 .pane--empty {
   inset: 0;
   width: auto;

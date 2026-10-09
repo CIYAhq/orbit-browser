@@ -38,9 +38,35 @@ const FADE_OUT_MS = 120
  */
 export class PaneStrip {
   private windows = new Map<WindowId, StripState>()
+  /** Windows with a page in HTML full screen: no strip there (review F3). */
+  private fullscreen = new Set<WindowId>()
 
   constructor(private ctx: MainContext) {
     ctx.store.subscribe((next) => this.onState(next))
+    // The strip follows its pane when the panes move (window resize, divider drag; review F7).
+    ctx.events.on('layout.panes', ({ panes }, { windowId }) => {
+      const s = windowId ? this.windows.get(windowId) : undefined
+      if (!windowId || !s?.tabId || !s.view || s.view.webContents.isDestroyed()) return
+      const pane = panes.find((p) => p.tabId === s.tabId)
+      if (pane) s.view.setBounds(this.boundsOver(pane.rect))
+      else this.hide(windowId, true)
+    })
+  }
+
+  setFullscreen(windowId: WindowId, on: boolean): void {
+    if (on) {
+      this.fullscreen.add(windowId)
+      this.hide(windowId, true)
+    } else this.fullscreen.delete(windowId)
+  }
+
+  private boundsOver(r: Electron.Rectangle): Electron.Rectangle {
+    return {
+      x: Math.round(r.x + r.width / 2 - STRIP_WIDTH / 2),
+      y: Math.round(r.y + 6),
+      width: STRIP_WIDTH,
+      height: STRIP_HEIGHT,
+    }
   }
 
   /** Test/debug view of where the strip is. */
@@ -102,6 +128,7 @@ export class PaneStrip {
     const page = this.ctx.tabs.get(tabId)
     const state = this.ctx.store.state
     if (!win || win.isDestroyed() || !page || !this.isShownPane(state, windowId, tabId)) return
+    if (this.fullscreen.has(windowId)) return
     if (state.windows[windowId]?.overlay.kind !== 'none') return
     const s = this.stateOf(windowId)
     clearTimeout(s.showTimer)
@@ -111,13 +138,7 @@ export class PaneStrip {
     s.view = view
     s.tabId = tabId
     s.candidate = null
-    const b = page.getBounds()
-    view.setBounds({
-      x: Math.round(b.x + b.width / 2 - STRIP_WIDTH / 2),
-      y: Math.round(b.y + 6),
-      width: STRIP_WIDTH,
-      height: STRIP_HEIGHT,
-    })
+    view.setBounds(this.boundsOver(page.getBounds()))
     // On top of the pages; the overlay re-adds itself above when it opens.
     win.contentView.addChildView(view)
     view.setVisible(true)

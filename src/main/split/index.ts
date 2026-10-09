@@ -503,7 +503,7 @@ export function registerSplit(ctx: MainContext): void {
     store.update((d) => {
       for (const copy of tabs) d.tabs[copy.id] = copy
       insertItem(d, loc.container, loc.index + 1, id)
-      d.splits[id] = { id, layout, createdAt: now }
+      d.splits[id] = { id, layout, createdAt: now, ...(split.name ? { name: split.name } : {}) }
     })
     // Copies keep their back/forward history.
     for (const [from, to] of copies) {
@@ -713,11 +713,53 @@ export function registerSplit(ctx: MainContext): void {
     store.update((d) => focusInDraft(d, windowId, tabId))
   }
 
-  ctx.hooks.tabCreated.push((tabId, contents) => {
-    contents.on('before-mouse-event', (_event, mouse) => {
+  // Mouse input from pages matters only for split panes (click to focus, the strip's hover), so
+  // the hook is attached to panes alone and follows tabs in and out of splits (review F6).
+  const live = new Map<TabId, Electron.WebContents>()
+  const hooked = new Map<TabId, () => void>()
+  const isPane = (state: OrbitState, tabId: TabId) => !!splitOfTab(state, tabId)
+  const hook = (tabId: TabId, contents: Electron.WebContents) => {
+    if (hooked.has(tabId) || contents.isDestroyed()) return
+    const onMouse = (_event: Electron.Event, mouse: Electron.MouseInputEvent) => {
       if (mouse.type === 'mouseDown') focusFromPage(tabId)
       strip.onPageMouse(tabId, mouse)
+    }
+    contents.on('before-mouse-event', onMouse)
+    hooked.set(tabId, () => {
+      if (!contents.isDestroyed()) contents.off('before-mouse-event', onMouse)
     })
+  }
+  const unhook = (tabId: TabId) => {
+    hooked.get(tabId)?.()
+    hooked.delete(tabId)
+  }
+  store.subscribe((next, prev) => {
+    if (next.splits === prev.splits) return
+    for (const [tabId, contents] of live) {
+      if (isPane(next, tabId)) hook(tabId, contents)
+      else unhook(tabId)
+    }
+  })
+
+  ctx.hooks.tabCreated.push((tabId, contents) => {
+    live.set(tabId, contents)
+    if (isPane(store.state, tabId)) hook(tabId, contents)
+    contents.once('destroyed', () => {
+      unhook(tabId)
+      if (live.get(tabId) === contents) live.delete(tabId)
+    })
+    // The pane strip stays away while a page is in HTML full screen (review F3).
+    let fullscreenWindow: WindowId | undefined
+    contents.on('enter-html-full-screen', () => {
+      fullscreenWindow = windows.windowOfTab(tabId)
+      if (fullscreenWindow) strip.setFullscreen(fullscreenWindow, true)
+    })
+    const leave = () => {
+      if (fullscreenWindow) strip.setFullscreen(fullscreenWindow, false)
+      fullscreenWindow = undefined
+    }
+    contents.on('leave-html-full-screen', leave)
+    contents.once('destroyed', leave)
     placeholderUntilLoaded(tabId, contents)
   })
 

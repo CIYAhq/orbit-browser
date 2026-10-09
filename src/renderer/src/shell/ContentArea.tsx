@@ -1,7 +1,7 @@
 import { Command } from 'lucide-react'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { formatAccelerator } from '../../../shared/actions'
-import { type DividerBox, layoutBoxes, layoutLeaves, leaf } from '../../../shared/split'
+import { type DividerBox, layoutBoxes, layoutLeaves, leaf, nodeAt } from '../../../shared/split'
 import type { OrbitState, SplitLayout, WindowState } from '../../../shared/state'
 import { splitOfTab } from '../../../shared/tree'
 import { invoke } from '../api'
@@ -102,7 +102,13 @@ export function ContentArea({ win }: { win: WindowState }) {
         )}
         {frame?.splitId &&
           dividers.map((d) => (
-            <Divider key={dividerKey(d.path, d.index)} divider={d} splitId={frame.splitId as string} engine={engine} />
+            <Divider
+              key={dividerKey(d.path, d.index)}
+              divider={d}
+              splitId={frame.splitId as string}
+              engine={engine}
+              value={sizeBefore(layout, d)}
+            />
           ))}
         {isSplit && (
           <div className="pane-focus-ring" data-testid="split-focus-ring" ref={(el) => engine.registerRing(el)} />
@@ -133,7 +139,24 @@ const Pane = memo(function Pane(props: {
   )
 })
 
-function Divider({ divider, splitId, engine }: { divider: DividerBox; splitId: string; engine: PaneEngine }) {
+/** Share (percent) of the container taken by the pane(s) before a divider. */
+function sizeBefore(layout: SplitLayout | null, d: DividerBox): number {
+  const node = layout ? nodeAt(layout, d.path) : undefined
+  if (!node || node.type === 'leaf') return 50
+  return Math.round(node.sizes.slice(0, d.index + 1).reduce((a, b) => a + b, 0) * 100)
+}
+
+function Divider({
+  divider,
+  splitId,
+  engine,
+  value,
+}: {
+  divider: DividerBox
+  splitId: string
+  engine: PaneEngine
+  value: number
+}) {
   const key = dividerKey(divider.path, divider.index)
   const cursorClass = divider.axis === 'row' ? 'is-resizing' : 'is-resizing-rows'
   const finish = () => {
@@ -156,6 +179,9 @@ function Divider({ divider, splitId, engine }: { divider: DividerBox; splitId: s
       role="separator"
       aria-orientation={divider.axis === 'row' ? 'vertical' : 'horizontal'}
       aria-label="Resize panes (double-click to even them out)"
+      aria-valuenow={value}
+      aria-valuemin={0}
+      aria-valuemax={100}
       data-testid="split-divider"
       data-axis={divider.axis}
       onPointerDown={(e) => {

@@ -476,8 +476,10 @@ test('[SV-17][SV-19] reopening closed panes puts them back into their split', as
   // Close the whole split, then reopen its tabs: the split comes back together.
   await run(orbit.app, 'split.close', { splitId })
   await expect(orbit.shell.getByTestId('split-row')).toHaveCount(0)
-  for (let i = 0; i < 3; i++) await action(orbit.app, 'tab.reopenClosed')
+  // One reopen brings the whole split back as it was (SV-19).
+  await action(orbit.app, 'tab.reopenClosed')
   await expect(orbit.shell.getByTestId('split-row').getByTestId('split-segment')).toHaveCount(3)
+  expect((await state(orbit.app)).splits[splitId]?.layout).toEqual(before)
   const back = await splitOf(orbit.app, a)
   expect(back && JSON.stringify(back.layout).match(/t-[a-z0-9]+/g)).toEqual([a, b, c])
 })
@@ -664,6 +666,15 @@ test('[SV-25] a page going full screen in a pane fills the window and comes back
       return v?.bounds.x === 0 && v.bounds.y === 0 && v.bounds.width === w && other?.visible === false
     })
     .toBe(true)
+  // No pane strip over a full-screen page (review F3).
+  await orbit.app.evaluate((_e, id) => {
+    const g = globalThis as unknown as {
+      __orbitSplit: { strip: { show: (w: string, t: string) => void } }
+      __orbit: { windowIds: () => string[] }
+    }
+    g.__orbitSplit.strip.show(g.__orbit.windowIds()[0] as string, id)
+  }, b)
+  expect((await stripInfo(orbit.app)).visible).toBe(false)
   await video.evaluate(() => document.exitFullscreen())
   await expectViewsOverPanes(orbit, [a, b])
   await expect(orbit.shell.getByTestId('split-pane')).toHaveCount(2)
@@ -739,9 +750,23 @@ test('[SV-13][SV-26] a divider drag leaves the sidebar untouched and causes no l
       for (const e of list.getEntries()) w.__longTasks.push(e.duration)
     }).observe({ entryTypes: ['longtask'] })
     const sidebar = document.querySelector('[data-testid="sidebar"]') as Element
+    const ww = w as unknown as { __lastMutation: number }
+    ww.__lastMutation = performance.now()
     new MutationObserver((records) => {
       w.__sidebarMutations += records.length
+      ww.__lastMutation = performance.now()
     }).observe(sidebar, { subtree: true, childList: true, attributes: true, characterData: true })
+  })
+  // Let late page titles, favicons and row animations settle, then count from zero.
+  await expect
+    .poll(() =>
+      orbit.shell.evaluate(
+        () => performance.now() - (window as unknown as { __lastMutation: number }).__lastMutation > 600,
+      ),
+    )
+    .toBe(true)
+  await orbit.shell.evaluate(() => {
+    ;(window as unknown as { __sidebarMutations: number }).__sidebarMutations = 0
   })
   const divider = await orbit.shell.getByTestId('split-divider').boundingBox()
   if (!divider) throw new Error('no divider')
@@ -1068,3 +1093,40 @@ function splitOfTab(s: { splits: Record<string, { layout: SplitLayout }> }, tabI
   for (const [id, split] of Object.entries(s.splits)) if (JSON.stringify(split.layout).includes(`"${tabId}"`)) return id
   return undefined
 }
+
+test('[SV-12][SV-22] the strip follows its pane when the panes move; Duplicate keeps the name', async () => {
+  const b = await openTab(orbit.app, 'Moving')
+  const a = await openTab(orbit.app, 'Fixed')
+  const splitId = (await run(orbit.app, 'split.create', { tabIds: [a, b] })) as string
+  await expectViewsOverPanes(orbit, [a, b])
+  const shown = await showStrip(orbit.app, b)
+  await run(orbit.app, 'split.resize', { splitId, path: [], sizes: [0.7, 0.3] })
+  await expectViewsOverPanes(orbit, [a, b])
+  await expect
+    .poll(async () => {
+      const info = await stripInfo(orbit.app)
+      const pb = await paneBox(orbit.shell, b)
+      return (
+        info.visible && !!info.bounds && Math.abs(info.bounds.x + info.bounds.width / 2 - (pb.x + pb.width / 2)) <= 1
+      )
+    })
+    .toBe(true)
+  expect((await stripInfo(orbit.app)).bounds?.x).toBeGreaterThan(shown.x)
+  await run(orbit.app, 'split.rename', { splitId, name: 'Pair' })
+  const copy = (await run(orbit.app, 'split.duplicate', { splitId })) as string
+  expect((await state(orbit.app)).splits[copy]?.name).toBe('Pair')
+})
+
+test('[SV-08] a link opens in a new pane beside the page that holds it', async () => {
+  const a = await openTab(orbit.app, 'Source')
+  await expect.poll(async () => (await tabView(orbit.app, a))?.visible).toBe(true)
+  const splitId = (await run(orbit.app, 'split.openUrl', { url: fx.url('/page/Linked'), target: a })) as string
+  expect(splitId).toMatch(/^v-/)
+  const split = await splitOf(orbit.app, a)
+  const linked = JSON.stringify(split?.layout)
+    .match(/t-[a-z0-9]+/g)
+    ?.find((id) => id !== a) as string
+  await expectViewsOverPanes(orbit, [a, linked])
+  expect((await paneBox(orbit.shell, linked)).x).toBeGreaterThan((await paneBox(orbit.shell, a)).x)
+  await expect.poll(async () => (await tabView(orbit.app, linked))?.url).toContain('/page/Linked')
+})
