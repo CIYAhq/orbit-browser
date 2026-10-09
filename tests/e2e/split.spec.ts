@@ -4,7 +4,9 @@ import {
   action,
   activeTabId,
   type Fixtures,
+  FRAME_SLACK,
   launchOrbit,
+  MOD,
   type Orbit,
   run,
   startFixtures,
@@ -13,6 +15,7 @@ import {
   tabView,
   viewPage,
 } from './helpers'
+import { settled } from './tabs-support'
 
 let fx: Fixtures
 let orbit: Orbit
@@ -118,22 +121,24 @@ test('[SV-13][SV-24] dragging a divider resizes the native views and the sizes p
   const y = divider.y + divider.height / 2
   await orbit.shell.mouse.move(x, y)
   await orbit.shell.mouse.down()
-  for (let i = 1; i <= 10; i++) await orbit.shell.mouse.move(x + i * 12, y)
+  // 40 px: room the right pane has even in a small window (the macOS runner's is about 880 px wide,
+  // so each pane starts near 310 px and stops at 240).
+  for (let i = 1; i <= 10; i++) await orbit.shell.mouse.move(x + i * 4, y)
   // Mid-drag the views already follow the pointer, while the stored layout (and so every
   // state subscriber, e.g. the sidebar) is untouched until the drag ends.
-  await expect.poll(async () => (await tabView(orbit.app, a))?.bounds.width).toBeGreaterThan(before.width + 100)
+  await expect.poll(async () => (await tabView(orbit.app, a))?.bounds.width).toBeGreaterThan(before.width + 30)
   const midDrag = (await splitOf(orbit.app, a))?.layout
   expect(midDrag?.type === 'row' && midDrag.sizes).toEqual([0.5, 0.5])
   await orbit.shell.mouse.up()
   await expectViewsOverPanes(orbit, [a, b])
   const after = (await tabView(orbit.app, a))?.bounds as Box
-  expect(after.width - before.width).toBeGreaterThan(100)
+  expect(after.width - before.width).toBeGreaterThan(30)
   await expect
     .poll(async () => {
       const layout = (await splitOf(orbit.app, a))?.layout
       return layout && layout.type !== 'leaf' ? (layout.sizes[0] ?? 0) : 0
     })
-    .toBeGreaterThan(0.55)
+    .toBeGreaterThan(0.52)
   // The right pane stops at its minimum width.
   const d2 = await orbit.shell.getByTestId('split-divider').boundingBox()
   if (!d2) throw new Error('no divider')
@@ -229,7 +234,7 @@ test('[SV-02][SV-15] the shortcut adds a pane that the command bar fills; Escape
 test('[SV-03][SV-11] Add Split Below from the command bar stacks a pane; flip turns it side by side', async () => {
   const a = await openTab(orbit.app, 'Top')
   await expect.poll(async () => (await tabView(orbit.app, a))?.visible).toBe(true)
-  await orbit.shell.keyboard.press('Control+T')
+  await orbit.shell.keyboard.press(`${MOD}+T`)
   const overlay = await viewPage(orbit.app, 'overlay')
   const input = overlay.getByTestId('command-input')
   await input.fill('split below')
@@ -246,18 +251,25 @@ test('[SV-03][SV-11] Add Split Below from the command bar stacks a pane; flip tu
   const bottom = JSON.stringify(split?.layout)
     .match(/t-[a-z0-9]+/g)
     ?.find((id) => id !== a) as string
+  // Panes move to their new places over a few frames (slow ones on the macOS runner): poll for
+  // the arrangement, then check the native views over it.
+  await expect
+    .poll(async () => (await paneBox(orbit.shell, bottom)).y - (await paneBox(orbit.shell, a)).y)
+    .toBeGreaterThan(100)
   await expectViewsOverPanes(orbit, [a, bottom])
-  expect((await paneBox(orbit.shell, bottom)).y).toBeGreaterThan((await paneBox(orbit.shell, a)).y)
   await action(orbit.app, 'split.flip')
   await expect.poll(async () => (await splitOf(orbit.app, a))?.layout.type).toBe('row')
+  await expect
+    .poll(async () => (await paneBox(orbit.shell, bottom)).x - (await paneBox(orbit.shell, a)).x)
+    .toBeGreaterThan(100)
   await expectViewsOverPanes(orbit, [a, bottom])
-  expect((await paneBox(orbit.shell, bottom)).x).toBeGreaterThan((await paneBox(orbit.shell, a)).x)
 })
 
 test('[SV-04][SV-25] dragging a tab row onto the page makes a split; a full split refuses', async () => {
   const b = await openTab(orbit.app, 'Dragged')
   const a = await openTab(orbit.app, 'Shown')
   await expect.poll(async () => (await tabView(orbit.app, a))?.visible).toBe(true)
+  await settled(orbit.shell)
   const row = orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${b}"]`)
   const from = await row.boundingBox()
   const frame = await orbit.shell.getByTestId('content-frame').boundingBox()
@@ -384,7 +396,7 @@ test('[SV-24] a resized three-pane split comes back after relaunch', async () =>
   expect(pa.width / pb.width).toBeCloseTo(2, 1)
 })
 
-test('[SV-17] Ctrl+W closes only the focused pane and keeps the others’ arrangement', async () => {
+test('[SV-17] ⌘W / Ctrl+W closes only the focused pane and keeps the others’ arrangement', async () => {
   const c = await openTab(orbit.app, 'Cee')
   const a = await openTab(orbit.app, 'Ay')
   const splitId = (await run(orbit.app, 'split.create', { tabIds: [a, c] })) as string
@@ -395,7 +407,7 @@ test('[SV-17] Ctrl+W closes only the focused pane and keeps the others’ arrang
   await run(orbit.app, 'split.resize', { splitId, path: [], sizes: [0.6, 0.4] })
   await expectViewsOverPanes(orbit, [a, b, c, d])
   expect(await activeTabId(orbit.app)).toBe(d)
-  await orbit.shell.keyboard.press('Control+W')
+  await orbit.shell.keyboard.press(`${MOD}+W`)
   await expect(orbit.shell.getByTestId('split-row').getByTestId('split-segment')).toHaveCount(3)
   // Focus stays in the split (on one of the remaining panes).
   expect([a, b, c]).toContain(await activeTabId(orbit.app))
@@ -551,7 +563,7 @@ test('[SV-22][SV-21] a split can be named; the name replaces the pane titles', a
   await expect(row.getByTestId('split-segment')).toHaveCount(2)
 })
 
-test('[SV-14][SV-15] the split row returns to the last focused pane; Ctrl+L can swap an open tab into a pane', async () => {
+test('[SV-14][SV-15] the split row returns to the last focused pane; ⌘L / Ctrl+L can swap an open tab into a pane', async () => {
   const other = await openTab(orbit.app, 'Outside')
   const b = await openTab(orbit.app, 'Right pane')
   const a = await openTab(orbit.app, 'Left pane')
@@ -565,8 +577,8 @@ test('[SV-14][SV-15] the split row returns to the last focused pane; Ctrl+L can 
   await orbit.shell.mouse.click(row.x + 3, row.y + row.height / 2)
   await expect.poll(() => activeTabId(orbit.app)).toBe(b)
   await expectViewsOverPanes(orbit, [a, b])
-  // Ctrl+L on the focused pane and pick the open tab: it takes the pane's place, the old page goes to Today.
-  await orbit.shell.keyboard.press('Control+L')
+  // ⌘L / Ctrl+L on the focused pane and pick the open tab: it takes the pane's place, the old page goes to Today.
+  await orbit.shell.keyboard.press(`${MOD}+L`)
   const overlay = await viewPage(orbit.app, 'overlay')
   const input = overlay.getByTestId('command-input')
   await expect(input).toBeFocused()
@@ -725,11 +737,15 @@ test('[SV-26] a new pane grows in with a spring and a closed one fades out', asy
   // It starts small and grows over several frames (a spring, not a jump), settles within 1 px
   // in well under a second (about 300 ms on an idle machine), without visible overshoot.
   // Thresholds leave room for dropped frames when CI runs two apps at once.
-  expect(samples[0]?.w ?? final).toBeLessThan(final * 0.8)
-  const settled = samples.find((s) => Math.abs(s.w - final) <= 1)
-  expect(settled?.t ?? 1000).toBeLessThan(650)
+  // On the macOS CI VM a frame can take 100–200 ms (D17): its first frame may already show most of
+  // the spring, so the shape is checked where frames are timely and the end state everywhere.
+  if (FRAME_SLACK === 1) {
+    expect(samples[0]?.w ?? final).toBeLessThan(final * 0.8)
+    expect(samples.filter((s) => s.w > 1 && s.w < final - 1).length).toBeGreaterThan(1)
+  }
+  const settledAt = samples.find((s) => Math.abs(s.w - final) <= 1)
+  expect(settledAt?.t ?? 1000).toBeLessThan(FRAME_SLACK === 1 ? 650 : 900)
   expect(Math.max(...samples.map((s) => s.w))).toBeLessThan(final + 4)
-  expect(samples.filter((s) => s.w > 1 && s.w < final - 1).length).toBeGreaterThan(1)
   // Closing a pane leaves a short-lived fading card.
   const ghost = orbit.shell.waitForSelector('[data-testid="split-ghost"]', { state: 'attached', timeout: 5000 })
   await run(orbit.app, 'split.closePane', { tabId: b })
@@ -799,22 +815,22 @@ test('[SV-02][SV-15] pane sessions: quick re-add, new-tab choice and closing the
   await expect(orbit.shell.getByTestId('split-row')).toContainText('Second')
   await expect(orbit.shell.getByTestId('split-row')).toContainText('Steady')
   await expect(orbit.shell.getByTestId('split-pane')).toHaveCount(2)
-  // Ctrl+L on a pane, then Ctrl+Enter (open in a new tab): the pane keeps its page.
+  // ⌘L / Ctrl+L on a pane, then ⌘/Ctrl+Enter (open in a new tab): the pane keeps its page.
   const pane = (await activeTabId(orbit.app)) as string
-  await orbit.shell.keyboard.press('Control+L')
+  await orbit.shell.keyboard.press(`${MOD}+L`)
   await expect(input).toBeFocused()
   await input.fill(fx.url('/page/Elsewhere'))
   await expect(overlay.getByTestId('command-result').first()).toBeVisible()
-  await input.press('Control+Enter')
+  await input.press(`${MOD}+Enter`)
   await expect(orbit.shell.getByTestId('tab-row')).toHaveCount(1)
   await expect(orbit.shell.getByTestId('split-row')).toContainText('Second')
   expect((await state(orbit.app)).tabs[pane]?.url).toContain('/page/Second')
-  // Closing the empty pane itself (Ctrl+W while its command bar is open) closes the bar too.
+  // Closing the empty pane itself (⌘W / Ctrl+W while its command bar is open) closes the bar too.
   await run(orbit.app, 'tabs.activate', { tabId: a })
   await orbit.shell.keyboard.press('Control+Shift+Equal')
   await expect(input).toBeFocused()
   await expect(orbit.shell.getByTestId('split-pane')).toHaveCount(3)
-  await input.press('Control+W')
+  await input.press(`${MOD}+W`)
   await expect(overlay.getByTestId('command-bar')).toHaveCount(0)
   await expect(orbit.shell.getByTestId('split-pane')).toHaveCount(2)
 })
@@ -880,7 +896,7 @@ async function takePlacements(app: ElectronApplication) {
   })
 }
 
-test('[SV-17][SV-26] Ctrl+W and Ctrl+Shift+T on a pane never show a page outside the split', async () => {
+test('[SV-17][SV-26] ⌘W and ⌘⇧T (Ctrl+W, Ctrl+Shift+T) on a pane never show a page outside the split', async () => {
   const x = await openTab(orbit.app, 'Neighbour')
   const c = await openTab(orbit.app, 'PaneC')
   const b = await openTab(orbit.app, 'PaneB')
@@ -893,7 +909,7 @@ test('[SV-17][SV-26] Ctrl+W and Ctrl+Shift+T on a pane never show a page outside
   await run(orbit.app, 'tabs.activate', { tabId: b })
   await expectViewsOverPanes(orbit, [a, b, c])
   await logPlacements(orbit.app)
-  await orbit.shell.keyboard.press('Control+W')
+  await orbit.shell.keyboard.press(`${MOD}+W`)
   await expect(orbit.shell.getByTestId('split-row').getByTestId('split-segment')).toHaveCount(2)
   await expectViewsOverPanes(orbit, [a, c])
   const closing = await takePlacements(orbit.app)
@@ -909,7 +925,7 @@ test('[SV-17][SV-26] Ctrl+W and Ctrl+Shift+T on a pane never show a page outside
   }
   expect([a, c]).toContain(await activeTabId(orbit.app))
   // Reopening puts the pane straight back into the split: it is never placed alone.
-  await orbit.shell.keyboard.press('Control+Shift+T')
+  await orbit.shell.keyboard.press(`${MOD}+Shift+T`)
   await expect(orbit.shell.getByTestId('split-row').getByTestId('split-segment')).toHaveCount(3)
   await expectViewsOverPanes(orbit, [a, b, c])
   const reopening = await takePlacements(orbit.app)
@@ -947,6 +963,7 @@ test('[SV-05] resting a dragged tab on the right half of a row makes a split the
   const b = await openTab(orbit.app, 'Target')
   const a = await openTab(orbit.app, 'Dropped')
   const before = (await state(orbit.app)).spaces[(await state(orbit.app)).tabs[a]?.spaceId as string]?.today
+  await settled(orbit.shell)
   const from = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${a}"]`).boundingBox()
   const to = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${b}"]`).boundingBox()
   if (!from || !to) throw new Error('rows')
@@ -973,6 +990,7 @@ test('[SV-05] a quick drag across the middle of a row reorders, it does not make
   const c = await openTab(orbit.app, 'Third')
   const b = await openTab(orbit.app, 'Second')
   const a = await openTab(orbit.app, 'First')
+  await settled(orbit.shell)
   const from = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${a}"]`).boundingBox()
   const to = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${c}"]`).boundingBox()
   if (!from || !to) throw new Error('rows')
@@ -987,6 +1005,39 @@ test('[SV-05] a quick drag across the middle of a row reorders, it does not make
   const s = await state(orbit.app)
   const today = s.spaces[s.tabs[a]?.spaceId as string]?.today ?? []
   expect(today.indexOf(a)).toBeGreaterThan(today.indexOf(b))
+})
+
+test('[SV-05] leaving the list starts the rest over: back on the same row and released at once reorders (review W1)', async () => {
+  const c = await openTab(orbit.app, 'Third')
+  const b = await openTab(orbit.app, 'Second')
+  const a = await openTab(orbit.app, 'First')
+  // The last row goes up onto the first: rows above the dragged one stay put while it is away.
+  await settled(orbit.shell)
+  const from = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${c}"]`).boundingBox()
+  const to = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${a}"]`).boundingBox()
+  if (!from || !to) throw new Error('rows')
+  // The right half of the row's middle band, on the side the drag comes from, where a rest arms.
+  const over = { x: to.x + to.width * 0.75, y: to.y + to.height * 0.6 }
+  await orbit.shell.mouse.move(from.x + 30, from.y + from.height / 2)
+  await orbit.shell.mouse.down()
+  await orbit.shell.mouse.move(from.x + 40, from.y + from.height / 2 - 6, { steps: 2 })
+  await orbit.shell.mouse.move(over.x, over.y, { steps: 6 })
+  // The split indicator shows: the rest has run its full time.
+  await expect(orbit.shell.locator('.row-slot.is-split-right')).toHaveCount(1)
+  // Out over the page and straight back onto the same spot, released at once.
+  await orbit.shell.mouse.move(to.x + to.width + 300, over.y, { steps: 2 })
+  await expect(orbit.shell.locator('.row-slot.is-split-right')).toHaveCount(0)
+  await orbit.shell.mouse.move(over.x, over.y, { steps: 2 })
+  await orbit.shell.mouse.up()
+  // The drop is a move (committed once the row has settled), not a split.
+  await expect
+    .poll(async () => {
+      const s = await state(orbit.app)
+      const today = s.spaces[s.tabs[c]?.spaceId as string]?.today ?? []
+      return today.includes(c) && today.indexOf(c) < today.indexOf(b)
+    })
+    .toBe(true)
+  expect(Object.keys((await state(orbit.app)).splits)).toHaveLength(0)
 })
 
 test('[SV-06] Open in Split View from a multi-selection makes one split in sidebar order', async () => {
@@ -1128,18 +1179,23 @@ test('[SV-12][SV-22] the strip follows its pane when the panes move; Duplicate k
   const splitId = (await run(orbit.app, 'split.create', { tabIds: [a, b] })) as string
   await expectViewsOverPanes(orbit, [a, b])
   const shown = await showStrip(orbit.app, b)
-  await run(orbit.app, 'split.resize', { splitId, path: [], sizes: [0.7, 0.3] })
+  // Sizes any window can show: a 0.3 pane would be under the 240 px minimum in a small window.
+  await run(orbit.app, 'split.resize', { splitId, path: [], sizes: [0.6, 0.4] })
   await expectViewsOverPanes(orbit, [a, b])
+  // Moved right, and centred over the pane again (before the panes start moving, it is centred
+  // where it was: slow frames on the macOS runner showed that).
   await expect
     .poll(async () => {
       const info = await stripInfo(orbit.app)
       const pb = await paneBox(orbit.shell, b)
       return (
-        info.visible && !!info.bounds && Math.abs(info.bounds.x + info.bounds.width / 2 - (pb.x + pb.width / 2)) <= 1
+        info.visible &&
+        !!info.bounds &&
+        info.bounds.x > shown.x &&
+        Math.abs(info.bounds.x + info.bounds.width / 2 - (pb.x + pb.width / 2)) <= 1
       )
     })
     .toBe(true)
-  expect((await stripInfo(orbit.app)).bounds?.x).toBeGreaterThan(shown.x)
   await run(orbit.app, 'split.rename', { splitId, name: 'Pair' })
   const copy = (await run(orbit.app, 'split.duplicate', { splitId })) as string
   expect((await state(orbit.app)).splits[copy]?.name).toBe('Pair')
