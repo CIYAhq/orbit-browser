@@ -8,10 +8,22 @@ setAutoFreeze(false)
 export type StateListener = (next: OrbitState, prev: OrbitState, patches: Patch[]) => void
 export type PatchBatchListener = (seq: number, patches: Patch[]) => void
 
+interface Change {
+  next: OrbitState
+  prev: OrbitState
+  patches: Patch[]
+}
+
 /**
  * The single source of truth for Orbit's state, owned by the main process.
  * Every update produces Immer patches. Synchronous listeners see each update;
  * batch listeners (IPC broadcast) get patches coalesced per microtask.
+ *
+ * Ordering: an update applies at once (`state` reflects it immediately) and its
+ * patches join the pending batch in the order updates were applied. A listener
+ * may update the store; that nested change is delivered to every listener after
+ * the current change has reached all of them, so each listener sees changes in
+ * the order they happened and every broadcast batch replays cleanly on a mirror.
  */
 export class Store {
   private current: OrbitState
@@ -20,6 +32,9 @@ export class Store {
   private pending: Patch[] = []
   private flushQueued = false
   private seqNo = 0
+  /** Changes waiting for listener delivery (non-empty only while listeners run). */
+  private queue: Change[] = []
+  private notifying = false
 
   constructor(initial: OrbitState) {
     this.current = initial
@@ -39,11 +54,28 @@ export class Store {
     const [next, patches] = produceWithPatches(prev, recipe)
     if (patches.length === 0) return
     this.current = next
-    for (const listener of this.listeners) listener(next, prev, patches)
+    // Queue the patches before any listener runs: a listener's own update must come after this one.
     this.pending.push(...patches)
     if (!this.flushQueued) {
       this.flushQueued = true
       queueMicrotask(() => this.flush())
+    }
+    this.queue.push({ next, prev, patches })
+    if (this.notifying) return // the outer update() delivers it once the current change is done
+    this.notifying = true
+    try {
+      for (let change = this.queue.shift(); change; change = this.queue.shift()) {
+        for (const listener of this.listeners) {
+          try {
+            listener(change.next, change.prev, change.patches)
+          } catch (err) {
+            // One failing listener must not stop the others (or leave the window manager stale).
+            console.error('[store] listener failed:', err)
+          }
+        }
+      }
+    } finally {
+      this.notifying = false
     }
   }
 
