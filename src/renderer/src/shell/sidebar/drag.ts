@@ -14,6 +14,7 @@ import { locate, parseContainerKey, visibleTabOrder } from '../../../../shared/t
 import { invoke } from '../../api'
 import { activeTabId } from '../../selectors'
 import { getOrbitState, getSeq, useMirror } from '../../store'
+import { stripSettled } from '../spaces/switcher'
 import { computeDropTarget, type DropTarget, gridDropIndex, ROW_GAP, rowShifts, type Slot } from './dnd-model'
 import { reducedMotion, STANDARD } from './motion-tokens'
 import { IDLE_DRAG, useDrag, useSelection } from './ui-state'
@@ -76,6 +77,8 @@ interface Session {
   raf: number
   dwell: { side: 'left' | 'right'; since: number } | null
   spaceAtStart: SpaceId
+  /** The Space whose rows `slots` describes (changes after an edge-dwell switch). */
+  measuredSpace: SpaceId
   cleanup: () => void
 }
 
@@ -173,6 +176,7 @@ export function pressItem(
     raf: 0,
     dwell: null,
     spaceAtStart: ctx.spaceId,
+    measuredSpace: ctx.spaceId,
     cleanup: () => {},
   }
   const onMove = (ev: PointerEvent) => {
@@ -240,6 +244,7 @@ function begin(s: Session, rect: DOMRect): void {
   s.slots = measureSlots()
   s.measuredSeq = getSeq()
   s.measuredAt = performance.now()
+  s.measuredSpace = ctx.spaceId
   s.blockHeight = s.slots
     .filter((sl) => s.dragged.has(sl.key) || sl.ancestors.some((a) => s.dragged.has(a)))
     .reduce((h, sl) => h + sl.height + ROW_GAP, 0)
@@ -330,13 +335,33 @@ function sameTarget(a: DropTarget | null, b: DropTarget | null): boolean {
   return a.container === b.container && a.index === b.index && a.at === b.at
 }
 
+/**
+ * The registered list is on screen and shows the window's current Space. Right after an
+ * edge-dwell switch the sidebar first shows a stand-in while the real list renders (the
+ * Space strip), and until then the registered list is the previous Space's, hidden.
+ */
+function listReady(): boolean {
+  const scroll = ctx.scroll
+  if (!scroll || scroll.getClientRects().length === 0) return false
+  const shown = getOrbitState().windows[window.orbit.windowId]?.spaceId
+  return !shown || ctx.spaceId === shown
+}
+
 function update(s: Session): void {
   // Re-measure when the list may have changed under the drag (new state, rows still growing in
-  // right after the drag began); otherwise reuse the slots. Offsets ignore the drag transforms.
+  // right after the drag began), or when it now shows another Space (edge dwell); otherwise
+  // reuse the slots. Offsets ignore the drag transforms.
   const now = performance.now()
-  if (ctx.spaceId === s.spaceAtStart && (getSeq() !== s.measuredSeq || now - s.measuredAt < 400)) {
+  const ready = listReady()
+  if (
+    ready &&
+    (ctx.spaceId !== s.measuredSpace ||
+      (ctx.spaceId === s.spaceAtStart && (getSeq() !== s.measuredSeq || now - s.measuredAt < 400)))
+  ) {
     s.slots = measureSlots()
     s.measuredSeq = getSeq()
+    s.measuredAt = now
+    s.measuredSpace = ctx.spaceId
   }
   const zone = zoneAt(s.lastX, s.lastY)
   // The row stays in the sidebar's column (FL-10) unless it heads for the grid, a Space or out of the window.
@@ -352,7 +377,8 @@ function update(s: Session): void {
   }
   let target: DropTarget | null = null
   if (zone.kind === 'list') {
-    target = listTarget(s, useDrag.getState().target)
+    // No drop target until the rows under the pointer are the measured ones (review V1).
+    target = ready && s.measuredSpace === ctx.spaceId ? listTarget(s, useDrag.getState().target) : null
     patch.target = target
     patch.intoFolder = target?.type === 'into' ? target.folderId : null
   } else if (zone.kind === 'favorites' && s.ids.every(isTabId)) {
@@ -442,13 +468,18 @@ function tick(s: Session): void {
         if (scroll.scrollTop !== before) update(s)
       }
     }
+    // The list switched to another Space under a still pointer: measure it as soon as it's up.
+    if (s.measuredSpace !== ctx.spaceId && listReady()) update(s)
     if (s.dwell && performance.now() - s.dwell.since > SPACE_DWELL_MS) {
       const order = getOrbitState().spaceOrder
       const i = order.indexOf(ctx.spaceId)
       const next = order[i + (s.dwell.side === 'left' ? -1 : 1)]
       s.dwell = { side: s.dwell.side, since: performance.now() }
       if (next) {
-        void invoke('spaces.switch', { spaceId: next }).then(() => remeasure(s))
+        // Measure once the Space strip has finished sliding (SP-21).
+        void invoke('spaces.switch', { spaceId: next })
+          .then(stripSettled)
+          .then(() => remeasure(s))
       }
     }
     tick(s)
@@ -462,7 +493,10 @@ function remeasure(s: Session): void {
     useDrag.setState({ shifts: {} })
     requestAnimationFrame(() => {
       if (session !== s) return
-      s.slots = measureSlots()
+      if (listReady()) {
+        s.slots = measureSlots()
+        s.measuredSpace = ctx.spaceId
+      }
       update(s)
     })
   })

@@ -10,11 +10,11 @@ import {
   DEFAULT_SIDEBAR_WIDTH,
   MAX_SIDEBAR_WIDTH,
   MIN_SIDEBAR_WIDTH,
-  THEME_PRESETS,
 } from '../shared/defaults'
 import { isFolderId, isSplitId, isTabId } from '../shared/ids'
 import type { ItemId, OrbitState, ProfileId, SpaceId, SplitLayout, TabId } from '../shared/state'
 import { STATE_SCHEMA } from '../shared/state'
+import { normalizeSpaceTheme } from '../shared/theme'
 import { fallbackTitle } from '../shared/url'
 import type { Store } from './store'
 
@@ -101,6 +101,7 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
     tweaks: record(input.tweaks),
   }
   if (!['system', 'light', 'dark'].includes(state.settings.appearance)) state.settings.appearance = 'system'
+  seedAppearanceFromOldThemes(state)
   normalizeEntities(state, base)
   // spaceOrder must list exactly the existing spaces.
   state.spaceOrder = [...new Set(state.spaceOrder)].filter((id) => state.spaces[id])
@@ -128,6 +129,22 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
     if (d.state === 'progressing' || d.state === 'paused') d.state = 'interrupted'
   }
   return state
+}
+
+/**
+ * Light/dark used to be stored per Space (`theme.mode`); it is now the one global
+ * `settings.appearance` (D12). When an older file left the global setting on
+ * Automatic but its Spaces all chose Light or all chose Dark, keep that choice.
+ */
+function seedAppearanceFromOldThemes(state: OrbitState): void {
+  if (state.settings.appearance !== 'system') return
+  const modes = new Set<unknown>()
+  for (const sp of Object.values(state.spaces)) {
+    const theme = (sp as { theme?: unknown }).theme
+    if (isRecord(theme) && 'mode' in theme) modes.add(theme.mode)
+  }
+  const [only] = [...modes]
+  if (modes.size === 1 && (only === 'light' || only === 'dark')) state.settings.appearance = only
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -158,13 +175,13 @@ function normalizeEntities(state: OrbitState, base: OrbitState): void {
   }
   // Commands fall back to the default profile, so it always exists.
   if (!state.profiles[DEFAULT_PROFILE_ID])
-    state.profiles[DEFAULT_PROFILE_ID] = createProfile('Personal', DEFAULT_PROFILE_ID, 0)
+    state.profiles[DEFAULT_PROFILE_ID] = createProfile('Default', DEFAULT_PROFILE_ID, 0)
   for (const [id, sp] of Object.entries(state.spaces)) {
     sp.id = id
     sp.name = text(sp.name, 'Space') || 'Space'
     sp.icon = text(sp.icon, '')
-    if (!isRecord(sp.theme) || typeof sp.theme.color !== 'string')
-      sp.theme = { ...(THEME_PRESETS[0] as typeof sp.theme) }
+    // Any stored shape (current, the old { color, color2, mode }, or corrupt) becomes a valid theme.
+    sp.theme = normalizeSpaceTheme(sp.theme)
     if (!state.profiles[sp.profileId]) sp.profileId = DEFAULT_PROFILE_ID
     sp.pinned = ids(sp.pinned)
     sp.today = ids(sp.today)

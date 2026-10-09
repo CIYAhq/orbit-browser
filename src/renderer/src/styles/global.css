@@ -80,14 +80,14 @@ html.is-resizing * {
 /* ---------- Shell ---------- */
 
 .shell {
+  position: relative;
+  isolation: isolate;
   display: grid;
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   height: 100%;
-  background: linear-gradient(180deg, var(--frame-top), var(--frame-bottom));
-  transition:
-    grid-template-columns var(--dur) var(--ease-out),
-    --frame-top 320ms ease,
-    --frame-bottom 320ms ease;
+  /* Space theme: three stops painted by the theme driver (src/renderer/src/theme.ts). */
+  background: linear-gradient(180deg, var(--frame-top), var(--frame-mid, var(--frame-top)), var(--frame-bottom));
+  transition: grid-template-columns var(--dur) var(--ease-out);
 }
 
 .shell--sidebar-hidden {
@@ -508,61 +508,7 @@ html.is-resizing * {
   box-shadow: inset 0 0 0 1px var(--divider);
 }
 
-/* Space bar */
-.spacebar {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 40px;
-  padding-top: 4px;
-}
-
-.spacebar__spaces {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-  gap: 2px;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.space-dot {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  transition: background var(--dur-fast) ease;
-}
-
-.space-dot:hover {
-  background: var(--hover);
-}
-
-.space-dot__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--text-muted);
-  transition:
-    transform var(--dur-fast) var(--ease-spring),
-    background var(--dur-fast) ease;
-}
-
-.space-dot.is-active .space-dot__dot {
-  background: var(--dot);
-  transform: scale(1.35);
-}
-
-.space-dot__icon {
-  font-size: 14px;
-  opacity: 0.6;
-}
-
-.space-dot.is-active .space-dot__icon {
-  opacity: 1;
-}
+/* Space bar: see src/renderer/src/shell/spaces/spaces.css (spaces lane). */
 
 .sidebar__resize {
   position: absolute;

@@ -588,7 +588,7 @@ test('[AP-01][SP-18] the window background and colour scheme follow the global a
   await orbit.shell.emulateMedia({ colorScheme: null })
   for (const appearance of ['dark', 'light'] as const) {
     await setAppearance(appearance)
-    const expected = paletteFor({ ...(theme as SpaceTheme), mode: 'system' }, appearance === 'dark').windowBackground
+    const expected = paletteFor(theme as SpaceTheme, appearance === 'dark').windowBackground
     await expect.poll(native).toEqual({ source: appearance, background: expected.toLowerCase() })
     await expect
       .poll(() => orbit.shell.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches))

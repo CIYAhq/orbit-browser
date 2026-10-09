@@ -1,37 +1,49 @@
-import { type PointerEvent as ReactPointerEvent, useMemo, useRef } from 'react'
+import { type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, useRef } from 'react'
 import type { WindowState } from '../../../../shared/state'
 import { invoke } from '../../api'
 import { useOrbit } from '../../store'
 import { MediaTray } from '../media/MediaTray'
-import { SidebarItems } from './SidebarItems'
+import { SpaceStrip } from '../spaces/SpaceStrip'
+import { UndoToast } from '../spaces/UndoToast'
 import { SpaceBar } from './SpaceBar'
 import { TopBar } from './TopBar'
 
-/** The vertical sidebar: top bar, address, favorites, pinned + Today lists, Space switcher. */
+/**
+ * The vertical sidebar: top bar and address, then the per-Space strip
+ * (Favorites, title row, pinned, Today; swipeable between Spaces), then the
+ * Space switcher. Space content lives in ../spaces/.
+ */
 export function Sidebar({ win }: { win: WindowState }) {
-  const name = useOrbit((s) => s.spaces[win.spaceId]?.name)
-  const icon = useOrbit((s) => s.spaces[win.spaceId]?.icon)
-  // A stable header element, so the memoized tab lists skip window-only changes (review F5).
-  const header = useMemo(
-    () => (
-      <div className="sidebar__space-name" data-testid="space-name">
-        {icon ? <span className="sidebar__space-icon">{icon}</span> : null}
-        {name}
-      </div>
-    ),
-    [name, icon],
-  )
-  if (name === undefined) return null
+  const exists = useOrbit((s) => !!s.spaces[win.spaceId])
+  if (!exists) return null
   return (
-    <aside className="sidebar" data-testid="sidebar" aria-hidden={!win.sidebar.visible}>
+    <aside
+      className="sidebar"
+      data-testid="sidebar"
+      aria-hidden={!win.sidebar.visible}
+      onMouseUp={onSideButtons}
+      onAuxClick={preventSideButtons}
+    >
       <TopBar win={win} />
-      <SidebarItems spaceId={win.spaceId} header={header} />
+      <SpaceStrip windowId={win.id} spaceId={win.spaceId} />
+      <UndoToast />
       {/* Media lane: transient media tray above the bottom bar (SB-10, MD-09). */}
       <MediaTray />
       <SpaceBar win={win} />
       <ResizeHandle width={win.sidebar.width} />
     </aside>
   )
+}
+
+/** Mouse back/forward buttons over the sidebar move between Spaces (SP-09). */
+function onSideButtons(e: ReactMouseEvent) {
+  if (e.button !== 3 && e.button !== 4) return
+  e.preventDefault()
+  void invoke('spaces.step', { delta: e.button === 3 ? -1 : 1 })
+}
+
+function preventSideButtons(e: ReactMouseEvent) {
+  if (e.button === 3 || e.button === 4) e.preventDefault()
 }
 
 function ResizeHandle({ width }: { width: number }) {
