@@ -4,14 +4,14 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 42 built (22 partial) · 43 tested · 0 feel right.
+**Totals:** 485 spec’d · 42 built (22 partial) · 57 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
 | P0 | 174 | 30 | 35 |
-| P1 | 221 | 11 | 7 |
-| P2 | 83 | 1 | 1 |
+| P1 | 221 | 11 | 20 |
+| P2 | 83 | 1 | 2 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -65,17 +65,17 @@ Spec: `spec/tabs.md`
 | TB-07 | Reopen the last closed tab | P0 | ✅ | ✅ e2e | – | Cmd+Shift+T stack with full history; Cmd+Z reopens too |
 | TB-08 | Reorder tabs by drag and drop | P0 | ✅ | ✅ e2e+unit | – | pointer drag, 4px threshold, rows spring apart, ghost lift/settle, auto-scroll, Escape cancel, undo; no haptics |
 | TB-09 | Drag and drop to other destinations | P0 | 🟡 partial | ✅ e2e | – | Space switcher drop, edge dwell to next Space, drag out to new window; no split/option-drag/URL-to-page drops |
-| TB-10 | Duplicate a tab | P1 | 🟡 partial | – | – | Duplicate (menu/action) copies history, lands below; no option-drag or Cmd-click reload |
+| TB-10 | Duplicate a tab | P1 | 🟡 partial | ✅ e2e | – | Duplicate (menu/action) copies history, lands below; no option-drag or Cmd-click reload |
 | TB-11 | Move a tab to another Space | P0 | ✅ | ✅ e2e | – | Move to > Space > Pinned/Today/folder (menu + tabs.moveToSpace); command-bar entry is the commandbar lane's |
-| TB-12 | Rename a tab and set a custom icon | P1 | ✅ | – | – | double-click/menu rename, empty reverts; emoji icon picker |
-| TB-13 | Multi-select tabs | P1 | 🟡 partial | – | – | Cmd-click, Shift-click, menu actions, group drag; Escape clears |
+| TB-12 | Rename a tab and set a custom icon | P1 | ✅ | ✅ e2e | – | double-click/menu rename, empty reverts; emoji icon picker |
+| TB-13 | Multi-select tabs | P1 | 🟡 partial | ✅ e2e | – | Cmd-click, Shift-click, menu actions, group drag; Escape clears |
 | TB-14 | Tab context menu | P0 | 🟡 partial | ✅ e2e | – | native menus with all tab/pinned/Favorite items; not theme-coloured; no split or share items yet |
-| TB-15 | Audio, mute, microphone/camera and screen-share indicators | P1 | 🟡 partial | – | – | audio icon toggles mute; no mic/camera/screen-share indicators |
-| TB-16 | Tab sleeping and background resource limits | P1 | 🟡 partial | ✅ unit | – | sleep timer (settings.sleepAfterMs), Favorites warm 4x, audible/selected never sleep |
+| TB-15 | Audio, mute, microphone/camera and screen-share indicators | P1 | 🟡 partial | ✅ e2e | – | audio icon toggles mute; no mic/camera/screen-share indicators |
+| TB-16 | Tab sleeping and background resource limits | P1 | 🟡 partial | ✅ e2e+unit | – | sleep timer (settings.sleepAfterMs), Favorites warm 4x, audible/selected never sleep |
 | TB-17 | Tabs across multiple windows | P1 | – | ✅ e2e | – |  |
 | TB-18 | Undo sidebar actions | P1 | 🟡 partial | ✅ e2e+unit | – | undo for moves, close, clear, archive below, rename, icon, folders; no redo |
-| TB-19 | Back on a fresh child tab returns to its opener | P2 | 🟡 partial | – | – | Back with no history closes a link-opened Today tab and selects its opener (shortcut/command) |
-| TB-20 | Copy a tab's URL | P1 | ✅ | ✅ unit | – | Cmd+Shift+C clean URL, Cmd+Shift+Alt+C Markdown, multi-select and folder Copy Links |
+| TB-19 | Back on a fresh child tab returns to its opener | P2 | 🟡 partial | ✅ e2e | – | Back with no history closes a link-opened Today tab and selects its opener (shortcut/command) |
+| TB-20 | Copy a tab's URL | P1 | ✅ | ✅ e2e+unit | – | Cmd+Shift+C clean URL, Cmd+Shift+Alt+C Markdown, multi-select and folder Copy Links |
 | TB-21 | Hover cards for known web apps | P2 | – | – | – |  |
 | TB-22 | Session restore on relaunch | P0 | ✅ | ✅ e2e+unit | – | Spaces, Favorites, pinned, Today, folders, selection restored; only the selected tab loads; Linux bound saving is core's |
 | PN-01 | What a pinned tab is | P0 | ✅ | ✅ e2e | – | per-Space pinned tabs with pinned URL; never auto-archived |
@@ -84,24 +84,24 @@ Spec: `spec/tabs.md`
 | PN-04 | Reset a pinned tab to its pinned URL | P0 | ✅ | ✅ e2e | – | favicon click resets, Cmd/Ctrl-click keeps the page as a Today tab, Reset Tab action |
 | PN-05 | Links clicked inside pinned tabs and Favorites | P1 | – | – | – |  |
 | PN-06 | Closing a pinned tab vs unpinning vs deleting | P0 | ✅ | ✅ e2e | – | close unloads and resets, unpin, Delete from Sidebar (archived, undoable) |
-| PN-07 | Edit the pinned URL | P1 | ✅ | – | – | Pinned URL > Replace with Current / Edit (inline field) |
-| PN-08 | Rename pinned tabs | P1 | ✅ | – | – | custom name kept through resets; breadcrumb 'Name / page' |
-| PN-09 | Collapse the pinned section | P1 | ✅ | – | – | caret on the Space title, peeking selected tab, bold title, Collapse/Expand Pinned action |
+| PN-07 | Edit the pinned URL | P1 | ✅ | ✅ e2e | – | Pinned URL > Replace with Current / Edit (inline field) |
+| PN-08 | Rename pinned tabs | P1 | ✅ | ✅ e2e | – | custom name kept through resets; breadcrumb 'Name / page' |
+| PN-09 | Collapse the pinned section | P1 | ✅ | ✅ e2e | – | caret on the Space title, peeking selected tab, bold title, Collapse/Expand Pinned action |
 | FV-01 | What Favorites are and how they're shared | P0 | ✅ | ✅ e2e | – | per-profile grid above the Space title |
 | FV-02 | Capacity and grid layout | P0 | ✅ | ✅ e2e | – | max 12 (13th refused with toast), up to 4 per row, fewer stretch |
 | FV-03 | Add a Favorite | P0 | ✅ | ✅ e2e | – | drag to grid (drop zone when empty), menu, Favorite This Tab action |
 | FV-04 | Remove a Favorite | P0 | ✅ | ✅ e2e | – | drag tile into pinned/Today, menu, action toggle |
 | FV-05 | Reorder Favorites | P0 | ✅ | ✅ e2e+unit | – | drag within grid with spring reflow; order persists |
 | FV-06 | Favorites always reset to their URL | P0 | ✅ | ✅ e2e | – | double-click resets, away dot + tooltip, close unloads |
-| FV-07 | Favorite context menu and hover | P1 | ✅ | – | – | Favorite menu (icon, pinned URL, reset, move, mute, copy, close), title tooltip |
-| FV-08 | Favorites stay warm in the background | P1 | ✅ | ✅ unit | – | Favorites sleep only after 4x the sleep period |
+| FV-07 | Favorite context menu and hover | P1 | ✅ | ✅ e2e | – | Favorite menu (icon, pinned URL, reset, move, mute, copy, close), title tooltip |
+| FV-08 | Favorites stay warm in the background | P1 | ✅ | ✅ e2e+unit | – | Favorites sleep only after 4x the sleep period |
 | FV-09 | Live badges and states on Favorite tiles | P2 | – | – | – |  |
 | FV-10 | Favorites and numeric shortcuts | P1 | ✅ | ✅ e2e+unit | – | see TB-04 |
 | TD-01 | The Today section | P0 | ✅ | ✅ e2e | – |  |
 | TD-02 | Auto-archive rule | P0 | ✅ | ✅ e2e+unit | – | maintenance timer (1 min, launch, resume) with injected clock; media/selected exempt; splits as one |
 | TD-03 | Archive timing setting (per profile, so per Space) | P0 | 🟡 partial | ✅ e2e+unit | – | settings.archiveAfterMs plus optional profile.archiveAfterMs; settings UI is the settings lane's |
 | TD-04 | Clear all Today tabs | P0 | ✅ | ✅ e2e | – | Clear on divider hover, Cmd+Shift+K, keeps media tabs, cascade exit, Cmd+Z restores in order |
-| TD-05 | Archive tabs below | P1 | ✅ | – | – | menu Archive Tabs Below, undoable |
+| TD-05 | Archive tabs below | P1 | ✅ | ✅ e2e | – | menu Archive Tabs Below, undoable |
 | TD-06 | Per-Space scope of Today actions | P0 | ✅ | ✅ e2e+unit | – | Clear/archive-below/auto-archive per Space |
 | TD-07 | First-run explanation of auto-archive | P2 | – | – | – |  |
 | TD-08 | AI "tidy" of Today tabs | P2 | – | – | – |  |
@@ -110,11 +110,11 @@ Spec: `spec/tabs.md`
 | FD-03 | Rename a folder | P0 | ✅ | ✅ e2e | – | menu or double-click; Enter/blur saves, Escape cancels, empty keeps name |
 | FD-04 | Collapse and expand folders | P0 | ✅ | ✅ e2e | – | click toggles with height reveal; selected child peeks under a closed folder |
 | FD-05 | Drag into and out of folders | P0 | ✅ | ✅ e2e+unit | – | drop into closed folder (no expand, peeks) or between children; folders drag/nest |
-| FD-06 | Nested folders | P1 | ✅ | – | – | nesting by drag or New Folder from children; 14px indent per level |
-| FD-07 | Folder icon | P1 | 🟡 partial | – | – | emoji icon via Change Icon; open/closed glyphs; not full-colour |
+| FD-06 | Nested folders | P1 | ✅ | ✅ e2e | – | nesting by drag or New Folder from children; 14px indent per level |
+| FD-07 | Folder icon | P1 | 🟡 partial | ✅ e2e | – | emoji icon via Change Icon; open/closed glyphs; not full-colour |
 | FD-08 | Folder hover preview and search | P1 | – | – | – |  |
-| FD-09 | Folder context menu | P1 | 🟡 partial | – | – | Rename, Change Icon, Duplicate, Copy All Links, Paste URL, Move to, Delete; no Open [Folder] command |
-| FD-10 | Delete a folder | P1 | ✅ | – | – | confirm when non-empty, contents to Archive, Cmd+Z restores all |
+| FD-09 | Folder context menu | P1 | 🟡 partial | ✅ e2e | – | Rename, Change Icon, Duplicate, Copy All Links, Paste URL, Move to, Delete; no Open [Folder] command |
+| FD-10 | Delete a folder | P1 | ✅ | ✅ e2e | – | confirm when non-empty, contents to Archive, Cmd+Z restores all |
 | FD-11 | Auto-updating folders | P2 | – | – | – |  |
 
 ## Spaces and Profiles (prefixes SP, PR)

@@ -136,7 +136,12 @@ function dragIds(id: ItemId): ItemId[] {
 }
 
 /** Starts tracking a press on a row or Favorite tile; it becomes a drag after a few pixels. */
-export function pressItem(e: PointerEvent | React.PointerEvent, id: ItemId, source: 'list' | 'favorites'): void {
+export function pressItem(
+  e: PointerEvent | React.PointerEvent,
+  id: ItemId,
+  source: 'list' | 'favorites',
+  onTap?: () => void,
+): void {
   if (e.button !== 0 || session) return
   const el = e.currentTarget as HTMLElement
   const rect = el.getBoundingClientRect()
@@ -176,7 +181,10 @@ export function pressItem(e: PointerEvent | React.PointerEvent, id: ItemId, sour
     if (ev.pointerId !== s.pointerId) return
     s.cleanup()
     if (s.started) void drop(s, ev)
-    else session = null
+    else {
+      session = null
+      onTap?.()
+    }
   }
   const onCancel = (ev: PointerEvent) => {
     if (ev.pointerId !== s.pointerId) return

@@ -34,6 +34,15 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   let lastMenu: MenuItemConstructorOptions[] = []
 
   const windowOf = (c: CallContext): WindowId | undefined => c.windowId ?? windows.focusedWindowId()
+  /** Multi-selection per window, reported by the sidebar (TB-13). */
+  const selections = new Map<WindowId, TabId[]>()
+  const selectionOf = (windowId: WindowId | undefined): TabId[] =>
+    (windowId ? (selections.get(windowId) ?? []) : []).filter((id) => store.state.tabs[id])
+  const clearSelectionIn = (windowId: WindowId | undefined) => {
+    if (!windowId) return
+    selections.delete(windowId)
+    windows.sendToWindow(windowId, 'sidebar:clear-selection', {})
+  }
   const send = (windowId: WindowId | undefined, channel: string, payload: unknown) => {
     if (windowId) windows.sendToWindow(windowId, channel, payload)
   }
@@ -267,6 +276,12 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     })
   })
 
+  commands.register('tabs.setSelection', ({ tabIds }, c) => {
+    const windowId = windowOf(c)
+    if (!windowId) return
+    if (tabIds.length > 0) selections.set(windowId, tabIds)
+    else selections.delete(windowId)
+  })
   commands.register('tabs.focusSidebar', (_args, c) => {
     const win = windows.get(windowOf(c) ?? '')
     if (win && !win.isDestroyed()) win.webContents.focus()
@@ -464,6 +479,13 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
 
   actions.register('tab.close', (c) => {
     const windowId = windowOf(c)
+    const selected = selectionOf(windowId)
+    if (selected.length > 1) {
+      // ⌘W closes every selected tab (TB-06, TB-13).
+      ops.closeTabs(selected, 'closed')
+      clearSelectionIn(windowId)
+      return
+    }
     const tabId = ops.activeTab(windowId)
     // With nothing left to close, ⌘W closes the window (TB-06).
     if (!tabId) {
@@ -514,7 +536,10 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   )
   actions.register(
     'tab.copyUrl',
-    withActive((tabId, windowId) => void copyLinks(windowId, [tabId], false)),
+    withActive((tabId, windowId) => {
+      const selected = selectionOf(windowId)
+      void copyLinks(windowId, selected.length > 1 ? selected : [tabId], false)
+    }),
   )
   actions.register(
     'tab.copyUrlMarkdown',

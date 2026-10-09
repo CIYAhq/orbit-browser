@@ -50,6 +50,8 @@ export interface TabCommands {
   'tabs.setPinnedCollapsed': { args: { spaceId?: SpaceId; collapsed: boolean }; result: void }
   /** Right-click menu for a tab or folder; `selection` is the multi-selection (TB-13, TB-14). */
   'tabs.contextMenu': { args: { id: ItemId; selection?: TabId[] }; result: void }
+  /** The sidebar's multi-selection in this window, so ⌘W and ⌘⇧C act on all of it (TB-13). */
+  'tabs.setSelection': { args: { tabIds: TabId[] }; result: void }
   /** Give keyboard focus to the window's sidebar (drag cancel with Escape, SB-22). */
   'tabs.focusSidebar': { args: Record<string, never>; result: void }
   /** Return keyboard focus to the selected tab's page (SB-22). */

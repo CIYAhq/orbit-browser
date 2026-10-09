@@ -137,13 +137,16 @@ function SpaceHeader({ space, children }: { space: Space; children: ReactNode })
 /** Pinned tabs and folders (PN-01); collapsed, only the selected pinned tab stays visible (PN-09). */
 const PinnedSection = memo(function PinnedSection({ space }: { space: Space }) {
   const collapsed = !!space.pinnedCollapsed
-  const peek = useOrbit((s) => {
+  // Primitive selector result (a fresh object per call would re-render forever).
+  const peekKey = useOrbit((s) => {
     if (!collapsed) return null
     const a = activeTabId(s)
     if (!a || sectionOf(s, a) !== 'pinned' || s.tabs[a]?.spaceId !== space.id) return null
     const loc = locate(s, a)
-    return loc ? { id: a, key: containerKey(loc.container), index: loc.index } : null
+    return loc ? `${a}|${containerKey(loc.container)}|${loc.index}` : null
   })
+  const [peekId, peekContainer, peekIndex] = peekKey ? peekKey.split('|') : []
+  const peek = peekId && peekContainer ? { id: peekId, key: peekContainer, index: Number(peekIndex) } : null
   return (
     <>
       <AnimatePresence initial={false}>
@@ -260,6 +263,7 @@ function useMainMessages(scrollRef: React.RefObject<HTMLDivElement | null>) {
       }),
       window.orbit.on('sidebar:edit-pinned-url', (p) => startRename((p as { id: string }).id, { mode: 'url' })),
       window.orbit.on('sidebar:icon', (p) => useIconPicker.setState({ id: (p as { id: string }).id })),
+      window.orbit.on('sidebar:clear-selection', () => clearSelection()),
       window.orbit.on('sidebar:focus', () => {
         const el = scrollRef.current
         if (!el) return

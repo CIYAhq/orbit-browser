@@ -202,12 +202,19 @@ function onRowPointerDown(e: ReactPointerEvent<HTMLElement>, tabId: TabId) {
     const anchor = sel.anchor ?? active ?? tabId
     const a = order.indexOf(anchor)
     const b = order.indexOf(tabId)
-    if (a >= 0 && b >= 0) useSelection.setState({ ids: order.slice(Math.min(a, b), Math.max(a, b) + 1), anchor })
+    if (a >= 0 && b >= 0) {
+      // The range joins what is already selected (⌘-clicked rows stay).
+      const range = order.slice(Math.min(a, b), Math.max(a, b) + 1)
+      const base = sel.ids.length > 0 ? sel.ids : active ? [active] : []
+      useSelection.setState({ ids: [...new Set([...base, ...range])], anchor })
+    }
     return
   }
-  if (!useSelection.getState().ids.includes(tabId)) clearSelection()
+  // A press on a selected row keeps the selection (to drag the group); a plain click clears it.
+  const inSelection = useSelection.getState().ids.includes(tabId)
+  if (!inSelection) clearSelection()
   void invoke('tabs.activate', { tabId })
-  pressItem(e, tabId, 'list')
+  pressItem(e, tabId, 'list', inSelection ? clearSelection : undefined)
 }
 
 function openContextMenu(e: ReactMouseEvent, id: ItemId) {

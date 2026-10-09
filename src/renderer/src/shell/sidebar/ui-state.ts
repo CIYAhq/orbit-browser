@@ -25,8 +25,12 @@ export function stopRename(): void {
 /** Emoji picker target (TB-12, FD-07). */
 export const useIconPicker = create<{ id: ItemId | null }>(() => ({ id: null }))
 
-/** Multi-selection (TB-13): ordered tab ids plus the range anchor. */
+/** Multi-selection (TB-13): ordered tab ids plus the range anchor. Main hears about it for ⌘W and ⌘⇧C. */
 export const useSelection = create<{ ids: TabId[]; anchor: TabId | null }>(() => ({ ids: [], anchor: null }))
+
+useSelection.subscribe((next, prev) => {
+  if (next.ids !== prev.ids) void window.orbit.invoke('tabs.setSelection', { tabIds: next.ids })
+})
 
 export function clearSelection(): void {
   if (useSelection.getState().ids.length > 0) useSelection.setState({ ids: [], anchor: null })
