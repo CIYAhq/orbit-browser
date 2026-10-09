@@ -264,4 +264,17 @@ describe('Favorite splits and the Favorites cap', () => {
     expect(ops.favorite(add())).toBe(false)
     expect(store.state.profiles[DEFAULT_PROFILE_ID]?.favorites).toHaveLength(12)
   })
+
+  it('[FV-02][SV-23] a split moved in from Today takes one Favorite: it fits as the twelfth tile (D19)', () => {
+    const { store, ops, add, split } = world()
+    const favorites = { kind: 'favorites', profileId: DEFAULT_PROFILE_ID } as const
+    for (let i = 0; i < 11; i++) expect(ops.favorite(add())).toBe(true)
+    const v = split({ type: 'row', sizes: [0.4, 0.3, 0.3], children: [add(), add(), add()].map(L) })
+    expect(ops.moveItems([v], favorites, 11)).toBe(true)
+    expect(store.state.profiles[DEFAULT_PROFILE_ID]?.favorites).toHaveLength(12)
+    expect(store.state.profiles[DEFAULT_PROFILE_ID]?.favorites).toContain(v)
+    // Full now: one more tile is refused.
+    expect(ops.moveItems([add()], favorites, 0)).toBe(false)
+    expect(store.state.profiles[DEFAULT_PROFILE_ID]?.favorites).toHaveLength(12)
+  })
 })

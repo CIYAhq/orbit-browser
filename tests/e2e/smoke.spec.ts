@@ -57,7 +57,7 @@ test('opens a page from the command bar into a real web view', async () => {
 test('[FL-01] every CSS animation in the shell and the overlay names keyframes defined in that page', async () => {
   for (const view of ['shell', 'overlay'] as const) {
     const page = await viewPage(orbit.app, view)
-    const missing = await page.evaluate(() => {
+    const { used, missing } = await page.evaluate(() => {
       const defined = new Set<string>()
       const used = new Set<string>()
       const walk = (rules: CSSRuleList) => {
@@ -79,8 +79,10 @@ test('[FL-01] every CSS animation in the shell and the overlay names keyframes d
           // A sheet the page can't read (none expected).
         }
       }
-      return [...used].filter((name) => !defined.has(name))
+      return { used: used.size, missing: [...used].filter((name) => !defined.has(name)) }
     })
+    // Some animations were read at all (a sheet that couldn't be read would pass with nothing checked).
+    expect(used, `${view}: animations found`).toBeGreaterThan(0)
     expect(missing, `${view}: animations without keyframes`).toEqual([])
   }
 })

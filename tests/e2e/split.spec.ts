@@ -1076,6 +1076,32 @@ for (const [dir, fy] of [
   })
 }
 
+test("[SV-05][FL-10] a quick drop of a Favorite on a row's lower half lands after the row: a tile opens no gap, so no row holds (review M1)", async () => {
+  const r4 = await openTab(orbit.app, 'Fourth')
+  const r3 = await openTab(orbit.app, 'Third')
+  const r2 = await openTab(orbit.app, 'Second')
+  const r1 = await openTab(orbit.app, 'First')
+  const fav = await openTab(orbit.app, 'Fav')
+  const s = await state(orbit.app)
+  const spaceId = s.tabs[fav]?.spaceId as string
+  const profileId = s.spaces[spaceId]?.profileId as string
+  await run(orbit.app, 'tabs.move', { id: fav, to: { kind: 'favorites', profileId }, index: 0 })
+  await expect(orbit.shell.getByTestId('favorite-tile')).toHaveCount(1)
+  await settled(orbit.shell)
+  const tile = await orbit.shell.locator(`[data-fav-id="${fav}"]`).boundingBox()
+  const to = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${r2}"]`).boundingBox()
+  if (!tile || !to) throw new Error('boxes')
+  await orbit.shell.mouse.move(tile.x + tile.width / 2, tile.y + tile.height / 2)
+  await orbit.shell.mouse.down()
+  await orbit.shell.mouse.move(tile.x + tile.width / 2, tile.y + tile.height / 2 + 8, { steps: 2 })
+  await orbit.shell.mouse.move(to.x + to.width * 0.75, to.y + to.height * 0.1, { steps: 10 })
+  // Onto the lower half of the row's middle band, then let go long before a rest would make a split.
+  await orbit.shell.mouse.move(to.x + to.width * 0.75, to.y + to.height * 0.7)
+  await orbit.shell.mouse.up()
+  await expect.poll(async () => (await state(orbit.app)).spaces[spaceId]?.today).toEqual([r1, r2, fav, r3, r4])
+  await expect(orbit.shell.getByTestId('split-row')).toHaveCount(0)
+})
+
 test('[SV-06] Open in Split View from a multi-selection makes one split in sidebar order', async () => {
   const c = await openTab(orbit.app, 'Sel3')
   const b = await openTab(orbit.app, 'Sel2')
