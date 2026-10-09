@@ -46,9 +46,10 @@
   "CB-21": { "built": "yes", "note": "Esc, ⌘T/⌘L again, click outside, window blur; text discarded; focus returns to the page" },
   "CB-22": { "built": "yes", "note": "spring scale-fade entrance, quicker exit, reduced-motion fade; type-ahead and Enter buffered; IME-safe; per-keystroke latency measured" },
   "CB-23": { "built": "partial", "note": "private (non-persistent) sessions get no history/archive rows; ⌘L on an empty Space acts like ⌘T; split-pane and Mini Window variants not done" },
-  "KS-04": { "built": "partial", "note": "every command bar key incl. ⌘⌥V; only ⇧Enter (CB-16, a P2 option) is missing" },
+  "KS-04": { "built": "yes", "note": "⌘T/⌘L/Alt+D, Esc, ⌘T/⌘L again, ↑/↓ (⌃N/⌃P), Enter, Tab, ⌫, ⇧Enter (option), ⌘⌥⌫ / Shift+Delete, ⌘⌥V" },
   "KS-19": { "built": "partial", "note": "command bar: ⌘T/⌘L/⌘W/Esc handled by the bar first (ActionRegistry.intercept); other overlays belong to their lanes" },
   "FL-16": { "built": "yes", "note": "motion spring (0.97→1, 4 px drop), 100 ms exit while focus returns at once; centred in the window" },
   "FL-17": { "built": "yes", "note": "per-keystroke local results, identity-keyed memoized rows, instant highlight; engine suggestions fill free rows without moving the highlight" },
-  "CB-20": { "built": "partial", "note": "a click over the sidebar closes the bar and is forwarded to the sidebar (one-click tab select); hover-reveal sidebar interplay untested" }
+  "CB-20": { "built": "partial", "note": "a click over the sidebar closes the bar and is forwarded to the sidebar (one-click tab select); hover-reveal sidebar interplay untested" },
+  "CB-16": { "built": "yes", "note": "⇧Enter opens the first result (DuckDuckGo backslash prefix, Google lucky button) when settings.searchTopResult is on (default off); otherwise like Enter" }
 }

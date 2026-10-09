@@ -167,6 +167,8 @@ export interface Settings {
   siteSearch: SiteSearchEngine[]
   /** Ask the search engine for suggestions while typing in the command bar (CB-15). Off by default: it sends keystrokes to the engine. */
   searchSuggestions: boolean
+  /** ⇧Enter on a search opens the engine's first result directly where the engine supports it (CB-16). Off by default. */
+  searchTopResult: boolean
 }
 
 export interface ArchivedTab {

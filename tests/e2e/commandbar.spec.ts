@@ -647,3 +647,29 @@ test('[CB-22] IME composition: Enter while composing commits the text and runs n
   expect(await tabCount()).toBe(0)
   await expect(bar(overlay)).toBeVisible()
 })
+
+test('[CB-16][KS-04] ⇧Enter opens the first result directly only when the option is on', async () => {
+  const setSettings = (fields: Record<string, unknown>) =>
+    orbit.app.evaluate((_e, f) => {
+      const ctx = (
+        globalThis as unknown as { __orbit: { ctx: { store: { update: (fn: (d: never) => void) => void } } } }
+      ).__orbit.ctx
+      ctx.store.update((d: { settings: Record<string, unknown> }) => {
+        Object.assign(d.settings, f)
+      })
+    }, fields)
+  await setSettings({ searchEngine: 'duckduckgo' })
+  let overlay = await openBar()
+  await overlay.keyboard.type('wikipedia cats')
+  await overlay.keyboard.press('Shift+Enter')
+  await expect.poll(tabCount).toBe(1)
+  // Off by default: a normal search.
+  expect(Object.values((await state(orbit.app)).tabs)[0]?.url).toBe('https://duckduckgo.com/?q=wikipedia+cats')
+  await setSettings({ searchTopResult: true })
+  overlay = await openBar()
+  await overlay.keyboard.type('wikipedia cats')
+  await overlay.keyboard.press('Shift+Enter')
+  await expect.poll(tabCount).toBe(2)
+  const urls = Object.values((await state(orbit.app)).tabs).map((t) => t.url)
+  expect(urls).toContain('https://duckduckgo.com/?q=%5Cwikipedia+cats')
+})

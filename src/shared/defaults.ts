@@ -29,6 +29,7 @@ export const DEFAULT_SETTINGS: Settings = {
   onboarded: false,
   siteSearch: DEFAULT_SITE_SEARCH,
   searchSuggestions: false,
+  searchTopResult: false,
 }
 
 /** Orbit's own palette of Space colours (original, not taken from any other product). */

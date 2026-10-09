@@ -4,14 +4,14 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 20 built (32 partial) · 27 tested · 0 feel right.
+**Totals:** 485 spec’d · 22 built (31 partial) · 28 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 17 | 21 |
+| P0 | 174 | 18 | 21 |
 | P1 | 221 | 3 | 6 |
-| P2 | 83 | 0 | 0 |
+| P2 | 83 | 1 | 1 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -181,7 +181,7 @@ Spec: `spec/commandbar.md`
 | CB-13 | Actions (browser commands by name) | P0 | 🟡 partial | ✅ e2e+unit | – | every registered action by name/synonym/initials with its shortcut; Move to / Pin to [Space]; Open [Folder]; tab-only actions hidden on empty Spaces; many catalogue actions do not exist yet |
 | CB-14 | Actions-only mode (Tab on an empty field) | P1 | ✅ | ✅ e2e+unit | – | Tab on an empty field or '/ ' at the start → Actions chip; Esc/Backspace leaves |
 | CB-15 | Default search engine fallback | P0 | ✅ | ✅ e2e+unit | – | default engine search row and destination (q=a+b); engine suggestions opt-in (settings.searchSuggestions, off by default), non-blocking with a 1.5 s timeout |
-| CB-16 | Open the top web result directly (Shift+Enter) | P2 | – | – | – |  |
+| CB-16 | Open the top web result directly (Shift+Enter) | P2 | ✅ | ✅ e2e+unit | – | ⇧Enter opens the first result (DuckDuckGo backslash prefix, Google lucky button) when settings.searchTopResult is on (default off); otherwise like Enter |
 | CB-17 | Remove a suggestion | P1 | ✅ | ✅ e2e+unit | – | hover × and ⌘⌥⌫ / Shift+Delete delete history and past-search rows |
 | CB-18 | Empty state (bar opened with nothing typed) | P0 | ✅ | ✅ e2e+unit | – | recent tabs, frequent sites, paste row; starter actions/sites in a fresh profile; current page in ⌘L mode |
 | CB-19 | Space and profile awareness | P0 | ✅ | ✅ e2e+unit | – | results use the window's current Space/profile and re-run on Space switch; new tabs go to the current Space |
@@ -350,7 +350,7 @@ Spec: `spec/shortcuts.md`
 | KS-01 | One keymap, remapping and persistence | P0 | – | – | – |  |
 | KS-02 | Conflicts with web pages ("prefer websites" vs "prefer Orbit") | P0 | – | – | – |  |
 | KS-03 | Platform mapping rules | P0 | – | – | – |  |
-| KS-04 | Command bar and address | P0 | 🟡 partial | ✅ e2e | – | every command bar key incl. ⌘⌥V; only ⇧Enter (CB-16, a P2 option) is missing |
+| KS-04 | Command bar and address | P0 | ✅ | ✅ e2e | – | ⌘T/⌘L/Alt+D, Esc, ⌘T/⌘L again, ↑/↓ (⌃N/⌃P), Enter, Tab, ⌫, ⇧Enter (option), ⌘⌥⌫ / Shift+Delete, ⌘⌥V |
 | KS-05 | Tabs and windows | P0 | – | – | – |  |
 | KS-06 | Switching tabs | P0 | – | – | – |  |
 | KS-07 | Spaces | P0 | – | – | – |  |

@@ -3,7 +3,7 @@ import type { SearchQueryArgs, SearchResult } from '../../shared/commands/comman
 import type { CommandName } from '../../shared/rpc'
 import type { OrbitState, WindowId } from '../../shared/state'
 import { splitOfTab, tabsInItem } from '../../shared/tree'
-import { fillSearchTemplate, parseInput, SEARCH_ENGINES } from '../../shared/url'
+import { fillSearchTemplate, parseInput, SEARCH_ENGINES, topResultUrl } from '../../shared/url'
 import type { MainContext } from '../context'
 import type { HistoryService } from '../history'
 import type { CallContext } from '../registry'
@@ -157,7 +157,7 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
     (store.state.settings.siteSearch ?? []).map((s) => ({ id: s.id, name: s.name, keyword: s.keyword })),
   )
 
-  commands.register('search.open', async ({ result, mode, disposition }, c) => {
+  commands.register('search.open', async ({ result, mode, disposition, topResult }, c) => {
     const windowId = windowOf(c)
     closeBar(windowId)
     const state = store.state
@@ -213,8 +213,14 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
       case 'paste':
         return openUrl(result.url, true)
       case 'search':
-      case 'suggestion':
-        return openUrl(result.url, false)
+      case 'suggestion': {
+        // CB-16: ⇧Enter jumps to the first result when the option is on and the engine can.
+        const lucky =
+          topResult && state.settings.searchTopResult && result.query && !result.siteSearchId
+            ? topResultUrl(state.settings.searchEngine, result.query)
+            : undefined
+        return openUrl(lucky ?? result.url, false)
+      }
       default:
         return
     }

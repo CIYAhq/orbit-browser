@@ -52,6 +52,17 @@ export function searchUrl(engine: SearchEngineId, query: string): string {
 }
 
 /**
+ * URL that jumps straight to an engine's first result (CB-16), or undefined when
+ * the engine has no such feature: DuckDuckGo's "\" prefix, Google's lucky button.
+ */
+export function topResultUrl(engine: SearchEngineId, query: string): string | undefined {
+  const q = encodeURIComponent(query).replace(/%20/g, '+')
+  if (engine === 'duckduckgo') return `https://duckduckgo.com/?q=%5C${q}`
+  if (engine === 'google') return `https://www.google.com/search?btnI=1&q=${q}`
+  return undefined
+}
+
+/**
  * Puts a query into a search URL template (%s). In the query string spaces
  * become "+" (form encoding, e.g. `?q=orbit+test`); in a path they are %20.
  */

@@ -106,7 +106,7 @@ export function CommandBar({
     completion: undefined as SearchResponse['autocomplete'],
     noAuto: false,
     composing: false,
-    pendingEnter: undefined as { disposition?: OpenDisposition } | undefined,
+    pendingEnter: undefined as { disposition?: OpenDisposition; topResult?: boolean } | undefined,
     results: [] as SearchResult[],
     selected: 0,
     scope: null as Scope,
@@ -138,7 +138,7 @@ export function CommandBar({
     return s ? { id: s.id, name: s.name, keyword: s.keyword } : undefined
   }
 
-  function choose(r: SearchResult | undefined, disposition?: OpenDisposition) {
+  function choose(r: SearchResult | undefined, disposition?: OpenDisposition, topResult = false) {
     if (!r || st.closed) return
     if (r.kind === 'sitesearch') {
       const site = r.siteSearchId ? siteById(r.siteSearchId) : undefined
@@ -147,7 +147,7 @@ export function CommandBar({
     }
     if ((r.kind === 'search' || r.kind === 'url') && !r.url) return
     st.closed = true
-    void invoke('search.open', { result: r, mode, disposition })
+    void invoke('search.open', { result: r, mode, disposition, ...(topResult ? { topResult } : {}) })
   }
 
   /** Applies (or drops) the inline completion for the current text (CB-08). */
@@ -210,7 +210,7 @@ export function CommandBar({
       const pending = st.pendingEnter
       if (pending) {
         st.pendingEnter = undefined
-        choose(rows[0], pending.disposition)
+        choose(rows[0], pending.disposition, pending.topResult)
       }
     })
   }
@@ -343,9 +343,10 @@ export function CommandBar({
       const row = st.results[st.selected]
       const disposition: OpenDisposition | undefined =
         e.metaKey || e.ctrlKey || (e.altKey && row?.kind === 'tab') ? 'new-tab' : undefined
+      const topResult = e.shiftKey // ⇧Enter (CB-16); main decides whether it applies
       // Type-ahead: Enter before the latest results arrived runs the top row once they do.
-      if (st.answered !== st.seq) st.pendingEnter = { disposition }
-      else choose(row, disposition)
+      if (st.answered !== st.seq) st.pendingEnter = { disposition, topResult }
+      else choose(row, disposition, topResult)
     } else if (e.key === 'Escape') {
       e.preventDefault()
       if (st.scope) setScope(null)

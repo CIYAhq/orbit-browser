@@ -16,7 +16,7 @@ import { parseSuggestions } from '../../src/main/commandbar/suggest'
 import { HistoryStore, hostOf, urlKeyOf } from '../../src/main/history/store'
 import { mergeSuggestions, type SearchResult } from '../../src/shared/commands/commandbar'
 import { DEFAULT_SITE_SEARCH } from '../../src/shared/defaults'
-import { fillSearchTemplate, parseInput } from '../../src/shared/url'
+import { fillSearchTemplate, parseInput, topResultUrl } from '../../src/shared/url'
 
 const NOW = 1_800_000_000_000
 
@@ -103,6 +103,12 @@ describe('URL and search parsing', () => {
     expect(fillSearchTemplate('https://open.spotify.com/search/%s', 'lo fi')).toBe(
       'https://open.spotify.com/search/lo%20fi',
     )
+  })
+
+  it('[CB-16] builds first-result URLs only for engines that support it', () => {
+    expect(topResultUrl('duckduckgo', 'wikipedia cats')).toBe('https://duckduckgo.com/?q=%5Cwikipedia+cats')
+    expect(topResultUrl('google', 'cats')).toBe('https://www.google.com/search?btnI=1&q=cats')
+    expect(topResultUrl('bing', 'cats')).toBeUndefined()
   })
 
   it('normalizes URLs for dedupe and display', () => {

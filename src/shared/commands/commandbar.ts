@@ -101,6 +101,8 @@ export interface CommandBarCommands {
       mode: CommandBarMode
       /** `new-tab` forces a new tab (⌘/Ctrl+Enter; ⌥/Alt+Enter on a tab row opens a fresh copy). */
       disposition?: OpenDisposition
+      /** ⇧Enter on a search: open the first result directly if enabled and supported (CB-16). */
+      topResult?: boolean
     }
     result: void
   }
