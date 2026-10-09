@@ -1,4 +1,5 @@
 import { clipboard, Menu, type MenuItemConstructorOptions, nativeTheme } from 'electron'
+import { FAVORITES_FULL_MESSAGE } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
 import {
   equalizeLayout,
@@ -35,6 +36,7 @@ import {
   isBlankPane,
   isFailure,
   leavesOf,
+  overflowsFavorites,
   popOutInDraft,
   separateInDraft,
   sidebarSorted,
@@ -428,18 +430,29 @@ export function registerSplit(ctx: MainContext): void {
     if (rest.length > 0) void commands.run('tabs.close', { tabIds: rest }, { windowId: windowOf(c) })
   })
 
-  commands.register('split.separate', ({ splitId }) => {
+  commands.register('split.separate', ({ splitId }, c) => {
+    // A Favorite split becomes one tile per pane: refused when that passes 12 Favorites (FV-02).
+    const tiles = leavesOf(store.state, splitId).filter((id) => !isPendingPane(store.state, id)).length
+    if (overflowsFavorites(store.state, splitId, tiles)) {
+      ctx.toast(windowOf(c), FAVORITES_FULL_MESSAGE)
+      return
+    }
     for (const id of leavesOf(store.state, splitId)) if (isPendingPane(store.state, id)) dropPending(id)
     store.update((d) => {
       separateInDraft(d, splitId)
     })
   })
 
-  commands.register('split.popOut', ({ tabId }) => {
+  commands.register('split.popOut', ({ tabId }, c) => {
     const state = store.state
     const splitId = splitOfTab(state, tabId)
     const split = splitId ? state.splits[splitId] : undefined
     if (!split) return
+    // The pane becomes a tile of its own beside a Favorite split (FV-02).
+    if (overflowsFavorites(state, split.id, 2)) {
+      ctx.toast(windowOf(c), FAVORITES_FULL_MESSAGE)
+      return
+    }
     const sibling = siblingOf(split.layout, tabId)
     store.update((d) => {
       for (const { windowId, spaceId } of windowsShowing(d, [tabId])) {

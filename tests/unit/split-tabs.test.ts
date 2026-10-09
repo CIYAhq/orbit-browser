@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MainContext } from '../../src/main/context'
-import { detachTab } from '../../src/main/split/model'
+import { detachTab, overflowsFavorites } from '../../src/main/split/model'
 import { Store } from '../../src/main/store'
 import { activateInDraft, makeTab } from '../../src/main/tabs/model'
 import { TabOps } from '../../src/main/tabs/ops'
@@ -276,5 +276,21 @@ describe('Favorite splits and the Favorites cap', () => {
     // Full now: one more tile is refused.
     expect(ops.moveItems([add()], favorites, 0)).toBe(false)
     expect(store.state.profiles[DEFAULT_PROFILE_ID]?.favorites).toHaveLength(12)
+  })
+
+  it('[FV-02][SV-23] a Favorite split may not come apart past 12 tiles; one elsewhere always may (lead review F1)', () => {
+    const { store, ops, add, split } = world()
+    const favorites = { kind: 'favorites', profileId: DEFAULT_PROFILE_ID } as const
+    for (let i = 0; i < 10; i++) expect(ops.favorite(add())).toBe(true)
+    const v = split({ type: 'row', sizes: [0.4, 0.3, 0.3], children: [add(), add(), add()].map(L) })
+    // In Today, any number of tiles is fine.
+    expect(overflowsFavorites(store.state, v, 3)).toBe(false)
+    expect(ops.moveItems([v], favorites, 10)).toBe(true)
+    // 11 tiles: a pane popped out makes 12, separating all three makes 13.
+    expect(overflowsFavorites(store.state, v, 2)).toBe(false)
+    expect(overflowsFavorites(store.state, v, 3)).toBe(true)
+    expect(ops.favorite(add())).toBe(true)
+    // 12 tiles: no room for even one more.
+    expect(overflowsFavorites(store.state, v, 2)).toBe(true)
   })
 })

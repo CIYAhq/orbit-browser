@@ -899,6 +899,34 @@ test('[SV-02][SV-23] a split made from a Favorite stays in the Favorites grid', 
   await expect(orbit.shell.getByTestId('split-pane')).toHaveCount(2)
 })
 
+test('[FV-02][SV-23] a Favorite split never comes apart past 12 Favorites: Separate and Move Out are refused (lead review F1)', async () => {
+  const panes = [await openTab(orbit.app, 'P3'), await openTab(orbit.app, 'P2'), await openTab(orbit.app, 'P1')]
+  const s = await state(orbit.app)
+  const spaceId = s.tabs[panes[0] as string]?.spaceId as string
+  const profileId = s.spaces[spaceId]?.profileId as string
+  const favorites = { kind: 'favorites', profileId }
+  for (let i = 0; i < 11; i++) {
+    const id = await run(orbit.app, 'tabs.create', { url: fx.url(`/page/F${i}`), activate: false })
+    expect(await run(orbit.app, 'tabs.move', { id, to: favorites, index: i }), `Favorite ${i}`).toBe(true)
+  }
+  const splitId = (await run(orbit.app, 'split.create', { tabIds: panes })) as string
+  await run(orbit.app, 'tabs.move', { id: splitId, to: favorites, index: 11 })
+  const tiles = async () => (await state(orbit.app)).profiles[profileId]?.favorites ?? []
+  await expect.poll(async () => (await tiles()).length).toBe(12)
+  // Separating would make 14 tiles and moving one pane out 13: both are refused, and nothing changes.
+  await run(orbit.app, 'split.separate', { splitId })
+  await expect(orbit.shell.getByTestId('toast').last()).toContainText('Favorites are full (12 max)')
+  await run(orbit.app, 'split.popOut', { tabId: panes[0] })
+  expect(await tiles()).toHaveLength(12)
+  const layout = JSON.stringify((await state(orbit.app)).splits[splitId]?.layout)
+  for (const id of panes) expect(layout).toContain(id)
+  // With room for one more tile, a pane moves out as usual.
+  await run(orbit.app, 'tabs.move', { id: (await tiles())[0], to: { kind: 'today', spaceId }, index: 0 })
+  await run(orbit.app, 'split.popOut', { tabId: panes[0] })
+  await expect.poll(async () => (await tiles()).length).toBe(12)
+  expect(JSON.stringify((await state(orbit.app)).splits[splitId]?.layout)).not.toContain(panes[0])
+})
+
 test('[SV-17] a reopened pane returns to its exact spot beside a stacked pair', async () => {
   const b = await openTab(orbit.app, 'StackTop')
   const a = await openTab(orbit.app, 'LeftTall')

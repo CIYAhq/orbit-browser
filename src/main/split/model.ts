@@ -4,6 +4,7 @@
  * themselves. Every helper keeps the invariants: 2–4 panes per split, canonical layout,
  * a tab in at most one place.
  */
+import { MAX_FAVORITES } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
 import {
   anchorOf,
@@ -217,6 +218,17 @@ export function popOutInDraft(d: OrbitState, tabId: TabId, opts: { toToday?: boo
   if (!today) return
   insertItem(d, today, 0, tabId)
   adoptPlacement(d, [tabId], today)
+}
+
+/**
+ * Whether a Favorite split coming apart into `tiles` tiles would take its profile past the
+ * Favorites limit (FV-02). A split anywhere else never counts.
+ */
+export function overflowsFavorites(d: OrbitState, splitId: SplitId, tiles: number): boolean {
+  const loc = locate(d, splitId)
+  if (loc?.container.kind !== 'favorites') return false
+  const count = d.profiles[loc.container.profileId]?.favorites.length ?? 0
+  return count - 1 + tiles > MAX_FAVORITES
 }
 
 /** Replaces a pane's tab with another open tab (which leaves its own place). The old tab goes to Today. */
