@@ -61,6 +61,15 @@ export const SidebarItems = memo(function SidebarItems({
 
   useMainMessages(scrollRef)
   useShellUndo()
+  // A selection belongs to what the window shows: switching Space, or selecting a tab outside it,
+  // ends it (lane review MF-3).
+  useEffect(() => {
+    clearSelection()
+  }, [spaceId])
+  useEffect(() => {
+    const ids = useSelection.getState().ids
+    if (active && ids.length > 0 && !ids.includes(active)) clearSelection()
+  }, [active])
   useScrollMemory(scrollRef, spaceId)
   const reveal = useAutoReveal(scrollRef, active)
   const onKeyDown = useKeyboardNav(scrollRef)

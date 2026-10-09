@@ -14,6 +14,7 @@ import {
   insertItem,
   locate,
   profileOfContainer,
+  rootContainerOf,
   sectionOf,
   sidebarTabOrder,
   splitOfTab,
@@ -45,8 +46,33 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   const windowOf = (c: CallContext): WindowId | undefined => c.windowId ?? windows.focusedWindowId()
   /** Multi-selection per window, reported by the sidebar (TB-13). */
   const selections = new Map<WindowId, TabId[]>()
-  const selectionOf = (windowId: WindowId | undefined): TabId[] =>
-    (windowId ? (selections.get(windowId) ?? []) : []).filter((id) => store.state.tabs[id])
+  /**
+   * The window's multi-selection, honoured only while it is about what the window shows: it holds
+   * the selected tab and every tab sits in the window's Space (or its profile's Favorites).
+   * Otherwise it is stale (the user switched Space or tab) and dropped (lane review MF-3).
+   */
+  const selectionOf = (windowId: WindowId | undefined): TabId[] => {
+    if (!windowId) return []
+    const ids = selections.get(windowId) ?? []
+    if (ids.length === 0) return []
+    const state = store.state
+    const win = state.windows[windowId]
+    const space = win ? state.spaces[win.spaceId] : undefined
+    const active = win?.activeTab[win.spaceId]
+    const inView = (id: TabId) => {
+      const tab = state.tabs[id]
+      if (!tab || !space) return false
+      const loc = locate(state, splitOfTab(state, id) ?? id)
+      const root = loc ? rootContainerOf(state, loc.container) : undefined
+      if (root?.kind === 'favorites') return root.profileId === space.profileId
+      return root?.kind === 'pinned' || root?.kind === 'today' ? root.spaceId === space.id : false
+    }
+    if (!active || !ids.includes(active) || !ids.every(inView)) {
+      clearSelectionIn(windowId)
+      return []
+    }
+    return ids
+  }
   const clearSelectionIn = (windowId: WindowId | undefined) => {
     if (!windowId) return
     selections.delete(windowId)

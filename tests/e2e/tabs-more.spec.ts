@@ -561,3 +561,32 @@ test('[TB-02][TB-03] a Cmd/Ctrl-clicked link opens a background tab at the top o
   await expect(shell.getByTestId('toast').last()).toContainText('Opened in a new tab')
   expect(await activeId(app)).toBe(t)
 })
+
+test('[TB-13][TB-06] a selection made in one Space never acts in another (lane review MF-3)', async () => {
+  const { app, shell } = orbit
+  const sA = (await space(app)).id
+  const sB = await cmd<string>(app, 'spaces.create', { name: 'B', activate: false })
+  const inB = await newTab(app, fx.url('/page/InB'), { spaceId: sB, activate: false })
+  const a2 = await newTab(app, fx.url('/page/A2'), { activate: false })
+  const a1 = await newTab(app, fx.url('/page/A1'))
+  await waitTab(app, a1, '/page/A1')
+  // Space A: Cmd-click a second row (the selected tab joins the selection).
+  await row(shell, a2).click({ modifiers: [MOD_KEY] })
+  await expect(shell.locator('.tab-row.is-selected')).toHaveCount(2)
+  // Switch to Space B and select its tab; the selection is gone.
+  await cmd(app, 'spaces.switch', { spaceId: sB })
+  await cmd(app, 'tabs.activate', { tabId: inB })
+  await expect(shell.locator('.tab-row.is-selected')).toHaveCount(0)
+  // Cmd+W closes only B's tab, never A's.
+  await act(app, 'tab.close')
+  await expect.poll(async () => (await state(app)).tabs[inB]).toBeUndefined()
+  const s = await state(app)
+  expect(s.spaces[sA]?.today).toEqual([a1, a2])
+  // Even if the sidebar's selection message is stale, main ignores a selection outside the view.
+  await cmd(app, 'tabs.setSelection', { tabIds: [a1, a2] })
+  const another = await newTab(app, fx.url('/page/B2'), { spaceId: sB })
+  await waitTab(app, another, '/page/B2')
+  await act(app, 'tab.close')
+  await expect.poll(async () => (await state(app)).tabs[another]).toBeUndefined()
+  expect((await state(app)).spaces[sA]?.today).toEqual([a1, a2])
+})
