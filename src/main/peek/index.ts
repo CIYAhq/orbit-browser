@@ -6,7 +6,7 @@ import type {
   WebContentsWillNavigateEventParams,
   WindowOpenHandlerResponse,
 } from 'electron'
-import { WebContentsView } from 'electron'
+import { app, WebContentsView } from 'electron'
 import { decideLink, type LinkHow, type LinkSettings, type LinkSource, routeFor } from '../../shared/link-routing'
 import { PEEK_RADIUS, peekCard, peekStart } from '../../shared/peek-geometry'
 import type { Rect } from '../../shared/rpc'
@@ -18,7 +18,7 @@ import type { CallContext } from '../registry'
 import type { SavedHistory } from '../tabs/runtime'
 import { activeTabOf } from '../windows'
 import { archiveFloating, floatingTab } from './floating'
-import { ClickTracker, isMiniClick, type PageClick } from './input'
+import { ClickTracker, HeldModifiers, isMiniClick, type PageClick } from './input'
 import { runPageAction } from './page-actions'
 
 /** A Peek card open in a window: a floating tab whose view sits above the overlay, in the card. */
@@ -63,7 +63,10 @@ export function registerPeek(ctx: MainContext): void {
   const { store, commands, actions, windows, tabs } = ctx
   const sessions = new Map<WindowId, Session>()
   const closed: ClosedPeek[] = []
-  const clicks = new ClickTracker()
+  const held = new HeldModifiers()
+  const clicks = new ClickTracker(held)
+  app.on('web-contents-created', (_event, contents) => held.watch(contents))
+  app.on('browser-window-blur', () => held.reset())
   /** When a sidebar tab last closed: ⌘⇧T reopens a Peek only if it closed after that. */
   let lastTabCloseAt = 0
   let undo: { windowId: WindowId; until: number } | undefined
@@ -534,12 +537,20 @@ export function registerPeek(ctx: MainContext): void {
   }
 
   const howFor = (details: HandlerDetails, click: PageClick | undefined): LinkHow => {
-    if (details.disposition === 'new-window') return details.features ? 'popup' : 'shift'
     if (isMiniClick(click)) return 'mini'
-    if (details.disposition === 'background-tab') return 'background-tab'
-    // ⌘⇧-click asks for a foreground tab on purpose.
-    if (click && (click.meta || click.control) && !click.alt) return 'background-tab'
-    return 'new-tab'
+    switch (details.disposition) {
+      case 'new-window':
+        return details.features ? 'popup' : 'shift'
+      case 'background-tab':
+        return 'background-tab'
+      case 'foreground-tab':
+      case 'default':
+        // ⌘⇧-click asks for a foreground tab on purpose.
+        return click && (click.meta || click.control) ? 'background-tab' : 'new-tab'
+      default:
+        // Downloads (Alt-click) and the like keep the engine's handling.
+        return 'popup'
+    }
   }
 
   // Runs before the tabs' own new-tab handling so Peek and Mini Window get first say.
@@ -580,7 +591,9 @@ export function registerPeek(ctx: MainContext): void {
             })
             if (created) return created
             // The Peek could not open after all: the link opens as a tab instead.
-            const spare = guest ? new WebContentsView(options as WebContentsViewConstructorOptions) : new WebContentsView()
+            const spare = guest
+              ? new WebContentsView(options as WebContentsViewConstructorOptions)
+              : new WebContentsView()
             setImmediate(() => spare.webContents.close())
             openTab(details.url, openerTabId)
             return spare.webContents
@@ -661,6 +674,11 @@ export function registerPeek(ctx: MainContext): void {
 
   ctx.hooks.tabCreated.push((tabId, contents) => {
     clicks.watch(contents)
+    // A Peek page that closes itself (window.close()) takes its card with it.
+    contents.once('destroyed', () => {
+      const s = sessionOfTab(tabId)
+      if (s && s.view?.webContents === contents && sessions.get(s.windowId) === s) discard(s)
+    })
     contents.on('will-navigate', (event) => onWillNavigate(tabId, contents, event))
     contents.on('before-input-event', (event, input) => onKey(tabId, event, input))
     // A video in fullscreen covers the window; leaving it puts the page back in the card.

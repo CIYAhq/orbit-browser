@@ -175,3 +175,34 @@ export async function pressInTab(app: ElectronApplication, tabId: string, accel:
     [tabId, accel, process.platform === 'darwin'] as const,
   )
 }
+
+/**
+ * Clicks a point of a tab's page through the browser's input handling, holding modifier keys the
+ * way a person does (their key presses come first). Playwright's modifier clicks bypass that path.
+ */
+export async function clickInTab(
+  app: ElectronApplication,
+  tabId: string,
+  point: { x: number; y: number },
+  modifiers: ('control' | 'alt' | 'meta' | 'shift')[] = [],
+): Promise<void> {
+  await app.evaluate(
+    (_e, [id, x, y, mods]) => {
+      const contents = (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id)
+      if (!contents) throw new Error(`no page for ${id}`)
+      const key = (m: string) => ({ control: 'Control', alt: 'Alt', meta: 'Meta', shift: 'Shift' })[m] as string
+      const held: typeof mods = []
+      for (const m of mods) {
+        held.push(m)
+        contents.sendInputEvent({ type: 'keyDown', keyCode: key(m), modifiers: [...held] })
+      }
+      contents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1, modifiers: mods })
+      contents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1, modifiers: mods })
+      for (const m of [...mods].reverse()) {
+        held.pop()
+        contents.sendInputEvent({ type: 'keyUp', keyCode: key(m), modifiers: [...held] })
+      }
+    },
+    [tabId, point.x, point.y, modifiers] as const,
+  )
+}

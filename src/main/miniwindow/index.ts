@@ -649,6 +649,15 @@ export function registerMiniWindow(ctx: MainContext): void {
 
   // Pages in a Mini Window: a video's fullscreen covers the window (MW-12).
   ctx.hooks.tabCreated.push((tabId, contents: WebContents) => {
+    // A page that closes itself (window.close()) closes its Mini Window.
+    contents.once('destroyed', () => {
+      const mini = miniOfTab(tabId)
+      if (!mini || mini.moved || quitting || mini.win.isDestroyed()) return
+      // Reopened in another profile: a new page already took its place.
+      const current = tabs.contents(tabId)
+      if (current && current !== contents) return
+      mini.win.close()
+    })
     contents.on('enter-html-full-screen', () => {
       const mini = miniOfTab(tabId)
       const view = tabs.get(tabId)

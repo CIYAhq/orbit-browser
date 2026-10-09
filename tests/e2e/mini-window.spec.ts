@@ -1,8 +1,9 @@
 import type { ElectronApplication, Page } from '@playwright/test'
 import { expect, test } from '@playwright/test'
-import { launchOrbit, type Orbit, state } from './helpers'
+import { launchOrbit, type Orbit, run, state } from './helpers'
 import {
   blockNetwork,
+  clickInTab,
   findPage,
   type OrbitGlobal,
   pressInTab,
@@ -60,10 +61,7 @@ async function minis(app: ElectronApplication): Promise<MiniInfo[]> {
       .filter((w) => w.kind === 'mini')
       .map((w) => {
         const win = BrowserWindow.getAllWindows().find(
-          (b) =>
-            !b.isDestroyed() &&
-            ctx.windows.isUi(b.webContents) &&
-            ctx.windows.windowIdFor(b.webContents) === w.id,
+          (b) => !b.isDestroyed() && ctx.windows.isUi(b.webContents) && ctx.windows.windowIdFor(b.webContents) === w.id,
         )
         const tabId = w.activeTab[w.spaceId] ?? null
         const view = tabId ? ctx.tabs.get(tabId) : undefined
@@ -259,3 +257,84 @@ test('[MW-11] with Mini Windows off, a link from another app opens as a Today ta
 function isMacKeys(mac: string, other: string): string {
   return process.platform === 'darwin' ? mac : other
 }
+
+/** Runs a command from a Mini Window's own UI (as its buttons and menus do), without waiting on it. */
+async function fromMini(app: ElectronApplication, windowId: string, name: string, args: unknown): Promise<void> {
+  const ui = await miniUi(app, windowId)
+  await ui.evaluate(
+    ([n, a]) => {
+      void (window as unknown as { orbit: { invoke: (n: string, a: unknown) => Promise<unknown> } }).orbit.invoke(n, a)
+    },
+    [name, args] as const,
+  )
+}
+
+test('[MW-05] "Open in…" moves the page into the chosen Space of the main window', async () => {
+  const work = (await run(orbit.app, 'spaces.create', { name: 'Research', activate: false })) as string
+  const url = sites.url('/site/Paper')
+  await openFromOtherApp(orbit.app, url)
+  await expect.poll(async () => (await minis(orbit.app))[0]?.url).toBe(url)
+  const [mini] = await minis(orbit.app)
+  if (!mini?.tabId) throw new Error('no mini')
+  await fromMini(orbit.app, mini.id, 'mini.moveToSpace', { spaceId: work })
+  await expect.poll(async () => (await minis(orbit.app)).length).toBe(0)
+  const s = await state(orbit.app)
+  const main = Object.values(s.windows).find((w) => w.kind === 'main')
+  expect(main?.spaceId).toBe(work)
+  expect(main?.activeTab[work]).toBe(mini.tabId)
+  expect(s.spaces[work]?.today).toEqual([mini.tabId])
+  expect(s.tabs[mini.tabId]?.spaceId).toBe(work)
+})
+
+test('[MW-07][PK-16] ⌘⌥-click opens a link in a Mini Window; links inside it never open a Peek', async () => {
+  const reader = (await run(orbit.app, 'tabs.create', { url: sites.url('/site/Reader') })) as string
+  const page = await findPage(orbit.app, '/site/Reader')
+  await expect(page.locator('#title')).toBeVisible()
+  const box = await page.locator('#other').boundingBox()
+  const mod = process.platform === 'darwin' ? 'meta' : 'control'
+  await clickInTab(orbit.app, reader, { x: (box?.x ?? 0) + 6, y: (box?.y ?? 0) + 6 }, [mod, 'alt'])
+  await expect.poll(async () => (await minis(orbit.app))[0]?.url).toBe(sites.other('/site/Other'))
+  expect(page.url()).toBe(sites.url('/site/Reader'))
+  const s = await state(orbit.app)
+  const main = Object.values(s.windows).find((w) => w.kind === 'main')
+  expect(s.spaces[main?.spaceId ?? '']?.today).toHaveLength(1)
+  // In the Mini Window, an other-site link navigates it and target=_blank stays in it: no Peek.
+  const [mini] = await minis(orbit.app)
+  const inMini = await findPage(orbit.app, '/site/Other')
+  await inMini.locator('#other-blank').click({ noWaitAfter: true })
+  await expect.poll(async () => (await minis(orbit.app))[0]?.url).toBe(sites.other('/site/OtherBlank'))
+  expect((await minis(orbit.app))[0]?.id).toBe(mini?.id)
+  expect(main?.overlay.kind).toBe('none')
+  expect(Object.values((await state(orbit.app)).windows).find((w) => w.kind === 'main')?.overlay.kind).toBe('none')
+})
+
+test('[MW-10] a Mini Window can reopen its page in another profile, remembered for the site', async () => {
+  const work = (await run(orbit.app, 'profiles.create', { name: 'Work' })) as string
+  await run(orbit.app, 'spaces.create', { name: 'Work', profileId: work, activate: false })
+  const url = sites.url('/site/Docs')
+  await openFromOtherApp(orbit.app, url)
+  await expect.poll(async () => (await minis(orbit.app))[0]?.url).toBe(url)
+  const [mini] = await minis(orbit.app)
+  if (!mini?.tabId) throw new Error('no mini')
+  const tabId = mini.tabId
+  const ui = await miniUi(orbit.app, mini.id)
+  await expect(ui.getByTestId('mini-profile')).toContainText('Personal')
+  await fromMini(orbit.app, mini.id, 'mini.setProfile', { profileId: work })
+  await expect(ui.getByTestId('mini-profile')).toContainText('Work')
+  const partition = () =>
+    orbit.app.evaluate((_e, id) => {
+      const ctx = (globalThis as unknown as OrbitGlobal).__orbit.ctx
+      const contents = ctx.tabs.contents(id)
+      const tab = ctx.store.state.tabs[id]
+      return contents && tab ? contents.session === ctx.sessions.get(tab.profileId) && tab.profileId : null
+    }, tabId)
+  await expect.poll(partition).toBe(work)
+  await expect.poll(async () => (await minis(orbit.app))[0]?.url).toBe(url)
+  await fromMini(orbit.app, mini.id, 'mini.control', { op: 'close' })
+  await expect.poll(async () => (await minis(orbit.app)).length).toBe(0)
+  // The next link to that site opens in the remembered profile.
+  await openFromOtherApp(orbit.app, sites.url('/site/Docs-2'))
+  await expect.poll(async () => (await minis(orbit.app))[0]?.url).toBe(sites.url('/site/Docs-2'))
+  const [next] = await minis(orbit.app)
+  expect((await state(orbit.app)).tabs[next?.tabId ?? '']?.profileId).toBe(work)
+})
