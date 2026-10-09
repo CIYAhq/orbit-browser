@@ -24,6 +24,9 @@ export interface MediaTestHooks {
   manager: MediaManager
   lastMenu: () => string[]
   clickMenu: (path: string) => boolean
+  /** The floating player's last "…" menu. */
+  playerMenu: () => string[]
+  clickPlayerMenu: (path: string) => boolean
 }
 
 /** Picture-in-picture, sidebar media controls and call controls (media lane; spec media.md). */
@@ -34,10 +37,10 @@ export function registerMedia(ctx: MainContext): MediaManager {
   const windowOf = (windowId: string | undefined) => windowId ?? windows.focusedWindowId()
 
   commands.register('media.control', ({ tabId, action, seconds }) => media.control(tabId, action, seconds))
-  commands.register('media.pip', async ({ tabId, on = true }, c) => {
+  commands.register('media.pip', async ({ tabId, on = true, from }, c) => {
     const windowId = windowOf(c.windowId)
     const id = tabId ?? (windowId ? activeTabOf(store.state, windowId) : null)
-    return id ? media.setPip(id, on) : false
+    return id ? media.setPip(id, on, from && windowId ? { windowId, rect: from } : undefined) : false
   })
   commands.register('media.dismiss', ({ tabId }) => media.dismiss(tabId))
   commands.register('media.focus', ({ tabId }, c) => {
@@ -56,6 +59,14 @@ export function registerMedia(ctx: MainContext): MediaManager {
   commands.register('media.sitePip', ({ url }) => media.sitePip(url))
   commands.register('media.setSitePip', ({ url, mode }) => media.setSitePip(url, mode))
   commands.register('media.call', ({ tabId, action }) => media.callControl(tabId, action))
+
+  // The floating player's own controls (MD-04 to MD-07).
+  const player = media.player
+  commands.register('media.pipBack', () => player.back())
+  commands.register('media.pipClose', () => player.close('close'))
+  commands.register('media.pipMenu', ({ x, y }) => player.menu(x, y))
+  commands.register('media.pipZoom', ({ factor, x, y }) => player.zoom(factor, x, y))
+  ctx.events.on('media.pipGesture', (e) => player.onGesture(e))
 
   // Picture in Picture for the selected tab's video (MD-02), and the global switch (MD-08, ST-10).
   actions.register('media.togglePip', ({ windowId }) => {
@@ -105,6 +116,8 @@ export function registerMedia(ctx: MainContext): MediaManager {
       manager: media,
       lastMenu: () => flatLabels(media.lastMenu),
       clickMenu: (path) => clickMenuPath(media.lastMenu, path),
+      playerMenu: () => flatLabels(player.lastMenu),
+      clickPlayerMenu: (path) => clickMenuPath(player.lastMenu, path),
     }
     ;(globalThis as unknown as { __orbitMedia: MediaTestHooks }).__orbitMedia = hooks
   }

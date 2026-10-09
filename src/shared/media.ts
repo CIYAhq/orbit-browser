@@ -3,6 +3,7 @@
  * script reports, how that becomes a tab's `TabMedia`, who shows in the media tray, and when
  * leaving a tab opens picture-in-picture. No Electron or DOM here, so it is unit-tested.
  */
+import { DEFAULT_PIP_PLACEMENT, normalizePlacement } from './pip'
 import type { OrbitState, Settings, Tab, TabId, TabMedia } from './state'
 
 /** One report from Orbit's page script (src/main/media/agent.ts). */
@@ -17,8 +18,12 @@ export interface AgentSnapshot {
   controllable: boolean
   /** The main media is a video with frames. */
   video: boolean
-  /** A video in the page is in picture-in-picture. */
+  /** A video in the page is in picture-in-picture (the engine's window or Orbit's player). */
   pip: boolean
+  /** The video is in Orbit's floating player (lifted into the page's top layer). */
+  player: boolean
+  /** That video's aspect ratio (width / height); 0 when not in the player or unknown. */
+  aspect: number
   /** A playing, unmuted video that automatic picture-in-picture may pick (MD-01). */
   pipCandidate: boolean
   title: string
@@ -27,6 +32,8 @@ export interface AgentSnapshot {
   seekable: boolean
   /** The main media played to its end. */
   ended: boolean
+  /** Playback of the main media (the player's video when it shows one). */
+  time: MediaTime | null
   /** The last time picture-in-picture ended without Orbit asking, and how (MD-07). */
   pipEnd: { n: number; reason: PipEndReason } | null
   mic: boolean
@@ -35,14 +42,52 @@ export interface AgentSnapshot {
   cameraOff: boolean
 }
 
+/** Where playback was at time `at` (ms since the epoch). */
+export interface MediaTime {
+  position: number
+  /** Length in seconds; 0 when unknown or live. */
+  duration: number
+  rate: number
+  paused: boolean
+  live: boolean
+  at: number
+}
+
 /**
  * Why picture-in-picture ended: Orbit closed it ('orbit'), the video ended, the user pressed the
- * player's close button ('close': playback continues as audio, MD-07) or its "Back to tab" ('back').
+ * engine player's close button ('close': playback continues as audio, MD-07) or its "Back to tab"
+ * ('back'), or the video left the page ('gone').
  */
-export type PipEndReason = 'orbit' | 'ended' | 'close' | 'back'
+export type PipEndReason = 'orbit' | 'ended' | 'close' | 'back' | 'gone'
 
-/** Actions the sidebar controller and commands send to a tab's media. */
-export type MediaAction = 'play' | 'pause' | 'toggle' | 'next' | 'previous' | 'seek'
+/**
+ * Actions the sidebar controller, the floating player and commands send to a tab's media.
+ * 'seek' moves by `value` seconds, 'seekTo' goes to `value` seconds, 'rate' sets the speed.
+ */
+export type MediaAction = 'play' | 'pause' | 'toggle' | 'next' | 'previous' | 'seek' | 'seekTo' | 'rate'
+
+/** Playback speeds offered by the floating player's menu (MD-04). */
+export const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2] as const
+
+/** Where playback is now, extrapolated from the last report (players redraw without asking). */
+export function currentPosition(
+  m: Pick<TabMedia, 'position' | 'duration' | 'rate' | 'at' | 'paused'>,
+  now: number,
+): number {
+  const base = m.position ?? 0
+  if (m.paused || m.at === undefined) return base
+  const moved = base + ((now - m.at) / 1000) * (m.rate ?? 1)
+  return m.duration ? Math.min(Math.max(moved, 0), m.duration) : Math.max(moved, 0)
+}
+
+/** "1:05", "12:00", "1:02:03" for a position in seconds. */
+export function formatClock(seconds: number): string {
+  const s = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = String(s % 60).padStart(2, '0')
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`
+}
 
 /** The "site" for per-site picture-in-picture choices (MD-08): the host without "www.". */
 export function siteOf(url: string | undefined): string {
@@ -92,6 +137,27 @@ export function applySitePip(settings: Settings, url: string, mode: SitePipMode,
   settings.pipSnoozed = snoozed
 }
 
+/**
+ * Cleans the media settings read from disk (MD-06, MD-08): site lists hold host names, snoozes
+ * that ran out are dropped, and the player's placement is a known corner and a sane size.
+ */
+export function normalizeMediaSettings(settings: Settings, now: number): void {
+  const sites = Array.isArray(settings.pipOffSites) ? settings.pipOffSites : []
+  settings.pipOffSites = [...new Set(sites.filter((s): s is string => typeof s === 'string' && s.length > 0))].slice(
+    0,
+    1000,
+  )
+  const snoozed: Record<string, number> = {}
+  const raw = settings.pipSnoozed
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    for (const [site, until] of Object.entries(raw)) {
+      if (site && typeof until === 'number' && Number.isFinite(until) && until > now) snoozed[site] = until
+    }
+  }
+  settings.pipSnoozed = snoozed
+  settings.pipPlacement = normalizePlacement(settings.pipPlacement) ?? { ...DEFAULT_PIP_PLACEMENT }
+}
+
 /** A fresh media record before the page script has reported. */
 export function emptyMedia(): TabMedia {
   return {
@@ -117,8 +183,15 @@ export function mediaFromSnapshot(prev: TabMedia | undefined, snap: AgentSnapsho
     controllable: snap.controllable,
     video: snap.video,
     pip: snap.pip,
+    player: snap.player || undefined,
     seekable: snap.seekable,
     ended: snap.ended,
+    paused: snap.time?.paused || undefined,
+    live: snap.time?.live || undefined,
+    position: snap.time ? Math.round(snap.time.position * 1000) / 1000 : undefined,
+    duration: snap.time && !snap.time.live && snap.time.duration > 0 ? snap.time.duration : undefined,
+    rate: snap.time && snap.time.rate !== 1 ? snap.time.rate : undefined,
+    at: snap.time?.at,
     title: snap.title || undefined,
     artist: snap.artist || undefined,
     mic: snap.mic || undefined,

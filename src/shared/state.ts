@@ -75,8 +75,10 @@ export interface TabMedia {
   controllable: boolean
   /** The page's main media is a video with frames (it can go to picture-in-picture). */
   video: boolean
-  /** A video of this tab is in picture-in-picture. */
+  /** A video of this tab is in picture-in-picture (Orbit's player or the engine's own window). */
   pip: boolean
+  /** That picture-in-picture is Orbit's floating player (MD-03, MD-04), not the engine's window. */
+  player?: boolean
   /** That picture-in-picture was opened automatically when the tab was left (MD-01). */
   autoPip?: boolean
   /** Track details from the page's Media Session, when it sets them. */
@@ -86,6 +88,18 @@ export interface TabMedia {
   seekable: boolean
   /** The main media played to its end. */
   ended: boolean
+  /** The main media (or the video in Orbit's player) is paused. */
+  paused?: boolean
+  /** It is a live stream: no length, no seeking (MD-04 shows "Live"). */
+  live?: boolean
+  /**
+   * Playback position in seconds at time `at` (ms since the epoch), the length in seconds and the
+   * speed, reported on play, pause, seek and speed changes only; players extrapolate in between.
+   */
+  position?: number
+  duration?: number
+  rate?: number
+  at?: number
   /** Shown in the sidebar media tray (MD-09, MD-10). */
   tray: boolean
   /** When it joined the tray (newest on top). */
@@ -97,6 +111,15 @@ export interface TabMedia {
   micMuted?: boolean
   camera?: boolean
   cameraOff?: boolean
+}
+
+/** A corner of the screen for Orbit's floating video player (media lane, MD-06). */
+export type PipCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+
+/** Where the floating player opens and how big it is (its longer side, in DIPs), MD-06. */
+export interface PipPlacement {
+  corner: PipCorner
+  size: number
 }
 
 export interface Folder {
@@ -213,6 +236,8 @@ export interface Settings {
   pipOffSites?: string[]
   /** Sites where automatic picture-in-picture is off until a time in ms ("Turn off for today", MD-08). */
   pipSnoozed?: Record<string, number>
+  /** Where the floating player opens and its size, remembered from the last time it was moved (MD-06). */
+  pipPlacement?: PipPlacement
   /** Links opened from other apps open in a Mini Window. */
   miniWindowForExternalLinks: boolean
   onboarded: boolean

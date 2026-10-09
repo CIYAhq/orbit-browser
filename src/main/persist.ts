@@ -12,6 +12,7 @@ import {
   MIN_SIDEBAR_WIDTH,
 } from '../shared/defaults'
 import { isFolderId, isSplitId, isTabId } from '../shared/ids'
+import { normalizeMediaSettings } from '../shared/media'
 import type { ItemId, OrbitState, ProfileId, SpaceId, SplitLayout, TabId } from '../shared/state'
 import { STATE_SCHEMA } from '../shared/state'
 import { normalizeSpaceTheme } from '../shared/theme'
@@ -101,6 +102,7 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
     tweaks: record(input.tweaks),
   }
   if (!['system', 'light', 'dark'].includes(state.settings.appearance)) state.settings.appearance = 'system'
+  normalizeMediaSettings(state.settings, Date.now())
   seedAppearanceFromOldThemes(state)
   normalizeEntities(state, base)
   // spaceOrder must list exactly the existing spaces.

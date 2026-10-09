@@ -4,9 +4,14 @@
  * - a tab gets Orbit's page script (agent.ts) only once it plays media (`media-started-playing`,
  *   or it turns audible); the script reports changes through a long-poll;
  * - tab switches arrive as store changes: a tab leaving the screen with a playing video goes to
- *   Chromium's own picture-in-picture (MD-01), and coming back ends it;
- * - each tab's `media` record (shared/state.ts) holds what the sidebar needs, and `tray` says
- *   whether its controller shows (shared/media.ts settleTray).
+ *   Orbit's floating player (player.ts, MD-01), and coming back ends it;
+ * - each tab's `media` record (shared/state.ts) holds what the sidebar and the player need, and
+ *   `tray` says whether its controller shows (shared/media.ts settleTray).
+ *
+ * The engine's own picture-in-picture window is still used while the tab stays on screen (the
+ * page's own PiP button, "Picture in Picture" on the selected tab): Orbit's player borrows the
+ * tab's view, which can't show in two places at once. Leaving the tab hands such a video over to
+ * Orbit's player.
  */
 import type { MenuItemConstructorOptions, WebContents } from 'electron'
 import {
@@ -22,10 +27,12 @@ import {
   siteOf,
   sitePipMode,
 } from '../../shared/media'
+import type { Rect } from '../../shared/rpc'
 import type { OrbitState, TabId, TabMedia, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import { displayedTabs } from '../tabs/model'
 import { AGENT_SOURCE, MEDIA_WORLD } from './agent'
+import { PipPlayer } from './player'
 
 interface Agent {
   contents: WebContents
@@ -38,7 +45,7 @@ interface Agent {
 }
 
 const call = (fn: string, ...args: unknown[]) =>
-  `window.__orbitMedia ? window.__orbitMedia.${fn}(${args.map((a) => JSON.stringify(a)).join(', ')}) : null`
+  `window.__orbitMedia ? window.__orbitMedia.${fn}(${args.map((a) => JSON.stringify(a ?? null)).join(', ')}) : null`
 
 export class MediaManager {
   private agents = new Map<TabId, Agent>()
@@ -46,11 +53,24 @@ export class MediaManager {
   private shown = new Set<TabId>()
   /** Last menu template (tests read it instead of a native popup). */
   lastMenu: MenuItemConstructorOptions[] = []
+  readonly player: PipPlayer
 
   constructor(
     private ctx: MainContext,
     private now: () => number = Date.now,
-  ) {}
+  ) {
+    this.player = new PipPlayer(ctx, {
+      call: (tabId, fn, ...args) => this.run(tabId, call(fn, ...args)),
+      changed: (tabId, open, auto) => this.markPip(tabId, open, open, auto),
+      focusTab: (tabId, windowId) => this.focusTab(tabId, windowId),
+      turnOffForSite: (tabId, mode) => {
+        const url = this.ctx.store.state.tabs[tabId]?.url
+        if (url) this.setSitePip(url, mode)
+        // Turning PiP off never stops playback: the media shows in the sidebar instead (MD-08).
+        this.player.closeFor(tabId, 'off')
+      },
+    })
+  }
 
   start(): void {
     this.shown = displayedTabs(this.ctx.store.state)
@@ -73,8 +93,8 @@ export class MediaManager {
       else void this.run(tabId, call('refresh'))
     })
     // A new document: its media (and picture-in-picture) went with the old one.
-    contents.on('did-navigate', () => this.drop(tabId, contents))
-    contents.once('destroyed', () => this.drop(tabId, contents))
+    contents.on('did-navigate', () => this.drop(tabId, contents, 'navigated'))
+    contents.once('destroyed', () => this.drop(tabId, contents, 'gone'))
   }
 
   /** Installs the page script in a tab that plays media (once per document) and follows its reports. */
@@ -116,9 +136,10 @@ export class MediaManager {
   }
 
   /** Forgets a tab's media when its document or contents go away (MD-07, MD-12). */
-  private drop(tabId: TabId, contents: WebContents): void {
+  private drop(tabId: TabId, contents: WebContents, why: 'navigated' | 'gone'): void {
     const agent = this.agents.get(tabId)
     if (agent && agent.contents !== contents) return
+    this.player.closeFor(tabId, why)
     this.agents.delete(tabId)
     this.ctx.store.update((d) => {
       const tab = d.tabs[tabId]
@@ -160,10 +181,21 @@ export class MediaManager {
       agent.pipEndSeen = snap.pipEnd.n
       this.onPipEnd(tabId, snap.pipEnd.reason)
     }
+    // A video plays somewhere: get the player ready, so leaving its tab shows it at once (MD-01).
+    if (snap.video) this.player.prewarm()
     this.patch(tabId, (prev) => {
       const next = mediaFromSnapshot(prev, snap)
       // Keep the "opened automatically" mark while the same picture-in-picture lasts.
       if (next.pip && prev?.autoPip) next.autoPip = true
+      // Orbit's player decides whether it shows this tab (the page's report may lag behind).
+      if (this.player.tabId === tabId) {
+        next.pip = true
+        next.player = true
+      } else if (snap.player) {
+        next.pip = false
+        delete next.player
+        delete next.autoPip
+      }
       return next
     })
   }
@@ -194,11 +226,14 @@ export class MediaManager {
     ) {
       return
     }
+    // A closed or archived tab takes its player with it (MD-07, MD-12).
+    const playerTab = this.player.tabId
+    if (playerTab && !next.tabs[playerTab]) this.player.close('gone')
     const before = this.shown
     const shown = displayedTabs(next)
     this.shown = shown
-    for (const id of before) if (!shown.has(id) && next.tabs[id]) this.left(id, next)
     for (const id of shown) if (!before.has(id)) this.returned(id, next)
+    for (const id of before) if (!shown.has(id) && next.tabs[id]) this.left(id, next)
     // Tray membership follows the screen, mute and audibility (MD-08, MD-09).
     const now = this.now()
     const updates: [TabId, TabMedia][] = []
@@ -223,58 +258,79 @@ export class MediaManager {
 
   // ---- Picture-in-picture ----
 
-  /** A tab left the screen: a playing video continues in picture-in-picture (MD-01). */
+  /** A tab left the screen: a playing video continues in the floating player (MD-01, MD-13). */
   private left(tabId: TabId, state: OrbitState): void {
     const agent = this.agents.get(tabId)
     const tab = state.tabs[tabId]
     if (!agent?.snap || !tab?.media || agent.contents.isDestroyed()) return
-    // The page script checks again when it runs; the report may be a moment old.
-    if (!shouldAutoPip(state.settings, tab, agent.snap.pipCandidate || agent.snap.video, this.now())) return
-    const optimistic = agent.snap.pipCandidate
-    if (optimistic) this.markPip(tabId, true, true)
-    void this.run<boolean>(tabId, call('pip', true, true), true).then((ok) => {
-      if (ok) this.markPip(tabId, true, true)
-      else if (optimistic) this.markPip(tabId, false)
-    })
+    // The engine's own window (opened on the tab) hands its video over to Orbit's player, with
+    // Orbit's controls. The user asked for it, so the automatic-PiP choices don't apply.
+    if (agent.snap.pip && !agent.snap.player) {
+      void this.player.open(tabId, { auto: true, keep: true })
+      return
+    }
+    // The page script checks again (the report may be a moment old): only a playing video goes.
+    const candidate = agent.snap.pipCandidate || agent.snap.video
+    if (!shouldAutoPip(state.settings, tab, candidate, this.now())) return
+    void this.player.open(tabId, { auto: true, from: 'page' })
   }
 
   /** A tab came back on screen: its picture-in-picture ends and the video plays in the page (MD-01, MD-07). */
   private returned(tabId: TabId, state: OrbitState): void {
-    if (!state.tabs[tabId]?.media?.pip) return
-    void this.run(tabId, call('pip', false, false))
+    if (this.player.tabId === tabId) {
+      this.player.close('returned')
+      return
+    }
+    if (state.tabs[tabId]?.media?.pip) void this.run(tabId, call('pip', false, false))
   }
 
-  private markPip(tabId: TabId, pip: boolean, auto = false): void {
+  private markPip(tabId: TabId, pip: boolean, player = false, auto = false): void {
     this.patch(tabId, (m) => {
       if (!m) return m
       const next = { ...m, pip }
+      if (player) next.player = true
+      else delete next.player
       if (pip && auto) next.autoPip = true
       else if (!pip) delete next.autoPip
       return next
     })
   }
 
-  /** The user ended picture-in-picture from the player (MD-04, MD-07). */
+  /** Picture-in-picture ended in the page (MD-04, MD-07). */
   private onPipEnd(tabId: TabId, reason: PipEndReason): void {
+    // Orbit's player: its video ended or left the page.
+    if (reason === 'ended' || reason === 'gone') this.player.closeFor(tabId, reason)
     if (reason !== 'back') return
-    // "Back to tab": select the source tab in its window (and Space) and bring the window forward.
+    // The engine window's "Back to tab": select the source tab in its window (and Space).
     const windowId = this.ctx.windows.windowOfTab(tabId) ?? this.ctx.windows.focusedWindowId()
     if (windowId) this.focusTab(tabId, windowId)
   }
 
-  /** Opens or closes picture-in-picture for a tab (MD-02, MD-10 "Back to PiP"). */
-  async setPip(tabId: TabId, on: boolean): Promise<boolean> {
+  /**
+   * Opens or closes picture-in-picture for a tab (MD-02, MD-10 "Back to PiP"). A tab in the
+   * background goes to Orbit's player, growing from `from` (a rect in a window, MD-16); the
+   * selected tab uses the engine's window, as its page stays on screen.
+   */
+  async setPip(tabId: TabId, on: boolean, from?: { windowId: WindowId; rect: Rect }): Promise<boolean> {
+    if (!on && this.player.tabId === tabId) {
+      this.player.close('close')
+      return true
+    }
     if (!(await this.ensureAgent(tabId))) return false
-    const ok = await this.run<boolean>(tabId, call('pip', on, false), true)
-    if (on && ok) this.markPip(tabId, true)
+    if (!on) return !!(await this.run<boolean>(tabId, call('pip', false, false), true))
+    if (this.player.tabId === tabId) return true
+    if (!this.shown.has(tabId)) return this.player.open(tabId, { auto: false, from })
+    const ok = await this.run<boolean>(tabId, call('pip', true, false), true)
+    if (ok) this.markPip(tabId, true)
     return !!ok
   }
 
   // ---- Controls ----
 
-  async control(tabId: TabId, action: MediaAction, seconds?: number): Promise<boolean> {
+  /** Play, pause, seek, skip or change speed (MD-04, MD-09). `value`: seconds, a position or a speed. */
+  async control(tabId: TabId, action: MediaAction, value?: number): Promise<boolean> {
     const gesture = action === 'play' || action === 'toggle' || action === 'previous'
-    const ok = await this.run<boolean>(tabId, call('control', action, seconds ?? 0), gesture)
+    const ok = await this.run<boolean>(tabId, call('control', action, value ?? 0), gesture)
     return !!ok
   }
 

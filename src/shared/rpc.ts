@@ -14,7 +14,7 @@ import type { CoreCommands, CoreEvents } from './commands/core'
 import type { DownloadCommands } from './commands/downloads'
 import type { ExtensionCommands } from './commands/extensions'
 import type { ImportCommands } from './commands/import'
-import type { MediaCommands } from './commands/media'
+import type { MediaCommands, MediaEvents } from './commands/media'
 import type { PeekCommands } from './commands/peek'
 import type { SettingsCommands } from './commands/settings'
 import type { SpaceCommands } from './commands/spaces'
@@ -37,7 +37,7 @@ export interface OrbitCommands
     ImportCommands,
     MediaCommands {}
 
-export interface OrbitEvents extends CoreEvents {}
+export interface OrbitEvents extends CoreEvents, MediaEvents {}
 
 export type CommandName = keyof OrbitCommands
 export type CommandArgs<K extends CommandName> = OrbitCommands[K] extends { args: infer A } ? A : never
@@ -59,7 +59,7 @@ export interface Rect {
 }
 
 /** Which UI a renderer instance is showing. */
-export type RendererView = 'shell' | 'overlay' | 'mini' | 'settings'
+export type RendererView = 'shell' | 'overlay' | 'mini' | 'settings' | 'pip'
 
 /** The API the preload exposes on `window.orbit` to Orbit's own UI renderers. */
 export interface OrbitBridge {
