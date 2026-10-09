@@ -1,15 +1,15 @@
 # Orbit status
 
-_Last updated: 2026-10-09 13:12 UTC by the lead (relaunched session)._
+_Last updated: 2026-10-09 13:42 UTC by the lead (relaunched session)._
 
 ## In plain words
-Four of the five build lanes have finished their milestone-1 work, and independent reviewers are checking each one:
-- **spaces**: Spaces, profiles, themes, Space swipe
+The scaffold and its review fixes are merged to `main` (PR #1), with CI green on Linux and macOS, including a signed-for-local-use macOS `.dmg`. Four feature lanes have finished their milestone-1 work:
+- **tabs**: tabs, pinned, Favorites, Today, folders
+- **spaces**: Spaces, profiles, themes, swipe
 - **commandbar**: command bar and history
 - **split**: split view
-- **core**: review fixes
 
-The **tabs** lane is finishing up. The core fixes are in the scaffold PR (#1), which is being re-reviewed. Once it merges to `main`, the lanes merge one by one. Then comes the milestone-1 screen capture.
+Each lane got an independent review. The spaces, commandbar and split lanes are fixing their review findings and integrating onto the tabs lane, whose own review is running. Next: merge the four lanes to `main` one by one, then record the milestone-1 screen capture.
 
 ## What happened so far
 - 05:37–06:14 UTC: first lead run. Spec team started, repo scaffolded (branch `wip/scaffold`). The lead then hung.
@@ -24,6 +24,10 @@ The **tabs** lane is finishing up. The core fixes are in the scaffold PR (#1), w
 - 12:47 UTC: **commandbar** lane done. All P0s are built; the bar opens in about 12 ms and results appear about 10 ms after each keystroke.
 - 13:01 UTC: **split** lane done. P0s are built; two depend on wiring in the tabs lane.
 - 13:06 UTC: **core** lane done. All 18 core review items are fixed with tests, and the packaged app shrank from 46 MB to 1.35 MB of app code. Merged into PR #1; re-review running.
+- 13:15–13:33 UTC: reviews of spaces (7 must-fix), commandbar (5 must-fix) and split (5 must-fix) came back. Each lane is fixing its findings.
+- 13:26 UTC: **tabs** lane done (60 e2e tests). Its review is running.
+- 13:36 UTC: macOS-only CI failures traced to two real bugs (a command bar race, a stuck fullscreen exit) and fixed.
+- 13:40 UTC: **PR #1 merged to `main`.**
 
 ## Milestone 1: core experience that feels good
 Target: sidebar, tabs, Spaces, pinned tabs and Favorites, command bar and split view all work and feel smooth. That includes a 30–60 s screen capture under Xvfb, screenshots and a `checkpoint` signal.
@@ -38,10 +42,9 @@ Target: sidebar, tabs, Spaces, pinned tabs and Favorites, command bar and split 
 | Interaction feel (FL) | ✅ written | – | – |
 
 ## Next
-1. PR #1 re-review → merge to `main`.
-2. Each lane fixes its review findings and merges `main` into its branch. Then a PR per lane, CI green, merge. Order: spaces, commandbar, tabs, split.
-3. Milestone 1 capture (30–60 s clip + screenshots) and a `checkpoint` signal.
-4. Next lanes: **chrome-nav** (top bar, address display, sidebar hide/hover/resize, navigation, find in page), **peek-mini**, **media**, **archive**.
+1. Merge the lanes to `main` in order: tabs, spaces, commandbar, split. Each one needs its review fixes, green CI and a PR.
+2. Milestone 1 capture (30–60 s clip + screenshots) and a `checkpoint` signal.
+3. Next lanes: **chrome-nav** (top bar, address display, sidebar hide/hover/resize, navigation, find in page), **peek-mini**, **media**, **archive**, **settings/downloads/devtools**.
 
 ## Blockers
 None. All decisions are logged in `DECISIONS.md` (Orca context directory).
