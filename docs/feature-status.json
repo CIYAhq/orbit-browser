@@ -48,7 +48,7 @@
   "SB-07": { "built": "yes", "note": "+ New Tab row with press animation opens the command bar" },
   "SB-22": { "built": "yes", "note": "Cmd/Ctrl+Shift+E focuses the sidebar; arrows, Enter, Escape, F2" },
   "SB-23": { "built": "yes", "note": "selected tab scrolled into view (smooth, then settles); pill points to it while it is out of view; rows use content-visibility" },
-  "TB-13": { "built": "partial", "note": "Cmd-click, Shift-click, menu actions, group drag; Escape clears" },
+  "TB-13": { "built": "partial", "note": "Cmd-click, Shift-click ranges, Escape/plain click clears; Cmd+W, Copy URL, menu pin/unpin/move/new folder and group drag act on the selection; open-as-split is the split lane's" },
   "TB-15": { "built": "partial", "note": "audio icon toggles mute; no mic/camera/screen-share indicators" },
   "TB-18": { "built": "yes", "note": "Cmd+Z undoes moves, close, Clear, archive below, renames, icons and folder changes (page text fields keep their own undo); Cmd+Shift+Z redoes moves, closes and renames" },
   "TB-19": { "built": "partial", "note": "Back with no history closes a link-opened Today tab and selects its opener (shortcut/command)" },
@@ -64,5 +64,6 @@
   "FD-07": { "built": "partial", "note": "emoji icon via Change Icon; open/closed glyphs; not full-colour" },
   "FD-09": { "built": "partial", "note": "Rename, Change Icon, Duplicate, Copy All Links, Paste URL, Move to, Delete; no Open [Folder] command" },
   "TB-05": { "built": "partial", "note": "Ctrl+Tab / Ctrl+Shift+Tab step through the 5 most recent tabs while Ctrl is held (keyboard only); no overlay list yet" },
-  "FD-08": { "built": "yes", "note": "magnifier on folder hover opens a search popover (custom names, first match selected, Enter opens and peeks)" }
+  "FD-08": { "built": "yes", "note": "magnifier on folder hover opens a search popover (custom names, first match selected, Enter opens and peeks)" },
+  "TB-17": { "built": "partial", "note": "tab handoff: selecting a tab another window shows moves it there and that window shows its next tab; no blank window yet" }
 }
