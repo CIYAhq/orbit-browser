@@ -1,4 +1,4 @@
-import type { InputEvent, WebContents } from 'electron'
+import { app, type InputEvent, type WebContents, webContents } from 'electron'
 
 /** The last click (or Enter press) in a page: when, where, on which link, with which modifiers. */
 export interface PageClick {
@@ -61,6 +61,23 @@ export class HeldModifiers {
   get(): Modifiers {
     return this.held
   }
+}
+
+let shared: HeldModifiers | undefined
+
+/**
+ * The app's one modifier tracker, watching every web contents from the first call on. Peek and
+ * Mini Window clicks (⇧, ⌘⌥) and ⌥-click split view (nav) read the same keys.
+ */
+export function heldModifiers(): HeldModifiers {
+  if (shared) return shared
+  const held = new HeldModifiers()
+  shared = held
+  for (const contents of webContents.getAllWebContents()) held.watch(contents)
+  app.on('web-contents-created', (_event, contents) => held.watch(contents))
+  // A key released while another app had focus is never seen: start over.
+  app.on('browser-window-blur', () => held.reset())
+  return held
 }
 
 /** The link (a or area) at a point of the page, in CSS pixels: its URL, or null. */

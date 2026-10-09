@@ -128,13 +128,10 @@ export async function startNavFixtures(): Promise<NavFixtures> {
     sockets.add(socket)
     socket.on('close', () => sockets.delete(socket))
   })
+  // Any free port the system gives: other agents' and suites' servers keep to fixed ranges.
   await new Promise<void>((resolveListen, reject) => {
-    let port = 3340
-    server.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE' && port < 3399) server.listen(++port, '127.0.0.1')
-      else reject(err)
-    })
-    server.listen(port, '127.0.0.1', () => resolveListen())
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => resolveListen())
   })
   const { port } = server.address() as AddressInfo
   return {

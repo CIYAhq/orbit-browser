@@ -4,12 +4,14 @@ import { type ElectronApplication, expect, test } from '@playwright/test'
 import type { OrbitState } from '../../src/shared/state'
 import { action, isMac, launchOrbit, MOD, type Orbit, state } from './helpers'
 import {
+  clickInPage,
   closeWindow,
   cmd,
   cmdIn,
   flushState,
   type NavFixtures,
   openTab,
+  pageMenu,
   pressInPage,
   startNavFixtures,
   uiPageOf,
@@ -290,4 +292,79 @@ test('[NV-11] nothing of a private window reaches the disk: no state, history, f
   expect(privateLeft(await state(orbit.app))).toEqual(NOTHING_PRIVATE)
   const found = await cmd<{ results: { url?: string }[] }>(orbit.app, 'search.query', { query: token, mode: 'new-tab' })
   expect(found.results.filter((r) => r.url?.includes(`/page/${token}`))).toEqual([])
+})
+
+test('[NV-11][NV-18][MW-07] a private window keeps its links: no Peek or Mini Window from it, and links from other apps never open in it', async () => {
+  const { app } = orbit
+  const main = (await windowList(app))[0]
+  if (!main) throw new Error('no window')
+  const priv = await openPrivate(app)
+  const id = await openTabIn(app, priv.id, page('Kept'))
+  const isPrivateTab = (s: OrbitState, tabId: string | undefined) =>
+    !!tabId && !!s.tabs[tabId]?.profileId.startsWith('private-')
+  const minis = async () => Object.values((await state(app)).windows).filter((w) => w.kind === 'mini')
+
+  // The link menu has no Peek or Mini Window there.
+  await clickInPage(app, page('Kept'), '#next', [], 'right')
+  await expect.poll(async () => (await pageMenu(app))?.tabId).toBe(id)
+  const labels = (await pageMenu(app))?.labels ?? []
+  expect(labels).toContain('Open Link in New Tab')
+  expect(labels).not.toContain('Open Link in Peek')
+  expect(labels).not.toContain('Open Link in Mini Window')
+
+  // ⌘⌥-click (Ctrl+Alt-click) opens the link as a tab of the private window, not a Mini Window.
+  await clickInPage(app, page('Kept'), '#next', [mod, 'alt'])
+  await expect
+    .poll(async () => {
+      const s = await state(app)
+      return (s.spaces[priv.spaceId]?.today ?? []).map((t) => s.tabs[t]?.url)
+    })
+    .toContain(page('Kept-next'))
+  expect(await minis()).toHaveLength(0)
+  const s1 = await state(app)
+  const opened = (s1.spaces[priv.spaceId]?.today ?? []).find((t) => s1.tabs[t]?.url === page('Kept-next'))
+  expect(isPrivateTab(s1, opened)).toBe(true)
+  // ⌘⌥-click on a row of its sidebar: the tab stays in the private window.
+  const shell = await uiPageOf(app, 'shell', priv.id)
+  await shell.locator(`[data-testid="tab-row"][data-tab-id="${id}"]`).click({ modifiers: [MOD, 'Alt'] })
+  // A later command from the same sidebar is handled after the click's own.
+  await shell.evaluate(() =>
+    (window as unknown as { orbit: { invoke: (n: string, a: unknown) => Promise<unknown> } }).orbit.invoke(
+      'site.info',
+      {},
+    ),
+  )
+  expect(await minis()).toHaveLength(0)
+  expect((await state(app)).tabs[id]?.floating).toBeUndefined()
+  expect((await state(app)).spaces[priv.spaceId]?.today).toContain(id)
+
+  // A link from another app, while the private window is in front: a Mini Window in a normal profile.
+  const fromApp = (url: string) =>
+    app.evaluate(({ app: a }, u) => a.emit('second-instance', {}, ['orbit', u], '/'), url)
+  await fromApp(page('FromMail'))
+  await expect.poll(async () => (await minis()).length).toBe(1)
+  const s2 = await state(app)
+  const mini = (await minis())[0]
+  const miniTab = mini?.activeTab[mini.spaceId] ?? undefined
+  expect(s2.tabs[miniTab ?? '']?.url).toBe(page('FromMail'))
+  expect(isPrivateTab(s2, miniTab)).toBe(false)
+  // With Mini Windows off for such links: a tab in the normal window, never the private one.
+  await app.evaluate(() => {
+    const g = globalThis as unknown as {
+      __orbit: { ctx: { store: { update: (f: (d: { settings: Record<string, unknown> }) => void) => void } } }
+    }
+    g.__orbit.ctx.store.update((d) => {
+      d.settings.miniWindowForExternalLinks = false
+    })
+  })
+  await fromApp(page('FromChat'))
+  await expect
+    .poll(async () => {
+      const s = await state(app)
+      return (s.spaces[main.spaceId]?.today ?? []).map((t) => s.tabs[t]?.url)
+    })
+    .toContain(page('FromChat'))
+  const s3 = await state(app)
+  expect((s3.spaces[priv.spaceId]?.today ?? []).map((t) => s3.tabs[t]?.url)).not.toContain(page('FromChat'))
+  expect(Object.values(s3.tabs).filter((t) => t.url === page('FromChat') && isPrivateTab(s3, t.id))).toEqual([])
 })

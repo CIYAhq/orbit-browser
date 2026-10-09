@@ -69,6 +69,17 @@ async function selectedTab(app: ElectronApplication): Promise<string | undefined
 const urlOf = async (app: ElectronApplication, tabId: string | undefined) =>
   tabId ? (await state(app)).tabs[tabId]?.url : undefined
 
+/** The pages of the open Mini Windows, oldest first. */
+async function miniUrls(app: ElectronApplication): Promise<(string | null)[]> {
+  const s = await state(app)
+  return Object.values(s.windows)
+    .filter((w) => w.kind === 'mini')
+    .map((w) => {
+      const id = w.activeTab[w.spaceId]
+      return id ? (s.tabs[id]?.url ?? null) : null
+    })
+}
+
 type Download = { url: string; cancelled: boolean }
 
 /**
@@ -146,9 +157,47 @@ test('[NV-08] ⇧-click opens the link in a new window, a step down and right, w
   const s = await state(app)
   const shown = s.windows[second.id]?.activeTab[second.spaceId]
   expect(await urlOf(app, shown ?? undefined)).toBe(page('Shifted-next'))
-  // The first window still shows the page with the link.
+  // The first window still shows the page with the link, and no Peek took the click.
   expect(s.windows[first.id]?.activeTab[first.spaceId]).toBe(opener)
+  expect(s.windows[first.id]?.overlay.kind).toBe('none')
+  expect(Object.values(s.tabs).filter((t) => t.floating)).toHaveLength(0)
   expect([second.bounds?.x, second.bounds?.y]).not.toEqual([first.bounds?.x, first.bounds?.y])
+})
+
+test('[NV-08][MW-07] ⌥-click opens split view and ⌘⌥-click (Ctrl+Alt-click) a Mini Window: neither takes the other’s click', async () => {
+  const { app } = orbit
+  const id = await openTab(app, page('Both'))
+  const downloads = await watchDownloads(app, page('Both'))
+  // ⌘⌥-click: the link in a Mini Window; no split view, no download.
+  await clickInPage(app, page('Both'), '#next', [mod, 'alt'])
+  await expect.poll(() => miniUrls(app)).toEqual([page('Both-next')])
+  expect(await splitTabs(app, id)).toEqual([])
+  expect(await urlOf(app, id)).toBe(page('Both'))
+  // ⌥-click: split view beside the page; no second Mini Window.
+  await clickInPage(app, page('Both'), '#next', ['alt'])
+  await expect.poll(() => splitTabs(app, id)).toHaveLength(2)
+  const [, right] = await splitTabs(app, id)
+  await waitLoaded(app, right as string, page('Both-next'))
+  expect(await miniUrls(app)).toEqual([page('Both-next')])
+  // Only the ⌥-click's own download began, and Orbit cancelled it.
+  await expect.poll(downloads, { timeout: 10_000 }).toEqual([{ url: page('Both-next'), cancelled: true }])
+})
+
+test('[SV-09][MW-07] on sidebar rows too: ⌥-click splits with the current tab, ⌘⌥-click (Ctrl+Alt-click) opens a Mini Window', async () => {
+  const { app, shell } = orbit
+  const current = await openTab(app, page('RowA'))
+  const other = await openTab(app, page('RowB'))
+  const third = await openTab(app, page('RowC'))
+  await cmd(app, 'tabs.activate', { tabId: current })
+  await expect.poll(() => selectedTab(app)).toBe(current)
+  const row = (id: string) => shell.locator(`[data-testid="tab-row"][data-tab-id="${id}"]`)
+  await row(other).click({ modifiers: ['Alt'] })
+  await expect.poll(() => splitTabs(app, current)).toEqual([current, other])
+  expect(await miniUrls(app)).toEqual([])
+  await row(third).click({ modifiers: [isMac ? 'Meta' : 'Control', 'Alt'] })
+  await expect.poll(() => miniUrls(app)).toEqual([page('RowC')])
+  expect((await state(app)).tabs[third]?.floating).toBe('mini')
+  expect(await splitTabs(app, current)).toEqual([current, other])
 })
 
 test('[NV-08][SV-08] ⌥-click (Alt-click) opens the link in split view beside the page instead of downloading it', async () => {
@@ -237,7 +286,7 @@ test('[NV-09] a link that downloads in a new tab leaves no tab behind', async ()
   expect((await state(app)).archive).toEqual([])
 })
 
-test('[NV-12] right-clicking a link offers new tab, split view, new and private windows, copy and save; Split View shows two panes', async () => {
+test('[NV-12] right-clicking a link offers new tab, split view, Peek, Mini Window, new and private windows, copy and save; Split View shows two panes', async () => {
   const { app, shell } = orbit
   const id = await openTab(app, page('Menu'))
   await clickInPage(app, page('Menu'), '#next', [], 'right')
@@ -246,6 +295,8 @@ test('[NV-12] right-clicking a link offers new tab, split view, new and private 
   const link = [
     'Open Link in New Tab',
     'Open Link in Split View',
+    'Open Link in Peek',
+    'Open Link in Mini Window',
     'Open Link in New Window',
     'Open Link in Private Window',
     'Copy Link Address',

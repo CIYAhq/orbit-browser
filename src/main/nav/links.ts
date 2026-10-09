@@ -1,8 +1,9 @@
-import { app, type BrowserWindow, Menu, type MenuItemConstructorOptions, type WebContents, webContents } from 'electron'
+import { type BrowserWindow, Menu, type MenuItemConstructorOptions, type WebContents } from 'electron'
 import { popupTitle, shownTabId } from '../../shared/nav'
 import type { TabId, WindowId } from '../../shared/state'
 import { sectionOf } from '../../shared/tree'
 import type { MainContext } from '../context'
+import { heldModifiers } from '../peek/input'
 import type { TabOps } from '../tabs/ops'
 import { activeTabOf, shownTabs } from '../windows'
 import { NAV_WORLD } from './focus'
@@ -92,31 +93,18 @@ export function registerLinks(ctx: MainContext, deps: LinksDeps): LinksTestHooks
   const { store, commands, tabs, windows } = ctx
   const { ops, prefs } = deps
 
-  // ---- Modifier keys: mouse events don't carry them, key events in any Orbit contents do ----
-  const held = { alt: false, meta: false, control: false, shift: false }
-  const track = (input: Electron.Input) => {
-    const down = input.type !== 'keyUp'
-    if (input.key === 'Alt') held.alt = down
-    else if (input.key === 'Meta') held.meta = down
-    else if (input.key === 'Control') held.control = down
-    else if (input.key === 'Shift') held.shift = down
-    else {
-      held.alt = input.alt
-      held.meta = input.meta
-      held.control = input.control
-      held.shift = input.shift
-    }
+  // ---- Modifier keys: the app's one tracker (Peek's), from the key events of every contents ----
+  const held = heldModifiers()
+  /** Only ⌥ (Alt) held: ⌘⌥ / Ctrl+Alt is a Mini Window click (MW-07), ⇧⌥ and ⌘-clicks are not ours. */
+  const altOnly = (mouse: Electron.MouseInputEvent) => {
+    const mods = new Set<string>(mouse.modifiers ?? [])
+    const keys = held.get()
+    const alt = keys.alt || mods.has('alt')
+    const meta = keys.meta || mods.has('meta') || mods.has('command') || mods.has('cmd')
+    const control = keys.control || mods.has('control') || mods.has('ctrl')
+    const shift = keys.shift || mods.has('shift')
+    return alt && !meta && !control && !shift
   }
-  const watchKeys = (contents: WebContents) => contents.on('before-input-event', (_e, input) => track(input))
-  for (const contents of webContents.getAllWebContents()) watchKeys(contents)
-  app.on('web-contents-created', (_event, contents) => watchKeys(contents))
-  // A key released while another app had focus is never seen: start over on every focus change.
-  app.on('browser-window-blur', () => {
-    held.alt = false
-    held.meta = false
-    held.control = false
-    held.shift = false
-  })
 
   // ---- ⇧-click: a new window (NV-08). Peek's own hook comes first and takes it when it's on. ----
   ctx.hooks.windowOpen.push((openerTabId, details) => {
@@ -166,8 +154,7 @@ export function registerLinks(ctx: MainContext, deps: LinksDeps): LinksTestHooks
       else hovered.delete(tabId)
     })
     contents.on('before-mouse-event', (_e, mouse) => {
-      if (mouse.type !== 'mouseDown' || mouse.button !== 'left') return
-      if (!held.alt || held.meta || held.control || held.shift) return
+      if (mouse.type !== 'mouseDown' || mouse.button !== 'left' || !altOnly(mouse)) return
       void onAltClick(tabId, contents)
     })
     contents.on('did-create-window', (popup, details) => keepHostTitle(popup, details.url))

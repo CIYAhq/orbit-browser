@@ -25,9 +25,10 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
   if (params.linkURL) {
     items.push(
       { label: 'Open Link in New Tab', click: () => openInNewTab(params.linkURL, false) },
-      ...linkPeekMenuItems(ctx, tabId, params.linkURL),
       // A new pane beside the page's pane (SV-08).
       linkSplitMenuItem(ctx, tabId, params.linkURL),
+      // Then Peek and Mini Window, new and private windows: the order NV-12 lists.
+      ...linkPeekMenuItems(ctx, tabId, params.linkURL),
       ...linkWindowItems(ctx, tabId, params.linkURL),
       { label: 'Copy Link Address', click: () => clipboard.writeText(params.linkURL) },
       saveLinkItem(contents, params.linkURL),
