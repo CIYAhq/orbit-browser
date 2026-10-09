@@ -72,7 +72,7 @@ function input(query: string, extra: Partial<RankInput> = {}): RankInput {
 }
 
 function historyOf(visits: [string, string, number?][]): HistoryStore {
-  const store = new HistoryStore('/nonexistent/never-written.jsonl', () => NOW)
+  const store = new HistoryStore('/nonexistent/never-written.jsonl', { now: () => NOW })
   for (const [url, title, n = 1] of visits) for (let i = 0; i < n; i++) store.record(url, { title, at: NOW - 3600_000 })
   return store
 }
@@ -299,7 +299,7 @@ describe('ranking', () => {
         lastActiveAt: NOW - i * 1000,
       }),
     )
-    const store = new HistoryStore('/nonexistent/bench.jsonl', () => NOW)
+    const store = new HistoryStore('/nonexistent/bench.jsonl', { now: () => NOW })
     for (let i = 0; i < 10_000; i++) {
       store.record(`https://host${i % 800}.example/${words[i % 10]}/page-${i}?ref=${i % 13}`, {
         title: `${words[(i * 3) % 10]} article number ${i} about ${words[(i * 7) % 10]}`,
