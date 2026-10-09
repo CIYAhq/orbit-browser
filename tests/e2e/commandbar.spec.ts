@@ -6,8 +6,8 @@ import { join } from 'node:path'
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 import {
   activeTabId,
-  FRAME_SLACK,
   type Fixtures,
+  FRAME_SLACK,
   launchOrbit,
   MOD,
   type Orbit,
