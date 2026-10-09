@@ -160,7 +160,7 @@ test('[PK-09] Esc in the Peek page closes it and keeps the source tab as it was'
   await expectClosed(source, peekTab)
   expect(await page.evaluate(() => Math.round(window.scrollY))).toBe(400)
   // Closed like a Today tab: it is in the Archive (PK-09).
-  const archived = (await state(orbit.app)).archive[0]
+  const archived = (await state(orbit.app)).archive.at(-1)
   expect(archived).toMatchObject({ url: sites.other('/site/Other'), from: 'peek' })
 })
 
@@ -297,11 +297,12 @@ test('[PK-11] inside a Peek, links navigate the Peek and page commands act on it
   await pressInTab(orbit.app, peekTab, process.platform === 'darwin' ? 'Mod+[' : 'Alt+Left')
   await expect.poll(async () => (await viewInfo(orbit.app, peekTab)).url).toBe(sites.other('/site/Other-Next'))
   expect(await inTab(orbit.app, source, 'location.pathname')).toBe('/site/Source')
-  // Copy URL copies the Peek page's URL.
-  await pressInTab(orbit.app, peekTab, process.platform === 'darwin' ? 'Shift+Mod+C' : 'Shift+Control+Alt+C')
-  await expect
-    .poll(() => orbit.app.evaluate(({ clipboard }) => clipboard.readText()))
-    .toBe(sites.other('/site/Other-Next'))
+  // Copy URL and Copy URL as Markdown copy the Peek page, not the source tab.
+  const clipboardText = () => orbit.app.evaluate(({ clipboard }) => clipboard.readText())
+  await pressInTab(orbit.app, peekTab, 'Shift+Mod+C')
+  await expect.poll(clipboardText).toBe(sites.other('/site/Other-Next'))
+  await pressInTab(orbit.app, peekTab, 'Shift+Mod+Alt+C')
+  await expect.poll(clipboardText).toBe(`[Other-Next](${sites.other('/site/Other-Next')})`)
   expect((await state(orbit.app)).tabs[source]?.url).toBe(sites.url('/site/Source'))
 })
 

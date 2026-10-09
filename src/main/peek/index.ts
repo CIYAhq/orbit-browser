@@ -17,7 +17,7 @@ import { openMiniWindow } from '../miniwindow'
 import type { CallContext } from '../registry'
 import type { SavedHistory } from '../tabs/runtime'
 import { activeTabOf } from '../windows'
-import { archiveFloating, floatingTab } from './floating'
+import { archiveFloating, floatingTab, keepFloatingPagesOutOfTabClose } from './floating'
 import { ClickTracker, HeldModifiers, isMiniClick, type PageClick } from './input'
 import { runPageAction } from './page-actions'
 
@@ -50,6 +50,8 @@ interface ClosedPeek {
   url: string
   history?: SavedHistory
   at: number
+  /** Its Archive entry, removed again when it reopens. */
+  archiveId?: string
 }
 
 /** Opens a link from a page in that window's Peek (set once the feature is registered). */
@@ -85,6 +87,7 @@ export function registerPeek(ctx: MainContext): void {
     return undefined
   }
   windows.addFloatingOwner((tabId) => sessionOfTab(tabId)?.windowId)
+  keepFloatingPagesOutOfTabClose(ctx)
   const linkSettings = (): LinkSettings => {
     const { peekExternalLinks, peekShiftClick, linkRules } = store.state.settings
     return { peekExternalLinks, peekShiftClick, linkRules: linkRules ?? [] }
@@ -229,12 +232,13 @@ export function registerPeek(ctx: MainContext): void {
       contents && contents.navigationHistory.length() > 0
         ? { entries: contents.navigationHistory.getAllEntries(), index: contents.navigationHistory.getActiveIndex() }
         : undefined
-    closed.push({ windowId: s.windowId, sourceTabId: s.sourceTabId, url, history, at: Date.now() })
-    if (closed.length > 20) closed.shift()
+    let archiveId: string | undefined
     store.update((d) => {
       const t = d.tabs[s.tabId]
-      if (t) archiveFloating(d, { ...t, url }, 'peek', 'closed')
+      if (t) archiveId = archiveFloating(d, { ...t, url }, 'peek', 'closed')
     })
+    closed.push({ windowId: s.windowId, sourceTabId: s.sourceTabId, url, history, at: Date.now(), archiveId })
+    if (closed.length > 20) closed.shift()
   }
 
   /** Closes the window's Peek (Esc, ⌘W, ×, a click outside) and returns focus to the source tab. */
@@ -388,11 +392,13 @@ export function registerPeek(ctx: MainContext): void {
     if (state.tabs[entry.sourceTabId] && activeTabOf(state, windowId) !== entry.sourceTabId) {
       void commands.run('tabs.activate', { tabId: entry.sourceTabId }, { windowId })
     }
-    store.update((d) => {
-      // Its Archive entry goes: the page is open again.
-      const i = d.archive.findIndex((a) => a.from === 'peek' && a.url === entry.url)
-      if (i >= 0 && i < 3) d.archive.splice(i, 1)
-    })
+    if (entry.archiveId) {
+      store.update((d) => {
+        // Its Archive entry goes: the page is open again.
+        const i = d.archive.findLastIndex((a) => a.id === entry.archiveId)
+        if (i >= 0) d.archive.splice(i, 1)
+      })
+    }
     return openPeek(windowId, entry.url, { history: entry.history }) !== null
   }
 
@@ -679,17 +685,28 @@ export function registerPeek(ctx: MainContext): void {
       return
     }
     if (!undo) return
-    const windowId = windows.windowOfTab(tabId)
-    if (undo.until < Date.now() || windowId !== undo.windowId) {
-      if (undo.until < Date.now()) undo = undefined
+    if (undo.until < Date.now()) {
+      undo = undefined
       return
     }
-    if (isUndoKey(input)) {
-      event.preventDefault()
-      reopenPeek(undo.windowId)
-    } else if (!['Shift', 'Control', 'Alt', 'Meta'].includes(input.key)) {
-      undo = undefined
+    if (windows.windowOfTab(tabId) !== undo.windowId) return
+    // Any other key ends the chance to bring the Peek back with ⌘Z (the tabs runtime reports ⌘Z).
+    if (!isUndoKey(input) && !['Shift', 'Control', 'Alt', 'Meta'].includes(input.key)) undo = undefined
+  }
+
+  /** ⌘Z right after a Peek closed in this window reopens it (PK-10). */
+  const undoArmed = (windowId: WindowId | undefined): windowId is WindowId =>
+    !!undo && undo.windowId === windowId && undo.until >= Date.now()
+  // ⌘Z in a page (outside text fields) undoes the last sidebar change (TB-18), unless a Peek just
+  // closed there: then it reopens the Peek. One handler, so a single press never does both.
+  const sidebarUndo = tabs.onUndoShortcut
+  tabs.onUndoShortcut = (tabId, redo) => {
+    const windowId = windows.windowOfTab(tabId)
+    if (!redo && undoArmed(windowId)) {
+      reopenPeek(windowId)
+      return
     }
+    sidebarUndo?.(tabId, redo)
   }
 
   ctx.hooks.tabCreated.push((tabId, contents) => {

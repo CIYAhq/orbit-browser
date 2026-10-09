@@ -9,7 +9,7 @@ import { paletteFor } from '../../shared/theme'
 import { insertItem } from '../../shared/tree'
 import { parseInput, siteOf } from '../../shared/url'
 import type { MainContext } from '../context'
-import { archiveFloating, floatingTab } from '../peek/floating'
+import { archiveFloating, floatingTab, keepFloatingPagesOutOfTabClose } from '../peek/floating'
 import { runPageAction } from '../peek/page-actions'
 import type { CallContext } from '../registry'
 import { activeTabOf, loadRenderer, rendererEntry, uiWebPreferences } from '../windows'
@@ -136,6 +136,7 @@ export function registerMiniWindow(ctx: MainContext): void {
     return undefined
   }
   windows.addFloatingOwner((tabId) => miniOfTab(tabId)?.id)
+  keepFloatingPagesOutOfTabClose(ctx)
 
   const send = (mini: Mini, channel: string, payload: unknown = {}) => {
     if (!mini.win.isDestroyed()) mini.win.webContents.send(`orbit:${channel}`, payload)
