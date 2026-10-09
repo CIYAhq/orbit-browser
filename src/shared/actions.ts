@@ -162,7 +162,16 @@ export const ACTIONS: ActionDef[] = [
   { id: 'app.archive', title: 'Show Archive', category: 'App', keywords: ['history', 'closed tabs'] },
 
   // Spaces
-  { id: 'space.new', title: 'New Space', category: 'Spaces' },
+  { id: 'space.new', title: 'New Space', category: 'Spaces', keywords: ['create space'] },
+  { id: 'space.rename', title: 'Rename Space', category: 'Spaces' },
+  {
+    id: 'space.theme',
+    title: 'Edit Theme',
+    category: 'Spaces',
+    keywords: ['theme', 'colour', 'color', 'gradient', 'dark mode', 'light mode'],
+  },
+  { id: 'space.changeIcon', title: 'Change Space Icon', category: 'Spaces', keywords: ['emoji'] },
+  { id: 'space.delete', title: 'Delete Space…', category: 'Spaces', keywords: ['remove space'] },
   {
     id: 'space.next',
     title: 'Next Space',

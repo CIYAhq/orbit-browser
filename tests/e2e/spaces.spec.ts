@@ -1,0 +1,623 @@
+import { expect, test } from '@playwright/test'
+import {
+  type Fixtures,
+  launchOrbit,
+  type Orbit,
+  run,
+  startFixtures,
+  state,
+  tabPage,
+  tabView,
+  viewPage,
+} from './helpers'
+import {
+  activeSpace,
+  createSpace,
+  cssVar,
+  hoverSidebar,
+  names,
+  newTab,
+  order,
+  settled,
+  stripWidth,
+  stripX,
+  swipe,
+  win,
+} from './spaces-support'
+
+let fx: Fixtures
+let orbit: Orbit
+
+test.beforeAll(async () => {
+  fx = await startFixtures()
+})
+test.afterAll(async () => {
+  await fx.close()
+})
+test.beforeEach(async () => {
+  orbit = await launchOrbit()
+})
+test.afterEach(async () => {
+  await orbit.app.close()
+})
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+test('[SP-01][SP-06][SB-09][PR-01] the switcher shows one target per Space (icon or dot) and only from two Spaces', async () => {
+  const { app, shell } = orbit
+  await expect(shell.getByTestId('space-dot')).toHaveCount(0)
+  const s0 = await state(app)
+  expect(Object.values(s0.profiles).map((p) => p.name)).toEqual(['Default'])
+  const a = await activeSpace(app)
+  const b = await createSpace(app, { name: 'Rocket', icon: '🚀', activate: false })
+  await createSpace(app, { name: 'Gamma', activate: false, afterSpaceId: b })
+  const dots = shell.getByTestId('space-dot')
+  await expect(dots).toHaveCount(3)
+  await expect(dots.nth(0).locator('.space-dot__dot')).toHaveCount(1)
+  await expect(dots.nth(1)).toHaveText('🚀')
+  await expect(dots.nth(2).locator('.space-dot__dot')).toHaveCount(1)
+  await expect(dots.nth(0)).toHaveAttribute('aria-pressed', 'true')
+  await expect(dots.nth(1)).toHaveAttribute('aria-pressed', 'false')
+  await expect(dots.nth(1)).toHaveAttribute('title', /^Rocket/)
+  // The emphasis is stronger on the active target.
+  const p = await dots.evaluateAll((els) => els.map((el) => Number(getComputedStyle(el).getPropertyValue('--p'))))
+  expect(p).toEqual([1, 0, 0])
+  expect(await activeSpace(app)).toBe(a)
+})
+
+test('[SP-07][SP-10][FL-13] clicking a target slides to that Space and each Space remembers its tab', async () => {
+  const { app, shell } = orbit
+  const a = await activeSpace(app)
+  const t1 = await newTab(app, fx.url('/page/AlphaOne'))
+  await newTab(app, fx.url('/page/AlphaTwo'))
+  await run(app, 'tabs.activate', { tabId: t1 })
+  const b = await createSpace(app, { name: 'Beta', activate: false })
+  await settled(shell)
+  await shell.locator(`[data-testid="space-dot"][data-space-id="${b}"]`).click()
+  // State first: the window is on B at once, and the slide shows A's page leaving.
+  await expect.poll(() => activeSpace(app)).toBe(b)
+  await expect(shell.locator(`[data-preview-space="${a}"]`)).toHaveCount(1)
+  await expect(shell.getByTestId('space-name')).toHaveText('Beta')
+  await settled(shell)
+  await expect(shell.getByTestId('empty-state')).toBeVisible()
+  const t5 = await newTab(app, fx.url('/page/BetaFive'))
+  await expect.poll(async () => (await win(app)).activeTab[b]).toBe(t5)
+  await shell.locator(`[data-testid="space-dot"][data-space-id="${a}"]`).click()
+  await expect.poll(() => activeSpace(app)).toBe(a)
+  await expect.poll(async () => (await win(app)).activeTab[a]).toBe(t1)
+  await settled(shell)
+  // The page card shows A's remembered tab again.
+  const page = await tabPage(app, '/page/AlphaOne')
+  await expect(page.locator('#title')).toHaveText('AlphaOne')
+  await expect.poll(async () => (await tabView(app, t1))?.visible).toBe(true)
+  await expect.poll(async () => (await tabView(app, t5))?.visible ?? false).toBe(false)
+})
+
+test('[SP-08][FL-13] a horizontal two-finger swipe tracks 1:1 and commits with a spring settle', async () => {
+  const { app, shell } = orbit
+  const a = await activeSpace(app)
+  const b = await createSpace(app, { name: 'Beta', activate: false })
+  await settled(shell)
+  const w = await stripWidth(shell)
+  await hoverSidebar(shell)
+  // Recognition (≈9 px) then 1:1 tracking: 10 + 6×10 = 70 px of finger travel.
+  await swipe(shell, 10, 7, 10)
+  await expect.poll(() => stripX(shell)).toBeCloseTo(-70, 0)
+  await expect(shell.locator(`[data-preview-space="${b}"]`)).toHaveCount(1)
+  // The neighbour slides in beside the current page; the window has not switched yet.
+  expect(await activeSpace(app)).toBe(a)
+  await swipe(shell, 10, 6, 10)
+  await expect.poll(() => stripX(shell)).toBeCloseTo(-130, 0)
+  // Past a third of the width on release: commit.
+  await swipe(shell, 10, Math.ceil(w / 3 / 10) - 13 + 2, 10)
+  await expect.poll(() => activeSpace(app), { timeout: 3000 }).toBe(b)
+  await settled(shell)
+  await expect(shell.getByTestId('space-name')).toHaveText('Beta')
+})
+
+test('[SP-08][FL-13] a short slow swipe springs back while a quick short flick commits', async () => {
+  const { app, shell } = orbit
+  const a = await activeSpace(app)
+  const b = await createSpace(app, { name: 'Beta', activate: false })
+  await settled(shell)
+  await hoverSidebar(shell)
+  // Slow: 40 px over ~400 ms, then release.
+  await swipe(shell, 4, 10, 40)
+  await settled(shell)
+  expect(await activeSpace(app)).toBe(a)
+  // Flick: 60 px (under a third of the width) in three quick events still switches.
+  await sleep(200)
+  await swipe(shell, 20, 3, 0)
+  await expect.poll(() => activeSpace(app), { timeout: 3000 }).toBe(b)
+  await settled(shell)
+})
+
+test('[SP-08][FL-13] the first Space rubber-bands; a long over-swipe at the last Space opens the new-Space page', async () => {
+  const { app, shell } = orbit
+  const a = await activeSpace(app)
+  const b = await createSpace(app, { name: 'Beta', activate: false })
+  await settled(shell)
+  const w = await stripWidth(shell)
+  await hoverSidebar(shell)
+  // Toward the previous Space from the first: resistance grows, at most about a third.
+  await swipe(shell, -20, Math.round(w / 20), 10)
+  const shown = await stripX(shell)
+  expect(shown).toBeGreaterThan(0)
+  expect(shown).toBeLessThan(w * 0.37)
+  await settled(shell)
+  expect(await activeSpace(app)).toBe(a)
+
+  await run(app, 'spaces.switch', { spaceId: b })
+  await settled(shell)
+  // A short over-swipe past the last Space stretches and springs back.
+  await sleep(150)
+  await swipe(shell, 8, 4, 30)
+  await expect(shell.getByTestId('new-space-hint')).toHaveCount(1)
+  await settled(shell)
+  await expect(shell.getByTestId('new-space-flow')).toHaveCount(0)
+  // A long, hard one opens the new-Space flow on the page past the last Space.
+  await sleep(150)
+  await swipe(shell, 30, 12, 10)
+  await expect(shell.getByTestId('new-space-flow')).toBeVisible()
+  await expect.poll(() => stripX(shell)).toBeCloseTo(-w, 0)
+  await shell.getByTestId('new-space-name').fill('Delta')
+  await shell.getByTestId('new-space-name').press('Enter')
+  await expect.poll(() => names(app)).toEqual(['Personal', 'Beta', 'Delta'])
+  await expect.poll(async () => (await state(app)).spaces[await activeSpace(app)]?.name).toBe('Delta')
+  await settled(shell)
+  await expect(shell.getByTestId('space-name')).toHaveText('Delta')
+  await expect(shell.getByTestId('new-space-flow')).toHaveCount(0)
+})
+
+test('[SP-08][SB-23] a vertical scroll over the sidebar never switches Space', async () => {
+  const { app, shell } = orbit
+  const a = await activeSpace(app)
+  await createSpace(app, { name: 'Beta', activate: false })
+  for (let i = 0; i < 40; i++) await newTab(app, fx.url(`/page/Row${i}`), { activate: false })
+  await settled(shell)
+  await hoverSidebar(shell)
+  // Mostly vertical with some horizontal drift (> 30° from horizontal).
+  await swipe(shell, 6, 12, 12, 30)
+  await sleep(300)
+  expect(await activeSpace(app)).toBe(a)
+  expect(await stripX(shell)).toBe(0)
+  const scrolled = await shell.getByTestId('sidebar-scroll').evaluate((el) => el.scrollTop)
+  expect(scrolled).toBeGreaterThan(100)
+})
+
+test('[SP-09][KS-07] Space shortcuts: jump to N and next/previous without wrapping', async () => {
+  const { app, shell } = orbit
+  const isMac = process.platform === 'darwin'
+  const [a] = await order(app)
+  const b = await createSpace(app, { name: 'Beta', activate: false })
+  const c = await createSpace(app, { name: 'Gamma', activate: false, afterSpaceId: b })
+  await settled(shell)
+  await shell.keyboard.press(isMac ? 'Control+3' : 'Alt+3')
+  await expect.poll(() => activeSpace(app)).toBe(c)
+  await shell.keyboard.press(isMac ? 'Control+9' : 'Alt+9')
+  await sleep(150)
+  expect(await activeSpace(app)).toBe(c)
+  await settled(shell)
+  // Next from the last Space stays there (only a small nudge).
+  await shell.keyboard.press(isMac ? 'Meta+Alt+ArrowRight' : 'Control+Alt+ArrowRight')
+  await sleep(200)
+  expect(await activeSpace(app)).toBe(c)
+  await shell.keyboard.press(isMac ? 'Meta+Alt+ArrowLeft' : 'Control+Alt+ArrowLeft')
+  await expect.poll(() => activeSpace(app)).toBe(b)
+  await sleep(150)
+  await shell.keyboard.press(isMac ? 'Meta+Alt+ArrowLeft' : 'Control+Alt+ArrowLeft')
+  await expect.poll(() => activeSpace(app)).toBe(a)
+  await settled(shell)
+  await shell.keyboard.press(isMac ? 'Meta+Alt+ArrowLeft' : 'Control+Alt+ArrowLeft')
+  await sleep(200)
+  expect(await activeSpace(app)).toBe(a)
+})
+
+test('[SP-19][FL-14][SP-16] the theme colour blends between Spaces during a switch, never via the neutral grey', async () => {
+  const { app, shell } = orbit
+  const a = await activeSpace(app)
+  await run(app, 'spaces.update', { spaceId: a, theme: { colors: ['#2f6bff'], intensity: 1, grain: 0 } })
+  const b = await createSpace(app, { name: 'Orange', activate: false })
+  await run(app, 'spaces.update', { spaceId: b, theme: { colors: ['#ff8a2f'], intensity: 1, grain: 0 } })
+  await settled(shell)
+  await sleep(300)
+  const start = await cssVar(shell, '--frame-top')
+  // Sample the colour every frame while the switch animates.
+  const samples = shell.evaluate(
+    () =>
+      new Promise<string[]>((done) => {
+        const out: string[] = []
+        const el = document.querySelector('[data-testid="shell"]') as HTMLElement
+        const t0 = performance.now()
+        const tick = () => {
+          out.push(el.style.getPropertyValue('--frame-top').trim())
+          if (performance.now() - t0 < 600) requestAnimationFrame(tick)
+          else done(out)
+        }
+        requestAnimationFrame(tick)
+      }),
+  )
+  await run(app, 'spaces.switch', { spaceId: b })
+  const frames = [...new Set(await samples)]
+  const end = await cssVar(shell, '--frame-top')
+  expect(end).not.toBe(start)
+  // Several in-between colours, none of them grey.
+  const between = frames.filter((c) => c !== start && c !== end)
+  expect(between.length).toBeGreaterThan(2)
+  for (const c of between) {
+    const n = Number.parseInt(c.slice(1), 16)
+    const r = (n >> 16) & 255
+    const g = (n >> 8) & 255
+    const bl = n & 255
+    expect(Math.max(r, g, bl) - Math.min(r, g, bl), c).toBeGreaterThan(6)
+  }
+})
+
+test('[SP-03][SP-04][SB-06][SB-24] rename the Space inline from its title row', async () => {
+  const { app, shell } = orbit
+  const a = await activeSpace(app)
+  await createSpace(app, { name: 'Beta', activate: false })
+  await shell.getByTestId('space-name').click()
+  const input = shell.getByTestId('space-rename-input')
+  await expect(input).toBeFocused()
+  // The whole name is selected, so typing replaces it.
+  await input.pressSequentially('Research')
+  await input.press('Enter')
+  await expect.poll(async () => (await state(app)).spaces[a]?.name).toBe('Research')
+  await expect(shell.getByTestId('space-name')).toHaveText('Research')
+  await expect(shell.locator(`[data-testid="space-dot"][data-space-id="${a}"]`)).toHaveAttribute('title', /^Research/)
+  // Escape cancels.
+  await shell.getByTestId('space-name').click()
+  await shell.getByTestId('space-rename-input').pressSequentially('Nope')
+  await shell.getByTestId('space-rename-input').press('Escape')
+  await expect(shell.getByTestId('space-name')).toHaveText('Research')
+  // Clearing the name restores the placeholder.
+  await shell.getByTestId('space-name').click()
+  await shell.getByTestId('space-rename-input').fill('')
+  await shell.getByTestId('space-rename-input').press('Enter')
+  await expect(shell.getByTestId('space-name')).toHaveText('Space 1')
+})
+
+test('[SP-04][SP-07][SB-06] the Space menu lists its items, also for a background Space from the switcher', async () => {
+  const { app, shell } = orbit
+  const a = await activeSpace(app)
+  const b = await createSpace(app, { name: 'Beta', activate: false })
+  await settled(shell)
+  const row = shell.getByTestId('space-title-row')
+  const button = shell.getByTestId('space-menu-button')
+  await expect(button).toHaveCSS('opacity', '0')
+  await row.hover()
+  await expect(button).toHaveCSS('opacity', '1')
+  await button.click()
+  const overlay = await viewPage(app, 'overlay')
+  const menu = overlay.getByTestId('space-menu')
+  await expect(menu).toBeVisible()
+  await expect(menu.getByRole('menuitem')).toHaveText([
+    'Theme…',
+    'Change Icon…',
+    'Profile',
+    'Rename',
+    'Manage Spaces',
+    'Delete Space…',
+  ])
+  await overlay.keyboard.press('Escape')
+  await expect(menu).toHaveCount(0)
+  // Right-click a background Space's target: its menu, without switching to it.
+  await shell.locator(`[data-testid="space-dot"][data-space-id="${b}"]`).click({ button: 'right' })
+  await expect(overlay.getByTestId('space-menu')).toHaveAttribute('aria-label', 'Beta options')
+  await overlay.getByTestId('menu-rename').click()
+  await expect(shell.getByTestId('space-rename-input')).toHaveCount(0)
+  expect(await activeSpace(app)).toBe(a)
+})
+
+test('[SP-12] deleting a Space asks first, archives its tabs tagged with its name, and Undo brings it back', async () => {
+  const { app, shell } = orbit
+  const a = await activeSpace(app)
+  const b = await createSpace(app, { name: 'Trip planning' })
+  await newTab(app, fx.url('/page/Flights'), { activate: false })
+  await newTab(app, fx.url('/page/Hotels'))
+  await settled(shell)
+  await shell.getByTestId('space-title-row').hover()
+  await shell.getByTestId('space-menu-button').click()
+  const overlay = await viewPage(app, 'overlay')
+  await overlay.getByTestId('menu-delete').click()
+  const dialog = overlay.getByTestId('space-delete-dialog')
+  await expect(dialog).toContainText('Delete “Trip planning”?')
+  await overlay.getByTestId('space-delete-cancel').click()
+  await expect(dialog).toHaveCount(0)
+  expect(await order(app)).toContain(b)
+
+  await shell.getByTestId('space-title-row').hover()
+  await shell.getByTestId('space-menu-button').click()
+  await overlay.getByTestId('menu-delete').click()
+  await overlay.getByTestId('space-delete-confirm').click()
+  await expect.poll(() => order(app)).toEqual([a])
+  expect(await activeSpace(app)).toBe(a)
+  const s = await state(app)
+  expect(
+    s.archive
+      .filter((e) => e.spaceName === 'Trip planning')
+      .map((e) => new URL(e.url).pathname)
+      .sort(),
+  ).toEqual(['/page/Flights', '/page/Hotels'])
+  expect(Object.values(s.profiles)).toHaveLength(1)
+  await expect(shell.getByTestId('space-undo')).toContainText('Trip planning')
+  await shell.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z')
+  await expect.poll(() => order(app)).toEqual([a, b])
+  const restored = await state(app)
+  expect(restored.spaces[b]?.today).toHaveLength(2)
+  expect(restored.archive.filter((e) => e.spaceName === 'Trip planning')).toHaveLength(0)
+  expect(await activeSpace(app)).toBe(b)
+  // The last Space can't be deleted.
+  await run(app, 'spaces.delete', { spaceId: b })
+  await expect(shell.getByTestId('space-undo-button')).toBeVisible()
+  await shell.getByTestId('space-undo-button').click()
+  await expect.poll(() => order(app)).toEqual([a, b])
+  expect(await run(app, 'spaces.delete', { spaceId: a })).toBe(true)
+  expect(await run(app, 'spaces.delete', { spaceId: b })).toBe(false)
+})
+
+test('[SP-14][SP-15][SP-16][SP-17][SP-18][SB-24][FL-14] the theme picker previews live and is the one global light/dark switch', async () => {
+  const { app, shell } = orbit
+  const a = await activeSpace(app)
+  await run(app, 'spaces.setAppearance', { appearance: 'light' })
+  const b = await createSpace(app, { name: 'Beta', activate: false })
+  await settled(shell)
+  const before = await cssVar(shell, '--frame-top')
+  await shell.getByTestId('space-title-row').hover()
+  await shell.getByTestId('space-menu-button').click()
+  const overlay = await viewPage(app, 'overlay')
+  await overlay.getByTestId('menu-theme').click()
+  const picker = overlay.getByTestId('theme-picker')
+  await expect(picker).toBeVisible()
+  // Drag in the colour area: the sidebar colour follows while dragging.
+  const field = await overlay.getByTestId('theme-field').boundingBox()
+  if (!field) throw new Error('no field')
+  await overlay.mouse.move(field.x + field.width * 0.05, field.y + 10)
+  await overlay.mouse.down()
+  await overlay.mouse.move(field.x + field.width * 0.08, field.y + 12, { steps: 3 })
+  await expect.poll(async () => (await state(app)).spaces[a]?.theme.colors[0]).toMatch(/^#/)
+  const red = await cssVar(shell, '--frame-top')
+  expect(red).not.toBe(before)
+  await overlay.mouse.move(field.x + field.width * 0.62, field.y + 12, { steps: 4 })
+  await expect.poll(() => cssVar(shell, '--frame-top')).not.toBe(red)
+  await overlay.mouse.up()
+  // Two colours make a gradient.
+  await overlay.getByTestId('theme-add-color').click()
+  await expect.poll(async () => (await state(app)).spaces[a]?.theme.colors.length).toBe(2)
+  await expect
+    .poll(async () => (await cssVar(shell, '--frame-top')) !== (await cssVar(shell, '--frame-bottom')))
+    .toBe(true)
+  // Grain is stored with the theme and shown on the sidebar.
+  await overlay.getByTestId('theme-grain').fill('80')
+  await expect.poll(async () => (await state(app)).spaces[a]?.theme.grain).toBeCloseTo(0.8)
+  await expect.poll(async () => Number(await cssVar(shell, '--grain-opacity'))).toBeGreaterThan(0.3)
+  // A preset applies (animated) and reset returns to the neutral theme.
+  await overlay.getByTestId('theme-preset').nth(2).click()
+  await expect.poll(async () => (await state(app)).spaces[a]?.theme.colors).toEqual(['#2fbf8f'])
+  await overlay.getByTestId('theme-reset').click()
+  await expect.poll(async () => (await state(app)).spaces[a]?.theme.colors).toEqual([])
+  await expect.poll(() => cssVar(shell, '--frame-top')).toBe('#e7e7eb')
+  // Light / Dark / Automatic applies to every Space (SP-18).
+  await overlay.getByTestId('appearance-dark').click()
+  await expect.poll(async () => (await state(app)).settings.appearance).toBe('dark')
+  await expect.poll(() => cssVar(shell, '--text')).toBe('#f3f3f5')
+  await overlay.keyboard.press('Escape')
+  await expect(picker).toHaveCount(0)
+  await run(app, 'spaces.switch', { spaceId: b })
+  await settled(shell)
+  await expect.poll(() => cssVar(shell, '--text')).toBe('#f3f3f5')
+  const s = await state(app)
+  expect(s.spaces[b]?.theme).not.toHaveProperty('mode')
+})
+
+test('[SP-05][SP-06] change a Space icon with the emoji picker and remove it again', async () => {
+  const { app, shell } = orbit
+  const a = await activeSpace(app)
+  await createSpace(app, { name: 'Beta', activate: false })
+  await settled(shell)
+  await shell.getByTestId('space-title-row').hover()
+  await shell.getByTestId('space-menu-button').click()
+  const overlay = await viewPage(app, 'overlay')
+  await overlay.getByTestId('menu-icon').click()
+  const search = overlay.getByTestId('emoji-search')
+  await expect(search).toBeFocused()
+  await search.fill('rocket')
+  await overlay.getByTestId('emoji-option').first().click()
+  await expect.poll(async () => (await state(app)).spaces[a]?.icon).toBe('🚀')
+  await expect(shell.locator(`[data-testid="space-dot"][data-space-id="${a}"]`)).toHaveText('🚀')
+  await run(app, 'spaces.update', { spaceId: a, icon: '' })
+  await expect(shell.locator(`[data-testid="space-dot"][data-space-id="${a}"] .space-dot__dot`)).toHaveCount(1)
+})
+
+test('[PR-02][PR-03][PR-05][PR-07][PR-08] a new profile from the Space menu isolates cookies and shows its badge', async () => {
+  const { app, shell } = orbit
+  const a = await activeSpace(app)
+  await newTab(app, fx.url('/page/CookieA'))
+  const pageA = await tabPage(app, '/page/CookieA')
+  await pageA.evaluate(() => {
+    // biome-ignore lint/suspicious/noDocumentCookie: the test sets a plain session cookie on purpose
+    document.cookie = 'orbit_session=alice; path=/; max-age=3600'
+  })
+  const b = await createSpace(app, { name: 'Client' })
+  await settled(shell)
+  // Space menu → Profile → New Profile… assigns it to this Space at once.
+  await shell.getByTestId('space-title-row').hover()
+  await shell.getByTestId('space-menu-button').click()
+  const overlay = await viewPage(app, 'overlay')
+  await overlay.getByTestId('menu-profile').click()
+  await overlay.getByTestId('menu-profile-new').click()
+  await overlay.getByTestId('profile-name').fill('Work')
+  await overlay.getByTestId('profile-create').click()
+  await expect.poll(async () => (await state(app)).spaces[b]?.profileId).not.toBe('p-default')
+  const s = await state(app)
+  const work = s.spaces[b]?.profileId as string
+  expect(s.profiles[work]?.name).toBe('Work')
+  expect(s.profiles[work]?.partition).toBe(`persist:orbit-${work}`)
+  // Same site in the other profile: signed out (no cookie).
+  await newTab(app, fx.url('/page/CookieB'))
+  const pageB = await tabPage(app, '/page/CookieB')
+  await expect(pageB.locator('#title')).toHaveText('CookieB')
+  expect(await pageB.evaluate(() => document.cookie)).not.toContain('orbit_session')
+  // …while another tab in the first profile still sees it.
+  await run(app, 'spaces.switch', { spaceId: a })
+  await newTab(app, fx.url('/page/CookieA2'))
+  const pageA2 = await tabPage(app, '/page/CookieA2')
+  await expect.poll(() => pageA2.evaluate(() => document.cookie)).toContain('orbit_session=alice')
+  // Profile indicator: badge on the title row and the switcher tooltip (PR-07).
+  await run(app, 'spaces.switch', { spaceId: b })
+  await settled(shell)
+  await shell.getByTestId('space-title-row').hover()
+  await expect(shell.getByTestId('profile-badge')).toHaveText('W')
+  await expect(shell.locator(`[data-testid="space-dot"][data-space-id="${b}"]`)).toHaveAttribute(
+    'title',
+    /Client · Work/,
+  )
+  // The Default profile can't be deleted; a deleted profile's Spaces fall back to Default.
+  expect(await run(app, 'profiles.delete', { profileId: 'p-default' })).toBe(false)
+  expect(await run(app, 'profiles.delete', { profileId: work })).toBe(true)
+  await expect.poll(async () => (await state(app)).spaces[b]?.profileId).toBe('p-default')
+  await expect(shell.getByTestId('profile-badge')).toHaveCount(0)
+})
+
+test('[PR-06][SP-01][SP-20] Favorites belong to the profile; pinned and Today belong to the Space', async () => {
+  const { app, shell } = orbit
+  const a = await activeSpace(app)
+  await newTab(app, fx.url('/page/Fav'), { container: { kind: 'favorites', profileId: 'p-default' } })
+  await newTab(app, fx.url('/page/PinnedA'), { container: { kind: 'pinned', spaceId: a } })
+  const b = await createSpace(app, { name: 'Same profile', activate: false })
+  const work = (await run(app, 'profiles.create', { name: 'Work' })) as string
+  const c = await createSpace(app, { name: 'Work Space', activate: false, profileId: work, afterSpaceId: b })
+  await settled(shell)
+  await expect(shell.getByTestId('favorite-tile')).toHaveCount(1)
+  await run(app, 'spaces.switch', { spaceId: b })
+  await settled(shell)
+  await expect(shell.getByTestId('favorite-tile')).toHaveCount(1)
+  await expect(shell.getByTestId('pinned-list').getByTestId('tab-row')).toHaveCount(0)
+  await run(app, 'spaces.switch', { spaceId: c })
+  await settled(shell)
+  await expect(shell.getByTestId('favorite-tile')).toHaveCount(0)
+  // Clear Today in one Space leaves the others alone.
+  await newTab(app, fx.url('/page/TodayC'))
+  await run(app, 'spaces.switch', { spaceId: a })
+  await newTab(app, fx.url('/page/TodayA'))
+  await run(app, 'tabs.clearToday', { spaceId: a })
+  const s = await state(app)
+  expect(s.spaces[a]?.today).toHaveLength(0)
+  expect(s.spaces[c]?.today).toHaveLength(1)
+})
+
+test('[SP-23][SP-24] each window has its own Space; a new window opens on the same Space with the command bar', async () => {
+  const { app, shell } = orbit
+  const a = await activeSpace(app)
+  const b = await createSpace(app, { name: 'Beta' })
+  await run(app, 'window.setSidebar', { visible: false })
+  await app.evaluate(async () => {
+    const hooks = (
+      globalThis as unknown as {
+        __orbit: { action: (id: string, w?: string) => Promise<void>; windowIds: () => string[] }
+      }
+    ).__orbit
+    await hooks.action('window.new', hooks.windowIds()[0])
+  })
+  await expect.poll(async () => Object.keys((await state(app)).windows).length).toBe(2)
+  const s = await state(app)
+  const ids = Object.keys(s.windows)
+  const second = s.windows[ids[1] as string]
+  expect(second?.spaceId).toBe(b)
+  expect(second?.sidebar.visible).toBe(true)
+  await expect.poll(async () => (await state(app)).windows[ids[1] as string]?.overlay.kind).toBe('commandbar')
+  // Cascaded, not exactly on top of the first window.
+  const first = s.windows[ids[0] as string]
+  if (first?.bounds && second?.bounds) expect(second.bounds.x).not.toBe(first.bounds.x)
+  // Switching window 1 leaves window 2 alone.
+  await run(app, 'spaces.switch', { spaceId: a })
+  const after = await state(app)
+  expect(after.windows[ids[0] as string]?.spaceId).toBe(a)
+  expect(after.windows[ids[1] as string]?.spaceId).toBe(b)
+  // Renaming a Space in one window updates both windows' sidebars.
+  await run(app, 'spaces.update', { spaceId: b, name: 'Renamed' })
+  await expect(shell.locator(`[data-testid="space-dot"][data-space-id="${b}"]`)).toHaveAttribute('title', /^Renamed/)
+})
+
+test('[SP-11] dragging a switcher target reorders Spaces and keeps the active Space', async () => {
+  const { app, shell } = orbit
+  const [a] = await order(app)
+  const b = await createSpace(app, { name: 'Beta', activate: false })
+  const c = await createSpace(app, { name: 'Gamma', activate: false, afterSpaceId: b })
+  await settled(shell)
+  const third = await shell.locator(`[data-testid="space-dot"][data-space-id="${c}"]`).boundingBox()
+  const firstBox = await shell.locator(`[data-testid="space-dot"][data-space-id="${a}"]`).boundingBox()
+  if (!third || !firstBox) throw new Error('no targets')
+  await shell.mouse.move(third.x + third.width / 2, third.y + third.height / 2)
+  await shell.mouse.down()
+  await shell.mouse.move(firstBox.x + firstBox.width / 2, third.y + third.height / 2, { steps: 8 })
+  await shell.mouse.up()
+  await expect.poll(() => order(app)).toEqual([c, a, b])
+  expect(await activeSpace(app)).toBe(a)
+  // Numeric shortcuts follow the new order.
+  await shell.keyboard.press(process.platform === 'darwin' ? 'Control+1' : 'Alt+1')
+  await expect.poll(() => activeSpace(app)).toBe(c)
+})
+
+test('[SP-02][PR-04] New Space from the + menu: the flow in the sidebar, profile step, inserted after the active Space', async () => {
+  const { app, shell } = orbit
+  const [a] = await order(app)
+  const b = await createSpace(app, { name: 'B' })
+  const c = await createSpace(app, { name: 'C', activate: false, afterSpaceId: b })
+  const work = (await run(app, 'profiles.create', { name: 'Work' })) as string
+  await settled(shell)
+  await shell.getByTestId('sidebar-plus').click()
+  const overlay = await viewPage(app, 'overlay')
+  await overlay.getByTestId('menu-plus-space').click()
+  const flow = shell.getByTestId('new-space-flow')
+  await expect(flow).toBeVisible()
+  await expect(shell.getByTestId('new-space-name')).toBeFocused()
+  // Profile step: the active Space's profile is preselected.
+  const profiles = shell.getByTestId('new-space-profile')
+  await expect(profiles).toHaveCount(2)
+  await expect(profiles.nth(0)).toHaveAttribute('aria-checked', 'true')
+  await profiles.nth(1).click()
+  // Escape abandons the flow and creates nothing.
+  await shell.getByTestId('new-space-name').press('Escape')
+  await expect(flow).toHaveCount(0)
+  expect(await order(app)).toEqual([a, b, c])
+  await run(app, 'spaces.beginCreate', {})
+  await expect(flow).toBeVisible()
+  await shell.getByTestId('new-space-name').fill('D')
+  await shell.getByTestId('new-space-profile').nth(1).click()
+  await shell.getByTestId('new-space-create').click()
+  await expect.poll(() => names(app)).toEqual(['Personal', 'B', 'D', 'C'])
+  const s = await state(app)
+  const d = s.spaceOrder[2] as string
+  expect(s.spaces[d]?.profileId).toBe(work)
+  await expect.poll(() => activeSpace(app)).toBe(d)
+  await settled(shell)
+  await expect(shell.getByTestId('space-name')).toHaveText('D')
+  await expect(shell.getByTestId('today-list').getByTestId('tab-row')).toHaveCount(0)
+})
+
+test('[FL-13][SP-07] with reduced motion a switch cross-fades without sliding', async () => {
+  const { app, shell } = orbit
+  await shell.emulateMedia({ reducedMotion: 'reduce' })
+  const b = await createSpace(app, { name: 'Beta', activate: false })
+  await settled(shell)
+  const slid = shell.evaluate(
+    () =>
+      new Promise<boolean>((done) => {
+        let moved = false
+        const track = document.querySelector<HTMLElement>('.space-strip__track')
+        const t0 = performance.now()
+        const tick = () => {
+          if (track?.style.transform) moved = true
+          if (document.querySelector('[data-preview-space]')) moved = true
+          if (performance.now() - t0 < 400) requestAnimationFrame(tick)
+          else done(moved)
+        }
+        requestAnimationFrame(tick)
+      }),
+  )
+  await shell.locator(`[data-testid="space-dot"][data-space-id="${b}"]`).click()
+  expect(await slid).toBe(false)
+  await expect(shell.getByTestId('space-name')).toHaveText('Beta')
+})

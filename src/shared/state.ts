@@ -76,17 +76,25 @@ export interface Split {
 
 export type ColorMode = 'system' | 'light' | 'dark'
 
+/**
+ * A Space's colours. Light/dark is not part of it: that is the one global
+ * `settings.appearance`, and every theme has a light and a dark rendition
+ * (see src/shared/theme.ts).
+ */
 export interface SpaceTheme {
-  /** Base colour as #rrggbb. */
-  color: string
-  /** Optional second colour for a gradient. */
-  color2?: string
-  mode: ColorMode
+  /** Zero to three colours (#rrggbb), blended top to bottom. Empty = the neutral default theme. */
+  colors: string[]
+  /** How strongly the colours show: 0 = faint wash … 1 = full. */
+  intensity: number
+  /** Static grain texture over the sidebar and frame: 0 = none … 1 = strong. */
+  grain: number
 }
 
 export interface Space {
   id: SpaceId
   name: string
+  /** True while `name` is an automatic placeholder ("Space 3") the user never chose. */
+  unnamed?: boolean
   /** Emoji or a short icon key. */
   icon: string
   theme: SpaceTheme
@@ -112,7 +120,7 @@ export type OverlayState =
   | { kind: 'none' }
   | { kind: 'commandbar'; mode: CommandBarMode; query: string; nonce: number }
   | { kind: 'peek'; tabId: TabId; nonce: number }
-  | { kind: 'panel'; panel: string; nonce: number }
+  | { kind: 'panel'; panel: string; nonce: number; params?: Record<string, string | number | boolean> }
 
 export interface SidebarState {
   /** Docked and visible (true) or hidden/auto-hiding (false). */
@@ -162,6 +170,8 @@ export interface ArchivedTab {
   title: string
   favicon?: string
   spaceId: SpaceId
+  /** Name of the Space at archive time (kept when the Space itself is deleted). */
+  spaceName?: string
   profileId: ProfileId
   archivedAt: number
   reason: 'auto' | 'closed'

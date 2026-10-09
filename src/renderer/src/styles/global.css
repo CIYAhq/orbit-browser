@@ -80,14 +80,14 @@ html.is-resizing * {
 /* ---------- Shell ---------- */
 
 .shell {
+  position: relative;
+  isolation: isolate;
   display: grid;
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   height: 100%;
-  background: linear-gradient(180deg, var(--frame-top), var(--frame-bottom));
-  transition:
-    grid-template-columns var(--dur) var(--ease-out),
-    --frame-top 320ms ease,
-    --frame-bottom 320ms ease;
+  /* Space theme: three stops painted by the theme driver (src/renderer/src/theme.ts). */
+  background: linear-gradient(180deg, var(--frame-top), var(--frame-mid, var(--frame-top)), var(--frame-bottom));
+  transition: grid-template-columns var(--dur) var(--ease-out);
 }
 
 .shell--sidebar-hidden {
