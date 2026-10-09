@@ -131,6 +131,7 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
     tab.progress = undefined
     tab.error = undefined
     tab.blockedPopups = undefined
+    tab.permissionPrompt = undefined
     tab.canGoBack = tab.canGoBack ?? false
     tab.canGoForward = tab.canGoForward ?? false
     tab.muted = tab.muted ?? false
@@ -373,7 +374,17 @@ function repairReferences(state: OrbitState): void {
  * touch nothing else (loading flips, focus, audio, download progress…) don't cause a write.
  */
 const RUNTIME_ONLY: Record<string, ReadonlySet<string>> = {
-  tabs: new Set(['loading', 'audible', 'asleep', 'progress', 'error', 'canGoBack', 'canGoForward', 'blockedPopups']),
+  tabs: new Set([
+    'loading',
+    'audible',
+    'asleep',
+    'progress',
+    'error',
+    'canGoBack',
+    'canGoForward',
+    'blockedPopups',
+    'permissionPrompt',
+  ]),
   windows: new Set(['focused', 'fullscreen', 'overlay']),
   downloads: new Set(['receivedBytes']),
 }

@@ -7,6 +7,8 @@
  * s- space, p- profile, w- window. Sidebar containers hold ordered ItemId lists.
  */
 
+import type { PermissionPrompt } from './site'
+
 export type TabId = string
 export type FolderId = string
 export type SplitId = string
@@ -65,6 +67,8 @@ export interface Tab {
   error?: { code: number; description: string }
   /** Runtime-only: pop-ups the page tried to open without a click since it loaded (NV-09). */
   blockedPopups?: number
+  /** Runtime-only: the permission prompt waiting for an answer on this tab (NV-15). */
+  permissionPrompt?: PermissionPrompt
 }
 
 export interface Folder {

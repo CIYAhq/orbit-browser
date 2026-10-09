@@ -62,6 +62,12 @@ interface WindowRecord {
   tools?: WebContentsView
   toolsShown: boolean
   toolsPrewarm?: ReturnType<typeof setTimeout>
+  /**
+   * A permission prompt over the active page's top-left corner while the sidebar is hidden (NV-15;
+   * with the sidebar showing, the prompt is part of it). Started when first needed.
+   */
+  prompt?: WebContentsView
+  promptShown: boolean
 }
 
 /** A tab view placed in a window. */
@@ -335,6 +341,7 @@ export class WindowManager {
       overlayShown: false,
       floatingShown: false,
       toolsShown: false,
+      promptShown: false,
     }
     this.records.set(id, rec)
     // macOS: the traffic lights live in the sidebar's top row (SB-20).
@@ -415,6 +422,7 @@ export class WindowManager {
       clearTimeout(rec.toolsPrewarm)
       if (rec.floating && !rec.floating.webContents.isDestroyed()) rec.floating.webContents.close()
       if (rec.tools && !rec.tools.webContents.isDestroyed()) rec.tools.webContents.close()
+      if (rec.prompt && !rec.prompt.webContents.isDestroyed()) rec.prompt.webContents.close()
       this.records.delete(id)
       for (const [tabId, entry] of [...this.attached]) {
         if (entry.windowId === id) {
@@ -637,6 +645,61 @@ export class WindowManager {
     return { exists: true, placed: rec.win.contentView.children.includes(view), bounds: view.getBounds() }
   }
 
+  /** Places the permission prompt's view at `bounds` (window coordinates): above the pages, under the floating sidebar and the overlay (NV-15). */
+  showPrompt(windowId: WindowId, bounds: Rect): void {
+    const rec = this.records.get(windowId)
+    if (!rec || rec.win.isDestroyed()) return
+    const view = this.ensurePrompt(rec)
+    const next = roundRect(bounds)
+    const current = view.getBounds()
+    if (
+      current.x !== next.x ||
+      current.y !== next.y ||
+      current.width !== next.width ||
+      current.height !== next.height
+    ) {
+      view.setBounds(next)
+    }
+    rec.promptShown = true
+    this.placeAbovePages(rec, view)
+    view.setVisible(true)
+  }
+
+  /** Takes the permission prompt's view out of the window; keyboard focus in it goes back to the page. */
+  hidePrompt(windowId: WindowId): void {
+    const rec = this.records.get(windowId)
+    const view = rec?.prompt
+    if (!rec || !view || !rec.promptShown) return
+    rec.promptShown = false
+    const focused = !view.webContents.isDestroyed() && webContents.getFocusedWebContents() === view.webContents
+    if (focused && !rec.overlayShown && rec.win.isFocused()) this.focusActiveTab(rec.id)
+    this.removeChild(rec, view)
+  }
+
+  /** Test/debug view of a window's permission prompt view. */
+  promptInfo(windowId: WindowId): { exists: boolean; placed: boolean; bounds?: Rect } {
+    const rec = this.records.get(windowId)
+    const view = rec?.prompt
+    if (!rec || !view || view.webContents.isDestroyed()) return { exists: false, placed: false }
+    return { exists: true, placed: rec.win.contentView.children.includes(view), bounds: view.getBounds() }
+  }
+
+  /** Puts a small view above every page, under the overlay and the floating sidebar; leaves it be when it already is. */
+  private placeAbovePages(rec: WindowRecord, view: WebContentsView): void {
+    const parent = rec.win.contentView
+    const children = parent.children
+    const at = children.indexOf(view)
+    const ceilings = [rec.overlay, rec.floating].map((v) => (v ? children.indexOf(v) : -1)).filter((i) => i >= 0)
+    const ceiling = ceilings.length > 0 ? Math.min(...ceilings) : children.length
+    let topPage = -1
+    for (const entry of this.attached.values()) {
+      if (entry.windowId === rec.id) topPage = Math.max(topPage, children.indexOf(entry.view))
+    }
+    if (at > topPage && at < ceiling) return
+    if (ceiling >= children.length) parent.addChildView(view)
+    else parent.addChildView(view, at >= 0 && at < ceiling ? ceiling - 1 : ceiling)
+  }
+
   /** A page that just appeared for the focused tab or pane (e.g. a split pane filled late) takes keyboard focus. */
   private focusIfNewlyShown(rec: WindowRecord, shownBefore: Set<TabId>): void {
     const active = activeTabOf(this.ctx.store.state, rec.id)
@@ -854,8 +917,9 @@ export class WindowManager {
     const parent = rec.win.contentView
     const children = parent.children
     const at = children.indexOf(view)
-    // The overlay, the floating sidebar (SB-12) and the page tools (NV-05) stay above every page.
-    const above = [rec.overlay, rec.floating, rec.tools]
+    // The overlay, the floating sidebar (SB-12), the page tools (NV-05) and a permission prompt
+    // (NV-15) stay above every page.
+    const above = [rec.overlay, rec.floating, rec.tools, rec.prompt]
       .map((v) => (v ? children.indexOf(v) : -1))
       .filter((i) => i >= 0)
     const overlayAt = above.length > 0 ? Math.min(...above) : -1
@@ -1120,6 +1184,21 @@ export class WindowManager {
     loadRenderer(view.webContents, 'tools')
     rec.tools = view
     rec.toolsShown = false
+    return view
+  }
+
+  /** The permission prompt's view (NV-15): transparent, sized by the permissions module to its card. */
+  private ensurePrompt(rec: WindowRecord): WebContentsView {
+    if (rec.prompt && !rec.prompt.webContents.isDestroyed()) return rec.prompt
+    const view = new WebContentsView({ webPreferences: uiWebPreferences(rec.id, 'prompt') })
+    view.setBackgroundColor('#00000000')
+    this.registerUi(view.webContents, rec.id)
+    this.reloadUiOnCrash(view.webContents, 'prompt')
+    this.attachShortcuts(view.webContents)
+    this.hardenUi(view.webContents)
+    loadRenderer(view.webContents, 'prompt')
+    rec.prompt = view
+    rec.promptShown = false
     return view
   }
 

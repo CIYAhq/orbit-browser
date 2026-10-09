@@ -1,4 +1,5 @@
 import type { FindState, ZoomIndicator } from '../nav'
+import type { PermissionKind, PromptChoice, SiteControlsInfo } from '../site'
 import type { TabId } from '../state'
 
 /** One entry of a tab's back/forward history, as the history menu lists it (NV-01). */
@@ -74,4 +75,22 @@ export interface NavCommands {
   'nav.blockedPopupsMenu': { args: { x: number; y: number }; result: void }
   /** The active tab's page zoom as a percentage, and whether it differs from the default (NV-06, NV-16). */
   'zoom.get': { args: { tabId?: TabId }; result: { percent: number } }
+  /** Answers a permission prompt (NV-15); `pick` is the device or screen chosen in a chooser. */
+  'permissions.answer': { args: { id: number; choice: PromptChoice; pick?: string }; result: void }
+  /** A screen picker's previews: data URLs by source id. */
+  'permissions.thumbnails': { args: { id: number }; result: Record<string, string> }
+  /** The prompt view's card height, so its view fits it (sidebar hidden). */
+  'permissions.promptSize': { args: { height: number }; result: void }
+  /** Opens the site controls panel for the active tab, under a point in window coordinates (NV-16). */
+  'site.openControls': { args: { x?: number; y?: number }; result: void }
+  /** What the site controls panel shows for a tab (default: the active one). */
+  'site.info': { args: { tabId?: TabId }; result: SiteControlsInfo | null }
+  /** A switch in the site controls panel: allow or block a permission, or pop-ups, on the tab's site. */
+  'site.setPermission': { args: { tabId: TabId; kind: PermissionKind; allowed: boolean }; result: void }
+  /** Forgets every permission choice of the tab's site. */
+  'site.resetPermissions': { args: { tabId: TabId }; result: void }
+  /** Stops letting the tab's site use a device it was given. */
+  'site.revokeDevice': { args: { tabId: TabId; key: string }; result: void }
+  /** Deletes the tab's site's cookies and stored data. */
+  'site.clearData': { args: { tabId: TabId }; result: void }
 }

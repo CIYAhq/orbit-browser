@@ -37,6 +37,14 @@ async function boot(): Promise<void> {
         <PageToolsApp />
       </StrictMode>,
     )
+  } else if (view === 'prompt') {
+    // A site's permission prompt over the page's corner while the sidebar is hidden (chrome lane, NV-15).
+    const { PromptViewApp } = await import('./shell/chrome/PromptViewApp')
+    root.render(
+      <StrictMode>
+        <PromptViewApp />
+      </StrictMode>,
+    )
   } else if (view === 'strip') {
     // Split view pane strip (split lane, SV-12): a tiny transparent view over a pane's top edge.
     const { PaneStripApp } = await import('./shell/split/PaneStripApp')

@@ -3,6 +3,7 @@ import type { WindowState } from '../../../../shared/state'
 import { isMac, runAction } from '../../api'
 import { Address } from '../chrome/Address'
 import { NavButtons } from '../chrome/NavButtons'
+import { PermissionPrompt, useActivePrompt } from '../chrome/PermissionPrompt'
 import { withShortcut } from '../chrome/shortcut-label'
 import { WindowControls } from '../chrome/WindowControls'
 import '../chrome/chrome.css'
@@ -11,10 +12,12 @@ import '../chrome/chrome.css'
  * The top of the sidebar (SB-03, SB-04): window controls (traffic lights on macOS), the sidebar
  * toggle, Back, Forward and Reload, then the address display. At narrow widths the toggle goes
  * first; Back and Forward stay. In the floating card (SB-12) the toggle docks the sidebar again.
+ * A site's permission prompt hangs under the address display (NV-15).
  */
 export function TopBar({ win, floating = false }: { win: WindowState; floating?: boolean }) {
+  const prompt = useActivePrompt(win.id)
   return (
-    <div className={`topbar${isMac ? ' topbar--mac' : ''}`} data-testid="topbar">
+    <div className={`topbar${isMac ? ' topbar--mac' : ''}${prompt ? ' has-prompt' : ''}`} data-testid="topbar">
       <div className="topbar__row">
         {isMac ? <div className="topbar__traffic-space" data-testid="traffic-space" /> : <WindowControls />}
         <div className="topbar__spacer" />
@@ -31,6 +34,11 @@ export function TopBar({ win, floating = false }: { win: WindowState; floating?:
         <NavButtons windowId={win.id} />
       </div>
       <Address windowId={win.id} />
+      {prompt && (
+        <div className="perm-prompt-anchor">
+          <PermissionPrompt key={prompt.id} prompt={prompt} />
+        </div>
+      )}
     </div>
   )
 }

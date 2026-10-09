@@ -125,13 +125,21 @@
   }
 }
 
-/* Insecure pages: a clear warning instead of the site-controls glyph (no padlock on https). */
-.address--insecure .address__site {
+/* Insecure pages: a clear warning before the host (no padlock on https). */
+.address__warning,
+.address__warning:hover {
   color: #c9372c;
 }
 
-.shell[data-dark] .address--insecure .address__site {
+.shell[data-dark] .address__warning,
+.shell[data-dark] .address__warning:hover {
   color: #ff8a7d;
+}
+
+/* The site controls button while its panel is open (NV-16). */
+.address__site.is-open {
+  background: var(--hover);
+  color: var(--text);
 }
 
 /* ---------- Hidden sidebar: the left edge and the floating card (SB-12, FL-03) ---------- */

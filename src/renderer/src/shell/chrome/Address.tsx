@@ -1,6 +1,7 @@
 import { Check, Link2, ShieldBan, SlidersHorizontal, TriangleAlert } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { connectionOf } from '../../../../shared/nav'
+import { SITE_PANEL } from '../../../../shared/site'
 import { displayHost } from '../../../../shared/url'
 import { invoke, runAction } from '../../api'
 import { activeTabId } from '../../selectors'
@@ -12,9 +13,10 @@ const COPIED_MS = 1200
 
 /**
  * The address display under the top row (SB-04): the active tab's host only (the focused pane
- * in split view), a site-controls button that turns into a warning on insecure pages (no padlock
- * on secure ones), and a copy-link button. Clicking the host edits the URL in the command bar.
- * When the page tried to open pop-ups without a click, a button says so and offers them (NV-09).
+ * in split view), a warning before it on insecure pages (no padlock on secure ones), a copy-link
+ * button and, at the right end, the site controls button (NV-16), which opens the site controls
+ * panel under the field. Clicking the host edits the URL in the command bar. When the page tried
+ * to open pop-ups without a click, a button says so and offers them (NV-09).
  */
 export function Address({ windowId }: { windowId: string }) {
   // Only the URL: the display re-renders on navigations, not on title, favicon or progress changes.
@@ -34,6 +36,22 @@ export function Address({ windowId }: { windowId: string }) {
   const copied = !!page && copiedFor === page
   const copiedTimer = useRef(0)
   useEffect(() => () => window.clearTimeout(copiedTimer.current), [])
+  const field = useRef<HTMLDivElement>(null)
+  const panelOpen = useOrbit((s) => {
+    const overlay = s.windows[windowId]?.overlay
+    return overlay?.kind === 'panel' && overlay.panel === 'site-controls'
+  })
+
+  // The site controls panel hangs under the field (window coordinates: the sidebar's view starts
+  // at the window's corner, docked or floating).
+  const openControls = () => {
+    const r = field.current?.getBoundingClientRect()
+    void invoke('site.openControls', r ? { x: r.left, y: r.bottom + SITE_PANEL.gap } : {})
+  }
+  const openRef = useRef(openControls)
+  openRef.current = openControls
+  // The Site Controls action (command bar, a shortcut) while this sidebar shows.
+  useEffect(() => window.orbit.on('sidebar:siteControls', () => openRef.current()), [])
 
   const copy = () => {
     // Same as ⌘⇧C: the clean URL on the clipboard and a "Copied" toast (NV-17, TB-20).
@@ -45,20 +63,21 @@ export function Address({ windowId }: { windowId: string }) {
 
   return (
     <div
+      ref={field}
       className={`address${page ? '' : ' address--empty'}${insecure ? ' address--insecure' : ''}`}
       data-testid="address"
       data-connection={connection}
     >
-      {page && (
+      {page && insecure && (
         <button
           type="button"
-          className="address__button address__site"
-          data-testid="site-controls-button"
-          aria-label={insecure ? 'Not secure: site controls' : 'Site controls'}
-          title={insecure ? 'Not secure. This connection is not encrypted.' : 'Site controls'}
-          onClick={() => runAction('site.controls')}
+          className="address__button address__warning"
+          data-testid="insecure-button"
+          aria-label="Not secure: site controls"
+          title="Not secure. This connection is not encrypted."
+          onClick={openControls}
         >
-          {insecure ? <TriangleAlert size={13} data-testid="insecure-icon" /> : <SlidersHorizontal size={13} />}
+          <TriangleAlert size={13} data-testid="insecure-icon" />
         </button>
       )}
       <button
@@ -95,6 +114,19 @@ export function Address({ windowId }: { windowId: string }) {
           onClick={copy}
         >
           {copied ? <Check size={13} /> : <Link2 size={14} />}
+        </button>
+      )}
+      {page && (
+        <button
+          type="button"
+          className={`address__button address__site${panelOpen ? ' is-open' : ''}`}
+          data-testid="site-controls-button"
+          aria-label="Site controls"
+          aria-expanded={panelOpen}
+          title={withShortcut('Site controls', 'site.controls')}
+          onClick={openControls}
+        >
+          <SlidersHorizontal size={13} />
         </button>
       )}
     </div>

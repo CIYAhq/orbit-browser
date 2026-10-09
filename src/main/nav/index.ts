@@ -14,8 +14,10 @@ import { openUrlInNewWindow } from './new-window'
 import { registerPageColor } from './page-color'
 import { type PageMenuTestHooks, pageMenuTestHooks, setLinkOpeners } from './page-menu'
 import { type PageToolsInfo, registerPageTools } from './page-tools'
+import { registerPermissions } from './permissions'
 import { type PrivateWindows, registerPrivate } from './private'
 import { type RevealHoldInfo, registerSidebarReveal } from './sidebar-reveal'
+import { registerSiteControls } from './site-controls'
 import { SitePrefs } from './site-prefs'
 
 /** Test-only handle (ORBIT_E2E=1): globalThis.__orbitNav. */
@@ -26,6 +28,8 @@ export interface NavTestHooks extends LinksTestHooks, PageMenuTestHooks {
   chooseMenu: (label: string, newTab?: boolean) => boolean
   /** A window's page tools (default: the first): what the find bar and zoom indicator show, and where (NV-05, NV-06). */
   tools: (windowId?: WindowId) => PageToolsInfo
+  /** A window's permission prompt view (default: the first): placed while the sidebar is hidden (NV-15). */
+  prompt: (windowId?: WindowId) => { placed: boolean; bounds?: { x: number; y: number; width: number; height: number } }
   /** The corner radius of a shown page's card (0 without a frame: full screen) (SB-19). */
   corner: (tabId: TabId) => number | null
   /** The floating sidebar of a window (default: the first): its view, and what keeps it out (SB-12). */
@@ -282,8 +286,9 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
     private: (url, from) => void privateWindows.open({ url, fromWindowId: from.windowId }),
   })
 
-  // Placeholder until the site controls panel (NV-16) lands.
-  actions.register('site.controls', (c) => ctx.toast(windowOf(c), 'Site controls are coming soon'))
+  // Permission prompts and the site controls panel (NV-15, NV-16).
+  const permissions = registerPermissions(ctx, prefs)
+  registerSiteControls(ctx, prefs, permissions)
 
   ctx.hooks.tabCreated.push((tabId, contents) => {
     // Esc stops a loading page (NV-04). The page still gets the key; an open overlay (command bar,
@@ -323,6 +328,7 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
       },
       corner: (tabId) => windows.cornerOf(tabId) ?? null,
       tools: (windowId) => pageTools.info(windowId ?? windows.ids()[0] ?? ''),
+      prompt: (windowId) => permissions.info(windowId ?? windows.ids()[0] ?? ''),
       floating: (windowId) => {
         const id = windowId ?? windows.ids()[0] ?? ''
         return { ...windows.floatingInfo(id), hold: reveal.hold(id) ?? null }

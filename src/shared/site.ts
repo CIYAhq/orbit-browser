@@ -1,0 +1,268 @@
+/**
+ * What sites may ask for and what Orbit shows about a site (NV-15, NV-16): the permission prompt
+ * under the address display and the site controls panel. Shared by main and the renderers.
+ */
+import type { Connection } from './nav'
+import type { TabId } from './state'
+
+/** Permissions a site asks for. Camera and microphone are separate choices, as in Chromium. */
+export type PermissionKind =
+  | 'camera'
+  | 'microphone'
+  | 'location'
+  | 'notifications'
+  | 'clipboard'
+  | 'midi'
+  | 'idle'
+  | 'windows'
+  | 'fonts'
+  | 'network'
+  | 'popups'
+
+/** The user's lasting choice for a permission on a site. */
+export type PermissionChoice = 'allow' | 'block'
+
+/** Devices a site connects to through a chooser (Web Serial, WebUSB, WebHID). */
+export type DeviceKind = 'serial' | 'usb' | 'hid'
+
+/** The order permissions are listed in, in the prompt and the panel. */
+export const PERMISSION_ORDER: readonly PermissionKind[] = [
+  'camera',
+  'microphone',
+  'location',
+  'notifications',
+  'clipboard',
+  'midi',
+  'idle',
+  'windows',
+  'fonts',
+  'network',
+  'popups',
+]
+
+/** The prompt's line for each permission: "<site> wants to" … (NV-15). */
+export const PERMISSION_ASK: Record<PermissionKind, string> = {
+  camera: 'Use your camera',
+  microphone: 'Use your microphone',
+  location: 'Know your location',
+  notifications: 'Show notifications',
+  clipboard: 'See text and images copied to the clipboard',
+  midi: 'Use your MIDI devices',
+  idle: 'Know when you’re actively using this device',
+  windows: 'Manage windows on all your displays',
+  fonts: 'Use the fonts on your computer',
+  network: 'Look for and connect to any device on your local network',
+  popups: 'Open pop-ups',
+}
+
+/** The site controls panel's name for each permission (NV-16). */
+export const PERMISSION_NAME: Record<PermissionKind, string> = {
+  camera: 'Camera',
+  microphone: 'Microphone',
+  location: 'Location',
+  notifications: 'Notifications',
+  clipboard: 'Clipboard',
+  midi: 'MIDI devices',
+  idle: 'Device use',
+  windows: 'Window management',
+  fonts: 'Fonts',
+  network: 'Local network access',
+  popups: 'Pop-ups',
+}
+
+/** What a device chooser asks: "<site> wants to" … */
+export const DEVICE_ASK: Record<DeviceKind, string> = {
+  serial: 'Connect to a serial port',
+  usb: 'Connect to a USB device',
+  hid: 'Connect to a HID device',
+}
+
+export const DEVICE_NAME: Record<DeviceKind, string> = {
+  serial: 'Serial port',
+  usb: 'USB device',
+  hid: 'HID device',
+}
+
+/** Permissions whose prompt offers "Allow this time", as Chromium's does. */
+export const ONE_TIME_KINDS: ReadonlySet<PermissionKind> = new Set(['camera', 'microphone', 'location'])
+
+export function isPermissionKind(value: unknown): value is PermissionKind {
+  return typeof value === 'string' && (PERMISSION_ORDER as readonly string[]).includes(value)
+}
+
+/**
+ * The permissions an engine permission request or check is about, or null for one Orbit doesn't
+ * ask the user about. `media` names the camera and/or the microphone; when the engine doesn't say
+ * which, it is both.
+ */
+export function kindsOf(permission: string, mediaTypes?: readonly string[]): PermissionKind[] | null {
+  switch (permission) {
+    case 'media': {
+      const known = (mediaTypes ?? []).filter((t) => t === 'video' || t === 'audio')
+      if (known.length === 0) return ['camera', 'microphone']
+      const kinds: PermissionKind[] = []
+      if (known.includes('video')) kinds.push('camera')
+      if (known.includes('audio')) kinds.push('microphone')
+      return kinds
+    }
+    case 'geolocation':
+    case 'geolocation-approximate':
+      return ['location']
+    case 'notifications':
+      return ['notifications']
+    case 'clipboard-read':
+      return ['clipboard']
+    case 'midi':
+    case 'midiSysex':
+      return ['midi']
+    case 'idle-detection':
+      return ['idle']
+    case 'window-management':
+      return ['windows']
+    case 'local-fonts':
+      return ['fonts']
+    case 'local-network-access':
+    case 'local-network':
+    case 'loopback-network':
+      return ['network']
+    default:
+      return null
+  }
+}
+
+/** Sorts permissions into PERMISSION_ORDER, without repeats. */
+export function sortKinds(kinds: Iterable<PermissionKind>): PermissionKind[] {
+  const set = new Set(kinds)
+  return PERMISSION_ORDER.filter((k) => set.has(k))
+}
+
+/**
+ * The origin a permission belongs to: the page's own (the top frame's), as in Chromium, where a
+ * frame inside the page uses what the page was given.
+ */
+export function permissionOrigin(url: string | undefined): string | null {
+  if (!url) return null
+  try {
+    const u = new URL(url)
+    if (u.protocol === 'file:') return 'file://'
+    const origin = u.origin
+    return origin && origin !== 'null' ? origin : null
+  } catch {
+    return null
+  }
+}
+
+/** How a prompt names a site: its host (with the port), "This file" for local files. */
+export function siteLabel(origin: string): string {
+  if (origin === 'file://') return 'This file'
+  try {
+    return new URL(origin).host || origin
+  } catch {
+    return origin
+  }
+}
+
+/** A device as the engine describes it (serial port, USB or HID device). */
+export interface EngineDevice {
+  deviceId?: string
+  portId?: string
+  portName?: string
+  displayName?: string
+  name?: string
+  productName?: string
+  manufacturerName?: string
+  vendorId?: number | string
+  productId?: number | string
+  serialNumber?: string
+}
+
+/** A device's lasting identity for a site's grant: vendor, product and serial number where known. */
+export function deviceKey(type: DeviceKind, device: EngineDevice): string {
+  const id = (v: number | string | undefined) => (v === undefined || v === '' ? '' : String(v))
+  if (device.vendorId !== undefined || device.productId !== undefined) {
+    return `${type}:${id(device.vendorId)}:${id(device.productId)}:${device.serialNumber ?? ''}`
+  }
+  return `${type}:port:${device.portName ?? device.portId ?? device.deviceId ?? ''}`
+}
+
+/** A device's name for people: the product's name, else the port's, else its kind. */
+export function deviceLabel(type: DeviceKind, device: EngineDevice): string {
+  return device.displayName || device.productName || device.name || device.portName || DEVICE_NAME[type]
+}
+
+export interface DeviceOption {
+  id: string
+  name: string
+}
+
+export interface ScreenSource {
+  id: string
+  name: string
+  /** A whole screen (else a window). */
+  screen: boolean
+}
+
+/** A permission prompt on a tab (NV-15): the first of its pending requests. */
+export type PermissionPrompt =
+  | {
+      id: number
+      type: 'permission'
+      origin: string
+      kinds: PermissionKind[]
+      /** Offers "Allow this time" (camera, microphone, location). */
+      oneTime: boolean
+    }
+  | { id: number; type: 'device'; origin: string; device: DeviceKind; devices: DeviceOption[] }
+  | { id: number; type: 'screen'; origin: string; sources: ScreenSource[] }
+  | {
+      id: number
+      type: 'file'
+      origin: string
+      /** The file's (or folder's) name. */
+      name: string
+      directory: boolean
+      /** Saving changes to it (else seeing it). */
+      write: boolean
+    }
+
+/**
+ * How the user answered a prompt: allow (and remember), allow this time, block (and remember), or
+ * dismiss (no answer: asked again next time). A chooser's allow comes with the device or screen picked.
+ */
+export type PromptChoice = 'allow' | 'once' | 'block' | 'dismiss'
+
+/** A row of the site controls panel's permissions. */
+export interface SitePermissionRow {
+  kind: PermissionKind
+  /** allow / block: the user's choice; once: allowed this time; ask: asked, no choice yet. */
+  state: 'allow' | 'block' | 'once' | 'ask'
+}
+
+/** A device the site may use again. */
+export interface SiteDeviceRow {
+  key: string
+  type: DeviceKind
+  name: string
+}
+
+/** What the site controls panel shows for the active tab's site (NV-16). */
+export interface SiteControlsInfo {
+  tabId: TabId
+  url: string
+  /** The host (with the port), or the address for pages that have none. */
+  host: string
+  connection: Connection
+  /** A web page (http or https): permissions, pop-ups and site data apply. */
+  web: boolean
+  /** The tab is in a private window: choices last until the last private window closes. */
+  private: boolean
+  permissions: SitePermissionRow[]
+  devices: SiteDeviceRow[]
+  /** Page zoom in percent (NV-06). */
+  zoom: number
+  /** A change the page only sees once it reloads. */
+  reload: boolean
+}
+
+/** The site controls panel's size and its gap from what it is anchored to. */
+export const SITE_PANEL = { width: 300, gap: 6, margin: 8 }
