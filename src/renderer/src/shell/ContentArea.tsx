@@ -1,5 +1,5 @@
 import { Command } from 'lucide-react'
-import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { formatAccelerator } from '../../../shared/actions'
 import { type DividerBox, layoutBoxes, layoutLeaves, leaf } from '../../../shared/split'
 import type { OrbitState, SplitLayout, WindowState } from '../../../shared/state'
@@ -59,13 +59,16 @@ export function ContentArea({ win }: { win: WindowState }) {
     })
   }, [engine, frame])
   useLayoutEffect(() => engine.setPreview(drop), [engine, drop])
-  useLayoutEffect(
-    () =>
-      window.orbit.on('split:fullscreen', (payload) => {
-        engine.setFullscreen((payload as { tabId: string | null }).tabId)
-      }),
-    [engine],
-  )
+  useLayoutEffect(() => {
+    const offFullscreen = window.orbit.on('split:fullscreen', (payload) => {
+      engine.setFullscreen((payload as { tabId: string | null }).tabId)
+    })
+    const offRelayout = window.orbit.on('split:relayout', () => engine.invalidate())
+    return () => {
+      offFullscreen()
+      offRelayout()
+    }
+  }, [engine])
   useTabDrop(engine, setDrop)
   usePaneDrag(engine, setDrop)
   useAltClickSplit()
@@ -148,6 +151,14 @@ function Divider({ divider, splitId, engine }: { divider: DividerBox; splitId: s
     const result = engine.endDrag()
     if (result) void invoke('split.resize', { splitId, path: result.path, sizes: result.sizes })
   }
+  // A divider that goes away mid-drag (the split changed) ends its drag and its cursor.
+  useEffect(
+    () => () => {
+      document.documentElement.classList.remove(cursorClass)
+      engine.cancelDrag(key)
+    },
+    [engine, key, cursorClass],
+  )
   return (
     <div
       ref={(el) => engine.registerDivider(key, el)}
@@ -168,6 +179,7 @@ function Divider({ divider, splitId, engine }: { divider: DividerBox; splitId: s
       }}
       onPointerUp={finish}
       onPointerCancel={finish}
+      onLostPointerCapture={finish}
       onDoubleClick={() => void invoke('split.equalize', { splitId, path: divider.path, index: divider.index })}
     />
   )

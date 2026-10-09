@@ -17,6 +17,7 @@ import {
   removePane,
   replacePane,
   type SplitAxis,
+  siblingOf,
 } from '../../shared/split'
 import type { ContainerRef, ItemId, OrbitState, SplitId, SplitLayout, Tab, TabId, WindowId } from '../../shared/state'
 import {
@@ -281,6 +282,14 @@ export function dropBlankPanes(d: OrbitState): TabId[] {
   for (const split of Object.values(d.splits)) {
     for (const id of layoutLeaves(split.layout)) {
       if (!isBlankPane(d.tabs[id])) continue
+      // A window that was focused on the empty pane focuses its neighbour instead.
+      const current = d.splits[split.id]?.layout ?? split.layout
+      const neighbor = siblingOf(current, id) ?? layoutLeaves(current).find((t) => t !== id && !isBlankPane(d.tabs[t]))
+      for (const win of Object.values(d.windows)) {
+        for (const [spaceId, active] of Object.entries(win.activeTab)) {
+          if (active === id) win.activeTab[spaceId] = neighbor ?? null
+        }
+      }
       detachTab(d, id)
       delete d.tabs[id]
       removed.push(id)

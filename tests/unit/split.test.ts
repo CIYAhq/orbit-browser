@@ -268,7 +268,10 @@ describe('split model', () => {
     const [a, b] = [add(), add('today', 'about:blank')]
     const c = add()
     const id = createSplitInDraft(state, [a, b, c]) as string
+    const win = Object.values(state.windows)[0]
+    if (win) win.activeTab[spaceId] = b
     expect(dropBlankPanes(state)).toEqual([b])
+    expect(win?.activeTab[spaceId]).toBe(c)
     expect(layoutLeaves(state.splits[id]?.layout as SplitLayout)).toEqual([a, c])
     expect(state.tabs[b]).toBeUndefined()
     createSplitInDraft(state, [a, add('today', 'about:blank')])

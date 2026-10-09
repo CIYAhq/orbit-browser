@@ -59,6 +59,12 @@ interface PaneSession {
   /** Selection at the moment the command bar closed (a later change means a tab was chosen). */
   activeAtClose?: TabId | null
   activeTabsAtClose?: Record<string, TabId | null>
+  /** Tabs that existed when the bar closed: a tab picked from the results is one of them. */
+  tabsAtClose?: OrbitState['tabs']
+  /** The tab the bar's choice selected, decided in the same tick the bar closed. */
+  chosen?: TabId | null
+  /** Grace timer while a slow choice may still fill the empty pane. */
+  timer?: NodeJS.Timeout
 }
 
 /** How long an empty pane waits for the command bar's choice before it is removed. */
@@ -82,10 +88,13 @@ export function registerSplit(ctx: MainContext): void {
 
   /** Sleeps tabs whose profile changed so they reload in the right session (without the old session's history). */
   const reloadMoved = (tabIds: TabId[]) => {
+    if (tabIds.length === 0) return
     for (const id of tabIds) {
       ctx.tabs.sleep(id)
       ctx.tabs.savedHistory.delete(id)
     }
+    // Pages that were on screen lost their views: have the shells report their panes again.
+    for (const windowId of windows.ids()) windows.sendToWindow(windowId, 'split:relayout', {})
   }
 
   /** Applies a change that moves tabs into a split, reloading any that changed profile. */
@@ -185,7 +194,8 @@ export function registerSplit(ctx: MainContext): void {
   /** ⌃⇧= and the Add Split actions: an empty pane beside the focused pane, filled from the command bar. */
   const addPane = (windowId: WindowId | undefined, side: PaneSide) => {
     if (!windowId) return
-    settle(windowId, { cancel: true })
+    const existing = sessions.get(windowId)
+    if (existing) settle(existing, { cancel: true })
     const state = store.state
     const anchor = activeTabOf(state, windowId)
     const anchorTab = anchor ? state.tabs[anchor] : undefined
@@ -221,23 +231,24 @@ export function registerSplit(ctx: MainContext): void {
     void commands.run('overlay.open', { overlay: { kind: 'commandbar', mode: 'edit-url', query: '' } }, { windowId })
     const overlay = store.state.windows[windowId]?.overlay
     if (overlay?.kind === 'commandbar') session.nonce = overlay.nonce
-    else settle(windowId, { cancel: true })
+    else settle(session, { cancel: true })
   }
 
   /** Ends a pane session once its command bar closed: keep, fill, swap in or remove the pane. */
-  const settle = (windowId: WindowId, opts: { cancel?: boolean } = {}) => {
-    const session = sessions.get(windowId)
-    if (!session) return
+  const settle = (session: PaneSession, opts: { cancel?: boolean } = {}) => {
+    const windowId = session.windowId
+    if (sessions.get(windowId) !== session) return
     sessions.delete(windowId)
+    clearTimeout(session.timer)
     const state = store.state
     const tab = state.tabs[session.tabId]
     const splitId = splitOfTab(state, session.tabId)
     if (!tab || !splitId) return
-    const active = activeTabOf(state, windowId)
-    const chosen =
-      !opts.cancel && session.activeAtClose === session.tabId && active && active !== session.tabId ? active : null
-    const chosenSplit = chosen ? splitOfTab(state, chosen) : undefined
-    const chosenIsToday = chosen && sectionOf(state, chosen) === 'today' && !chosenSplit
+    const chosen = opts.cancel ? null : (session.chosen ?? null)
+    // A tab that existed when the bar closed was picked from its results; a tab the choice
+    // created (e.g. "open in new tab") was not, and is left alone.
+    const picked = !!chosen && !!session.tabsAtClose?.[chosen]
+    const chosenIsToday = picked && sectionOf(state, chosen) === 'today' && !splitOfTab(state, chosen)
 
     if (!session.blank) {
       // ⌘L on a pane, then an open Today tab was chosen: it takes the pane's place (SV-15).
@@ -273,7 +284,7 @@ export function registerSplit(ctx: MainContext): void {
       ctx.tabs.destroy(session.tabId)
       return
     }
-    if (chosen && !leavesOf(state, splitId).includes(chosen)) {
+    if (chosen && picked && !leavesOf(state, splitId).includes(chosen)) {
       // A pinned tab, Favorite or another split's pane stays where it is: the new pane opens a copy of its page.
       const url = state.tabs[chosen]?.url
       if (url && !isBlankPane({ url })) {
@@ -291,11 +302,13 @@ export function registerSplit(ctx: MainContext): void {
         return
       }
     }
-    // Nothing chosen (Escape, click outside): the empty pane goes away and focus returns.
+    // Nothing chosen (Escape, click outside) or a new tab was opened instead: the empty pane
+    // goes away. Focus returns to the previous pane unless something else was selected since.
     store.update((d) => {
+      const stillOnBlank = activeTabOf(d, windowId) === session.tabId
       detachTab(d, session.tabId)
       delete d.tabs[session.tabId]
-      const back = chosen ?? session.previous
+      const back = picked ? chosen : stillOnBlank ? session.previous : null
       if (back && d.tabs[back]) focusInDraft(d, windowId, back)
     })
     ctx.tabs.destroy(session.tabId)
@@ -314,24 +327,43 @@ export function registerSplit(ctx: MainContext): void {
 
   // Watch command bar sessions: open on a pane → track; closed → settle right after the choice ran.
   store.subscribe((next) => {
-    for (const session of sessions.values()) {
-      if (session.settling || session.nonce < 0) continue
-      const win = next.windows[session.windowId]
-      const overlay = win?.overlay
-      if (overlay?.kind === 'commandbar' && overlay.nonce === session.nonce) continue
+    for (const session of [...sessions.values()]) {
+      const overlay = next.windows[session.windowId]?.overlay
+      const open = overlay?.kind === 'commandbar' && overlay.nonce === session.nonce
+      if (session.blank && !next.tabs[session.tabId]) {
+        // The empty pane itself was closed (e.g. Cmd/Ctrl+W): end the session and its command bar.
+        sessions.delete(session.windowId)
+        clearTimeout(session.timer)
+        if (open) queueMicrotask(() => void commands.run('overlay.close', {}, { windowId: session.windowId }))
+        continue
+      }
+      if (session.nonce < 0) continue
+      if (session.settling) {
+        // Another command bar opened while this one was still settling: decide now (nothing was chosen).
+        if (session.timer && overlay?.kind === 'commandbar' && overlay.nonce !== session.nonce) {
+          clearTimeout(session.timer)
+          session.timer = undefined
+          queueMicrotask(() => settle(session, { cancel: true }))
+        }
+        continue
+      }
+      if (open) continue
       session.settling = true
       session.activeAtClose = activeTabOf(next, session.windowId)
-      session.activeTabsAtClose = { ...(win?.activeTab ?? {}) }
+      session.activeTabsAtClose = { ...(next.windows[session.windowId]?.activeTab ?? {}) }
+      session.tabsAtClose = next.tabs
       // The command bar's choice (navigate / switch tab) runs synchronously right after the
       // overlay closes, so a microtask sees its result and still lands in the same patch batch.
+      // Selection changes after that are the user's own and never count as the choice.
       queueMicrotask(() => {
+        if (sessions.get(session.windowId) !== session) return
         const state = store.state
+        const active = activeTabOf(state, session.windowId)
+        session.chosen = session.activeAtClose === session.tabId && active && active !== session.tabId ? active : null
         const tab = state.tabs[session.tabId]
-        const chose =
-          (tab && !isBlankPane(tab)) || activeTabOf(state, session.windowId) !== session.activeAtClose || !session.blank
-        if (chose) settle(session.windowId)
-        // Nothing yet (Escape, click outside, or a choice still on its way): decide shortly.
-        else setTimeout(() => settle(session.windowId), SETTLE_GRACE_MS)
+        if (session.chosen || !session.blank || (tab && !isBlankPane(tab))) settle(session)
+        // Escape, a click outside, or a choice still on its way: a late page can still fill the pane.
+        else session.timer = setTimeout(() => settle(session), SETTLE_GRACE_MS)
       })
     }
     for (const win of Object.values(next.windows)) {
@@ -695,7 +727,13 @@ export function registerSplit(ctx: MainContext): void {
     if (spaceId && section === 'pinned') {
       items.push({ label: 'Unpin Split', click: () => moveSplit(splitId, { kind: 'today', spaceId }, 0) })
     }
-    // "Add to Favorites" waits until the Favorites grid can draw a split tile (it lists tabs only).
+    const profileId = spaceId ? state.spaces[spaceId]?.profileId : undefined
+    if (profileId && section !== 'favorite') {
+      items.push({
+        label: 'Add to Favorites',
+        click: () => moveSplit(splitId, { kind: 'favorites', profileId }, Number.MAX_SAFE_INTEGER),
+      })
+    }
     if (spaceId && section === 'favorite') {
       items.push({
         label: 'Remove from Favorites',
@@ -759,8 +797,11 @@ export function registerSplit(ctx: MainContext): void {
     })
     placeholderUntilLoaded(tabId, contents)
     // A page going full screen (e.g. a video) fills the window; leaving returns to the split (SV-25).
+    // The window is remembered: by the time a closing page leaves full screen it has no window.
+    let fullscreenWindow: WindowId | undefined
     const fullscreen = (on: boolean) => {
-      const windowId = windows.windowOfTab(tabId)
+      const windowId = on ? windows.windowOfTab(tabId) : fullscreenWindow
+      fullscreenWindow = on ? windowId : undefined
       if (windowId) windows.sendToWindow(windowId, 'split:fullscreen', { tabId: on ? tabId : null })
     }
     contents.on('enter-html-full-screen', () => fullscreen(true))

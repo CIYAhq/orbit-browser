@@ -1,8 +1,9 @@
-import { isTabId } from '../../../../shared/ids'
+import { isSplitId, isTabId } from '../../../../shared/ids'
 import { invoke } from '../../api'
 import { activeTabId } from '../../selectors'
 import { useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
+import { SplitFavoriteTile } from '../split/SplitFavoriteTile'
 
 /** The favorites grid at the top of the sidebar (shared by all Spaces of a profile). */
 export function Favorites({ profileId }: { profileId: string }) {
@@ -10,9 +11,13 @@ export function Favorites({ profileId }: { profileId: string }) {
   if (favorites.length === 0) return null
   return (
     <div className="favorites" data-testid="favorites">
-      {favorites.filter(isTabId).map((id) => (
-        <FavoriteTile key={id} tabId={id} />
-      ))}
+      {favorites.map((id) =>
+        isSplitId(id) ? (
+          <SplitFavoriteTile key={id} splitId={id} />
+        ) : isTabId(id) ? (
+          <FavoriteTile key={id} tabId={id} />
+        ) : null,
+      )}
     </div>
   )
 }

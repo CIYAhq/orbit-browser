@@ -179,6 +179,12 @@ export class PaneEngine {
         node && node.type !== 'leaf' && node.sizes.every((s, i) => Math.abs(s - (this.held?.sizes[i] ?? -1)) < 1e-6)
       if (echoed || !node || node.type === 'leaf') this.held = null
     }
+    if (this.drag && model.layout) {
+      // The split changed shape under a divider drag: drop the drag rather than resize the wrong container.
+      const node = nodeAt(model.layout, this.drag.path)
+      if (!node || node.type === 'leaf' || node.children.length !== this.drag.startSizes.length) this.drag = null
+    } else if (!model.layout) this.drag = null
+    if (this.fullscreen && !after.includes(this.fullscreen)) this.fullscreen = null
     if (this.preview?.move) {
       // A pane drag's preview ends as soon as the drop changes the stored layout.
       if (!sameLayout(this.model.layout, model.layout)) this.preview = null
@@ -267,6 +273,11 @@ export class PaneEngine {
     const delta = (drag.axis === 'row' ? clientX : clientY) - drag.start
     drag.sizes = dragSizes(node, drag.startSizes, drag.index, delta, drag.length).sizes
     this.relayout(false)
+  }
+
+  /** Drops a drag without saving (its divider went away). */
+  cancelDrag(key: string): void {
+    if (this.drag && dividerKey(this.drag.path, this.drag.index) === key) this.drag = null
   }
 
   /** Ends a drag; returns the container path and its new sizes to save. */
