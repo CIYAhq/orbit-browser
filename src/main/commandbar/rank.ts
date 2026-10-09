@@ -120,11 +120,16 @@ export function normKey(url: string): string {
   return noHash.endsWith('/') ? noHash.slice(0, -1) : noHash
 }
 
-/** Compact URL for row text: no scheme, no "www.", no trailing slash. */
+/** Compact, readable URL for row text: no scheme, no "www.", no trailing slash, %-escapes decoded. */
 export function displayUrl(url: string): string {
-  if (/^(about|data|chrome|devtools|view-source|orbit):/i.test(url)) return url
-  const s = url.replace(/^https?:\/\//i, '').replace(/^www\./i, '')
-  return s.endsWith('/') ? s.slice(0, -1) : s
+  if (/^(about|data|chrome|devtools|view-source|orbit):/i.test(url)) return url.slice(0, 300)
+  let s = url.replace(/^https?:\/\//i, '').replace(/^www\./i, '')
+  if (s.endsWith('/')) s = s.slice(0, -1)
+  try {
+    return decodeURIComponent(s)
+  } catch {
+    return s
+  }
 }
 
 const keyCache = new WeakMap<object, string>()

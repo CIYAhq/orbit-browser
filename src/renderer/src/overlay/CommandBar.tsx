@@ -36,6 +36,15 @@ const MAX_ROWS = 9
 const latencies: number[] = []
 ;(window as unknown as { __orbitCommandBar: { latencies: number[] } }).__orbitCommandBar = { latencies }
 
+/** Sample rows for the warm-up instance (one of each look). */
+const WARM_ROWS: SearchResult[] = [
+  { id: 'w1', kind: 'tab', title: 'Tab', subtitle: 'example.com', label: 'Tab', hint: 'Switch to tab', score: 0 },
+  { id: 'w2', kind: 'search', title: 'Search', subtitle: 'Search', label: 'Search', score: 0 },
+  { id: 'w3', kind: 'history', title: 'Page', subtitle: 'example.com/a', label: 'History', removable: true, score: 0 },
+  { id: 'w4', kind: 'action', title: 'Action', label: 'Action', shortcut: 'Ctrl+T', score: 0 },
+  { id: 'w5', kind: 'space', title: 'Space', label: 'Space', score: 0 },
+]
+
 /** Site search chip (CB-11) or actions-only mode (CB-14). */
 type Scope = { kind: 'site'; site: SiteSearchInfo } | { kind: 'actions' } | null
 
@@ -66,13 +75,16 @@ export function CommandBar({
   mode,
   initialQuery,
   dark,
+  warm = false,
 }: {
   mode: CommandBarMode
   initialQuery: string
   dark?: boolean
+  /** An inert, hidden instance rendered once at overlay start-up so the first real open is as fast as later ones (CB-22). */
+  warm?: boolean
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
-  const [results, setResults] = useState<SearchResult[]>([])
+  const [results, setResults] = useState<SearchResult[]>(warm ? WARM_ROWS : [])
   const [selected, setSelected] = useState(0)
   const [scope, setScopeState] = useState<Scope>(null)
   const maxRows = useMaxRows()
@@ -255,7 +267,7 @@ export function CommandBar({
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per open (the component is keyed by nonce)
   useLayoutEffect(() => {
     const input = inputRef.current
-    if (!input) return
+    if (!input || warm) return
     st.closed = false
     const buffered = claimTypeahead()
     const editing = mode === 'edit-url' && initialQuery
@@ -276,9 +288,9 @@ export function CommandBar({
 
   // CB-19 / FL-17: switching Space keeps the bar open and refreshes results for the new Space and profile.
   const firstSpace = useRef(spaceId)
-  // biome-ignore lint/correctness/useExhaustiveDependencies: runQuery reads live state from st
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runQuery reads live state from st; warm never changes
   useEffect(() => {
-    if (spaceId === firstSpace.current) return
+    if (warm || spaceId === firstSpace.current) return
     firstSpace.current = spaceId
     if (!st.closed) runQuery()
   }, [spaceId, st])
@@ -352,8 +364,11 @@ export function CommandBar({
         e.preventDefault()
         removeRow(row)
       }
-    } else if ((e.key === 'ArrowRight' || e.key === 'End') && st.completion) {
-      // Accept the completion: the caret moves to the end natively; results follow the full text.
+    } else if (
+      (e.key === 'ArrowRight' || e.key === 'End' || e.key === 'ArrowLeft' || e.key === 'Home') &&
+      st.completion
+    ) {
+      // Moving the caret accepts the completion (the caret moves natively); results follow the full text.
       queueMicrotask(() => {
         st.typed = input.value
         st.completion = undefined
@@ -386,7 +401,7 @@ export function CommandBar({
           className={`cmdbar${dark ? ' cmdbar--dark' : ''}`}
           role="dialog"
           aria-label="Command bar"
-          data-testid={present ? 'command-bar' : 'command-bar-closing'}
+          data-testid={warm ? undefined : present ? 'command-bar' : 'command-bar-closing'}
           data-mode={mode}
           data-scope={scope?.kind ?? ''}
           initial={{ opacity: 0, scale: 0.97, y: -4 }}
@@ -425,7 +440,7 @@ export function CommandBar({
             <input
               ref={inputRef}
               className="cmdbar__input"
-              data-testid="command-input"
+              data-testid={warm ? undefined : 'command-input'}
               placeholder={placeholder}
               spellCheck={false}
               autoComplete="off"
@@ -447,7 +462,12 @@ export function CommandBar({
             />
           </div>
           {results.length > 0 && (
-            <div className="cmdbar__results" role="listbox" id="cmdbar-list" data-testid="command-results">
+            <div
+              className="cmdbar__results"
+              role="listbox"
+              id={warm ? undefined : 'cmdbar-list'}
+              data-testid={warm ? undefined : 'command-results'}
+            >
               {results.map((r, i) => (
                 <ResultRow
                   key={r.id}

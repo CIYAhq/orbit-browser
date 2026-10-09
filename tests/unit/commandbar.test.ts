@@ -109,6 +109,8 @@ describe('URL and search parsing', () => {
     expect(normKey('https://www.GitHub.com/')).toBe('github.com')
     expect(normKey('http://github.com/#top')).toBe('github.com')
     expect(displayUrl('https://www.example.com/a/')).toBe('example.com/a')
+    expect(displayUrl('http://localhost:3300/page/Docs%3A%20Orbit')).toBe('localhost:3300/page/Docs: Orbit')
+    expect(displayUrl('https://x.example/%E0%A4%A')).toBe('x.example/%E0%A4%A')
   })
 })
 
@@ -154,6 +156,13 @@ describe('ranking', () => {
     expect(r.results[0]).toMatchObject({ kind: 'action', actionId: 'tab.togglePin', shortcut: '⌘D' })
     expect(rank(input('side by', { activeTabId: 't-1' })).results.some((x) => x.actionId === 'split.add')).toBe(true)
     expect(rank(input('dt', { activeTabId: 't-1' })).results.some((x) => x.actionId === 'devtools.toggle')).toBe(true)
+  })
+
+  it('[CB-07] a single letter only matches at the start of a word', () => {
+    const tabs = [tab('t-1', 'Reopen closed', 'https://x.example/'), tab('t-2', 'Design', 'https://y.example/')]
+    const ids = rank(input('d', { tabs })).results.map((r) => r.id)
+    expect(ids).toContain('tab:t-2')
+    expect(ids).not.toContain('tab:t-1')
   })
 
   it('[CB-13] hides actions that need a tab when the Space is empty', () => {

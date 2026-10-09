@@ -74,9 +74,14 @@ export function matchDoc(ts: string[], titleLower: string, urlKey: string, altUr
   let hostPrefix = false
   for (let k = 0; k < ts.length; k++) {
     const t = ts[k] as string
-    const inTitle = fieldMatch(t, titleLower)
+    let inTitle = fieldMatch(t, titleLower)
     let inUrl = fieldMatch(t, urlKey)
     if (altUrlKey) inUrl = Math.max(inUrl, fieldMatch(t, altUrlKey))
+    // A single letter only counts at the start of a word; anywhere else it is noise.
+    if (t.length === 1) {
+      if (inTitle === INSIDE) inTitle = 0
+      if (inUrl === INSIDE) inUrl = 0
+    }
     if (inTitle === 0 && inUrl === 0) return NO_MATCH
     const s = Math.max(inTitle, inUrl === PREFIX ? 95 : inUrl === WORD ? 60 : inUrl === INSIDE ? 25 : 0)
     total += s
@@ -103,6 +108,7 @@ export function matchName(ts: string[], nameLower: string, keywords?: readonly s
         if (m) s = Math.max(s, m - 10)
       }
     }
+    if (t.length === 1 && s <= INSIDE) return NO_MATCH
     if (s === 0) return NO_MATCH
     total += s
     if (k === 0) strong = s >= WORD - 10

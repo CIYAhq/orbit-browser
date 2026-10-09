@@ -617,6 +617,14 @@ html[data-view="overlay"] body {
 
 /* ---------- Command bar (CB-04, FL-16/17) ---------- */
 
+/* Hidden warm-up instance (rendered once at overlay start-up). */
+.cmdbar-warm {
+  position: fixed;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
 /* A very light scrim: the page stays readable behind the bar. */
 .cmdbar-scrim {
   position: absolute;

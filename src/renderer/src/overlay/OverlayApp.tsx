@@ -1,5 +1,5 @@
 import { AnimatePresence, domAnimation, LazyMotion, MotionConfig } from 'motion/react'
-import type { CSSProperties } from 'react'
+import { type CSSProperties, useEffect, useState } from 'react'
 import { invoke } from '../api'
 import { useWindow } from '../store'
 import { paletteVars, usePalette } from '../theme'
@@ -15,6 +15,12 @@ export function OverlayApp() {
   const palette = usePalette(win?.spaceId)
   const overlay = win?.overlay
   const kind = overlay?.kind ?? 'none'
+  // Pre-warm (CB-22): one hidden, inert command bar right after start-up.
+  const [warm, setWarm] = useState(true)
+  useEffect(() => {
+    const id = setTimeout(() => setWarm(false), 600)
+    return () => clearTimeout(id)
+  }, [])
   return (
     <LazyMotion features={domAnimation} strict>
       <MotionConfig reducedMotion="user">
@@ -32,6 +38,11 @@ export function OverlayApp() {
             }
           }}
         >
+          {warm && kind === 'none' && (
+            <div className="cmdbar-warm" aria-hidden>
+              <CommandBar warm mode="new-tab" initialQuery="" />
+            </div>
+          )}
           <AnimatePresence>
             {overlay?.kind === 'commandbar' && (
               <CommandBar key={overlay.nonce} mode={overlay.mode} initialQuery={overlay.query} dark={palette?.dark} />
