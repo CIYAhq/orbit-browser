@@ -1,5 +1,5 @@
 import { Search, X, Zap } from 'lucide-react'
-import { m, useIsPresent, useReducedMotion } from 'motion/react'
+import { m, useIsPresent } from 'motion/react'
 import {
   type FormEvent,
   type KeyboardEvent,
@@ -9,6 +9,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react'
 import { flushSync } from 'react-dom'
 import {
@@ -89,6 +90,24 @@ function useMaxRows(): number {
  * responsive (native echo, inline completion re-applied synchronously) and only
  * swaps rows whose content changed.
  */
+const REDUCED_MOTION = '(prefers-reduced-motion: reduce)'
+
+/**
+ * The OS "reduce motion" setting as it is at render time. motion's own hook takes a change only
+ * from the media query's change event, which arrives at the next rendering step, so a bar opened
+ * right after the setting changed could still scale in (FL-28).
+ */
+function useReducedMotionNow(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      const query = matchMedia(REDUCED_MOTION)
+      query.addEventListener('change', onChange)
+      return () => query.removeEventListener('change', onChange)
+    },
+    () => matchMedia(REDUCED_MOTION).matches,
+  )
+}
+
 export function CommandBar({
   mode,
   initialQuery,
@@ -108,7 +127,7 @@ export function CommandBar({
   const maxRows = useMaxRows()
   const present = useIsPresent()
   // FL-28: with reduced motion the bar only fades (no scale or drop, not even for one frame).
-  const reduced = useReducedMotion() ?? false
+  const reduced = useReducedMotionNow()
   const spaceId = useOrbit((s) => s.windows[window.orbit.windowId]?.spaceId)
   const suggestOn = useOrbit((s) => !!s.settings.searchSuggestions)
   const currentFavicon = useOrbit((s) => {
