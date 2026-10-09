@@ -32,9 +32,29 @@ export async function launchOrbit(opts: { userData?: string; env?: Record<string
     args,
     env: { ...process.env, ORBIT_E2E: '1', ORBIT_USER_DATA: userData, ...opts.env } as Record<string, string>,
   })
+  evaluateBetweenTasks(app)
   const shell = await viewPage(app, 'shell')
   await shell.getByTestId('sidebar').waitFor()
   return { app, shell, userData }
+}
+
+/**
+ * Playwright runs main-process evaluates through the inspector, which can interrupt main-process
+ * code part-way, even inside a store update. A change made there is lost when that update finishes:
+ * a background tab a test had just created vanished. Each evaluate starts in a task of its own instead.
+ */
+function evaluateBetweenTasks(app: ElectronApplication): void {
+  const evaluate = app.evaluate.bind(app)
+  app.evaluate = ((fn: unknown, arg?: unknown) => {
+    if (typeof fn !== 'function') return evaluate(fn as never, arg as never)
+    return evaluate(
+      async (electron, [source, a]) => {
+        await new Promise((resolve) => setImmediate(resolve))
+        return new Function(`return (${source})`)()(electron, a)
+      },
+      [fn.toString(), arg] as const,
+    )
+  }) as ElectronApplication['evaluate']
 }
 
 /** Finds an Orbit UI page (shell/overlay) by its ?view= query. */
