@@ -726,6 +726,12 @@
   }
 }
 
+@keyframes space-backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+
 .space-menu,
 .space-panel,
 .space-dialog {
@@ -874,7 +880,7 @@ html[data-view] .space-menu__item.is-danger .space-menu__icon {
   display: grid;
   place-items: center;
   background: rgba(10, 10, 14, 0.24);
-  animation: overlay-in 140ms ease-out;
+  animation: space-backdrop-in 140ms ease-out;
 }
 
 .space-dialog {

@@ -147,8 +147,10 @@ test('[SV-13][SV-24] dragging a divider resizes the native views and the sizes p
   await orbit.shell.mouse.down()
   await orbit.shell.mouse.move(d2.x + 2000, d2.y + d2.height / 2, { steps: 5 })
   await orbit.shell.mouse.up()
-  await expect.poll(async () => (await tabView(orbit.app, b))?.bounds.width).toBeGreaterThanOrEqual(239)
-  expect((await tabView(orbit.app, b))?.bounds.width).toBeLessThanOrEqual(242)
+  // Polled down to the minimum first: the width before this drag already passes ">= 239", and a
+  // one-off read right after it could still see that width (CI saw 365).
+  await expect.poll(async () => (await tabView(orbit.app, b))?.bounds.width).toBeLessThanOrEqual(242)
+  expect((await tabView(orbit.app, b))?.bounds.width).toBeGreaterThanOrEqual(239)
   // Double-click evens the panes out again.
   const d3 = await orbit.shell.getByTestId('split-divider').boundingBox()
   if (!d3) throw new Error('no divider')
@@ -573,9 +575,12 @@ test('[SV-14][SV-15] the split row returns to the last focused pane; ⌘L / Ctrl
   // Leave the split, then click the row's edge (not a segment): the right pane is focused again.
   await run(orbit.app, 'tabs.activate', { tabId: other })
   await expect.poll(async () => (await tabView(orbit.app, b))?.visible).toBe(false)
-  const row = await orbit.shell.getByTestId('split-row').boundingBox()
-  if (!row) throw new Error('no row')
-  await orbit.shell.mouse.click(row.x + 3, row.y + row.height / 2)
+  // A locator click waits for the row to stand still and checks that the row takes the click: on a slow
+  // machine the rows from split.create can still be moving in.
+  const row = orbit.shell.getByTestId('split-row')
+  const box = await row.boundingBox()
+  if (!box) throw new Error('no row')
+  await row.click({ position: { x: 3, y: box.height / 2 } })
   await expect.poll(() => activeTabId(orbit.app)).toBe(b)
   await expectViewsOverPanes(orbit, [a, b])
   // ⌘L / Ctrl+L on the focused pane and pick the open tab: it takes the pane's place, the old page goes to Today.
@@ -1039,6 +1044,68 @@ test('[SV-05] leaving the list starts the rest over: back on the same row and re
     })
     .toBe(true)
   expect(Object.keys((await state(orbit.app)).splits)).toHaveLength(0)
+})
+
+/** Drags `from`'s row onto `onto`'s row, to `fy` of its height on the right half, and holds. */
+async function restOnRow(from: string, onto: string, fy: number) {
+  await settled(orbit.shell)
+  const a = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${from}"]`).boundingBox()
+  const to = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${onto}"]`).boundingBox()
+  if (!a || !to) throw new Error('rows')
+  const dy = to.y > a.y ? 6 : -6
+  await orbit.shell.mouse.move(a.x + 30, a.y + a.height / 2)
+  await orbit.shell.mouse.down()
+  await orbit.shell.mouse.move(a.x + 40, a.y + a.height / 2 + dy, { steps: 2 })
+  await orbit.shell.mouse.move(to.x + to.width * 0.75, to.y + to.height * fy, { steps: 10 })
+  return to
+}
+
+for (const [dir, fy] of [
+  ['down', 0.7],
+  ['up', 0.3],
+] as const) {
+  test(`[SV-05] dragging ${dir}, a rest on the far half of a row's middle band (${fy * 100} %) makes a split: the row holds still (review W2)`, async () => {
+    const d = await openTab(orbit.app, 'Fourth')
+    await openTab(orbit.app, 'Third')
+    const b = await openTab(orbit.app, 'Second')
+    const a = await openTab(orbit.app, 'First')
+    // Down: the first row onto the last. Up: the last row onto the second.
+    const [from, onto] = dir === 'down' ? [a, d] : [d, b]
+    const to = await restOnRow(from, onto, fy)
+    await expect(orbit.shell.locator('.row-slot.is-split-right')).toHaveCount(1)
+    const held = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${onto}"]`).boundingBox()
+    expect(Math.abs((held?.y ?? 0) - to.y)).toBeLessThan(2)
+    await orbit.shell.mouse.up()
+    await expect(orbit.shell.getByTestId('split-row')).toHaveCount(1)
+    const split = await splitOf(orbit.app, onto)
+    expect(split && JSON.stringify(split.layout).match(/t-[a-z0-9]+/g)).toEqual([onto, from])
+  })
+}
+
+test("[SV-05][FL-10] a quick drop of a Favorite on a row's lower half lands after the row: a tile opens no gap, so no row holds (review M1)", async () => {
+  const r4 = await openTab(orbit.app, 'Fourth')
+  const r3 = await openTab(orbit.app, 'Third')
+  const r2 = await openTab(orbit.app, 'Second')
+  const r1 = await openTab(orbit.app, 'First')
+  const fav = await openTab(orbit.app, 'Fav')
+  const s = await state(orbit.app)
+  const spaceId = s.tabs[fav]?.spaceId as string
+  const profileId = s.spaces[spaceId]?.profileId as string
+  await run(orbit.app, 'tabs.move', { id: fav, to: { kind: 'favorites', profileId }, index: 0 })
+  await expect(orbit.shell.getByTestId('favorite-tile')).toHaveCount(1)
+  await settled(orbit.shell)
+  const tile = await orbit.shell.locator(`[data-fav-id="${fav}"]`).boundingBox()
+  const to = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${r2}"]`).boundingBox()
+  if (!tile || !to) throw new Error('boxes')
+  await orbit.shell.mouse.move(tile.x + tile.width / 2, tile.y + tile.height / 2)
+  await orbit.shell.mouse.down()
+  await orbit.shell.mouse.move(tile.x + tile.width / 2, tile.y + tile.height / 2 + 8, { steps: 2 })
+  await orbit.shell.mouse.move(to.x + to.width * 0.75, to.y + to.height * 0.1, { steps: 10 })
+  // Onto the lower half of the row's middle band, then let go long before a rest would make a split.
+  await orbit.shell.mouse.move(to.x + to.width * 0.75, to.y + to.height * 0.7)
+  await orbit.shell.mouse.up()
+  await expect.poll(async () => (await state(orbit.app)).spaces[spaceId]?.today).toEqual([r1, r2, fav, r3, r4])
+  await expect(orbit.shell.getByTestId('split-row')).toHaveCount(0)
 })
 
 test('[SV-06] Open in Split View from a multi-selection makes one split in sidebar order', async () => {

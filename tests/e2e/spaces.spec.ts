@@ -153,15 +153,28 @@ test('[SP-08][FL-13] the first Space rubber-bands; a long over-swipe at the last
 
   await run(app, 'spaces.switch', { spaceId: b })
   await settled(shell)
-  // A short over-swipe past the last Space stretches and springs back.
+  // A short over-swipe past the last Space stretches and springs back. The hint shows while it's
+  // stretched; a loaded machine may only look after the spring-back, so a watcher records it.
   await sleep(150)
-  await swipe(shell, 8, 4, 30)
-  await expect(shell.getByTestId('new-space-hint')).toHaveCount(1)
+  await shell.evaluate(() => {
+    const w = window as unknown as { __sawNewHint?: boolean }
+    w.__sawNewHint = false
+    new MutationObserver((_, obs) => {
+      if (!document.querySelector('[data-testid="new-space-hint"]')) return
+      w.__sawNewHint = true
+      obs.disconnect()
+    }).observe(document.body, { childList: true, subtree: true })
+  })
+  await flick(shell, [8, 8, 8, 8], 30)
+  await expect
+    .poll(() => shell.evaluate(() => (window as unknown as { __sawNewHint?: boolean }).__sawNewHint))
+    .toBe(true)
   await settled(shell)
   await expect(shell.getByTestId('new-space-flow')).toHaveCount(0)
-  // A long, hard one opens the new-Space flow on the page past the last Space.
+  // A long, hard one opens the new-Space flow on the page past the last Space. Stamped event
+  // times: a slow runner delivering real wheel events late would end the gesture early.
   await sleep(150)
-  await swipe(shell, 30, 12, 10)
+  await flick(shell, Array(12).fill(30), 10)
   await expect(shell.getByTestId('new-space-flow')).toBeVisible()
   await expect.poll(() => stripX(shell)).toBeCloseTo(-w, 0)
   await shell.getByTestId('new-space-name').fill('Delta')

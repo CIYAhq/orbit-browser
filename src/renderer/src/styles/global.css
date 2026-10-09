@@ -1246,6 +1246,11 @@ html.is-dragging-tab * {
   contain-intrinsic-size: auto 32px;
 }
 
+/* A row growing in is always drawn: skipped mid-growth, it would keep that height once done. */
+.row-slot.is-growing {
+  content-visibility: visible;
+}
+
 /* A tab opened in the background glows briefly so the eye finds it (FL-06). */
 .tab-row.is-new-background {
   animation: row-glow 420ms ease-out;

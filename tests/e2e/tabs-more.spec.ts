@@ -419,6 +419,55 @@ test('[FL-21][SB-23] 200 tabs: the sidebar mounts and scrolls without long main-
   await expect(row(shell, t).getByTestId('tab-title')).toHaveText('Renamed in place')
 })
 
+test('[FL-21] a row that leaves the screen while it grows in still ends at its full height', async () => {
+  const { app, shell } = orbit
+  await app.evaluate(async () => {
+    const g = globalThis as unknown as {
+      __orbit: { run: (n: string, a: unknown, w?: string) => Promise<unknown>; windowIds: () => string[] }
+    }
+    const w = g.__orbit.windowIds()[0]
+    for (let i = 0; i < 60; i++) await g.__orbit.run('tabs.create', { url: `about:blank#t${i}`, activate: false }, w)
+  })
+  await expect(shell.getByTestId('today-list').locator(':scope > [data-slot]')).toHaveCount(60, { timeout: 30_000 })
+  await settled(shell, 30_000)
+  // A new row grows in at the top. Caught mid-growth, the list scrolls far down and the row finishes
+  // off-screen, where rows aren't drawn (content-visibility): it must not keep the height it left with.
+  type Seen = { caught: number; offscreen: number }
+  let seen: Seen | null = null
+  for (let attempt = 0; attempt < 3 && !seen; attempt++) {
+    await shell.evaluate(() => {
+      const sc = document.querySelector('[data-testid="sidebar-scroll"]') as HTMLElement
+      sc.scrollTop = 0
+      const keys = [...document.querySelectorAll<HTMLElement>('.row-slot')].map((e) => e.dataset.key)
+      ;(window as unknown as { __rows: Set<string | undefined> }).__rows = new Set(keys)
+    })
+    const watched = shell.evaluate(
+      () =>
+        new Promise<Seen | null>((resolve) => {
+          const known = (window as unknown as { __rows: Set<string | undefined> }).__rows
+          const sc = document.querySelector('[data-testid="sidebar-scroll"]') as HTMLElement
+          const t0 = performance.now()
+          const tick = () => {
+            const slots = [...document.querySelectorAll<HTMLElement>('.row-slot')]
+            const fresh = slots.find((e) => !known.has(e.dataset.key))
+            if (fresh && fresh.offsetHeight > 0 && fresh.offsetHeight < 30) {
+              const caught = fresh.offsetHeight
+              sc.scrollTop = 1e6
+              setTimeout(() => resolve({ caught, offscreen: fresh.offsetHeight }), 1500)
+            } else if (performance.now() - t0 > 5000) resolve(null)
+            else requestAnimationFrame(tick)
+          }
+          tick()
+        }),
+    )
+    await shell.waitForTimeout(100)
+    await cmd(app, 'tabs.create', { url: `about:blank#late${attempt}`, activate: false })
+    seen = await watched
+  }
+  expect(seen, 'a new row was caught while it grew in').not.toBeNull()
+  expect(seen?.offscreen, `caught at ${seen?.caught}px`).toBe(32)
+})
+
 test('[FD-08][FD-04] folder search lists its tabs, filters as you type and opens the match under the closed folder', async () => {
   const { app, shell } = orbit
   const sp = (await space(app)).id

@@ -16,7 +16,15 @@ import { invoke } from '../../api'
 import { activeTabId } from '../../selectors'
 import { getOrbitState, getSeq, useMirror } from '../../store'
 import { stripSettled } from '../spaces/switcher'
-import { computeDropTarget, type DropTarget, gridDropIndex, ROW_GAP, rowShifts, type Slot } from './dnd-model'
+import {
+  computeDropTarget,
+  type DropTarget,
+  draggedHeight,
+  gridDropIndex,
+  ROW_GAP,
+  rowShifts,
+  type Slot,
+} from './dnd-model'
 import { reducedMotion, STANDARD } from './motion-tokens'
 import { IDLE_DRAG, useDrag, useSelection } from './ui-state'
 
@@ -323,6 +331,17 @@ function listTarget(s: Session, prev: DropTarget | null): DropTarget | null {
       todayContainer: `today:${ctx.spaceId}`,
       counts,
     })
+  // While the pointer rests on a row's middle band, the row holds still: the gap stays on the side
+  // of it where it already is, so the row can't slide out from under the pointer before the rest
+  // makes a split (review W2). A drag that opens no gap (a Favorite tile) moves no row, so there
+  // the pointer's half of the row decides, as on any other row (review M1).
+  const resting = s.splitDwell ? s.slots.find((sl) => sl.key === s.splitDwell?.key) : undefined
+  if (resting && draggedHeight(s.slots, s.dragged) > 0) {
+    const shown = useDrag.getState().shifts[resting.key] ?? 0
+    const before = at(resting.top + resting.height * 0.4)
+    if ((rowShifts(s.slots, s.dragged, before)[resting.key] ?? 0) === shown) return before
+    return at(resting.top + resting.height * 0.6)
+  }
   let target = at(y)
   // Hysteresis: keep the current slot until the pointer is a few pixels past the boundary.
   if (prev && !sameTarget(prev, target)) {
