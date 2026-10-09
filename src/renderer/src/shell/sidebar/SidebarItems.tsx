@@ -63,7 +63,10 @@ export const SidebarItems = memo(function SidebarItems({
   useShellUndo()
   // A selection belongs to what the window shows: switching Space, or selecting a tab outside it,
   // ends it (lane review MF-3).
+  const shownSpace = useRef(spaceId)
   useEffect(() => {
+    if (shownSpace.current === spaceId) return
+    shownSpace.current = spaceId
     clearSelection()
   }, [spaceId])
   useEffect(() => {
