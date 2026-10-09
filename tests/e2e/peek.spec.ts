@@ -61,6 +61,18 @@ async function settledPeek(): Promise<string> {
   await expect.poll(async () => (await overlayOf(orbit.app)).kind).toBe('peek')
   const overlay = await overlayOf(orbit.app)
   const tabId = overlay.kind === 'peek' ? overlay.tabId : ''
+  // The open spring has run to its end ('peek:opened' after this Peek's 'peek:open', in main's clock).
+  // The page view follows the card frame by frame, so on a slow machine (the macOS CI VM) it also sits
+  // on the card mid-flight.
+  await expect
+    .poll(() =>
+      orbit.app.evaluate(() => {
+        const marks = (globalThis as unknown as OrbitGlobal).__orbit.ctx.perf.marks
+        const open = marks.filter((m) => m.name === 'peek:open').pop()
+        return !!open && marks.some((m) => m.name === 'peek:opened' && m.t >= open.t)
+      }),
+    )
+    .toBe(true)
   const overlayPage = await viewPage(orbit.app, 'overlay')
   // Settled: the page view sits exactly where the overlay draws the card.
   await expect
@@ -431,7 +443,7 @@ test('[PK-02] same-site links navigate the pinned tab; target=_blank to another 
   await expect(page.locator('#title')).toHaveText('App-Same')
   await page.locator('#other-blank').click({ noWaitAfter: true })
   const peekTab = await settledPeek()
-  expect((await viewInfo(orbit.app, peekTab)).url).toBe(sites.other('/site/OtherBlank'))
+  await expect.poll(async () => (await viewInfo(orbit.app, peekTab)).url).toBe(sites.other('/site/OtherBlank'))
   // Favorites behave the same.
   await pressInTab(orbit.app, peekTab, 'Escape')
   const fav = await pinned('/site/Fav', 'favorites')

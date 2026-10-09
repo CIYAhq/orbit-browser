@@ -145,7 +145,11 @@ class PeekAnimator {
 
     if (phase === 'open') {
       if (reduced) {
-        this.tween(FADE_MS, (t) => this.draw({ rect: card, radius: PEEK_RADIUS, dim: t, chrome: 1, page: true }))
+        this.tween(
+          FADE_MS,
+          (t) => this.draw({ rect: card, radius: PEEK_RADIUS, dim: t, chrome: 1, page: true }),
+          () => perfMark('peek:opened'),
+        )
         return
       }
       const from = this.frame?.rect ?? peekStart(card, a, this.overlay.origin)
