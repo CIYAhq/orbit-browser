@@ -248,6 +248,9 @@ function RowSlot({
   const [flying, setFlying] = useState(!!travel)
   // Rows that arrive or leave through a drag appear/disappear at once (the ghost covers them).
   const [instant] = useState(() => !!travel || hidden || reducedMotion() || !claimEnterAnimation())
+  // Drawn while it grows in, even off-screen (.is-growing): a skipped row would keep the height it had
+  // when it left the screen, its last remembered size, once its height is auto again (FL-21).
+  const [growing, setGrowing] = useState(!instant)
   useLayoutEffect(() => {
     if (!travel) return
     departed.delete(id)
@@ -275,12 +278,14 @@ function RowSlot({
   return (
     <motion.div
       ref={ref}
-      className={`${className}${hidden || leaving ? ' is-drag-hidden' : ''}${flying ? ' is-travelling' : ''}${splitSide ? ` is-split-target is-split-${splitSide}` : ''}`}
+      className={`${className}${hidden || leaving ? ' is-drag-hidden' : ''}${flying ? ' is-travelling' : ''}${growing ? ' is-growing' : ''}${splitSide ? ` is-split-target is-split-${splitSide}` : ''}`}
       style={{ y, x }}
       variants={rowVariants}
       custom={{ stagger: order !== undefined, index: order }}
-      onAnimationComplete={() => {
+      onAnimationComplete={(definition) => {
         if (!present) exitOrder.delete(id)
+        // One more frame drawn at full height, so that is the size the row remembers.
+        else if (definition === 'shown' && growing) requestAnimationFrame(() => setGrowing(false))
       }}
       initial={instant ? false : 'hidden'}
       animate="shown"
