@@ -576,3 +576,56 @@ test('[CB-14] typing "/ " at the start enters actions mode', async () => {
   await expect(bar(overlay).getByTestId('command-chip')).toHaveText('Actions')
   await expect(input(overlay)).toHaveValue('')
 })
+
+test('[CB-22][FL-16] the bar scales in normally and only fades with reduced motion', async () => {
+  const overlay = await viewPage(orbit.app, 'overlay')
+  /** Transforms of the live bar over its first frames. */
+  const sampleOpen = async () => {
+    const samples = overlay.evaluate(
+      () =>
+        new Promise<string[]>((resolve) => {
+          const out: string[] = []
+          const tick = () => {
+            const el = document.querySelector('[data-testid="command-bar"]')
+            if (el) out.push(getComputedStyle(el).transform)
+            if (out.length >= 10) resolve(out)
+            else requestAnimationFrame(tick)
+          }
+          requestAnimationFrame(tick)
+        }),
+    )
+    await orbit.shell.keyboard.press(`${MOD}+T`)
+    const result = await samples
+    await overlay.keyboard.press('Escape')
+    await expect(bar(overlay)).toHaveCount(0)
+    return result
+  }
+  const identity = (t: string) => t === 'none' || t === 'matrix(1, 0, 0, 1, 0, 0)'
+  expect((await sampleOpen()).some((t) => !identity(t))).toBe(true)
+  await overlay.emulateMedia({ reducedMotion: 'reduce' })
+  expect((await sampleOpen()).every(identity)).toBe(true)
+})
+
+test('[CB-05] history survives a restart and still feeds the bar', async () => {
+  const id = await newTab('Persistent page')
+  await run(orbit.app, 'tabs.navigate', { tabId: id, url: fx.url('/page/Elsewhere') })
+  await expect.poll(async () => (await state(orbit.app)).tabs[id]?.title).toBe('Elsewhere')
+  const { userData } = orbit
+  await orbit.app.close()
+  orbit = await launchOrbit({ userData })
+  await blockNetwork(orbit.app)
+  await (await viewPage(orbit.app, 'overlay')).getByTestId('overlay').waitFor({ state: 'attached' })
+  const overlay = await openBar()
+  await overlay.keyboard.type('persistent')
+  await expect(rows(overlay).filter({ hasText: 'Persistent page' })).toHaveAttribute('data-kind', 'history')
+})
+
+test('[CB-12][KS-04] ⌘⌥V / Ctrl+Alt+V opens the clipboard URL as a new tab', async () => {
+  const url = fx.url('/page/Pasted')
+  await orbit.app.evaluate(async ({ clipboard }, u) => {
+    await clipboard.writeText(u)
+  }, url)
+  await orbit.shell.keyboard.press(process.platform === 'darwin' ? 'Meta+Alt+V' : 'Control+Alt+V')
+  await expect.poll(tabCount).toBe(1)
+  expect(Object.values((await state(orbit.app)).tabs)[0]?.url).toBe(url)
+})

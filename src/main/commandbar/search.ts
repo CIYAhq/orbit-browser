@@ -13,9 +13,6 @@ import { pastSearchOf, type RankInput, rank } from './rank'
 import { SourceCache } from './sources'
 import { parseSuggestions } from './suggest'
 
-/** Keystroke → results timings (ms) of the last queries, for tests and tuning. */
-export const queryTimings: number[] = []
-
 /**
  * The command bar's main-process side: ranks open tabs, history, archived
  * tabs, Spaces, actions and the typed URL/search per keystroke (no state
@@ -46,10 +43,10 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
   }
 
   /** A URL on the clipboard (CB-12); never holds up the empty state for long. */
-  const clipboardUrl = async (): Promise<string | undefined> => {
+  const clipboardUrl = async (timeoutMs = 40): Promise<string | undefined> => {
     const text = await Promise.race([
       clipboard.readText().catch(() => ''),
-      new Promise<string>((resolve) => setTimeout(() => resolve(''), 40)),
+      new Promise<string>((resolve) => setTimeout(() => resolve(''), timeoutMs)),
     ])
     const trimmed = text.trim()
     if (!trimmed || trimmed.length > 2048 || /\s/.test(trimmed)) return undefined
@@ -97,11 +94,7 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
   commands.register('search.query', async (args, c) => {
     const wantsClipboard = args.mode === 'new-tab' && !args.query.trim() && !args.actionsOnly && !args.siteSearchId
     const clip = wantsClipboard ? await clipboardUrl() : undefined
-    const t0 = performance.now()
-    const response = rank(buildInput(args, windowOf(c), clip))
-    queryTimings.push(performance.now() - t0)
-    if (queryTimings.length > 200) queryTimings.splice(0, 100)
-    return response
+    return rank(buildInput(args, windowOf(c), clip))
   })
 
   // Warm per-entry caches and the JIT once history has loaded, so the first keystroke is as fast as later ones.
@@ -284,6 +277,15 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
         .map((e) => e.url)
       for (const url of urls) await hs.delete(url)
     }
+  })
+
+  // TB-02 / CB-12 / KS-04: ⌘⌥V (Ctrl+Alt+V) opens the clipboard URL as a new Today tab.
+  actions.register('tab.pasteUrl', async (c) => {
+    const windowId = windowOf(c)
+    closeBar(windowId)
+    const url = await clipboardUrl(250)
+    if (url) await commands.run('tabs.create', { url }, { windowId })
+    else ctx.toast(windowId, 'No URL on the clipboard')
   })
 
   // KS-19: while the bar is open, ⌘W closes the bar rather than the tab.

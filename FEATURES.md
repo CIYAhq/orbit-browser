@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 19 built (33 partial) · 27 tested · 0 feel right.
+**Totals:** 485 spec’d · 20 built (32 partial) · 27 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
 | P0 | 174 | 17 | 21 |
-| P1 | 221 | 2 | 6 |
+| P1 | 221 | 3 | 6 |
 | P2 | 83 | 0 | 0 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -177,7 +177,7 @@ Spec: `spec/commandbar.md`
 | CB-09 | Switch to an open tab instead of duplicating | P0 | ✅ | ✅ e2e+unit | – | switches to the tab (and its Space) instead of duplicating; exact URL match tops the list; ⌥/Alt+Enter opens a copy |
 | CB-10 | Keyboard navigation inside the bar | P0 | ✅ | ✅ e2e | – | ↑/↓ (⌃N/⌃P on macOS), Enter, hover, aria-activedescendant; ⌘⌥⌫ / Shift+Delete removes history rows |
 | CB-11 | Site search with Tab (search a site directly) | P0 | ✅ | ✅ e2e+unit | – | keyword or site-name prefix + Tab → chip; Backspace/Esc leaves; starter list in settings.siteSearch (editing UI is ST-06) |
-| CB-12 | Paste and go | P1 | 🟡 partial | ✅ e2e | – | Paste and go row first in the empty state; the ⌘⌥V action belongs to TB-02 |
+| CB-12 | Paste and go | P1 | ✅ | ✅ e2e | – | Paste and go row first in the empty state; ⌘⌥V / Ctrl+Alt+V (tab.pasteUrl) opens the clipboard URL |
 | CB-13 | Actions (browser commands by name) | P0 | 🟡 partial | ✅ e2e+unit | – | every registered action by name/synonym/initials with its shortcut; Move to / Pin to [Space]; Open [Folder]; tab-only actions hidden on empty Spaces; many catalogue actions do not exist yet |
 | CB-14 | Actions-only mode (Tab on an empty field) | P1 | ✅ | ✅ e2e+unit | – | Tab on an empty field or '/ ' at the start → Actions chip; Esc/Backspace leaves |
 | CB-15 | Default search engine fallback | P0 | ✅ | ✅ e2e+unit | – | default engine search row and destination (q=a+b); engine suggestions opt-in (settings.searchSuggestions, off by default), non-blocking with a 1.5 s timeout |
@@ -350,7 +350,7 @@ Spec: `spec/shortcuts.md`
 | KS-01 | One keymap, remapping and persistence | P0 | – | – | – |  |
 | KS-02 | Conflicts with web pages ("prefer websites" vs "prefer Orbit") | P0 | – | – | – |  |
 | KS-03 | Platform mapping rules | P0 | – | – | – |  |
-| KS-04 | Command bar and address | P0 | 🟡 partial | ✅ e2e | – | all command bar keys except ⇧Enter (CB-16) and ⌘⌥V (TB-02) |
+| KS-04 | Command bar and address | P0 | 🟡 partial | ✅ e2e | – | every command bar key incl. ⌘⌥V; only ⇧Enter (CB-16, a P2 option) is missing |
 | KS-05 | Tabs and windows | P0 | – | – | – |  |
 | KS-06 | Switching tabs | P0 | – | – | – |  |
 | KS-07 | Spaces | P0 | – | – | – |  |

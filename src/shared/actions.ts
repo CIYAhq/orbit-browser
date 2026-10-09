@@ -77,6 +77,14 @@ export const ACTIONS: ActionDef[] = [
   },
   { id: 'tab.toggleMute', title: 'Mute / Unmute Tab', category: 'Tabs', keywords: ['audio', 'sound'] },
   {
+    id: 'tab.pasteUrl',
+    title: 'Paste URL as New Tab',
+    category: 'Tabs',
+    mac: ['Cmd+Alt+V'],
+    other: ['Ctrl+Alt+V'],
+    keywords: ['clipboard', 'open'],
+  },
+  {
     id: 'tabs.clearToday',
     title: 'Clear Today Tabs',
     category: 'Tabs',

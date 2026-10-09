@@ -22,7 +22,7 @@ interface Layout {
 /** Actions the bar never lists (they open the bar itself). */
 const NOT_IN_BAR = new Set(['tab.new', 'url.edit'])
 /** Actions that work without a current tab even though their id says otherwise. */
-const NO_TAB_NEEDED = new Set(['tab.reopenClosed', 'tab.next', 'tab.previous'])
+const NO_TAB_NEEDED = new Set(['tab.reopenClosed', 'tab.next', 'tab.previous', 'tab.pasteUrl'])
 
 export function actionNeedsTab(id: string, category: string): boolean {
   if (NO_TAB_NEEDED.has(id)) return false
