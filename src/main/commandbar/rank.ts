@@ -16,7 +16,7 @@ import { findSiteSearch, type SearchResponse, type SearchResult } from '../../sh
 import type { CommandBarMode, FolderId, SiteSearchEngine, SpaceId, TabId } from '../../shared/state'
 import { fillSearchTemplate, parseInput, SEARCH_ENGINES } from '../../shared/url'
 import { frecency, type HostInfo, type IndexedEntry, urlKeyOf } from '../history/store'
-import { type DocMatch, matchDoc, matchName, terms as splitTerms } from './match'
+import { type DocMatch, initials, matchDoc, matchName, terms as splitTerms } from './match'
 
 export const MAX_RESULTS = 9
 const EMPTY_STATE_ROWS = 6
@@ -73,6 +73,37 @@ export interface ActionDoc {
   initials: string
   /** Hidden when there is no current tab (CB-13). */
   needsTab: boolean
+  /** Target Space of a "Move to / Pin to [Space]" action (TB-11, PN-02, SP-22). */
+  spaceId?: SpaceId
+}
+
+/** Bar-only actions with a Space parameter; search.open carries them out. */
+export const SPACE_ACTIONS = [
+  { id: 'tab.moveToSpace', verb: 'Move to' },
+  { id: 'tab.pinToSpace', verb: 'Pin to' },
+] as const
+
+/** "Move to [Space]" / "Pin to [Space]" for every other Space, when there is a current tab. */
+function spaceActions(input: RankInput): ActionDoc[] {
+  if (!input.activeTabId) return []
+  const out: ActionDoc[] = []
+  for (const s of input.spaces) {
+    if (s.id === input.currentSpaceId) continue
+    for (const { id, verb } of SPACE_ACTIONS) {
+      const title = `${verb} ${s.name}`
+      const titleLower = title.toLowerCase()
+      out.push({
+        id,
+        title,
+        titleLower,
+        keywords: ['tab', 'space'],
+        initials: initials(titleLower),
+        needsTab: true,
+        spaceId: s.id,
+      })
+    }
+  }
+  return out
 }
 
 export type SiteSearch = SiteSearchEngine
@@ -303,11 +334,12 @@ function urlRow(url: string, score = 0): SearchResult {
 
 function actionRow(a: ActionDoc, score: number): SearchResult {
   return {
-    id: `action:${a.id}`,
+    id: a.spaceId ? `action:${a.id}:${a.spaceId}` : `action:${a.id}`,
     kind: 'action',
     title: a.title,
     label: 'Action',
     actionId: a.id,
+    ...(a.spaceId ? { spaceId: a.spaceId } : {}),
     ...(a.shortcut ? { shortcut: a.shortcut } : {}),
     score,
   }
@@ -487,11 +519,13 @@ export function rank(input: RankInput): SearchResponse {
       })
     }
 
-    for (const a of input.actions) {
-      if (a.needsTab && !input.activeTabId) continue
-      const m = actionMatch(ts, lower, a)
-      if (m.score === 0) continue
-      actions.add({ r: actionRow(a, 150 + m.score), strong: m.strong, prio: 0 })
+    for (const list of [input.actions, spaceActions(input)]) {
+      for (const a of list) {
+        if (a.needsTab && !input.activeTabId) continue
+        const m = actionMatch(ts, lower, a)
+        if (m.score === 0) continue
+        actions.add({ r: actionRow(a, 150 + m.score), strong: m.strong, prio: 0 })
+      }
     }
   }
 
@@ -633,7 +667,7 @@ function actionResults(input: RankInput, q: string, max: number): SearchResult[]
   const ts = splitTerms(q)
   const lower = q.toLowerCase()
   const out: SearchResult[] = []
-  for (const a of input.actions) {
+  for (const a of [...input.actions, ...spaceActions(input)]) {
     if (a.needsTab && !input.activeTabId) continue
     if (!q) {
       out.push(actionRow(a, 0))

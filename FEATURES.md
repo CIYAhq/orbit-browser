@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 18 built (34 partial) · 27 tested · 0 feel right.
+**Totals:** 485 spec’d · 19 built (33 partial) · 27 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
 | P0 | 174 | 17 | 21 |
-| P1 | 221 | 1 | 6 |
+| P1 | 221 | 2 | 6 |
 | P2 | 83 | 0 | 0 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -144,7 +144,7 @@ Spec: `spec/spaces.md`
 | SP-19 | Theme transition between Spaces | P1 | – | – | – |  |
 | SP-20 | Per-Space pinned and Today sections | P0 | – | – | – |  |
 | SP-21 | Move tabs between Spaces | P0 | – | – | – |  |
-| SP-22 | Spaces in the command bar | P1 | – | ✅ e2e | – |  |
+| SP-22 | Spaces in the command bar | P1 | – | ✅ e2e+unit | – |  |
 | SP-23 | Spaces across windows | P0 | – | – | – |  |
 | SP-24 | What a new window shows | P0 | – | – | – |  |
 | SP-25 | Spaces menu in the app menu | P2 | – | – | – |  |
@@ -178,8 +178,8 @@ Spec: `spec/commandbar.md`
 | CB-10 | Keyboard navigation inside the bar | P0 | ✅ | ✅ e2e | – | ↑/↓ (⌃N/⌃P on macOS), Enter, hover, aria-activedescendant; ⌘⌥⌫ / Shift+Delete removes history rows |
 | CB-11 | Site search with Tab (search a site directly) | P0 | ✅ | ✅ e2e+unit | – | keyword or site-name prefix + Tab → chip; Backspace/Esc leaves; starter list in settings.siteSearch (editing UI is ST-06) |
 | CB-12 | Paste and go | P1 | 🟡 partial | ✅ e2e | – | Paste and go row first in the empty state; the ⌘⌥V action belongs to TB-02 |
-| CB-13 | Actions (browser commands by name) | P0 | 🟡 partial | ✅ e2e+unit | – | every registered action is searchable by name/synonym/initials with its shortcut, tab-only actions hidden on empty Spaces; many catalogue actions do not exist yet |
-| CB-14 | Actions-only mode (Tab on an empty field) | P1 | 🟡 partial | ✅ e2e+unit | – | Tab on an empty field → Actions chip; Esc/Backspace leaves; the '/ ' prefix (P2) is not done |
+| CB-13 | Actions (browser commands by name) | P0 | 🟡 partial | ✅ e2e+unit | – | every registered action by name/synonym/initials with its shortcut; Move to / Pin to [Space]; Open [Folder]; tab-only actions hidden on empty Spaces; many catalogue actions do not exist yet |
+| CB-14 | Actions-only mode (Tab on an empty field) | P1 | ✅ | ✅ e2e+unit | – | Tab on an empty field or '/ ' at the start → Actions chip; Esc/Backspace leaves |
 | CB-15 | Default search engine fallback | P0 | ✅ | ✅ e2e+unit | – | default engine search row and destination (q=a+b); engine suggestions opt-in (settings.searchSuggestions, off by default), non-blocking with a 1.5 s timeout |
 | CB-16 | Open the top web result directly (Shift+Enter) | P2 | – | – | – |  |
 | CB-17 | Remove a suggestion | P1 | ✅ | ✅ e2e+unit | – | hover × and ⌘⌥⌫ / Shift+Delete delete history and past-search rows |

@@ -165,6 +165,19 @@ describe('ranking', () => {
     expect(ids).not.toContain('tab:t-1')
   })
 
+  it('[CB-13][SP-22] offers "Move to" and "Pin to" every other Space for the current tab', () => {
+    const r = rank(input('move to', { activeTabId: 't-1', tabs: [tab('t-1', 'Current', 'https://cur.example/')] }))
+    expect(r.results.find((x) => x.title === 'Move to Work')).toMatchObject({
+      kind: 'action',
+      actionId: 'tab.moveToSpace',
+      spaceId: 's-b',
+      id: 'action:tab.moveToSpace:s-b',
+    })
+    expect(r.results.some((x) => x.title === 'Move to Home')).toBe(false) // the current Space
+    expect(rank(input('pin to work', { activeTabId: 't-1' })).results[0]?.actionId).toBe('tab.pinToSpace')
+    expect(rank(input('move to')).results.some((x) => x.actionId === 'tab.moveToSpace')).toBe(false)
+  })
+
   it('[CB-13] hides actions that need a tab when the Space is empty', () => {
     const r = rank(input('pin'))
     expect(r.results.some((x) => x.actionId === 'tab.togglePin')).toBe(false)

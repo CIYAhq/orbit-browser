@@ -553,3 +553,26 @@ test('[CB-20] clicking a tab in the sidebar while the bar is open selects it in 
   await expect.poll(() => activeTabId(orbit.app)).toBe(first)
   expect(await tabCount()).toBe(2)
 })
+
+test('[SP-22][CB-13] "Move to [Space]" moves the current tab there; this Space stays in view', async () => {
+  const keep = await newTab('Stays here')
+  const moving = await newTab('Goes to Work')
+  const spaceA = (await state(orbit.app)).spaceOrder[0] as string
+  const spaceB = (await run(orbit.app, 'spaces.create', { name: 'Work', activate: false })) as string
+  const overlay = await openBar()
+  await overlay.keyboard.type('move to work')
+  await expect(rows(overlay).first()).toContainText('Move to Work')
+  await overlay.keyboard.press('Enter')
+  await expect.poll(async () => (await state(orbit.app)).spaces[spaceB]?.today).toEqual([moving])
+  const s = await state(orbit.app)
+  expect(s.spaces[spaceA]?.today).toEqual([keep])
+  expect(Object.values(s.windows)[0]?.spaceId).toBe(spaceA)
+  expect(await activeTabId(orbit.app)).toBe(keep)
+})
+
+test('[CB-14] typing "/ " at the start enters actions mode', async () => {
+  const overlay = await openBar()
+  await overlay.keyboard.type('/ ')
+  await expect(bar(overlay).getByTestId('command-chip')).toHaveText('Actions')
+  await expect(input(overlay)).toHaveValue('')
+})

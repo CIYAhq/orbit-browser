@@ -300,6 +300,11 @@ export function CommandBar({
     const inputType = (e.nativeEvent as InputEvent).inputType ?? ''
     const deleting = inputType.startsWith('delete')
     const v = input.value
+    // "/ " at the start is the older way into actions mode (CB-14).
+    if (!st.scope && v === '/ ' && !deleting) {
+      setScope({ kind: 'actions' })
+      return
+    }
     st.typed = v
     st.noAuto = deleting
     // Keep a still-matching completion while typing forward, so it never flickers (CB-08, FL-17).
