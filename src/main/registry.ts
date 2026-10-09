@@ -51,18 +51,13 @@ export interface ActionContext {
   windowId?: WindowId
 }
 
+/** Takes an action over before its handler runs (e.g. an open Peek handles Close Tab). True when handled. */
+export type ActionInterceptor = (id: string, ctx: ActionContext) => boolean
+
 /** User-facing actions (shortcuts, menu, command bar) keyed by ActionDef id. */
 export class ActionRegistry {
   private handlers = new Map<string, (ctx: ActionContext) => void | Promise<void>>()
-  private interceptors: ((id: string, ctx: ActionContext) => boolean)[] = []
-
-  /**
-   * Lets an open overlay claim an action before its handler runs (KS-19), e.g.
-   * ⌘W closes the command bar instead of the tab. Return true to consume it.
-   */
-  intercept(fn: (id: string, ctx: ActionContext) => boolean): void {
-    this.interceptors.push(fn)
-  }
+  private interceptors: ActionInterceptor[] = []
 
   register(id: string, handler: (ctx: ActionContext) => void | Promise<void>): void {
     this.handlers.set(id, handler)
@@ -72,8 +67,17 @@ export class ActionRegistry {
     return this.handlers.has(id)
   }
 
+  /**
+   * Lets a feature act first while it is in charge of a window (an open overlay such as the
+   * command bar or a Peek card, a Mini Window; KS-19), e.g. ⌘W closes the command bar instead of
+   * the tab. The first interceptor that returns true handles the action instead of its handler.
+   */
+  intercept(interceptor: ActionInterceptor): void {
+    this.interceptors.push(interceptor)
+  }
+
   async run(id: string, ctx: ActionContext): Promise<void> {
-    for (const fn of this.interceptors) if (fn(id, ctx)) return
+    for (const interceptor of this.interceptors) if (interceptor(id, ctx)) return
     const handler = this.handlers.get(id)
     if (!handler) {
       console.warn(`[actions] no handler for ${id}`)
