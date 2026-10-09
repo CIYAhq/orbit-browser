@@ -152,6 +152,9 @@ function Divider({ divider, splitId, engine }: { divider: DividerBox; splitId: s
     <div
       ref={(el) => engine.registerDivider(key, el)}
       className={`split-divider split-divider--${divider.axis}`}
+      role="separator"
+      aria-orientation={divider.axis === 'row' ? 'vertical' : 'horizontal'}
+      aria-label="Resize panes (double-click to even them out)"
       data-testid="split-divider"
       data-axis={divider.axis}
       onPointerDown={(e) => {
