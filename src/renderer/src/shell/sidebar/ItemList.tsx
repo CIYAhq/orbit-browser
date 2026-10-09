@@ -16,6 +16,7 @@ import { invoke, isMac } from '../../api'
 import { activeTabId } from '../../selectors'
 import { getOrbitState, useMirror, useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
+import { CaptureIndicator } from '../media/CaptureIndicator'
 import { pressItem } from './drag'
 import { QUICK_EASE, reducedMotion, SNAPPY, SNAPPY_EASE, STANDARD } from './motion-tokens'
 import { RenameField } from './RenameField'
@@ -457,6 +458,8 @@ export const TabRowBody = memo(function TabRowBody({ tabId, depth }: { tabId: st
           )}
         </span>
       )}
+      {/* Media lane: camera / microphone in use (TB-15). */}
+      <CaptureIndicator media={tab.media} />
       {(tab.audible || tab.muted) && (
         <button
           type="button"

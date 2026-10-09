@@ -61,6 +61,42 @@ export interface Tab {
   progress?: number
   /** Set when the page crashed or failed to load. */
   error?: { code: number; description: string }
+  /** Runtime-only: the page's media, PiP and tray state (media lane, see shared/media.ts). */
+  media?: TabMedia
+}
+
+/** What Orbit knows about a tab's media (runtime-only; reported by Orbit's page script). */
+export interface TabMedia {
+  /** Unmuted media is playing in the page (or the tab is audible). */
+  playing: boolean
+  /** Any media element is playing, muted ones included (keeps the tab awake, MD-12). */
+  active: boolean
+  /** Orbit found a media element it can play, pause and seek. */
+  controllable: boolean
+  /** The page's main media is a video with frames (it can go to picture-in-picture). */
+  video: boolean
+  /** A video of this tab is in picture-in-picture. */
+  pip: boolean
+  /** That picture-in-picture was opened automatically when the tab was left (MD-01). */
+  autoPip?: boolean
+  /** Track details from the page's Media Session, when it sets them. */
+  title?: string
+  artist?: string
+  /** The main media has a known length: seeking, next and previous work. */
+  seekable: boolean
+  /** The main media played to its end. */
+  ended: boolean
+  /** Shown in the sidebar media tray (MD-09, MD-10). */
+  tray: boolean
+  /** When it joined the tray (newest on top). */
+  since: number
+  /** Closed from the tray: stays out of it until it plays again. */
+  dismissed?: boolean
+  /** Camera / microphone in use, as far as Orbit can see (TB-15, MD-11, MD-14). */
+  mic?: boolean
+  micMuted?: boolean
+  camera?: boolean
+  cameraOff?: boolean
 }
 
 export interface Folder {
@@ -165,6 +201,10 @@ export interface Settings {
   peekExternalLinks: boolean
   /** Auto picture-in-picture when leaving a tab that plays video. */
   autoPip: boolean
+  /** Sites (hosts) where automatic picture-in-picture is always off (MD-08). */
+  pipOffSites?: string[]
+  /** Sites where automatic picture-in-picture is off until a time in ms ("Turn off for today", MD-08). */
+  pipSnoozed?: Record<string, number>
   /** Links opened from other apps open in a Mini Window. */
   miniWindowForExternalLinks: boolean
   onboarded: boolean

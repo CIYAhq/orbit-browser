@@ -2,6 +2,7 @@ import { type PointerEvent as ReactPointerEvent, useMemo, useRef } from 'react'
 import type { WindowState } from '../../../../shared/state'
 import { invoke } from '../../api'
 import { useOrbit } from '../../store'
+import { MediaTray } from '../media/MediaTray'
 import { SidebarItems } from './SidebarItems'
 import { SpaceBar } from './SpaceBar'
 import { TopBar } from './TopBar'
@@ -25,6 +26,8 @@ export function Sidebar({ win }: { win: WindowState }) {
     <aside className="sidebar" data-testid="sidebar" aria-hidden={!win.sidebar.visible}>
       <TopBar win={win} />
       <SidebarItems spaceId={win.spaceId} header={header} />
+      {/* Media lane: transient media tray above the bottom bar (SB-10, MD-09). */}
+      <MediaTray />
       <SpaceBar win={win} />
       <ResizeHandle width={win.sidebar.width} />
     </aside>

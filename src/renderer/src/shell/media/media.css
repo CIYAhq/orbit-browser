@@ -1,0 +1,197 @@
+/* Sidebar media tray (media lane; MD-09, MD-10, MD-14, SB-10). Colours come from the Space palette. */
+
+.media-tray {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.media-tray__slot {
+  overflow: hidden;
+}
+
+.media-ctl {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 44px;
+  margin-top: 4px;
+  padding: 0 4px 0 2px;
+  border-radius: var(--radius-row);
+  background: var(--active);
+  box-shadow: var(--active-shadow);
+}
+
+.media-ctl__source {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 4px 0 6px;
+  border-radius: 6px;
+  text-align: left;
+}
+
+.media-ctl__source:focus-visible,
+.media-ctl__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.media-ctl__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--hover);
+}
+
+.media-ctl__emoji {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.media-ctl__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.media-ctl__title {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  font-weight: 500;
+  font-size: 12.5px;
+}
+
+.media-ctl__title-inner {
+  display: inline-block;
+}
+
+.media-ctl__title:not(.is-scrolling) .media-ctl__title-inner {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: top;
+}
+
+.media-ctl__title.is-scrolling .media-ctl__title-inner {
+  animation: media-marquee var(--marquee-time, 8s) linear infinite alternate;
+}
+
+@keyframes media-marquee {
+  0%,
+  20% {
+    transform: translateX(0);
+  }
+  80%,
+  100% {
+    transform: translateX(var(--marquee-shift, 0));
+  }
+}
+
+.media-ctl__sub {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.media-ctl__buttons {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.media-ctl__btn {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--text);
+  transition:
+    background var(--dur-fast) ease,
+    transform 90ms ease;
+}
+
+.media-ctl__btn:hover {
+  background: var(--hover);
+}
+
+.media-ctl__btn:active {
+  transform: scale(0.9);
+}
+
+.media-ctl__btn.is-on {
+  color: #d64545;
+}
+
+/* Previous and × show on hover (or keyboard focus), like a tab row's close button. */
+.media-ctl__hover {
+  display: none;
+}
+
+.media-ctl:hover .media-ctl__hover,
+.media-ctl:focus-within .media-ctl__hover {
+  display: grid;
+}
+
+/* A call in progress: its source icon pulses red (MD-14, TB-15). */
+.media-ctl.is-call .media-ctl__icon {
+  box-shadow: 0 0 0 1.5px #e5484d;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .media-ctl__title.is-scrolling .media-ctl__title-inner {
+    animation: none;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: top;
+  }
+  .media-ctl__btn {
+    transition: none;
+  }
+  .media-ctl__btn:active {
+    transform: none;
+  }
+}
+
+/* Camera / microphone in use: a pulsing red mark on the tab row (TB-15, MD-11). */
+.capture-indicator {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 2px;
+  border-radius: 50%;
+  color: #fff;
+  background: #e5484d;
+  animation: capture-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes capture-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(229, 72, 77, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(229, 72, 77, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .capture-indicator {
+    animation: none;
+  }
+}
