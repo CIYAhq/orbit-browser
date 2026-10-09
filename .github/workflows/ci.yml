@@ -20,7 +20,9 @@ permissions:
 
 env:
   ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
-  ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+  # Outside the repo: electron-builder unpacks CommonJS helpers here, and the repo's
+  # package.json ("type": "module") would make Node load them as ES modules.
+  ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/../electron-builder-cache
 
 jobs:
   checks:
@@ -79,7 +81,7 @@ jobs:
         with:
           path: |
             .cache/electron
-            .cache/electron-builder
+            ${{ github.workspace }}/../electron-builder-cache
           key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
       - run: npm run build
