@@ -631,3 +631,19 @@ test('[CB-12][KS-04] ⌘⌥V / Ctrl+Alt+V opens the clipboard URL as a new tab',
   await expect.poll(tabCount).toBe(1)
   expect(Object.values((await state(orbit.app)).tabs)[0]?.url).toBe(url)
 })
+
+test('[CB-22] IME composition: Enter while composing commits the text and runs nothing', async () => {
+  const overlay = await openBar()
+  const cdp = await overlay.context().newCDPSession(overlay)
+  await cdp.send('Input.imeSetComposition', { text: 'ㅎ', selectionStart: 1, selectionEnd: 1 })
+  await cdp.send('Input.imeSetComposition', { text: '하', selectionStart: 1, selectionEnd: 1 })
+  // Enter while the composition is active must not choose a row.
+  const enter = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }
+  await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...enter })
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...enter })
+  await cdp.send('Input.insertText', { text: '한' })
+  await expect(input(overlay)).toHaveValue('한')
+  await expect(rows(overlay).first().getByTestId('command-result-title')).toHaveText('한')
+  expect(await tabCount()).toBe(0)
+  await expect(bar(overlay)).toBeVisible()
+})
