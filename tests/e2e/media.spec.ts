@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { type ElectronApplication, _electron as electron, expect, type Page, test } from '@playwright/test'
 import type { MediaTestHooks } from '../../src/main/media'
-import type { PlayerInfo } from '../../src/main/media/player'
+import type { PlayerHost, PlayerInfo } from '../../src/main/media/player'
 import { formatClock } from '../../src/shared/media'
 import type { TabMedia } from '../../src/shared/state'
 import { FRAME_SLACK, launchOrbit, type Orbit, state, tabPage, tabView, viewPage } from './helpers'
@@ -1133,4 +1133,204 @@ test('[MD-13][MD-14] leaving a call floats the participant with call controls; c
   await expect(ctl.getByTestId('media-camera')).toBeVisible()
   await ctl.getByTestId('media-source').click()
   await expect.poll(() => activeId(app)).toBe(c.id)
+})
+
+// ---- Media in Split View (MD-01, MD-11) ----
+
+type ElectronMenu = { items: { label: string; enabled: boolean; submenu?: ElectronMenu | null; click: () => void }[] }
+
+/** From now on, native popup menus are recorded instead of shown (the split row's right-click menu). */
+async function recordMenus(app: ElectronApplication): Promise<void> {
+  await app.evaluate(({ Menu }) => {
+    const g = globalThis as unknown as { __shownMenu?: unknown }
+    Menu.prototype.popup = function popup(this: unknown) {
+      g.__shownMenu = this
+    }
+  })
+}
+
+/** The last recorded popup menu's items, as "Item > Subitem" paths. */
+function shownMenu(app: ElectronApplication): Promise<string[]> {
+  return app.evaluate(() => {
+    const walk = (m: ElectronMenu | null | undefined, prefix: string): string[] =>
+      (m?.items ?? []).flatMap((i) => [prefix + i.label, ...walk(i.submenu, `${prefix}${i.label} > `)])
+    return walk((globalThis as unknown as { __shownMenu?: ElectronMenu }).__shownMenu, '')
+  })
+}
+
+/** Clicks an item of the last recorded popup menu by its path; false when it is missing or disabled. */
+function clickShownMenu(app: ElectronApplication, path: string): Promise<boolean> {
+  return app.evaluate((_e, labels) => {
+    let menu = (globalThis as unknown as { __shownMenu?: ElectronMenu }).__shownMenu
+    let item: ElectronMenu['items'][number] | undefined
+    for (const label of labels.split(' > ')) {
+      item = menu?.items.find((i) => i.label === label)
+      menu = item?.submenu ?? undefined
+    }
+    if (!item?.enabled) return false
+    item.click()
+    return true
+  }, path)
+}
+
+/** A tab view's bounds once they stop changing (a new split lays its panes out with a spring). */
+async function stableView(app: ElectronApplication, shell: Page, tabId: string): Promise<Box> {
+  let box: Box | undefined
+  await expect
+    .poll(async () => {
+      const a = (await tabView(app, tabId))?.bounds
+      await shell.evaluate(
+        () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r)))),
+      )
+      box = (await tabView(app, tabId))?.bounds
+      return !!a && !!box && JSON.stringify(a) === JSON.stringify(box)
+    })
+    .toBe(true)
+  return box as Box
+}
+
+/** Whether a tab's page is muted at the engine level (it plays, but silently). */
+function audioMuted(app: ElectronApplication, tabId: string): Promise<boolean | null> {
+  return app.evaluate(
+    (_e, id) =>
+      (
+        globalThis as unknown as {
+          __orbit: { ctx: { tabs: { contents: (id: string) => Electron.WebContents | undefined } } }
+        }
+      ).__orbit.ctx.tabs
+        .contents(id)
+        ?.isAudioMuted() ?? null,
+    tabId,
+  )
+}
+
+test('[MD-11][TB-15] in a split, the split row menu mutes one pane on its own: only that pane goes silent', async () => {
+  orbit = await launchOrbit()
+  const { app, shell } = orbit
+  const one = await openPlaying(app, '/media/audio/First%20Song')
+  const two = await openPlaying(app, '/media/audio/Second%20Song')
+  expect(await cmd<string | null>(app, 'split.create', { tabIds: [one.id, two.id] })).toBeTruthy()
+  const row = shell.getByTestId('split-row')
+  const segment = (id: string) => row.locator(`[data-testid="split-segment"][data-tab-id="${id}"]`)
+  await expect(row.getByTestId('split-segment')).toHaveCount(2)
+  // Two audible panes.
+  for (const t of [one, two]) {
+    await expect.poll(async () => (await tab(app, t.id))?.audible).toBe(true)
+    await expect(segment(t.id).getByRole('button', { name: 'Mute pane' })).toBeVisible()
+  }
+
+  // Right-click the split row: each pane has its own entry, by its title, with Mute in it.
+  await recordMenus(app)
+  await segment(one.id).locator('.split-segment__title').click({ button: 'right' })
+  await expect.poll(() => shownMenu(app)).toEqual(expect.arrayContaining(['First Song > Mute', 'Second Song > Mute']))
+  expect(await clickShownMenu(app, 'Second Song > Mute')).toBe(true)
+
+  // Only that pane goes silent; both keep playing.
+  await expect.poll(async () => (await tab(app, two.id))?.muted).toBe(true)
+  expect(await audioMuted(app, two.id)).toBe(true)
+  expect((await tab(app, one.id))?.muted).toBeFalsy()
+  expect(await audioMuted(app, one.id)).toBe(false)
+  expect(await paused(one.page, '#a')).toBe(false)
+  expect(await paused(two.page, '#a')).toBe(false)
+  await expect(segment(two.id).getByRole('button', { name: 'Unmute pane' })).toBeVisible()
+  await expect(segment(one.id).getByRole('button', { name: 'Mute pane' })).toBeVisible()
+
+  // The same menu turns its sound back on.
+  await segment(one.id).locator('.split-segment__title').click({ button: 'right' })
+  await expect.poll(() => shownMenu(app)).toContain('Second Song > Unmute')
+  expect(await clickShownMenu(app, 'Second Song > Unmute')).toBe(true)
+  await expect.poll(async () => (await tab(app, two.id))?.muted).toBeFalsy()
+  expect(await audioMuted(app, two.id)).toBe(false)
+})
+
+test('[MD-01][MD-16] a video in a split pane floats only when the split is left, from its place in the pane, and goes back into it', async () => {
+  orbit = await launchOrbit()
+  const { app, shell } = orbit
+  const v = await openPlaying(app, '/media/long-video/Film')
+  await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
+  await pipPage(app)
+  const notes = await newTab(app, fx.url('/page/Notes/Quiet'))
+  await waitTab(app, notes, '/page/Notes')
+  expect(await cmd<string | null>(app, 'split.create', { tabIds: [v.id, notes], focus: notes })).toBeTruthy()
+  await expect(shell.getByTestId('split-row').getByTestId('split-segment')).toHaveCount(2)
+  await expect.poll(async () => (await tabView(app, v.id))?.visible).toBe(true)
+  await expect.poll(async () => (await tabView(app, notes))?.visible).toBe(true)
+
+  // Moving between the split's panes keeps the video on screen in its pane: nothing floats.
+  for (const id of [v.id, notes]) {
+    await cmd(app, 'split.focusPane', { tabId: id })
+    await expect.poll(() => activeId(app)).toBe(id)
+    const p = await player(app)
+    expect(p.opening || p.tabId !== null).toBe(false)
+  }
+  expect(await floated(v.page)).toBe('')
+  expect(await paused(v.page, '#v')).toBe(false)
+
+  // Leaving the split floats it, starting from its place in its pane (MD-01, MD-16).
+  const pane = await stableView(app, shell, v.id)
+  const content = (await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0]?.getContentBounds(),
+  )) as Box
+  const home = await v.page.evaluate(() => {
+    const r = (document.getElementById('v') as HTMLVideoElement).getBoundingClientRect()
+    return { x: r.x, y: r.y, width: r.width, height: r.height }
+  })
+  const other = await leave(app)
+  const info = await expectPlayer(app, v.id)
+  expect(await activeId(app)).toBe(other)
+  const from = (info.lastEnter as { from: Box }).from
+  expect(Math.abs(from.x - (content.x + pane.x + home.x))).toBeLessThanOrEqual(2)
+  expect(Math.abs(from.y - (content.y + pane.y + home.y))).toBeLessThanOrEqual(2)
+  expect(Math.abs(from.width - home.width)).toBeLessThanOrEqual(2)
+  expect(info.bounds).toEqual(cornerBox(info.workArea as Box, 'bottom-right', 320, 180))
+  expect(await floated(v.page)).toBe('v')
+
+  // Back on the split (by its other pane): the video goes back into its pane, at the pane's size,
+  // still playing.
+  await cmd(app, 'tabs.activate', { tabId: notes })
+  await expectNoPlayer(app)
+  await expect.poll(() => floated(v.page)).toBe('')
+  // (Within a pixel or so: the split's layout rounds fractional pane sizes.)
+  await expect
+    .poll(async () => {
+      const b = (await tabView(app, v.id))?.bounds
+      return !!b && (['x', 'y', 'width', 'height'] as const).every((k) => Math.abs(b[k] - pane[k]) <= 2)
+    })
+    .toBe(true)
+  await expect.poll(async () => (await tabView(app, v.id))?.visible).toBe(true)
+  expect(await paused(v.page, '#v')).toBe(false)
+  await expect.poll(async () => (await media(app, v.id))?.pip).toBe(false)
+})
+
+test("[MD-01] a late resize from the tab's own window (a split still settling) does not cancel the video's move into the player", async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const v = await openPlaying(app, '/media/long-video/Film')
+  await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
+  // The page script, as the player calls it.
+  const agent = <T>(fn: string, ...args: unknown[]) =>
+    app.evaluate(
+      (_e, [id, name, rest]) =>
+        (
+          (globalThis as unknown as { __orbitMedia: MediaTestHooks }).__orbitMedia.manager.player as unknown as {
+            host: PlayerHost
+          }
+        ).host.call(id, name, ...rest),
+      [v.id, fn, args] as const,
+    ) as Promise<T>
+  expect((await agent<{ ok: boolean }>('probe', { auto: true }))?.ok).toBe(true)
+  const size = await v.page.evaluate(() => ({ w: innerWidth, h: innerHeight }))
+  // The lift waits for the player's size: nothing changes in the page until then.
+  const css = { w: 320, h: 180 }
+  expect(await agent('lift', { from: css, to: css, ms: 0, arm: { w: size.w + 120, h: size.h + 24 } })).toBe(true)
+  expect(await floated(v.page)).toBe('')
+  // A resize at the page's old size arrives late: the lift still waits.
+  await v.page.evaluate(() => dispatchEvent(new Event('resize')))
+  await v.page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+  expect(await agent('lifted')).toBe(true)
+  expect(await floated(v.page)).toBe('')
+  // The player giving up puts everything back.
+  expect(await agent('drop')).toBe(true)
+  expect(await agent('lifted')).toBe(false)
+  expect(await paused(v.page, '#v')).toBe(false)
 })

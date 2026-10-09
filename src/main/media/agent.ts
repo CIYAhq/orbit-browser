@@ -504,11 +504,14 @@ export const AGENT_SOURCE = `(() => {
 
   // In the player, the page takes the size it was armed with and the video lifts in that frame.
   // Back on screen, the size changes again and the video goes back into the page before that
-  // frame is drawn (MD-01: no blank frame).
+  // frame is drawn (MD-01: no blank frame). Until the lift shows, other sizes are late news from
+  // the tab's own window (a split's panes still settling) and leave it armed; the player drops
+  // it if it gives up.
   window.addEventListener('resize', () => {
     if (!lift || !lift.armW) return
-    if (!armed()) drop()
-    else if (!lift.shown) show()
+    if (armed()) {
+      if (!lift.shown) show()
+    } else if (lift.shown) drop()
   }, true)
 
   // ---- Controls ----
