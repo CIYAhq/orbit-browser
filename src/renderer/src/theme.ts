@@ -221,6 +221,18 @@ export class ThemeDriver {
       el.style.colorScheme = scheme
       this.written.set('color-scheme', scheme)
     }
+    if (this.written.get('dark') !== scheme) {
+      if (p.dark) el.dataset.dark = ''
+      else delete el.dataset.dark
+      this.written.set('dark', scheme)
+    }
+    // The grain layer (a blended full-window texture) only exists while there is grain.
+    const grain = p.grain > 0.001 ? 'on' : ''
+    if (this.written.get('grain') !== grain) {
+      if (grain) el.dataset.grain = grain
+      else delete el.dataset.grain
+      this.written.set('grain', grain)
+    }
   }
 }
 

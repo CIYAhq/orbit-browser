@@ -2,8 +2,18 @@
 
 /* ---------- Theme surface (SP-16, SP-17) ---------- */
 
+/* Everything in the shell inherits the theme's text colour (light or dark rendition). */
+.shell {
+  color: var(--text);
+}
+
+/* Dark rendition: the empty page card is dark too (AP-04). */
+.shell[data-dark] .frame {
+  background: color-mix(in srgb, var(--frame-top) 40%, #19191c);
+}
+
 /* Static grain over the sidebar and frame margin (not the page card, which sits above it). */
-.shell::before {
+.shell[data-grain]::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -273,13 +283,15 @@
 
 /* ---------- Over-swipe hint and the new-Space flow (SP-02, SP-08) ---------- */
 
+/* Sits at the page's leading edge: that is the part an over-swipe reveals. */
 .new-space-hint {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   height: 100%;
+  padding-left: 14px;
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 600;
