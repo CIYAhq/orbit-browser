@@ -537,7 +537,7 @@ test('[MD-01][MD-03][MD-16] leaving a playing video floats it bottom-right out o
   expect((await media(app, v.id))?.player).toBeUndefined()
 })
 
-test('[MD-04][MD-05] hovering the player shows play/pause, ±15 s, progress and speed; Space and arrows work when it has focus', async () => {
+test('[MD-04][MD-05][KS-11] hovering the player shows play/pause, ±15 s, progress and speed; Space and arrows work when it has focus', async () => {
   orbit = await launchOrbit()
   const { app } = orbit
   const v = await openPlaying(app, '/media/long-video/Film')
@@ -928,7 +928,7 @@ test('[MD-02] Picture in Picture on the selected tab keeps the tab selected; lea
 
 // ---- Sidebar media controls (MD-09, MD-10) ----
 
-test('[MD-09] background audio shows sidebar controls: pause, play and jump back to the tab', async () => {
+test('[MD-09][SB-10] background audio shows sidebar controls just above the bottom bar: pause, play and jump back to the tab', async () => {
   orbit = await launchOrbit()
   const { app } = orbit
   const a = await openPlaying(app, '/media/audio/Song%20Page?session')
@@ -941,6 +941,12 @@ test('[MD-09] background audio shows sidebar controls: pause, play and jump back
   await expect(ctl).toBeVisible()
   await expect(ctl.getByTestId('media-title')).toHaveText('Track One')
   await expect(ctl).toContainText('Orbit Test')
+  // The tray sits just above the bottom bar and pushes the list up rather than covering it (SB-10).
+  const tray = await stableBox(orbit.shell, '[data-testid="media-tray"]')
+  const bar = await stableBox(orbit.shell, '[data-testid="spacebar"]')
+  const list = await stableBox(orbit.shell, '[data-testid="space-strip"]')
+  expect(Math.abs(tray.y + tray.height - bar.y)).toBeLessThanOrEqual(1)
+  expect(list.y + list.height).toBeLessThanOrEqual(tray.y + 1)
   // Audio doesn't open the floating player.
   expect((await player(app)).tabId).toBeNull()
 
