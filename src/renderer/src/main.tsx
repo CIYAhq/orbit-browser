@@ -8,7 +8,12 @@ import './styles/global.css'
 async function boot(): Promise<void> {
   const view = window.orbit.view
   // Load the view's code while the state snapshot arrives.
-  const app = view === 'overlay' ? import('./overlay/OverlayApp') : import('./shell/ShellApp')
+  const app =
+    view === 'overlay'
+      ? import('./overlay/OverlayApp')
+      : view === 'mini'
+        ? import('./mini/MiniApp')
+        : import('./shell/ShellApp')
   await initStore()
   installShortcutFallback()
   document.documentElement.dataset.view = view
@@ -19,6 +24,13 @@ async function boot(): Promise<void> {
     root.render(
       <StrictMode>
         <OverlayApp />
+      </StrictMode>,
+    )
+  } else if (view === 'mini') {
+    const { MiniApp } = (await app) as typeof import('./mini/MiniApp')
+    root.render(
+      <StrictMode>
+        <MiniApp />
       </StrictMode>,
     )
   } else {

@@ -3,6 +3,7 @@ import { invoke } from '../api'
 import { useWindow } from '../store'
 import { paletteVars, usePalette } from '../theme'
 import { CommandBar } from './CommandBar'
+import { PeekLayer } from './PeekLayer'
 
 /**
  * Transparent full-window layer above the tab views. It is only visible while
@@ -25,6 +26,7 @@ export function OverlayApp() {
       {overlay.kind === 'commandbar' && (
         <CommandBar key={overlay.nonce} mode={overlay.mode} initialQuery={overlay.query} />
       )}
+      {overlay.kind === 'peek' && <PeekLayer key={overlay.nonce} overlay={overlay} />}
     </div>
   )
 }

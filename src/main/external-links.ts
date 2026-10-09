@@ -3,6 +3,7 @@ import { isAbsolute, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { app } from 'electron'
 import type { MainContext } from './context'
+import { routeExternalLink } from './miniwindow'
 
 /**
  * Links and files other apps ask Orbit to open once it is the default browser (NV-18):
@@ -11,20 +12,11 @@ import type { MainContext } from './context'
  */
 
 /**
- * Where a link from another app goes. For now: a new Today tab in the focused window's Space
- * (the last focused main window when Orbit is in the background; a window opens if none is).
- * The mini-window lane replaces this function's body to open a Mini Window instead (MW-02).
+ * Where a link from another app goes: a Mini Window by default, a routing rule's Space, or with
+ * Mini Windows off a tab in the most recent (or chosen) Space (MW-02, MW-11, NV-18).
  */
 export function routeExternalUrl(ctx: MainContext, url: string): void {
-  const windowId = ctx.windows.focusedWindowId() ?? ctx.windows.ids()[0] ?? ctx.windows.open()
-  void ctx.commands.run('tabs.create', { url }, { windowId }).catch((err) => {
-    console.error('[external-links] could not open', url, err)
-  })
-  const win = ctx.windows.get(windowId)
-  if (!win || win.isDestroyed()) return
-  if (win.isMinimized()) win.restore()
-  win.show()
-  win.focus()
+  routeExternalLink(ctx, url)
 }
 
 /** Files Orbit opens as pages (what the packaged app registers for, plus close relatives). */
