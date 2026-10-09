@@ -5,7 +5,13 @@
  */
 import { createWindowState, MAX_FAVORITES } from '../../shared/defaults'
 import { isFolderId, isTabId, newId } from '../../shared/ids'
-import { isLostPrivateTab, isPrivateProfileId, isPrivateSpace, mayReopenIn, privateMoveAllowed } from '../../shared/private'
+import {
+  isLostPrivateTab,
+  isPrivateProfileId,
+  isPrivateSpace,
+  mayReopenIn,
+  privateMoveAllowed,
+} from '../../shared/private'
 import { isPendingPane, layoutLeaves, paneAfterClose, SPLIT_FULL_MESSAGE } from '../../shared/split'
 import type {
   ArchivedTab,

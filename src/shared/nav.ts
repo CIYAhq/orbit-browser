@@ -41,6 +41,21 @@ export function connectionOf(url: string | undefined): Connection {
   }
 }
 
+/**
+ * A pop-up window's title (NV-09): the host it shows, whatever the page calls itself, marked when
+ * the connection isn't secure. Empty for a blank page; other addresses as they are.
+ */
+export function popupTitle(url: string): string {
+  let host = ''
+  try {
+    host = new URL(url).host
+  } catch {
+    // Not an address: shown as it is.
+  }
+  if (!host) return url === 'about:blank' ? '' : url
+  return connectionOf(url) === 'insecure' ? `Not secure — ${host}` : host
+}
+
 /** How many history entries the Back/Forward menu lists (the nearest ones). */
 export const HISTORY_MENU_MAX = 15
 

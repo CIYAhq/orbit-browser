@@ -15,6 +15,7 @@
   "SB-22": {"built": "yes", "note": "Cmd/Ctrl+Shift+E focuses the sidebar; arrows, Enter, Escape, F2"},
   "SB-23": {"built": "yes", "note": "selected tab scrolled into view (smooth, then settles); pill points to it while it is out of view; rows use content-visibility"},
   "SB-24": {"built": "partial", "note": "theme gradient + grain on sidebar and frame, tinted selection; the neutral theme is a solid soft grey/near-black, not a translucent material yet"},
+  "SB-25": {"built": "yes", "note": "private window sidebar: top bar and address, a Private label with icon and a plain note, then only its own tabs; no Spaces, Favorites or pinned tabs (and their actions do nothing); + and Cmd/Ctrl+T open the command bar, which a new private window starts with"},
   "TB-01": {"built": "yes", "note": "row: favicon/emoji, title or breadcrumb, hover close, audio, selected pill, dimmed when asleep"},
   "TB-02": {"built": "yes", "note": "Cmd+T / + New Tab / link drop / Cmd+Alt+V paste; background link tabs gesture-gated"},
   "TB-03": {"built": "yes", "note": "single rule todayInsertIndex(): top of Today"},
@@ -76,7 +77,7 @@
   "SV-05": {"built": "yes", "note": "resting a dragged tab on a tab or split row's middle band (~400 ms) highlights that half; dropping makes or extends a split there, undoable with Cmd/Ctrl+Z; quick drags reorder as usual"},
   "SV-06": {"built": "yes", "note": "Open in Split View in the tab menu for a 2-4 tab multi-selection (sidebar order); more than 4 is disabled with the hint"},
   "SV-07": {"built": "partial", "note": "New Split View and Add Split Right/Left/Above/Below actions plus newSplitMenuItems(); the '+' menu and title-bar button belong to the sidebar chrome"},
-  "SV-08": {"built": "partial", "note": "Open Link in Split View in the page's link menu; Option-click and dragging links not built"},
+  "SV-08": {"built": "partial", "note": "Open Link in Split View in the page's link menu; Option/Alt-click a link opens it beside the page (the engine download is cancelled); dragging links not built"},
   "SV-09": {"built": "yes", "note": "Alt-click a tab row joins it (the selected tab duplicates beside itself); Alt-click a split row separates"},
   "SV-11": {"built": "yes", "note": "row/column trees, 3-4 pane arrangements from where panes are added, flip transposes keeping ratios"},
   "SV-12": {"built": "yes", "note": "hover strip view with close and split-controls menu (flip, add split x4, move pane, separate); no per-pane toolbar yet"},
@@ -161,9 +162,15 @@
   "NV-04": {"built": "partial", "note": "Esc in the page while loading (overlays take it first), Cmd+. on macOS, double-click Reload, Stop (x) state; the address does not show a pending URL yet"},
   "NV-05": {"built": "yes", "note": "floating bar over the active page's top-right corner; finds as you type, n/m count, No matches; Enter/Cmd+G/F3 next, Shift+Enter/Shift+Cmd+G/Shift+F3 previous, buttons; Esc closes and keeps the match selected; per tab (hidden on switch, back with text and place); starts from the selection, else the last search; IME commits; Cmd+J jumps to the selection (macOS); Edit > Find menu"},
   "NV-06": {"built": "yes", "note": "Chromium steps 25-500% on Cmd+=/Cmd+-/Cmd+0 and Ctrl+wheel (Win/Linux); per host in each profile (all its tabs), remembered across launches; indicator with Reset over the page for 1.5 s (longer while hovered); pinch is visual zoom and Cmd+0 undoes it too"},
+  "NV-08": {"built": "partial", "note": "Cmd/middle-click background tab and Shift+Cmd foreground tab at the top of Today; Shift-click a new window when Peek is off; Option/Alt-click split view instead of the engine download; Peek, Mini Window and pinned-tab links come with the peek lane; hover pill is SB-27; dragging links not built"},
+  "NV-09": {"built": "yes", "note": "target=_blank and window.open without size: selected tab at the top of Today with its opener; with size: a small window without sidebar titled with the host (Not secure marked), the opener can close it; pop-ups without a click blocked, shown in the address display with Open and Always Allow for the site; a tab that only downloads closes and reselects its opener"},
+  "NV-10": {"built": "partial", "note": "Cmd/Ctrl+N (SP-24): same Spaces and pinned tabs, cascaded, command bar open, full screen follows; links opened in new windows (Shift-click, link menu) cascade too; the Ctrl+Cmd+N blank window (TB-17) is not built"},
+  "NV-11": {"built": "yes", "note": "Cmd/Ctrl+Shift+N, File menu, macOS Dock menu, Windows taskbar task: in-memory session shared by open private windows, wiped when the last closes; no state, history, favicon, archive, site-choice or reopen record kept; own Space-less sidebar, dark look, Private label with a plain note; command bar sees only private tabs; extension rules are EX-10"},
+  "NV-12": {"built": "yes", "note": "native menu: page (Back, Forward, Reload, Save Page As, Print, View Page Source), link (New Tab, Split View, New Window, Private Window, Copy, Save Link As), selection (Copy, Search engine, Look Up on macOS), image, editable (suggestions, Add to Dictionary, edit roles, Paste and Match Style, Writing Direction), Inspect last; Peek, Mini Window and media items come from their lanes; P2 Translate and Share Quote not built"},
   "NV-17": {"built": "partial", "note": "copy button = Cmd+Shift+C (clean URL, Copied toast); one-time shortcut tip when the URL is copied from the command bar; the Win/Linux page-first offer waits on KS-02"},
   "KS-08": {"built": "partial", "note": "Back, Forward, Reload, hard reload, Stop, find (Cmd+F, Cmd+G, Shift+Cmd+G, F3, Ctrl+G), Cmd+J and zoom keys done; print, save page, reader mode and the rest come with their NV items"},
   "FL-15": {"built": "partial", "note": "top row: Back/Forward nudge, Reload glyph turns once, press to 0.94 with pop release, restarts on repeat, none when disabled or reduced motion"},
   "FL-02": {"built": "yes", "note": "260 ms standard curve drives the sidebar column and the card margins together; interruptible; reduced motion snaps"},
-  "FL-03": {"built": "yes", "note": "0 ms dwell; card in 200 ms (snappy), out 160 ms (quick); hysteresis band; re-entering while it leaves brings it back"}
+  "FL-03": {"built": "yes", "note": "0 ms dwell; card in 200 ms (snappy), out 160 ms (quick); hysteresis band; re-entering while it leaves brings it back"},
+  "AP-05": {"built": "yes", "note": "private windows are near-black whatever the theme (frame, sidebar, window background) with hover and selection tuned for black; Private label with icon in the sidebar, not over the page; no Space switcher or Favorites"}
 }

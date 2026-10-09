@@ -77,11 +77,7 @@ export function privateMoveAllowed(state: OrbitState, items: ItemId[], to: Conta
     const fromPrivate = !!at && isPrivateContainer(state, at.container)
     if (!fromPrivate && !toPrivate) return true
     return (
-      fromPrivate &&
-      toPrivate &&
-      to.kind === 'today' &&
-      !!at &&
-      spaceOfContainer(state, at.container) === to.spaceId
+      fromPrivate && toPrivate && to.kind === 'today' && !!at && spaceOfContainer(state, at.container) === to.spaceId
     )
   })
 }
@@ -111,7 +107,11 @@ export function isLostPrivateTab(state: OrbitState, tab: Pick<Tab, 'profileId' |
  * Whether a closed tab may come back in a window (Reopen Closed Tab): a private tab only in its
  * own private window, a normal tab only in a normal window (NV-11).
  */
-export function mayReopenIn(state: OrbitState, tab: Pick<Tab, 'profileId' | 'spaceId'>, windowId: WindowId | undefined): boolean {
+export function mayReopenIn(
+  state: OrbitState,
+  tab: Pick<Tab, 'profileId' | 'spaceId'>,
+  windowId: WindowId | undefined,
+): boolean {
   const privateTab = isPrivateProfileId(tab.profileId) || isPrivateSpace(state, tab.spaceId)
   const win = windowId ? state.windows[windowId] : undefined
   if (!privateTab) return !isPrivateWindow(state, windowId)
@@ -150,9 +150,17 @@ function layoutLeaves(layout: SplitLayout): TabId[] {
  * when there is nothing private.
  */
 export function withoutPrivate(state: OrbitState): OrbitState {
-  const profiles = new Set(Object.values(state.profiles).filter(isPrivateProfile).map((p) => p.id))
+  const profiles = new Set(
+    Object.values(state.profiles)
+      .filter(isPrivateProfile)
+      .map((p) => p.id),
+  )
   const isPrivate = (profileId: ProfileId) => profiles.has(profileId) || isPrivateProfileId(profileId)
-  const spaces = new Set(Object.values(state.spaces).filter((s) => isPrivate(s.profileId)).map((s) => s.id))
+  const spaces = new Set(
+    Object.values(state.spaces)
+      .filter((s) => isPrivate(s.profileId))
+      .map((s) => s.id),
+  )
   const tabs = new Set(
     Object.values(state.tabs)
       .filter((t) => isPrivate(t.profileId) || spaces.has(t.spaceId))
@@ -203,7 +211,9 @@ export function withoutPrivate(state: OrbitState): OrbitState {
   }
   // A normal window never shows a private tab, but its remembered tabs per Space must not name one.
   for (const [id, win] of Object.entries(out.windows)) {
-    const stale = Object.entries(win.activeTab).filter(([spaceId, tabId]) => spaces.has(spaceId) || (tabId && tabs.has(tabId)))
+    const stale = Object.entries(win.activeTab).filter(
+      ([spaceId, tabId]) => spaces.has(spaceId) || (tabId && tabs.has(tabId)),
+    )
     if (stale.length === 0) continue
     const activeTab = { ...win.activeTab }
     for (const [spaceId] of stale) delete activeTab[spaceId]

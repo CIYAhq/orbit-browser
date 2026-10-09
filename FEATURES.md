@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 129 built (38 partial) · 178 tested · 0 feel right.
+**Totals:** 485 spec’d · 134 built (40 partial) · 183 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 99 | 124 |
-| P1 | 221 | 27 | 50 |
+| P0 | 174 | 102 | 127 |
+| P1 | 221 | 29 | 52 |
 | P2 | 83 | 3 | 4 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -45,7 +45,7 @@ Spec: `spec/sidebar.md`
 | SB-22 | Keyboard focus and navigation inside the sidebar | P2 | ✅ | ✅ e2e | – | Cmd/Ctrl+Shift+E focuses the sidebar; arrows, Enter, Escape, F2 |
 | SB-23 | Scrolling, auto-reveal of the active tab and overflow indicator | P1 | ✅ | ✅ e2e | – | selected tab scrolled into view (smooth, then settles); pill points to it while it is out of view; rows use content-visibility |
 | SB-24 | Sidebar colouring follows the Space theme | P0 | 🟡 partial | ✅ e2e+unit | – | theme gradient + grain on sidebar and frame, tinted selection; the neutral theme is a solid soft grey/near-black, not a translucent material yet |
-| SB-25 | Incognito window sidebar | P1 | – | – | – |  |
+| SB-25 | Incognito window sidebar | P1 | ✅ | ✅ e2e | – | private window sidebar: top bar and address, a Private label with icon and a plain note, then only its own tabs; no Spaces, Favorites or pinned tabs (and their actions do nothing); + and Cmd/Ctrl+T open the command bar, which a new private window starts with |
 | SB-26 | Platform notes (Windows / Linux) | P2 | – | – | – |  |
 | SB-27 | Link status pill | P1 | – | – | – |  |
 | SB-28 | Page loading indicator | P1 | – | – | – |  |
@@ -203,7 +203,7 @@ Spec: `spec/split-view.md`
 | SV-05 | Create by dropping a tab onto another tab row | P0 | ✅ | ✅ e2e+unit | – | resting a dragged tab on a tab or split row's middle band (~400 ms) highlights that half; dropping makes or extends a split there, undoable with Cmd/Ctrl+Z; quick drags reorder as usual |
 | SV-06 | Create from a multi-selection | P0 | ✅ | ✅ e2e+unit | – | Open in Split View in the tab menu for a 2-4 tab multi-selection (sidebar order); more than 4 is disabled with the hint |
 | SV-07 | Create from the "+" menu or the window's split button | P1 | 🟡 partial | ✅ unit | – | New Split View and Add Split Right/Left/Above/Below actions plus newSplitMenuItems(); the '+' menu and title-bar button belong to the sidebar chrome |
-| SV-08 | Open a link into a split | P1 | 🟡 partial | ✅ e2e+unit | – | Open Link in Split View in the page's link menu; Option-click and dragging links not built |
+| SV-08 | Open a link into a split | P1 | 🟡 partial | ✅ e2e+unit | – | Open Link in Split View in the page's link menu; Option/Alt-click a link opens it beside the page (the engine download is cancelled); dragging links not built |
 | SV-09 | Option-click a tab row | P1 | ✅ | ✅ e2e+unit | – | Alt-click a tab row joins it (the selected tab duplicates beside itself); Alt-click a split row separates |
 | SV-10 | Notes and canvases in a split | P2 | – | – | – |  |
 | SV-11 | Layouts and flipping orientation | P0 | ✅ | ✅ e2e+unit | – | row/column trees, 3-4 pane arrangements from where panes are added, flip transposes keeping ratios |
@@ -236,11 +236,11 @@ Spec: `spec/navigation.md`
 | NV-05 | Find in page | P0 | ✅ | ✅ e2e+unit | – | floating bar over the active page's top-right corner; finds as you type, n/m count, No matches; Enter/Cmd+G/F3 next, Shift+Enter/Shift+Cmd+G/Shift+F3 previous, buttons; Esc closes and keeps the match selected; per tab (hidden on switch, back with text and place); starts from the selection, else the last search; IME commits; Cmd+J jumps to the selection (macOS); Edit > Find menu |
 | NV-06 | Page zoom | P0 | ✅ | ✅ e2e+unit | – | Chromium steps 25-500% on Cmd+=/Cmd+-/Cmd+0 and Ctrl+wheel (Win/Linux); per host in each profile (all its tabs), remembered across launches; indicator with Reset over the page for 1.5 s (longer while hovered); pinch is visual zoom and Cmd+0 undoes it too |
 | NV-07 | Print | P1 | – | – | – |  |
-| NV-08 | Clicking links: plain and modified clicks | P0 | – | ✅ e2e | – |  |
-| NV-09 | Links with target=_blank and script-opened windows | P0 | – | ✅ e2e | – |  |
-| NV-10 | New window | P0 | – | – | – |  |
-| NV-11 | Private (incognito) window | P0 | – | – | – |  |
-| NV-12 | Page context menu | P0 | – | – | – |  |
+| NV-08 | Clicking links: plain and modified clicks | P0 | 🟡 partial | ✅ e2e | – | Cmd/middle-click background tab and Shift+Cmd foreground tab at the top of Today; Shift-click a new window when Peek is off; Option/Alt-click split view instead of the engine download; Peek, Mini Window and pinned-tab links come with the peek lane; hover pill is SB-27; dragging links not built |
+| NV-09 | Links with target=_blank and script-opened windows | P0 | ✅ | ✅ e2e+unit | – | target=_blank and window.open without size: selected tab at the top of Today with its opener; with size: a small window without sidebar titled with the host (Not secure marked), the opener can close it; pop-ups without a click blocked, shown in the address display with Open and Always Allow for the site; a tab that only downloads closes and reselects its opener |
+| NV-10 | New window | P0 | 🟡 partial | ✅ e2e | – | Cmd/Ctrl+N (SP-24): same Spaces and pinned tabs, cascaded, command bar open, full screen follows; links opened in new windows (Shift-click, link menu) cascade too; the Ctrl+Cmd+N blank window (TB-17) is not built |
+| NV-11 | Private (incognito) window | P0 | ✅ | ✅ e2e+unit | – | Cmd/Ctrl+Shift+N, File menu, macOS Dock menu, Windows taskbar task: in-memory session shared by open private windows, wiped when the last closes; no state, history, favicon, archive, site-choice or reopen record kept; own Space-less sidebar, dark look, Private label with a plain note; command bar sees only private tabs; extension rules are EX-10 |
+| NV-12 | Page context menu | P0 | ✅ | ✅ e2e | – | native menu: page (Back, Forward, Reload, Save Page As, Print, View Page Source), link (New Tab, Split View, New Window, Private Window, Copy, Save Link As), selection (Copy, Search engine, Look Up on macOS), image, editable (suggestions, Add to Dictionary, edit roles, Paste and Match Style, Writing Direction), Inspect last; Peek, Mini Window and media items come from their lanes; P2 Translate and Share Quote not built |
 | NV-13 | Load-error pages | P1 | – | – | – |  |
 | NV-14 | Crashed or unresponsive tab | P1 | – | ✅ e2e | – |  |
 | NV-15 | Permission prompts | P0 | – | ✅ e2e | – |  |
@@ -417,7 +417,7 @@ Spec: `spec/appearance.md`
 | AP-02 | Theme colours carry through the whole interface | P1 | – | – | – |  |
 | AP-03 | Restore the default (neutral) theme | P1 | – | ✅ unit | – |  |
 | AP-04 | Dark mode quality | P1 | – | ✅ unit | – |  |
-| AP-05 | Private-window appearance | P1 | – | – | – |  |
+| AP-05 | Private-window appearance | P1 | ✅ | ✅ e2e | – | private windows are near-black whatever the theme (frame, sidebar, window background) with hover and selection tuned for black; Private label with icon in the sidebar, not over the page; no Space switcher or Favorites |
 | AP-06 | Inactive-window dimming | P1 | – | – | – |  |
 | AP-07 | Optional top toolbar (look and placement) | P1 | – | – | – |  |
 | AP-08 | Page-colour-aware chrome | P2 | – | – | – |  |

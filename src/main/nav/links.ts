@@ -1,5 +1,5 @@
 import { app, type BrowserWindow, Menu, type MenuItemConstructorOptions, type WebContents, webContents } from 'electron'
-import { connectionOf } from '../../shared/nav'
+import { popupTitle } from '../../shared/nav'
 import type { TabId, WindowId } from '../../shared/state'
 import { sectionOf } from '../../shared/tree'
 import type { MainContext } from '../context'
@@ -63,13 +63,6 @@ function hostOf(url: string | undefined): string {
   } catch {
     return ''
   }
-}
-
-/** A pop-up's title: the host it shows, marked when the connection isn't secure (NV-09). */
-export function popupTitle(url: string): string {
-  const host = hostOf(url)
-  if (!host) return url === 'about:blank' ? '' : url
-  return connectionOf(url) === 'insecure' ? `Not secure — ${host}` : host
 }
 
 export interface LinksDeps {

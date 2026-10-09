@@ -45,9 +45,7 @@ export function NewSpaceFlow({ windowId }: { windowId: string }) {
   // The private windows' profile is not one to pick (NV-11).
   const profileList = Object.values(profiles)
     .filter((p) => !isPrivateProfile(p))
-    .sort((a, b) =>
-    a.id === DEFAULT_PROFILE_ID ? -1 : b.id === DEFAULT_PROFILE_ID ? 1 : a.createdAt - b.createdAt,
-  )
+    .sort((a, b) => (a.id === DEFAULT_PROFILE_ID ? -1 : b.id === DEFAULT_PROFILE_ID ? 1 : a.createdAt - b.createdAt))
 
   const create = () => {
     if (busy) return

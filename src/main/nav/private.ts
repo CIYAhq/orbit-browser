@@ -2,7 +2,12 @@ import { randomUUID } from 'node:crypto'
 import { app, Menu, session } from 'electron'
 import { createSpace, createWindowState, THEME_PRESETS } from '../../shared/defaults'
 import { isFolderId } from '../../shared/ids'
-import { isPrivateProfileId, isPrivateWindow, PRIVATE_PARTITION_PREFIX, PRIVATE_PROFILE_PREFIX } from '../../shared/private'
+import {
+  isPrivateProfileId,
+  isPrivateWindow,
+  PRIVATE_PARTITION_PREFIX,
+  PRIVATE_PROFILE_PREFIX,
+} from '../../shared/private'
 import type { ItemId, OrbitState, Profile, ProfileId, SpaceId, SpaceTheme, WindowId } from '../../shared/state'
 import { tabsInItem } from '../../shared/tree'
 import type { MainContext } from '../context'

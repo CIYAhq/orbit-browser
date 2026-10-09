@@ -1,15 +1,10 @@
 import { join } from 'node:path'
-import {
-  app,
-  type ContextMenuParams,
-  dialog,
-  type MenuItemConstructorOptions,
-  type WebContents,
-} from 'electron'
+import { app, type ContextMenuParams, dialog, type MenuItemConstructorOptions, type WebContents } from 'electron'
 import { isPrivateTab } from '../../shared/private'
 import type { TabId, WindowId } from '../../shared/state'
 import { SEARCH_ENGINES } from '../../shared/url'
 import type { MainContext } from '../context'
+import { NAV_WORLD } from './focus'
 
 /**
  * The page context menu's items from the chrome lane (NV-12), added to the tabs lane's menu
@@ -81,10 +76,37 @@ export function dictionaryItems(contents: WebContents, params: ContextMenuParams
   return [{ label: 'Add to Dictionary', click: () => contents.session.addWordToSpellCheckerDictionary(word) }]
 }
 
+/**
+ * Writing Direction for a text field (NV-12): Default, Left to Right or Right to Left, set on the
+ * field itself (its `dir`), so the page's own text and layout don't change.
+ */
+export function writingDirectionItem(contents: WebContents): MenuItemConstructorOptions {
+  const set = (dir: '' | 'ltr' | 'rtl') => () => {
+    if (contents.isDestroyed()) return
+    const code = `(() => {
+      let el = document.activeElement
+      while (el && el.shadowRoot && el.shadowRoot.activeElement) el = el.shadowRoot.activeElement
+      if (!el || !(el.isContentEditable || el.localName === 'input' || el.localName === 'textarea')) return
+      if (${JSON.stringify(dir)}) el.setAttribute('dir', ${JSON.stringify(dir)})
+      else el.removeAttribute('dir')
+    })()`
+    contents.executeJavaScriptInIsolatedWorld(NAV_WORLD, [{ code }]).catch(() => {})
+  }
+  return {
+    label: 'Writing Direction',
+    submenu: [
+      { label: 'Default', click: set('') },
+      { label: 'Left to Right', click: set('ltr') },
+      { label: 'Right to Left', click: set('rtl') },
+    ],
+  }
+}
+
 /** A file name from a page title, without characters file systems refuse. */
 function fileName(title: string): string {
-  const clean = title
-    .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ')
+  const printable = Array.from(title, (c) => (c.charCodeAt(0) < 32 ? ' ' : c)).join('')
+  const clean = printable
+    .replace(/[\\/:*?"<>|]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 120)
@@ -132,13 +154,12 @@ export function keepPageMenu(ctx: MainContext, tabId: TabId, items: MenuItemCons
   return true
 }
 
-const labelOf = (item: MenuItemConstructorOptions) =>
-  item.label ?? (item.role ? `role:${item.role}` : '')
+const labelOf = (item: MenuItemConstructorOptions) => item.label ?? (item.role ? `role:${item.role}` : '')
 
 export interface PageMenuTestHooks {
   /** The page menu last opened: its items' labels (`role:copy` for built-in ones; `-` for separators), or null. */
   pageMenu: () => { tabId: TabId; labels: string[]; enabled: Record<string, boolean> } | null
-  /** Chooses an item of the page menu by label. */
+  /** Chooses an item of the page menu by label (`Menu > Item` for one in a submenu). */
   choosePageMenu: (label: string) => boolean
 }
 
@@ -154,7 +175,13 @@ export const pageMenuTestHooks: PageMenuTestHooks = {
     }
   },
   choosePageMenu: (label) => {
-    const item = shown?.items.find((i) => i.type !== 'separator' && labelOf(i) === label)
+    let items = shown?.items ?? []
+    const path = label.split(' > ')
+    let item: MenuItemConstructorOptions | undefined
+    for (const part of path) {
+      item = items.find((i) => i.type !== 'separator' && labelOf(i) === part)
+      items = Array.isArray(item?.submenu) ? item.submenu : []
+    }
     if (!item?.click) return false
     shown = null
     ;(item.click as () => void)()

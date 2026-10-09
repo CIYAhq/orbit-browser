@@ -9,6 +9,7 @@ import {
   pageItems,
   saveLinkItem,
   searchLabel,
+  writingDirectionItem,
 } from '../nav/page-menu'
 import { linkSplitMenuItem } from '../split/menu'
 
@@ -56,6 +57,7 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
       { role: 'paste', enabled: params.editFlags.canPaste },
       { role: 'pasteAndMatchStyle', enabled: params.editFlags.canPaste },
       { role: 'selectAll' },
+      writingDirectionItem(contents),
       { type: 'separator' },
     )
   } else if (params.selectionText) {

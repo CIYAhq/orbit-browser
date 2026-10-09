@@ -1,5 +1,5 @@
 /**
- * Helpers for the chrome lane's e2e specs (chrome.spec.ts, nav.spec.ts): a local fixture server
+ * Helpers for the chrome lane's e2e specs (chrome.spec.ts, nav*.spec.ts): a local fixture server
  * with pages for navigation tests, and small wrappers around Orbit's test hooks.
  */
 import { createServer, type ServerResponse } from 'node:http'
@@ -38,7 +38,8 @@ const escapeHtml = (text: string) => text.replace(/[&<>"]/g, (c) => `&#${c.charC
  * A page that records key presses (`window.__keys`) and mouse presses (`window.__clicks`: x, y,
  * button) and counts its loads in sessionStorage (`loads`), with a text box (#box), a link to the
  * next page (#next), one that opens a new tab (#child) and one to a download (#download, in a new
- * tab), and buttons that open a small pop-up window (#popup) and close it again (#closepopup).
+ * tab), and buttons that open a small pop-up window (`/page/Popup-<title>`, #popup) and close it
+ * again (#closepopup).
  * `background` is its CSS background; `text` goes in a paragraph (#text); `open` is a page it
  * opens in a pop-up as soon as it loads, without a click.
  */
@@ -53,7 +54,7 @@ function page(title: string, background = '#f2fbf5', text = '', open = ''): stri
 <p><a id="next" href="/page/${encodeURIComponent(`${title}-next`)}">Next page</a></p>
 <p><a id="child" href="/page/${encodeURIComponent(`${title}-child`)}" target="_blank">Child page</a></p>
 <p><a id="download" href="/download/${name}.txt" target="_blank">Download</a>
-<button id="popup" onclick="window.__popup = window.open('/page/${name}-popup', 'pop', 'width=420,height=360')">Pop-up</button>
+<button id="popup" onclick="window.__popup = window.open('/page/Popup-${name}', 'pop', 'width=420,height=360')">Pop-up</button>
 <button id="closepopup" onclick="window.__popup && window.__popup.close()">Close pop-up</button></p>
 <div style="height:2000px"></div>
 <script>
@@ -154,6 +155,7 @@ type Hooks = {
   __orbit: {
     run: (n: string, a: unknown, w?: string) => Promise<unknown>
     windowIds: () => string[]
+    flush: () => unknown
     ctx: { windows: { get: (id: string) => Electron.BrowserWindow | undefined } }
   }
   __orbitNav: {
@@ -162,7 +164,185 @@ type Hooks = {
     floating: (windowId?: string) => FloatingInfo
     corner: (tabId: string) => number | null
     tools: (windowId?: string) => ToolsInfo
+    blockedMenu: () => string[] | null
+    chooseBlocked: (label: string) => boolean
+    pageMenu: () => PageMenu | null
+    choosePageMenu: (label: string) => boolean
   }
+}
+
+/** The page context menu Orbit last built (NV-12): labels top to bottom, `-` for separators. */
+export interface PageMenu {
+  tabId: string
+  labels: string[]
+  enabled: Record<string, boolean>
+}
+
+/** The page context menu last opened (kept instead of shown in tests), or null. */
+export function pageMenu(app: ElectronApplication): Promise<PageMenu | null> {
+  return app.evaluate(() => (globalThis as unknown as Hooks).__orbitNav.pageMenu())
+}
+
+export function choosePageMenu(app: ElectronApplication, label: string): Promise<boolean> {
+  return app.evaluate((_e, l) => (globalThis as unknown as Hooks).__orbitNav.choosePageMenu(l), label)
+}
+
+/** The blocked pop-ups menu last opened from the address display (NV-09), or null. */
+export function blockedMenu(app: ElectronApplication): Promise<string[] | null> {
+  return app.evaluate(() => (globalThis as unknown as Hooks).__orbitNav.blockedMenu())
+}
+
+export function chooseBlocked(app: ElectronApplication, label: string): Promise<boolean> {
+  return app.evaluate((_e, l) => (globalThis as unknown as Hooks).__orbitNav.chooseBlocked(l), label)
+}
+
+type Modifier = 'shift' | 'control' | 'alt' | 'meta'
+type InputEventInit = { type: string } & Record<string, unknown>
+
+/** Runs a script in the page with this address (or a part of it); null while there's none or it loads. */
+function inPage<T>(app: ElectronApplication, page: string, code: string): Promise<T | null> {
+  return app.evaluate(
+    async ({ webContents }, [part, js]) => {
+      const matches = (url: string) => (part.startsWith('http') ? url === part : url.includes(part))
+      const contents = webContents.getAllWebContents().find((w) => matches(w.getURL()))
+      if (!contents || contents.isLoading()) return null
+      return await contents.executeJavaScript(js)
+    },
+    [page, code] as const,
+  ) as Promise<T | null>
+}
+
+/** Sends input events to the page with this address (or a part of it) as the hardware would. */
+async function sendToPage(app: ElectronApplication, page: string, events: InputEventInit[]): Promise<void> {
+  await app.evaluate(
+    ({ webContents }, [part, list]) => {
+      const matches = (url: string) => (part.startsWith('http') ? url === part : url.includes(part))
+      const contents = webContents.getAllWebContents().find((w) => matches(w.getURL()))
+      if (!contents) throw new Error(`no page ${part}`)
+      for (const event of list) contents.sendInputEvent(event as unknown as Electron.MouseInputEvent)
+    },
+    [page, events] as const,
+  )
+}
+
+/**
+ * Clicks an element of a page the way a person does, through the browser process: the pointer
+ * goes onto it first (until the page has it hovered), then the modifier keys go down, the button
+ * is pressed and released, and the keys come up, so Orbit sees the keys as well as the page.
+ * `page` is the page's full address (matched exactly), or a part of it.
+ */
+export async function clickInPage(
+  app: ElectronApplication,
+  page: string,
+  selector: string,
+  modifiers: Modifier[] = [],
+  button: 'left' | 'middle' | 'right' = 'left',
+): Promise<void> {
+  const sel = JSON.stringify(selector)
+  const deadline = Date.now() + 10_000
+  let at: { x: number; y: number } | null = null
+  while (!at && Date.now() < deadline) {
+    at = await inPage<{ x: number; y: number }>(
+      app,
+      page,
+      `(() => { const r = document.querySelector(${sel})?.getBoundingClientRect(); return r ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } : null })()`,
+    )
+    if (!at) await new Promise((r) => setTimeout(r, 100))
+  }
+  if (!at) throw new Error(`no ${selector} in ${page}`)
+  const { x, y } = at
+  await sendToPage(app, page, [{ type: 'mouseMove', x, y }])
+  await expect.poll(() => inPage<boolean>(app, page, `!!document.querySelector(${sel})?.matches(':hover')`)).toBe(true)
+  const keys: Record<Modifier, string> = { shift: 'Shift', control: 'Control', alt: 'Alt', meta: 'Meta' }
+  const events: InputEventInit[] = []
+  const held: Modifier[] = []
+  for (const m of modifiers) {
+    held.push(m)
+    events.push({ type: 'keyDown', keyCode: keys[m], modifiers: [...held] })
+  }
+  events.push({ type: 'mouseDown', x, y, button, clickCount: 1, modifiers: [...modifiers] })
+  events.push({ type: 'mouseUp', x, y, button, clickCount: 1, modifiers: [...modifiers] })
+  for (const m of [...modifiers].reverse()) {
+    held.pop()
+    events.push({ type: 'keyUp', keyCode: keys[m], modifiers: [...held] })
+  }
+  await sendToPage(app, page, events)
+}
+
+/** Orbit's windows: id, kind and bounds, in the order they opened. */
+export async function windowList(
+  app: ElectronApplication,
+): Promise<{ id: string; kind: string; spaceId: string; bounds: Electron.Rectangle | null }[]> {
+  const s = await state(app)
+  const ids = await app.evaluate(() => (globalThis as unknown as Hooks).__orbit.windowIds())
+  const bounds = await app.evaluate((_e, list) => {
+    const { __orbit } = globalThis as unknown as Hooks
+    return list.map((id) => {
+      const win = __orbit.ctx.windows.get(id)
+      return win && !win.isDestroyed() ? win.getBounds() : null
+    })
+  }, ids)
+  return ids.map((id, i) => ({
+    id,
+    kind: s.windows[id]?.kind ?? '',
+    spaceId: s.windows[id]?.spaceId ?? '',
+    bounds: bounds[i] ?? null,
+  }))
+}
+
+/** Windows that are not Orbit's own (pop-ups pages opened): their titles. */
+export function foreignWindowTitles(app: ElectronApplication): Promise<string[]> {
+  return app.evaluate(({ BrowserWindow }) => {
+    const { __orbit } = globalThis as unknown as Hooks
+    const own = new Set(__orbit.windowIds().map((id) => __orbit.ctx.windows.get(id)))
+    return BrowserWindow.getAllWindows()
+      .filter((w) => !w.isDestroyed() && !own.has(w))
+      .map((w) => w.getTitle())
+  })
+}
+
+/** Runs a command as if from the given window. */
+export function cmdIn<T = unknown>(
+  app: ElectronApplication,
+  windowId: string,
+  name: string,
+  args: unknown = {},
+): Promise<T> {
+  return app.evaluate(async (_e, [w, n, a]) => (globalThis as unknown as Hooks).__orbit.run(n, a, w), [
+    windowId,
+    name,
+    args,
+  ] as const) as Promise<T>
+}
+
+/** A window's sidebar (`shell`) or overlay page. */
+export async function uiPageOf(app: ElectronApplication, view: 'shell' | 'overlay', windowId: string): Promise<Page> {
+  const deadline = Date.now() + 20_000
+  while (Date.now() < deadline) {
+    for (const p of app.windows()) {
+      if (!p.url().includes(`view=${view}`)) continue
+      const id = await p
+        .evaluate(() => (window as unknown as { orbit?: { windowId?: string } }).orbit?.windowId)
+        .catch(() => undefined)
+      if (id === windowId) return p
+    }
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  throw new Error(`no ${view} page for window ${windowId}`)
+}
+
+/** Closes a window as its close button would. */
+export async function closeWindow(app: ElectronApplication, windowId: string): Promise<void> {
+  await app.evaluate((_e, id) => {
+    ;(globalThis as unknown as Hooks).__orbit.ctx.windows.get(id)?.close()
+  }, windowId)
+}
+
+/** Writes the state file now (it is otherwise written a moment after each change). */
+export async function flushState(app: ElectronApplication): Promise<void> {
+  await app.evaluate(async () => {
+    await (globalThis as unknown as Hooks).__orbit.flush()
+  })
 }
 
 /** A window's page tools (NV-05, NV-06): what the find bar and the zoom indicator show, and where. */
