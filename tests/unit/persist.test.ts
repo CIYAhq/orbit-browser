@@ -6,7 +6,8 @@ import { backupOf, isRuntimeOnlyPatch, loadState, normalizeState, Persistence } 
 import { normalizeSpacesInDraft } from '../../src/main/spaces/model'
 import { Store } from '../../src/main/store'
 import { makeTab } from '../../src/main/tabs/model'
-import { createInitialState, createWindowState, DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
+import { createInitialState, createWindowState, DEFAULT_PROFILE_ID, DEFAULT_SETTINGS } from '../../src/shared/defaults'
+import { routeFor } from '../../src/shared/link-routing'
 import type { OrbitState } from '../../src/shared/state'
 import { paletteFor } from '../../src/shared/theme'
 
@@ -375,5 +376,62 @@ describe('[SP-15][SP-18] stored Space themes (review M1, F11)', () => {
     expect(normalizeState(withThemes([{ colors: ['#123456'], intensity: 1, grain: 0 }])).settings.appearance).toBe(
       'system',
     )
+  })
+})
+
+describe('[PK-12][MW-04][MW-09][MW-10] stored Peek and Mini Window settings', () => {
+  /** Loads a file with these settings (given the file's one Space id) and archive. */
+  const load = (settings: (spaceId: string) => Record<string, unknown>, archive: unknown[] = []) => {
+    const base = createInitialState(0)
+    const spaceId = base.spaceOrder[0] as string
+    const file = { ...base, settings: { ...base.settings, ...settings(spaceId) }, archive }
+    return { state: normalizeState(file as unknown as Partial<OrbitState>), spaceId }
+  }
+
+  it('keeps well-formed values', () => {
+    const settings = (spaceId: string) => ({
+      peekShiftClick: false,
+      linkRules: [{ match: 'contains', value: 'docs', spaceId }],
+      externalLinksSpace: spaceId,
+      miniWindowArchiveAfterMs: 0,
+      miniWindowProfiles: { 'a.test': DEFAULT_PROFILE_ID },
+      miniWindowBounds: { x: 10, y: 20, width: 900, height: 650 },
+    })
+    const { state, spaceId } = load(settings, [{ id: 'a-1', url: 'https://a.test/', from: 'mini' }])
+    expect(state.settings).toMatchObject(settings(spaceId))
+    expect(state.archive[0]?.from).toBe('mini')
+  })
+
+  it('replaces malformed values and drops what points at a missing Space or profile', () => {
+    const { state, spaceId } = load(
+      (spaceId) => ({
+        peekShiftClick: 'yes',
+        linkRules: [
+          null,
+          { match: 'regex', value: 'x', spaceId },
+          { match: 'exact', value: 5, spaceId },
+          { match: 'contains', value: 'gone', spaceId: 's-gone' },
+          { match: 'contains', value: 'keep', spaceId },
+        ],
+        externalLinksSpace: 's-gone',
+        miniWindowArchiveAfterMs: -5,
+        miniWindowProfiles: { 'a.test': 'p-gone', 'b.test': 7, 'c.test': DEFAULT_PROFILE_ID },
+        miniWindowBounds: { x: 'a', y: 0, width: 10, height: 10 },
+      }),
+      [{ id: 'a-1', url: 'https://a.test/', from: 'elsewhere' }],
+    )
+    expect(state.settings.peekShiftClick).toBe(DEFAULT_SETTINGS.peekShiftClick)
+    expect(state.settings.linkRules).toEqual([{ match: 'contains', value: 'keep', spaceId }])
+    expect(state.settings.externalLinksSpace).toBeNull()
+    expect(state.settings.miniWindowArchiveAfterMs).toBe(DEFAULT_SETTINGS.miniWindowArchiveAfterMs)
+    expect(state.settings.miniWindowProfiles).toEqual({ 'c.test': DEFAULT_PROFILE_ID })
+    expect(state.settings.miniWindowBounds).toBeUndefined()
+    expect(state.archive[0]?.from).toBeUndefined()
+  })
+
+  it('a malformed stored rule cannot break link routing', () => {
+    const { state } = load((spaceId) => ({ linkRules: [{ match: 'contains', value: null, spaceId }, 'x'] }))
+    expect(() => routeFor(state.settings.linkRules, 'https://a.test/')).not.toThrow()
+    expect(load(() => ({ linkRules: 'nope' })).state.settings.linkRules).toEqual([])
   })
 })

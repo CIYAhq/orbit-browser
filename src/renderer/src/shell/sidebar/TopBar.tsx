@@ -8,7 +8,10 @@ import { useOrbit } from '../../store'
 /** Window controls, navigation buttons and the address pill. */
 export function TopBar({ win }: { win: WindowState }) {
   const tab = useOrbit((s) => {
-    const id = activeTabId(s, win.id)
+    // While a Peek is open, the address and the buttons are the Peek page's (PK-11).
+    const overlay = s.windows[win.id]?.overlay
+    const peek = overlay?.kind === 'peek' && overlay.phase !== 'closing' ? overlay.tabId : null
+    const id = peek && s.tabs[peek] ? peek : activeTabId(s, win.id)
     return id ? s.tabs[id] : undefined
   })
   const host = tab ? displayHost(tab.url) : ''

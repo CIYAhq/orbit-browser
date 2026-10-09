@@ -130,6 +130,15 @@ export const ACTIONS: ActionDef[] = [
   },
   { id: 'tab.toggleMute', title: 'Mute / Unmute Tab', category: 'Tabs', keywords: ['audio', 'sound'] },
   {
+    // In a Mini Window the same keys move its page into the most recent Space (MW-05).
+    id: 'peek.expand',
+    title: 'Open Peek as Tab',
+    category: 'Tabs',
+    mac: ['Cmd+O'],
+    other: ['Ctrl+O'],
+    keywords: ['expand', 'preview', 'mini window', 'move to space'],
+  },
+  {
     id: 'tabs.clearToday',
     title: 'Clear Today Tabs',
     category: 'Tabs',
@@ -210,6 +219,15 @@ export const ACTIONS: ActionDef[] = [
     mac: ['Cmd+Alt+N'],
     other: ['Ctrl+Alt+N'],
   },
+  {
+    id: 'mini.chooseSpace',
+    title: 'Open Mini Window Page in Space…',
+    category: 'Window',
+    mac: ['Cmd+Alt+O', 'Cmd+Shift+O'],
+    other: ['Ctrl+Alt+O'],
+    keywords: ['move', 'triage'],
+  },
+  { id: 'mini.toggleAll', title: 'Show / Hide All Mini Windows', category: 'Window' },
   {
     id: 'window.newPrivate',
     title: 'New Private Window',
