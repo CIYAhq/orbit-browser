@@ -122,20 +122,22 @@ export async function center(
 }
 
 /** Waits until rows have finished growing in or out (row heights stable across frames). */
-export async function settled(page: Page): Promise<void> {
+export async function settled(page: Page, timeout = 10_000): Promise<void> {
   await expect
-    .poll(() =>
-      page.evaluate(async () => {
-        const sample = () =>
-          [...document.querySelectorAll<HTMLElement>('.row-slot')]
-            .map((el) => `${el.dataset.exiting ? 'x' : ''}${el.offsetHeight}`)
-            .join(',')
-        const a = sample()
-        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
-        const b = sample()
-        const rows = [...document.querySelectorAll<HTMLElement>('.row-slot:not(.row-slot--split)')]
-        return a === b && rows.every((el) => !!el.dataset.exiting || el.offsetHeight === 32)
-      }),
+    .poll(
+      () =>
+        page.evaluate(async () => {
+          const sample = () =>
+            [...document.querySelectorAll<HTMLElement>('.row-slot')]
+              .map((el) => `${el.dataset.exiting ? 'x' : ''}${el.offsetHeight}`)
+              .join(',')
+          const a = sample()
+          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+          const b = sample()
+          const rows = [...document.querySelectorAll<HTMLElement>('.row-slot:not(.row-slot--split)')]
+          return a === b && rows.every((el) => !!el.dataset.exiting || el.offsetHeight === 32)
+        }),
+      { timeout },
     )
     .toBe(true)
 }

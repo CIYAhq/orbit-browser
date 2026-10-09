@@ -19,8 +19,12 @@ const KIND_ICON = {
 export function CommandBar({ mode, initialQuery }: { mode: CommandBarMode; initialQuery: string }) {
   const [query, setQuery] = useState(initialQuery)
   const [results, setResults] = useState<SearchResult[]>([])
+  /** The query the shown results answer (they may still be an earlier query's). */
+  const [answered, setAnswered] = useState<string | null>(null)
   const [selected, setSelected] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  /** Enter pressed before the results for the typed text arrived: open their top row then. */
+  const pendingEnter = useRef<{ disposition?: 'new-tab' } | null>(null)
 
   useLayoutEffect(() => {
     const input = inputRef.current
@@ -33,8 +37,9 @@ export function CommandBar({ mode, initialQuery }: { mode: CommandBarMode; initi
   useEffect(() => {
     let cancelled = false
     void invoke('search.query', { query, mode }).then((r) => {
-      if (cancelled) return
+      if (cancelled) return // a newer query's answer is on its way
       setResults(r)
+      setAnswered(query)
       setSelected(0)
     })
     return () => {
@@ -47,6 +52,14 @@ export function CommandBar({ mode, initialQuery }: { mode: CommandBarMode; initi
     void invoke('search.open', { result, mode, disposition })
   }
 
+  useEffect(() => {
+    const pending = pendingEnter.current
+    if (!pending || answered !== query) return
+    pendingEnter.current = null
+    const top = results[0]
+    if (top) void invoke('search.open', { result: top, mode, disposition: pending.disposition })
+  }, [answered, query, results, mode])
+
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     // Emacs-style Ctrl+N/P list navigation (macOS only; Ctrl+N is New Window elsewhere).
     const ctrlNav = window.orbit.platform === 'darwin' && e.ctrlKey && !e.metaKey && !e.altKey
@@ -58,7 +71,10 @@ export function CommandBar({ mode, initialQuery }: { mode: CommandBarMode; initi
       setSelected((i) => Math.max(0, i - 1))
     } else if (e.key === 'Enter') {
       e.preventDefault()
-      open(results[selected], e.metaKey || e.ctrlKey ? 'new-tab' : undefined)
+      const disposition = e.metaKey || e.ctrlKey ? 'new-tab' : undefined
+      // Rows from an earlier query (e.g. "switch to" a recent tab) must not be what Enter opens.
+      if (answered === query) open(results[selected], disposition)
+      else pendingEnter.current = { disposition }
     } else if (e.key === 'Escape') {
       e.preventDefault()
       void invoke('overlay.close', {})

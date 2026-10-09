@@ -11,6 +11,8 @@ export interface TabCommands {
   'tabs.close': { args: { tabId?: TabId; tabIds?: TabId[] }; result: void }
   /** Reopen the most recently closed tab (or `tabId` from the list) with its history (TB-07). */
   'tabs.reopenClosed': { args: { tabId?: TabId }; result: TabId | null }
+  /** The remembered icon (a small data URL) for a page's origin: archive, history, lists (MF-2). */
+  'tabs.favicon': { args: { url: string }; result: string | null }
   /** Recently closed tabs, newest first (for command bar results, TB-07). */
   'tabs.recentlyClosed': {
     args: Record<string, never>

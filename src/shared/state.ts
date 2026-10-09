@@ -186,6 +186,7 @@ export interface ArchivedTab {
   id: string
   url: string
   title: string
+  /** Not stored by the tabs lane (keeps state small): look icons up with `tabs.favicon`. */
   favicon?: string
   spaceId: SpaceId
   /** Name of the Space at archive time (kept when the Space itself is deleted). */
