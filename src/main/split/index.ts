@@ -30,6 +30,7 @@ import {
   copyTab,
   createSplitInDraft,
   detachTab,
+  dropBlankPanes,
   focusInDraft,
   isBlankPane,
   isFailure,
@@ -69,6 +70,10 @@ export function registerSplit(ctx: MainContext): void {
   const windowOf = (c: CallContext): WindowId | undefined => c.windowId ?? windows.focusedWindowId()
   const sessions = new Map<WindowId, PaneSession>()
   const strip = new PaneStrip(ctx)
+  // An empty pane whose command bar was open when Orbit quit has nothing to show.
+  store.update((d) => {
+    dropBlankPanes(d)
+  })
   if (ctx.e2e) (globalThis as unknown as { __orbitSplit: unknown }).__orbitSplit = { strip }
 
   const refuse = (windowId: WindowId | undefined, result: unknown) => {

@@ -4,6 +4,7 @@ import {
   addPaneInDraft,
   createSplitInDraft,
   detachTab,
+  dropBlankPanes,
   popOutInDraft,
   separateInDraft,
   swapIntoPaneInDraft,
@@ -260,6 +261,19 @@ describe('split model', () => {
     expect(swapIntoPaneInDraft(state, b, c)).toBe(true)
     expect(layoutLeaves(state.splits[id]?.layout as SplitLayout)).toEqual([a, c])
     expect(locate(state, b)?.container).toEqual({ kind: 'today', spaceId })
+  })
+
+  it('[SV-24] drops panes still waiting for a page when state loads', () => {
+    const { state, spaceId, add } = world()
+    const [a, b] = [add(), add('today', 'about:blank')]
+    const c = add()
+    const id = createSplitInDraft(state, [a, b, c]) as string
+    expect(dropBlankPanes(state)).toEqual([b])
+    expect(layoutLeaves(state.splits[id]?.layout as SplitLayout)).toEqual([a, c])
+    expect(state.tabs[b]).toBeUndefined()
+    createSplitInDraft(state, [a, add('today', 'about:blank')])
+    dropBlankPanes(state)
+    expect(today(state, spaceId)).toContain(a)
   })
 
   it('lays out splits on the fast path only for unrelated selections', () => {

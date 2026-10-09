@@ -272,6 +272,23 @@ export function sidebarSorted(state: OrbitState, tabIds: TabId[]): TabId[] {
     .map((x) => x.id)
 }
 
+/**
+ * Removes panes still waiting for their first page (an empty pane whose command bar was open
+ * when Orbit quit). Returns the removed tab ids.
+ */
+export function dropBlankPanes(d: OrbitState): TabId[] {
+  const removed: TabId[] = []
+  for (const split of Object.values(d.splits)) {
+    for (const id of layoutLeaves(split.layout)) {
+      if (!isBlankPane(d.tabs[id])) continue
+      detachTab(d, id)
+      delete d.tabs[id]
+      removed.push(id)
+    }
+  }
+  return removed
+}
+
 /** Copies a tab (same page, fresh id) for Duplicate. */
 export function copyTab(tab: Tab, now = Date.now()): Tab {
   return {
