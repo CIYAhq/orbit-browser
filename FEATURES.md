@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 44 built (22 partial) · 60 tested · 0 feel right.
+**Totals:** 485 spec’d · 46 built (20 partial) · 60 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
 | P0 | 174 | 30 | 36 |
-| P1 | 221 | 13 | 22 |
+| P1 | 221 | 15 | 22 |
 | P2 | 83 | 1 | 2 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -43,7 +43,7 @@ Spec: `spec/sidebar.md`
 | SB-20 | Top-of-window behaviour and window dragging | P1 | – | – | – |  |
 | SB-21 | Dim the sidebar when the window is inactive | P1 | – | – | – |  |
 | SB-22 | Keyboard focus and navigation inside the sidebar | P2 | ✅ | ✅ e2e | – | Cmd/Ctrl+Shift+E focuses the sidebar; arrows, Enter, Escape, F2 |
-| SB-23 | Scrolling, auto-reveal of the active tab and overflow indicator | P1 | 🟡 partial | ✅ e2e | – | auto-reveal of the selected tab and a pill pointing to it; no indicator while scrolling |
+| SB-23 | Scrolling, auto-reveal of the active tab and overflow indicator | P1 | ✅ | ✅ e2e | – | selected tab scrolled into view (smooth, then settles); pill points to it while it is out of view; rows use content-visibility |
 | SB-24 | Sidebar colouring follows the Space theme | P0 | – | – | – |  |
 | SB-25 | Incognito window sidebar | P1 | – | – | – |  |
 | SB-26 | Platform notes (Windows / Linux) | P2 | – | – | – |  |
@@ -69,11 +69,11 @@ Spec: `spec/tabs.md`
 | TB-11 | Move a tab to another Space | P0 | ✅ | ✅ e2e | – | Move to > Space > Pinned/Today/folder (menu + tabs.moveToSpace); command-bar entry is the commandbar lane's |
 | TB-12 | Rename a tab and set a custom icon | P1 | ✅ | ✅ e2e | – | double-click/menu rename, empty reverts; emoji icon picker |
 | TB-13 | Multi-select tabs | P1 | 🟡 partial | ✅ e2e | – | Cmd-click, Shift-click, menu actions, group drag; Escape clears |
-| TB-14 | Tab context menu | P0 | 🟡 partial | ✅ e2e | – | native menus with all tab/pinned/Favorite items; not theme-coloured; no split or share items yet |
+| TB-14 | Tab context menu | P0 | 🟡 partial | ✅ e2e | – | native menus with every tab, pinned, Favorite, folder and multi-selection item; not theme-coloured; split/share items belong to other lanes |
 | TB-15 | Audio, mute, microphone/camera and screen-share indicators | P1 | 🟡 partial | ✅ e2e | – | audio icon toggles mute; no mic/camera/screen-share indicators |
 | TB-16 | Tab sleeping and background resource limits | P1 | 🟡 partial | ✅ e2e+unit | – | sleep timer (settings.sleepAfterMs), Favorites warm 4x, audible/selected never sleep |
 | TB-17 | Tabs across multiple windows | P1 | – | ✅ e2e | – |  |
-| TB-18 | Undo sidebar actions | P1 | 🟡 partial | ✅ e2e+unit | – | undo for moves, close, clear, archive below, rename, icon, folders; no redo |
+| TB-18 | Undo sidebar actions | P1 | ✅ | ✅ e2e+unit | – | Cmd+Z undoes moves, close, Clear, archive below, renames, icons and folder changes (page text fields keep their own undo); Cmd+Shift+Z redoes moves, closes and renames |
 | TB-19 | Back on a fresh child tab returns to its opener | P2 | 🟡 partial | ✅ e2e | – | Back with no history closes a link-opened Today tab and selects its opener (shortcut/command) |
 | TB-20 | Copy a tab's URL | P1 | ✅ | ✅ e2e+unit | – | Cmd+Shift+C clean URL, Cmd+Shift+Alt+C Markdown, multi-select and folder Copy Links |
 | TB-21 | Hover cards for known web apps | P2 | – | – | – |  |

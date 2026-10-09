@@ -13,6 +13,8 @@ export interface TabCommands {
   'tabs.reopenClosed': { args: Record<string, never>; result: TabId | null }
   /** Undo the last sidebar change (TB-18). Returns what was undone. */
   'tabs.undo': { args: Record<string, never>; result: string | null }
+  /** Redo the last undone sidebar change (⌘⇧Z) (TB-18). */
+  'tabs.redo': { args: Record<string, never>; result: string | null }
   'tabs.navigate': { args: { tabId: TabId; url: string }; result: void }
   'tabs.back': { args: { tabId: TabId }; result: void }
   'tabs.forward': { args: { tabId: TabId }; result: void }

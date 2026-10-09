@@ -43,7 +43,7 @@ export class TabRuntime {
   /** Pinned tabs loading their pinned URL: the URL they land on (after redirects) counts as home (PN-03). */
   private homeLoads = new Set<TabId>()
   /** Sidebar undo, called for ⌘Z pressed in a page whose focus is not in a text field (TB-18). */
-  onUndoShortcut?: (tabId: TabId) => void
+  onUndoShortcut?: (tabId: TabId, redo: boolean) => void
   /** A page closed itself (window.close()); treated like closing the tab (TB-06). */
   onPageClosed?: (tabId: TabId) => void
   /** Control was released in a page (ends recent-tab switching, TB-05). */
@@ -155,14 +155,15 @@ export class TabRuntime {
     })
     contents.on('before-input-event', (_event, input) => {
       if (input.type === 'keyUp' && input.key === 'Control') this.onControlUp?.()
-      // ⌘Z / Ctrl+Z: the page's own undo wins in text fields; elsewhere it undoes the last sidebar change.
-      if (input.type !== 'keyDown' || input.shift || input.alt || input.key.toLowerCase() !== 'z') return
+      // ⌘Z / Ctrl+Z (with ⇧: redo): the page's own undo wins in text fields; elsewhere it undoes the
+      // last sidebar change.
+      if (input.type !== 'keyDown' || input.alt || input.key.toLowerCase() !== 'z') return
       const mod = process.platform === 'darwin' ? input.meta && !input.control : input.control && !input.meta
       if (!mod || !this.onUndoShortcut) return
       contents
         .executeJavaScriptInIsolatedWorld(999, [{ code: FOCUS_IS_EDITABLE }])
         .then((editable) => {
-          if (!editable) this.onUndoShortcut?.(tabId)
+          if (!editable) this.onUndoShortcut?.(tabId, input.shift)
         })
         .catch(() => {})
     })

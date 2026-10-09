@@ -166,7 +166,7 @@ test('[TB-16][FV-08] idle background tabs sleep; Favorites stay warm longer; pla
   expect((await liveTabs(app)).sort()).toEqual([loud, shown].sort())
 })
 
-test('[TB-18][TD-05] undo walks back archive-below, a rename and a move', async () => {
+test('[TB-18][TD-05] undo walks back archive-below, a rename and a move; redo re-applies them', async () => {
   const { app, shell } = orbit
   const ids: string[] = []
   for (const n of [1, 2, 3, 4]) ids.unshift(await newTab(app, fx.url(`/page/U${n}`), { activate: false }))
@@ -185,6 +185,11 @@ test('[TB-18][TD-05] undo walks back archive-below, a rename and a move', async 
   await expect.poll(async () => (await tab(app, top))?.customTitle).toBeUndefined()
   await shell.keyboard.press(`${MOD}+Z`)
   await expect.poll(async () => (await space(app)).today).toEqual(ids)
+  // ⌘⇧Z redoes, most recently undone first: the move, then the rename.
+  await shell.keyboard.press(`${MOD}+Shift+Z`)
+  await expect.poll(async () => (await space(app)).today).toEqual(moved)
+  await shell.keyboard.press(`${MOD}+Shift+Z`)
+  await expect.poll(async () => (await tab(app, top))?.customTitle).toBe('Renamed')
 })
 
 test('[TB-19] Back on a link-opened tab with no history closes it and returns to the opener', async () => {

@@ -271,6 +271,31 @@ describe('[TB-18] undo stack', () => {
     expect(log).toEqual(['move'])
     expect(stack.undo()).toBeUndefined()
   })
+
+  it('redoes what undo returned, and a new change ends the redo chain', () => {
+    const stack = new UndoStack()
+    const log: string[] = []
+    const record = (n: string) => {
+      stack.push(n, () => {
+        log.push(`undo ${n}`)
+        return () => {
+          log.push(`redo ${n}`)
+          record(n)
+        }
+      })
+    }
+    record('a')
+    record('b')
+    stack.undo()
+    stack.undo()
+    expect(stack.redo()).toBe('a')
+    expect(stack.redo()).toBe('b')
+    expect(stack.redo()).toBeUndefined()
+    stack.undo()
+    record('c')
+    expect(stack.redo()).toBeUndefined()
+    expect(log).toEqual(['undo b', 'undo a', 'redo a', 'redo b', 'undo b'])
+  })
 })
 
 describe('[TB-03] cheap patches for sidebar lists (review F2)', () => {

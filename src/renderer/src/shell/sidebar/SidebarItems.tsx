@@ -291,9 +291,9 @@ function useShellUndo() {
         return
       }
       const mod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
-      if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z') {
+      if (mod && !e.altKey && e.key.toLowerCase() === 'z') {
         e.preventDefault()
-        void invoke('tabs.undo', {})
+        void invoke(e.shiftKey ? 'tabs.redo' : 'tabs.undo', {})
       }
     }
     // Releasing Control settles a recent-tab switch (TB-05) when the sidebar has focus.
@@ -347,11 +347,17 @@ function useAutoReveal(scrollRef: React.RefObject<HTMLDivElement | null>, win: W
     const raf = requestAnimationFrame(() =>
       outside()?.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' }),
     )
-    // Rows that were still growing in may have moved the target: settle on the final position.
+    // Rows that were still growing in may have moved the target: settle on the final position,
+    // unless the user has started scrolling in the meantime (never fight the user).
     const settle = setTimeout(() => outside()?.scrollIntoView({ block: 'nearest' }), 450)
+    const scroll = scrollRef.current
+    const userScroll = () => clearTimeout(settle)
+    const inputs = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const
+    for (const type of inputs) scroll?.addEventListener(type, userScroll, { passive: true })
     return () => {
       cancelAnimationFrame(raf)
       clearTimeout(settle)
+      for (const type of inputs) scroll?.removeEventListener(type, userScroll)
     }
   }, [active, scrollRef])
   useEffect(() => {

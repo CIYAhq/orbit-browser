@@ -59,6 +59,8 @@ type TabPlacement = Pick<
   Tab,
   'spaceId' | 'profileId' | 'pinnedUrl' | 'pinnedTitle' | 'pinnedResolvedUrl' | 'lastActiveAt'
 >
+/** Where an item sat and how its tabs were placed. */
+type Placement = { id: ItemId; loc: ItemLocation; tabs: Record<TabId, TabPlacement> }
 
 const MAX_RECENTLY_CLOSED = 50
 const MAX_ARCHIVE = 5000
@@ -267,9 +269,13 @@ export class TabOps {
       }
     }
     if (opts.undoLabel !== false) {
+      const label = opts.undoLabel ?? (records.length > 1 ? 'Close Tabs' : 'Close Tab')
       this.undo.push(
-        opts.undoLabel ?? (records.length > 1 ? 'Close Tabs' : 'Close Tab'),
-        () => this.restoreClosed(records, { select: false }),
+        label,
+        () => {
+          const back = this.restoreClosed(records, { select: false })
+          return () => this.closeTabs(back, reason, { remove: opts.remove, reselect: opts.reselect, undoLabel: label })
+        },
         this.now(),
         () => records.every((r) => !!this.state.tabs[r.tab.id]),
       )
@@ -435,9 +441,9 @@ export class TabOps {
   // ---- Moves ----
 
   /** Records where items are and how their tabs are placed, for undo. */
-  private capture(ids: ItemId[]): { id: ItemId; loc: ItemLocation; tabs: Record<TabId, TabPlacement> }[] {
+  private capture(ids: ItemId[]): Placement[] {
     const state = this.state
-    const out: { id: ItemId; loc: ItemLocation; tabs: Record<TabId, TabPlacement> }[] = []
+    const out: Placement[] = []
     for (const id of ids) {
       const loc = locate(state, id)
       if (!loc) continue
@@ -460,7 +466,7 @@ export class TabOps {
     return out
   }
 
-  private restorePlacement(before: { id: ItemId; loc: ItemLocation; tabs: Record<TabId, TabPlacement> }[]): void {
+  private restorePlacement(before: Placement[]): void {
     const reload: TabId[] = []
     this.ctx.store.update((d) => {
       const present = before.filter((b) => (isTabId(b.id) ? d.tabs[b.id] : true) && locate(d, b.id))
@@ -589,9 +595,23 @@ export class TabOps {
       this.ctx.tabs.sleep(id)
       this.ctx.tabs.savedHistory.delete(id)
     }
-    if (opts.undoLabel !== false)
-      this.undo.push(opts.undoLabel ?? 'Move', () => this.restorePlacement(before), this.now())
+    if (opts.undoLabel !== false) this.pushMoveUndo(opts.undoLabel ?? 'Move', before, this.capture(items))
     return true
+  }
+
+  /** Undo restores where the items were; redo puts them back where they went. */
+  private pushMoveUndo(label: string, before: Placement[], after: Placement[]): void {
+    this.undo.push(
+      label,
+      () => {
+        this.restorePlacement(before)
+        return () => {
+          this.restorePlacement(after)
+          this.pushMoveUndo(label, before, after)
+        }
+      },
+      this.now(),
+    )
   }
 
   /** ⌘D / Pin: to the end of the pinned section of `spaceId` (default: the tab's Space) (PN-02). */
@@ -727,7 +747,10 @@ export class TabOps {
     const next = title?.trim() ? title.trim() : undefined
     if (old === next) return
     this.setCustomTitle(tabId, next)
-    this.undo.push('Rename', () => this.setCustomTitle(tabId, old))
+    this.undo.push('Rename', () => {
+      this.setCustomTitle(tabId, old)
+      return () => this.rename(tabId, next ?? null)
+    })
   }
 
   private setCustomTitle(tabId: TabId, value: string | undefined): void {

@@ -587,10 +587,10 @@ test('[SB-22][SB-23] the selected tab is scrolled into view; keyboard focus move
   const last = ids[ids.length - 1] as string
   await expect.poll(() => activeId(app)).toBe(last)
   await expect(row(shell, last)).toBeInViewport()
-  // Scrolled away, a pill points back to it.
-  await scroll.evaluate((el) => {
-    el.scrollTop = 0
-  })
+  // Scrolled away (with the wheel, like a user), a pill points back to it.
+  await scroll.hover()
+  await shell.mouse.wheel(0, -5000)
+  await expect.poll(() => scroll.evaluate((el) => el.scrollTop)).toBe(0)
   await expect(shell.getByTestId('reveal-active')).toBeVisible()
   await shell.getByTestId('reveal-active').click()
   await expect(row(shell, last)).toBeInViewport()

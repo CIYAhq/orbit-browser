@@ -1,10 +1,12 @@
 /**
  * Undo for sidebar changes (TB-18): moves and reorders, closing and clearing,
- * archiving, renames and icon changes. Each entry knows how to revert itself.
+ * archiving, renames and icon changes. Each entry knows how to revert itself and may
+ * return a redo step (⌘⇧Z).
  */
 export interface UndoEntry {
   label: string
-  undo: () => void
+  /** Reverts the change; a returned function is the redo step. */
+  undo: () => unknown
   at: number
   /** True once the change was already reverted another way (e.g. ⌘⇧T reopened the tab). */
   isStale?: () => boolean
@@ -12,12 +14,17 @@ export interface UndoEntry {
 
 export class UndoStack {
   private entries: UndoEntry[] = []
+  private redos: { label: string; redo: () => void }[] = []
+  private redoing = false
 
   constructor(private limit = 100) {}
 
-  push(label: string, undo: () => void, at = Date.now(), isStale?: () => boolean): void {
+  /** Records a change. `undo` may return the step that re-applies it (redo). */
+  push(label: string, undo: () => unknown, at = Date.now(), isStale?: () => boolean): void {
     this.entries.push({ label, undo, at, isStale })
     if (this.entries.length > this.limit) this.entries.shift()
+    // A new change ends the redo chain (a redo re-records its own change without clearing it).
+    if (!this.redoing) this.redos = []
   }
 
   /** Reverts the most recent change. Returns its label, or undefined when there is nothing to undo. */
@@ -25,8 +32,22 @@ export class UndoStack {
     let entry = this.entries.pop()
     while (entry?.isStale?.()) entry = this.entries.pop()
     if (!entry) return undefined
-    entry.undo()
+    const redo = entry.undo()
+    if (typeof redo === 'function') this.redos.push({ label: entry.label, redo: redo as () => void })
     return entry.label
+  }
+
+  /** Re-applies the most recently undone change. */
+  redo(): string | undefined {
+    const step = this.redos.pop()
+    if (!step) return undefined
+    this.redoing = true
+    try {
+      step.redo()
+    } finally {
+      this.redoing = false
+    }
+    return step.label
   }
 
   peek(): UndoEntry | undefined {

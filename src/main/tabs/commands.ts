@@ -195,6 +195,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
 
   commands.register('tabs.reopenClosed', (_args, c) => ops.reopenLast(windowOf(c)))
   commands.register('tabs.undo', () => ops.undo.undo() ?? null)
+  commands.register('tabs.redo', () => ops.undo.redo() ?? null)
 
   commands.register('tabs.navigate', ({ tabId, url }) => {
     tabs.navigate(tabId, url)
@@ -462,8 +463,9 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   }
 
   // ⌘Z from a page (outside text fields) undoes the last sidebar change (TB-18, TB-07).
-  tabs.onUndoShortcut = () => {
-    ops.undo.undo()
+  tabs.onUndoShortcut = (_tabId, redo) => {
+    if (redo) ops.undo.redo()
+    else ops.undo.undo()
   }
 
   /** Back on a tab opened from a link with no earlier history closes it and returns to its opener (TB-19). */
