@@ -121,4 +121,6 @@ Sandboxed, context-isolated renderers everywhere. No Node in pages. Pages never 
 
 ## 11. Packaging and updates
 
-`electron-builder` produces unsigned macOS `.dmg` and `.zip` (arm64 + x64) in CI, and a Linux `dir` build for local testing. The updater is a stub for now (UP-10): it checks a release feed, says when a newer version exists, and links to it. There's no silent install until signing exists.
+`electron-builder` produces ad-hoc signed macOS `.dmg` and `.zip` (arm64 + x64) in CI, and a Linux `dir` build for local testing. Ad-hoc signing (`mac.identity: '-'`, no certificate) keeps arm64 Macs from rejecting the bundle as "damaged"; until Orbit has a Developer ID, a downloaded build still needs right-click → Open once (or `xattr -dr com.apple.quarantine /Applications/Orbit.app`). The updater is a stub for now (UP-10): it checks a release feed, says when a newer version exists, and links to it. There's no silent install until signing exists.
+
+Only packages the main process imports at runtime belong in `dependencies` (today just `immer`); they are the only `node_modules` packed into `app.asar`. Renderer packages (React, motion, lucide, dnd-kit, zustand) are bundled by Vite and live in `devDependencies`.
