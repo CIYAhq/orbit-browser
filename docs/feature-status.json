@@ -13,7 +13,7 @@
   "TB-04": { "built": "yes", "note": "click, Cmd+1-9 (Favorites setting, Cmd+9 last), Cmd+Alt+Up/Down skip collapsed rows" },
   "TB-06": { "built": "yes", "note": "Today -> Archive, pinned/Favorites unload; next selection below/above/MRU; middle-click; Cmd+W closes window when empty" },
   "TB-07": { "built": "yes", "note": "Cmd+Shift+T stack with full history; Cmd+Z reopens too" },
-  "TB-10": { "built": "partial", "note": "Duplicate (menu/action) copies history, lands below; no option-drag or Cmd-click reload" },
+  "TB-10": { "built": "yes", "note": "menu/action Duplicate (selected, below the original) and Alt-drag copy, both with history; Cmd-click Reload is the top bar's" },
   "TB-12": { "built": "yes", "note": "double-click/menu rename, empty reverts; emoji icon picker" },
   "TB-14": { "built": "partial", "note": "native menus with all tab/pinned/Favorite items; not theme-coloured; no split or share items yet" },
   "TB-16": { "built": "partial", "note": "sleep timer (settings.sleepAfterMs), Favorites warm 4x, audible/selected never sleep" },
@@ -28,7 +28,7 @@
   "TB-01": { "built": "yes", "note": "row: favicon/emoji, title or breadcrumb, hover close, audio, selected pill, dimmed when asleep" },
   "TB-03": { "built": "yes", "note": "single rule todayInsertIndex(): top of Today" },
   "TB-08": { "built": "yes", "note": "pointer drag, 4px threshold, rows spring apart, ghost lift/settle, auto-scroll, Escape cancel, undo; no haptics" },
-  "TB-09": { "built": "partial", "note": "Space switcher drop, edge dwell to next Space, drag out to new window; no split/option-drag/URL-to-page drops" },
+  "TB-09": { "built": "partial", "note": "Space switcher drop, edge dwell to the next Space, drag out to a new window, Alt-drag copy; no split or URL-to-page drops" },
   "TB-11": { "built": "yes", "note": "Move to > Space > Pinned/Today/folder (menu + tabs.moveToSpace); command-bar entry is the commandbar lane's" },
   "PN-01": { "built": "yes", "note": "per-Space pinned tabs with pinned URL; never auto-archived" },
   "PN-03": { "built": "yes", "note": "breadcrumb 'Pinned / Current', redirects count as home, hover shows reset glyph and hint" },
@@ -63,5 +63,6 @@
   "FD-06": { "built": "yes", "note": "nesting by drag or New Folder from children; 14px indent per level" },
   "FD-07": { "built": "partial", "note": "emoji icon via Change Icon; open/closed glyphs; not full-colour" },
   "FD-09": { "built": "partial", "note": "Rename, Change Icon, Duplicate, Copy All Links, Paste URL, Move to, Delete; no Open [Folder] command" },
-  "TB-05": { "built": "partial", "note": "Ctrl+Tab / Ctrl+Shift+Tab step through the 5 most recent tabs while Ctrl is held (keyboard only); no overlay list yet" }
+  "TB-05": { "built": "partial", "note": "Ctrl+Tab / Ctrl+Shift+Tab step through the 5 most recent tabs while Ctrl is held (keyboard only); no overlay list yet" },
+  "FD-08": { "built": "yes", "note": "magnifier on folder hover opens a search popover (custom names, first match selected, Enter opens and peeks)" }
 }

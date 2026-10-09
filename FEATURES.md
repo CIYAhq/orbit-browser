@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 42 built (23 partial) · 59 tested · 0 feel right.
+**Totals:** 485 spec’d · 44 built (22 partial) · 60 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
 | P0 | 174 | 30 | 36 |
-| P1 | 221 | 11 | 21 |
+| P1 | 221 | 13 | 22 |
 | P2 | 83 | 1 | 2 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -64,8 +64,8 @@ Spec: `spec/tabs.md`
 | TB-06 | Closing a tab | P0 | ✅ | ✅ e2e+unit | – | Today -> Archive, pinned/Favorites unload; next selection below/above/MRU; middle-click; Cmd+W closes window when empty |
 | TB-07 | Reopen the last closed tab | P0 | ✅ | ✅ e2e | – | Cmd+Shift+T stack with full history; Cmd+Z reopens too |
 | TB-08 | Reorder tabs by drag and drop | P0 | ✅ | ✅ e2e+unit | – | pointer drag, 4px threshold, rows spring apart, ghost lift/settle, auto-scroll, Escape cancel, undo; no haptics |
-| TB-09 | Drag and drop to other destinations | P0 | 🟡 partial | ✅ e2e | – | Space switcher drop, edge dwell to next Space, drag out to new window; no split/option-drag/URL-to-page drops |
-| TB-10 | Duplicate a tab | P1 | 🟡 partial | ✅ e2e | – | Duplicate (menu/action) copies history, lands below; no option-drag or Cmd-click reload |
+| TB-09 | Drag and drop to other destinations | P0 | 🟡 partial | ✅ e2e | – | Space switcher drop, edge dwell to the next Space, drag out to a new window, Alt-drag copy; no split or URL-to-page drops |
+| TB-10 | Duplicate a tab | P1 | ✅ | ✅ e2e | – | menu/action Duplicate (selected, below the original) and Alt-drag copy, both with history; Cmd-click Reload is the top bar's |
 | TB-11 | Move a tab to another Space | P0 | ✅ | ✅ e2e | – | Move to > Space > Pinned/Today/folder (menu + tabs.moveToSpace); command-bar entry is the commandbar lane's |
 | TB-12 | Rename a tab and set a custom icon | P1 | ✅ | ✅ e2e | – | double-click/menu rename, empty reverts; emoji icon picker |
 | TB-13 | Multi-select tabs | P1 | 🟡 partial | ✅ e2e | – | Cmd-click, Shift-click, menu actions, group drag; Escape clears |
@@ -112,7 +112,7 @@ Spec: `spec/tabs.md`
 | FD-05 | Drag into and out of folders | P0 | ✅ | ✅ e2e+unit | – | drop into closed folder (no expand, peeks) or between children; folders drag/nest |
 | FD-06 | Nested folders | P1 | ✅ | ✅ e2e | – | nesting by drag or New Folder from children; 14px indent per level |
 | FD-07 | Folder icon | P1 | 🟡 partial | ✅ e2e | – | emoji icon via Change Icon; open/closed glyphs; not full-colour |
-| FD-08 | Folder hover preview and search | P1 | – | – | – |  |
+| FD-08 | Folder hover preview and search | P1 | ✅ | ✅ e2e | – | magnifier on folder hover opens a search popover (custom names, first match selected, Enter opens and peeks) |
 | FD-09 | Folder context menu | P1 | 🟡 partial | ✅ e2e | – | Rename, Change Icon, Duplicate, Copy All Links, Paste URL, Move to, Delete; no Open [Folder] command |
 | FD-10 | Delete a folder | P1 | ✅ | ✅ e2e | – | confirm when non-empty, contents to Archive, Cmd+Z restores all |
 | FD-11 | Auto-updating folders | P2 | – | – | – |  |

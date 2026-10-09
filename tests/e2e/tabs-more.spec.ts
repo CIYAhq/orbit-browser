@@ -3,12 +3,14 @@ import { type Fixtures, launchOrbit, MOD, type Orbit, startFixtures, state, tabP
 import {
   act,
   activeId,
+  center,
   cmd,
   liveTabs,
   newTab,
   PROFILE,
   row,
   setState,
+  settled,
   space,
   tab,
   tabsHook,
@@ -373,6 +375,7 @@ test('[FL-21][SB-23] 200 tabs: the sidebar mounts and scrolls without long main-
   })
   await expect.poll(async () => (await space(app)).today.length).toBe(200)
   await expect(shell.getByTestId('today-list').locator(':scope > [data-slot]')).toHaveCount(200)
+  await settled(shell)
   const longTasks = await shell.evaluate(async () => {
     const tasks: number[] = []
     const obs = new PerformanceObserver((list) => {
@@ -397,4 +400,66 @@ test('[FL-21][SB-23] 200 tabs: the sidebar mounts and scrolls without long main-
   const t = (await space(app)).today[100] as string
   await cmd(app, 'tabs.rename', { tabId: t, title: 'Renamed in place' })
   await expect(row(shell, t).getByTestId('tab-title')).toHaveText('Renamed in place')
+})
+
+test('[FD-08][FD-04] folder search lists its tabs, filters as you type and opens the match under the closed folder', async () => {
+  const { app, shell } = orbit
+  const sp = (await space(app)).id
+  const a = await newTab(app, fx.url('/page/Alpha'), { container: { kind: 'pinned', spaceId: sp }, activate: false })
+  const b = await newTab(app, fx.url('/page/Beta'), { container: { kind: 'pinned', spaceId: sp }, activate: false })
+  const c = await newTab(app, fx.url('/page/Gamma'), { container: { kind: 'pinned', spaceId: sp }, activate: false })
+  await cmd(app, 'tabs.rename', { tabId: b, title: 'Budget sheet' })
+  const folderId = await cmd<string>(app, 'folders.create', { name: 'Work', items: [a, b, c] })
+  await shell.keyboard.press('Escape')
+  await cmd(app, 'folders.setCollapsed', { folderId, collapsed: true })
+  const folderRow = shell.locator(`[data-folder-id="${folderId}"] .folder-row`).first()
+  await folderRow.hover()
+  await folderRow.getByTestId('folder-search-button').click()
+  await expect(shell.getByTestId('folder-search')).toBeVisible()
+  await expect(shell.getByTestId('folder-search-item')).toHaveCount(3)
+  // Custom names are searchable; the first match is preselected.
+  await shell.getByTestId('folder-search-input').fill('budg')
+  await expect(shell.getByTestId('folder-search-item')).toHaveCount(1)
+  await expect(shell.getByTestId('folder-search-item').first()).toHaveAttribute('aria-selected', 'true')
+  await shell.getByTestId('folder-search-input').press('Enter')
+  await expect.poll(() => activeId(app)).toBe(b)
+  await expect(shell.getByTestId('folder-search')).toHaveCount(0)
+  expect((await state(app)).folders[folderId]?.collapsed).toBe(true)
+  await expect(shell.getByTestId('folder-peek').locator(`[data-tab-id="${b}"]`)).toBeVisible()
+  // Escape closes without opening anything.
+  await folderRow.hover()
+  await folderRow.getByTestId('folder-search-button').click()
+  await shell.getByTestId('folder-search-input').press('Escape')
+  await expect(shell.getByTestId('folder-search')).toHaveCount(0)
+  expect(await activeId(app)).toBe(b)
+})
+
+test('[TB-10][TB-09] dragging with Alt held drops a copy with its history and leaves the original', async () => {
+  const { app, shell } = orbit
+  const other = await newTab(app, fx.url('/page/Other'), { activate: false })
+  const t = await newTab(app, fx.url('/page/Src'))
+  await waitTab(app, t, '/page/Src')
+  await (await tabPage(app, '/page/Src')).click('#next')
+  await waitTab(app, t, '/page/Src-next')
+  const divider = await center(shell.getByTestId('today-divider'))
+  const start = await center(row(shell, t))
+  await shell.mouse.move(start.x, start.y)
+  await shell.mouse.down()
+  await shell.mouse.move(start.x, start.y + 6, { steps: 2 })
+  await shell.mouse.move(divider.x, divider.box.y + 2, { steps: 10 })
+  await shell.keyboard.down('Alt')
+  await shell.mouse.move(divider.x, divider.box.y + 3, { steps: 2 })
+  await shell.mouse.up()
+  await shell.keyboard.up('Alt')
+  await expect.poll(async () => (await space(app)).pinned.length).toBe(1)
+  const copy = (await space(app)).pinned[0] as string
+  expect(copy).not.toBe(t)
+  expect((await space(app)).today).toEqual([t, other])
+  expect(await activeId(app)).toBe(t)
+  await expect(row(shell, t)).toBeVisible()
+  // The copy has the original's back history.
+  await row(shell, copy).click()
+  await waitTab(app, copy, '/page/Src-next')
+  await act(app, 'nav.back')
+  await expect.poll(async () => (await tab(app, copy))?.url.endsWith('/page/Src')).toBe(true)
 })

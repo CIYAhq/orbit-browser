@@ -98,12 +98,12 @@ export async function tab(app: ElectronApplication, id: string): Promise<Tab | u
   return (await state(app)).tabs[id]
 }
 
-/** Waits until a tab shows a URL containing `part` and finished loading. */
+/** Waits until a tab is awake, shows a URL containing `part` and finished loading (its page title arrived). */
 export async function waitTab(app: ElectronApplication, id: string, part: string): Promise<void> {
   await expect
     .poll(async () => {
       const t = await tab(app, id)
-      return !!t && t.url.includes(part) && !t.loading
+      return !!t && t.url.includes(part) && !t.loading && !t.asleep && !/^localhost(:\d+)?$/.test(t.title)
     })
     .toBe(true)
 }
@@ -115,13 +115,28 @@ export function row(shell: Page, tabId: string): Locator {
 export async function center(
   loc: Locator,
 ): Promise<{ x: number; y: number; box: { x: number; y: number; width: number; height: number } }> {
+  await settled(loc.page())
   const box = await loc.boundingBox()
   if (!box) throw new Error('not visible')
   return { x: box.x + box.width / 2, y: box.y + box.height / 2, box }
 }
 
+/** Waits until rows have finished growing in (positions are stable). */
+export async function settled(page: Page): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>('.row-slot:not(.row-slot--split)')]
+          .filter((el) => !el.dataset.exiting)
+          .every((el) => el.offsetHeight === 32),
+      ),
+    )
+    .toBe(true)
+}
+
 /** Presses on `from`, drags past the threshold to (x, y) and releases (unless `hold`). */
 export async function drag(page: Page, from: Locator, to: { x: number; y: number }, opts: { hold?: boolean } = {}) {
+  await settled(page)
   const start = await center(from)
   await page.mouse.move(start.x, start.y)
   await page.mouse.down()

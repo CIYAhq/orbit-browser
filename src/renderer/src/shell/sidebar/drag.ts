@@ -484,6 +484,31 @@ async function drop(s: Session, ev: PointerEvent): Promise<void> {
     cancel(s)
     return
   }
+  // ⌥-drag drops a copy (with history) and leaves the original in place (TB-09, TB-10).
+  const copy = ev.altKey && s.ids.length === 1 && isTabId(first) && (zone.kind === 'list' || zone.kind === 'favorites')
+  if (copy) {
+    const target = state.target
+    const to =
+      zone.kind === 'favorites'
+        ? { kind: 'favorites' as const, profileId: ctx.profileId }
+        : target?.type === 'into'
+          ? { kind: 'folder' as const, folderId: target.folderId }
+          : target
+            ? parseContainerKey(target.container)
+            : undefined
+    const index =
+      zone.kind === 'favorites'
+        ? (state.favIndex ?? 0)
+        : target?.type === 'between'
+          ? target.index
+          : Number.MAX_SAFE_INTEGER
+    commit = to ? () => invoke('tabs.duplicate', { tabId: first, to, index }) : null
+    landing = 'away'
+    if (!commit) {
+      cancel(s)
+      return
+    }
+  }
   const seqAtDrop = getSeq()
   useDrag.setState({ phase: 'committing' })
   let landed = false
@@ -499,6 +524,8 @@ async function drop(s: Session, ev: PointerEvent): Promise<void> {
       favIndex: null,
       intoFolder: null,
       spaceTarget: null,
+      // A copy lands as a new row; the original reappears in place.
+      ...(copy ? { hidden: {} } : {}),
     })
     requestAnimationFrame(() => settle(s, landing, state.intoFolder))
   }

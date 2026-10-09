@@ -22,6 +22,9 @@ export function stopRename(): void {
   useRename.setState({ id: null, isNew: false, mode: 'name' })
 }
 
+/** Folder whose search popover is open (FD-08). */
+export const useFolderSearch = create<{ id: ItemId | null }>(() => ({ id: null }))
+
 /** Emoji picker target (TB-12, FD-07). */
 export const useIconPicker = create<{ id: ItemId | null }>(() => ({ id: null }))
 

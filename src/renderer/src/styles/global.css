@@ -1038,6 +1038,78 @@ html.is-dragging-tab * {
   color: var(--text);
 }
 
+/* Folder search (FD-08) */
+.folder-row__search {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  opacity: 0;
+}
+
+.folder-row:hover .folder-row__search,
+.folder-row__search:focus-visible {
+  opacity: 1;
+}
+
+.folder-row__search:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.tab-row__close:active,
+.tab-row__audio:active,
+.folder-row__search:active {
+  transform: scale(0.9);
+}
+
+.folder-search {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  z-index: 40;
+  padding: 8px;
+  border-radius: 12px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--frame-top) 22%, white);
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.2),
+    0 0 0 0.5px rgba(0, 0, 0, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  .folder-search {
+    background: color-mix(in srgb, var(--frame-top) 35%, #1f1f24);
+  }
+}
+
+.folder-search__list {
+  max-height: 210px;
+  overflow-y: auto;
+}
+
+.folder-search__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 6px;
+  border-radius: 7px;
+}
+
+.folder-search__item.is-selected {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.folder-search__empty {
+  padding: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .reveal-pill {
     transition: none;

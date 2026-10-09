@@ -22,6 +22,7 @@ import {
   row,
   rowIds,
   setState,
+  settled,
   space,
   tab,
   tabsHook,
@@ -237,6 +238,7 @@ test('[TB-08][PN-02] drag reorders Today, pins above the divider, unpins below, 
   for (const n of [1, 2, 3, 4, 5]) ids.unshift(await newTab(app, fx.url(`/page/R${n}`), { activate: false }))
   // ids is top-to-bottom: R5..R1. Drag the 5th row (R1) to the top.
   await expect.poll(() => rowIds(shell, 'today-list')).toEqual(ids)
+  await settled(shell)
   const fifth = row(shell, ids[4] as string)
   const top = await center(row(shell, ids[0] as string))
   await drag(shell, fifth, { x: top.x, y: top.box.y + 4 })
@@ -394,11 +396,13 @@ test('[FV-01][FV-02][FV-03][FV-04][FV-05][FV-06] Favorites: add by drag, reorder
   for (const id of more) expect(await cmd(app, 'tabs.favorite', { tabId: id })).toBe(true)
   const tiles = shell.getByTestId('favorite-tile')
   await expect(tiles).toHaveCount(5)
-  const b0 = await tiles.nth(0).boundingBox()
-  const b3 = await tiles.nth(3).boundingBox()
-  const b4 = await tiles.nth(4).boundingBox()
-  expect(Math.abs((b0?.y ?? 0) - (b3?.y ?? 1))).toBeLessThan(2)
-  expect((b4?.y ?? 0) > (b0?.y ?? 0)).toBe(true)
+  // Four per row, the fifth wraps (wait for the pop-in to settle).
+  await expect
+    .poll(async () => {
+      const [b0, b3, b4] = await Promise.all([0, 3, 4].map((i) => tiles.nth(i).boundingBox()))
+      return Math.abs((b0?.y ?? 0) - (b3?.y ?? 99)) < 2 && (b4?.y ?? 0) > (b0?.y ?? 0) + 20
+    })
+    .toBe(true)
   // Reorder: drag the last tile before the first.
   const firstTile = await center(tiles.nth(0))
   await drag(shell, tiles.nth(4), { x: firstTile.box.x + 4, y: firstTile.y })

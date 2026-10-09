@@ -1,4 +1,4 @@
-import { ChevronRight, Folder, FolderOpen, Undo2, Volume2, VolumeX, X } from 'lucide-react'
+import { ChevronRight, Folder, FolderOpen, Search, Undo2, Volume2, VolumeX, X } from 'lucide-react'
 import { AnimatePresence, animate, motion, useIsPresent, useMotionValue, type Variants } from 'motion/react'
 import {
   memo,
@@ -19,7 +19,15 @@ import { Favicon } from '../../ui/Favicon'
 import { pressItem } from './drag'
 import { QUICK_EASE, reducedMotion, SNAPPY, SNAPPY_EASE } from './motion-tokens'
 import { RenameField } from './RenameField'
-import { clearSelection, startRename, useDrag, useKeyboardFocus, useRename, useSelection } from './ui-state'
+import {
+  clearSelection,
+  startRename,
+  useDrag,
+  useFolderSearch,
+  useKeyboardFocus,
+  useRename,
+  useSelection,
+} from './ui-state'
 
 /** Indent per folder level (FD-06). */
 export const INDENT = 14
@@ -54,6 +62,22 @@ const rowVariants: Variants = {
       },
     }
   },
+}
+
+/**
+ * Bulk inserts (open all, import, restore) animate only their first rows: at most a dozen
+ * rows grow in per 300 ms burst, the rest appear in place (FL-06 caps a burst at ~300 ms).
+ */
+let enterBurstStart = 0
+let enterBurstCount = 0
+function claimEnterAnimation(): boolean {
+  const now = performance.now()
+  if (now - enterBurstStart > 300) {
+    enterBurstStart = now
+    enterBurstCount = 0
+  }
+  enterBurstCount += 1
+  return enterBurstCount <= 12
 }
 
 /** Rows leaving together, in list order (drives the cascade delay). */
@@ -164,7 +188,7 @@ function RowSlot({
   const hidden = useDrag((s) => !!s.hidden[id])
   const present = useIsPresent()
   // Rows that arrive or leave through a drag appear/disappear at once (the ghost covers them).
-  const [instant] = useState(() => hidden)
+  const [instant] = useState(() => hidden || reducedMotion() || !claimEnterAnimation())
   if (!present && hidden) return null
   const order = present ? undefined : exitOrder.get(id)
   return (
@@ -176,7 +200,7 @@ function RowSlot({
       onAnimationComplete={() => {
         if (!present) exitOrder.delete(id)
       }}
-      initial={instant || reducedMotion() ? false : 'hidden'}
+      initial={instant ? false : 'hidden'}
       animate="shown"
       exit="exit"
       data-slot="item"
@@ -437,6 +461,22 @@ const FolderRow = memo(function FolderRow({
             <span className="folder-row__title" data-testid="folder-title">
               {folder.name}
             </span>
+          )}
+          {!renaming && (
+            <button
+              type="button"
+              className="folder-row__search"
+              data-testid="folder-search-button"
+              aria-label={`Search ${folder.name}`}
+              title="Search this folder"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                useFolderSearch.setState({ id: folderId })
+              }}
+            >
+              <Search size={12} strokeWidth={2.2} />
+            </button>
           )}
         </div>
       </RowSlot>

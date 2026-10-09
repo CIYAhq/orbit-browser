@@ -20,6 +20,7 @@ import { getOrbitState, useOrbit } from '../../store'
 import { DragGhost } from './DragGhost'
 import { setDragContext } from './drag'
 import { Favorites } from './Favorites'
+import { FolderSearch } from './FolderSearch'
 import { IconPicker } from './IconPicker'
 import { ItemList, TabRow, useRowShift } from './ItemList'
 import { clearSelection, startRename, useDrag, useIconPicker, useKeyboardFocus, useSelection } from './ui-state'
@@ -93,6 +94,7 @@ export function SidebarItems({ win, space, header }: { win: WindowState; space: 
           </button>
         )}
         <IconPicker />
+        <FolderSearch />
         <DragGhost />
       </div>
     </MotionConfig>

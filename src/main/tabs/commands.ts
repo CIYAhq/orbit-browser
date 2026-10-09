@@ -234,20 +234,22 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   commands.register('tabs.archiveBelow', ({ tabId }) => ops.archiveBelow(tabId))
   commands.register('tabs.copyLinks', ({ tabIds, markdown = false }, c) => copyLinks(windowOf(c), tabIds, markdown))
 
-  commands.register('tabs.duplicate', ({ tabId }, c) => {
+  commands.register('tabs.duplicate', ({ tabId, to, index }, c) => {
     const state = store.state
     const tab = state.tabs[tabId]
     if (!tab) throw new Error('No such tab')
     const item = splitOfTab(state, tabId) ?? tabId
     const loc = locate(state, item)
-    const pinned = !!tab.pinnedUrl && sectionOf(state, tabId) !== 'today'
+    const pinned = !to && !!tab.pinnedUrl && sectionOf(state, tabId) !== 'today'
     const id = ops.createTab({
       url: tab.url,
       title: tab.title,
       favicon: tab.favicon,
-      spaceId: tab.spaceId,
-      container: loc?.container,
-      index: loc ? loc.index + 1 : undefined,
+      spaceId: to ? undefined : tab.spaceId,
+      container: to ?? loc?.container,
+      index: to ? index : loc ? loc.index + 1 : undefined,
+      // A copy dropped with ⌥ stays in the background; Duplicate from the menu selects it.
+      activate: !to,
       windowId: windowOf(c),
       history: ops.historyOf(tabId),
     })
