@@ -5,8 +5,10 @@ import {
   cornerRect,
   cubicBezier,
   draggedSize,
+  EASE_OUT_CURVE,
   keepInside,
   maxPipSize,
+  minPipSize,
   mixRect,
   nearestCorner,
   normalizePlacement,
@@ -91,6 +93,46 @@ describe('moving and resizing the player (MD-06, FL-32)', () => {
     expect(clampPipSize(Number.NaN, AREA)).toBe(320)
     // A small screen still allows the smallest player.
     expect(maxPipSize({ x: 0, y: 0, width: 300, height: 300 })).toBe(200)
+  })
+
+  it('[MD-06] a tall video is still about 200 px wide at its smallest, and fits the screen at its largest', () => {
+    // 9:16 and the tallest shape (0.4): the width stays at 200, the longer side grows.
+    expect(minPipSize(16 / 9)).toBe(200)
+    expect(pipDimensions(9 / 16, clampPipSize(100, AREA, 9 / 16))).toEqual({ width: 200, height: 356 })
+    expect(pipDimensions(0.4, clampPipSize(100, AREA, 0.4))).toEqual({ width: 200, height: 500 })
+    // A wide 3440 × 1440 screen: half its width (1720) is taller than the screen for a square or
+    // tall video, so the height stops inside the work area's margins.
+    const wide: Rect = { x: 0, y: 0, width: 3440, height: 1440 }
+    const inside = wide.height - 2 * PIP_MARGIN
+    for (const aspect of [1, 9 / 16, 0.4]) {
+      const { width, height } = pipDimensions(aspect, clampPipSize(5000, wide, aspect))
+      expect(height).toBeLessThanOrEqual(inside)
+      expect(width).toBeLessThanOrEqual(wide.width / 2)
+      const r = cornerRect(wide, 'top-left', width, height)
+      expect(r.y + r.height).toBeLessThanOrEqual(wide.y + wide.height)
+    }
+    expect(pipDimensions(1, clampPipSize(5000, wide, 1))).toEqual({ width: inside, height: inside })
+    // A 16:9 video is still limited by half the width.
+    expect(clampPipSize(5000, wide, 16 / 9)).toBe(1720)
+    // Dragging a tall video's corner resists below its own smallest size.
+    expect(resizeWithResistance(400, AREA, 9 / 16)).toBe(400)
+    expect(resizeWithResistance(300, AREA, 9 / 16)).toBeLessThan(356)
+    expect(resizeWithResistance(300, AREA, 9 / 16)).toBeGreaterThan(300)
+  })
+
+  it('[FL-28] with reduced motion a released player settles on an ease-out: fast at first, never past the end', () => {
+    const ease = cubicBezier(...EASE_OUT_CURVE)
+    expect(ease(0)).toBe(0)
+    expect(ease(1)).toBe(1)
+    let last = 0
+    for (let t = 0.05; t < 1; t += 0.05) {
+      const p = ease(t)
+      expect(p).toBeGreaterThan(last)
+      // Ahead of a linear motion all the way (it slows down into the end), and never past it.
+      expect(p).toBeGreaterThan(t)
+      expect(p).toBeLessThanOrEqual(1)
+      last = p
+    }
   })
 
   it('[MD-06][FL-32] a released player snaps to the nearest corner; a fling heads for the corner in its direction', () => {

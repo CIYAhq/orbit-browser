@@ -324,6 +324,9 @@ export const AGENT_SOURCE = `(() => {
   // ---- Orbit's floating player (MD-03, MD-04, MD-06) ----
 
   const LIFT = 'data-orbit-pip'
+  // The lift's rules weigh three ids more than the attribute: a page's own !important rules on its
+  // video (say '#player video{width:100%!important}') must not win over them.
+  const LIFTED = 'video[' + LIFT + ']:not(#_):not(#_):not(#_)'
   let lift = null
   let chosen = null
   let removal = null
@@ -363,7 +366,7 @@ export const AGENT_SOURCE = `(() => {
     const l = lift
     const t = l.ms > 0 ? 'width ' + l.ms + 'ms cubic-bezier(0.2,0.9,0.1,1),height ' + l.ms + 'ms cubic-bezier(0.2,0.9,0.1,1)' : 'none'
     const zoom = l.scale > 1 ? 'translate(' + l.tx + 'px,' + l.ty + 'px) scale(' + l.scale + ')' : 'none'
-    return 'video[' + LIFT + ']{position:fixed!important;inset:0 auto auto 0!important;left:0!important;top:0!important;' +
+    return LIFTED + '{position:fixed!important;inset:0 auto auto 0!important;left:0!important;top:0!important;' +
       'width:' + l.w + 'px!important;height:' + l.h + 'px!important;min-width:0!important;min-height:0!important;' +
       'max-width:none!important;max-height:none!important;margin:0!important;padding:0!important;border:0!important;' +
       'border-radius:0!important;box-sizing:border-box!important;background:#000!important;object-fit:contain!important;' +
@@ -371,8 +374,8 @@ export const AGENT_SOURCE = `(() => {
       'clip-path:none!important;filter:none!important;mask:none!important;overflow:hidden!important;' +
       'transform-origin:0 0!important;transform:' + zoom + '!important;transition:' + t + '!important;' +
       'z-index:2147483647!important;pointer-events:none!important}' +
-      'video[' + LIFT + ']::backdrop{background:#000!important}' +
-      'video[' + LIFT + ']::-webkit-media-controls{display:none!important}'
+      LIFTED + '::backdrop{background:#000!important}' +
+      LIFTED + '::-webkit-media-controls{display:none!important}'
   }
 
   function paint() {

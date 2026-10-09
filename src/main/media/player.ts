@@ -30,6 +30,7 @@ import {
   cornerRect,
   cubicBezier,
   draggedSize,
+  EASE_OUT_CURVE,
   keepInside,
   maxPipSize,
   mixRect,
@@ -68,6 +69,8 @@ const ENTER_MS = 300
 const EXIT_MS = 140
 /** "Back to tab": the reverse of the enter motion, a little quicker (MD-16, FL-01). */
 const BACK_MS = 220
+/** With reduced motion, a released player settles with a short ease-out instead of a spring (FL-28). */
+const RELEASE_MS = 120
 const FRAME_MS = 16
 /** A pause in wheel scrolling ends a hover-scroll move (MD-06). */
 const WHEEL_IDLE_MS = 160
@@ -140,6 +143,11 @@ export interface PlayerInfo {
   lastEnter: { from: Rect; to: Rect } | null
   /** The last "Back to tab" motion: from the player's place to the video's place in the page (MD-16). */
   lastBack: { from: Rect; to: Rect } | null
+  /**
+   * The last settle after a move or resize (MD-06): where it went, and how long it takes when it is
+   * a timed ease-out (reduced motion, FL-28); null for the spring.
+   */
+  lastSettle: { from: Rect; to: Rect; ms: number | null } | null
   /** How long the last opening took, from the request to the window showing (ms; MD-01). */
   openMs: number | null
   /** An opening is under way (the page is being asked for its video). */
@@ -160,6 +168,9 @@ export class PipPlayer {
   private wheelSamples: { x: number; y: number; t: number }[] = []
   private lastEnter: { from: Rect; to: Rect } | null = null
   private lastBack: { from: Rect; to: Rect } | null = null
+  private lastSettle: { from: Rect; to: Rect; ms: number | null } | null = null
+  /** The window the controls act for (app menu and shortcuts while the player has focus). */
+  private uiWindowId: WindowId | undefined
   /** "Back to tab" is under way: the player flies back into the page once the tab is selected. */
   private backing: { tabId: TabId; to: Rect | undefined } | undefined
   /** The controls view shows a still of the last frame (while flying back, MD-16). */
@@ -235,7 +246,7 @@ export class PipPlayer {
     const display = anchor ? screen.getDisplayMatching(anchor) : screen.getPrimaryDisplay()
     const area = display.workArea
     const placement = this.ctx.store.state.settings.pipPlacement ?? { corner: 'bottom-right', size: 320 }
-    const dims = pipDimensions(aspect, clampPipSize(placement.size, area))
+    const dims = pipDimensions(aspect, clampPipSize(placement.size, area, aspect))
     const target = cornerRect(area, placement.corner, dims.width, dims.height)
 
     // Where the video sits in its window: the enter motion starts there when leaving the tab, and
@@ -275,7 +286,7 @@ export class PipPlayer {
     const ms = ENTER_MS
 
     // The borrowed view: at least the page area, and big enough for the largest player.
-    const max = pipDimensions(aspect, maxPipSize(area))
+    const max = pipDimensions(aspect, maxPipSize(area, aspect))
     const viewSize = {
       width: Math.max(pane.width, max.width, start.width),
       height: Math.max(pane.height, max.height, start.height) + EXTRA_HEIGHT,
@@ -294,6 +305,12 @@ export class PipPlayer {
     }
 
     const { win, ui } = this.ensureWindow()
+    // The controls belong to the tab's window from now on, not to the window they were made in
+    // (which may have closed since).
+    if (windowId && windowId !== this.uiWindowId) {
+      this.ctx.windows.registerUi(ui.webContents, windowId)
+      this.uiWindowId = windowId
+    }
     this.finishFade?.()
     this.backing = undefined
     void this.showStill(null)
@@ -362,6 +379,12 @@ export class PipPlayer {
       } catch {}
       if (!s.contents.isDestroyed()) void this.host.call(s.tabId, 'drop')
     }
+    // A still taken for "Back to tab" that won't fly (the player was closed while it was taken) goes
+    // as the player hides, so the next video never shows it.
+    const released = () => {
+      release()
+      void this.showStill(null)
+    }
     const fade = isMac && richMotion() && (why === 'close' || why === 'off' || why === 'ended')
     const back = this.backing?.tabId === s.tabId ? this.backing : undefined
     this.backing = undefined
@@ -376,13 +399,13 @@ export class PipPlayer {
       if (fade) {
         this.fadeOut(win, () => {
           win.hide()
-          release()
+          released()
         })
       } else {
         win.hide()
-        release()
+        released()
       }
-    } else release()
+    } else released()
     this.host.changed(s.tabId, false, false)
   }
 
@@ -572,7 +595,7 @@ export class PipPlayer {
       this.place({ ...g.start, x: g.start.x + dx, y: g.start.y + dy })
     } else {
       const area = this.areaFor(g.start)
-      const size = resizeWithResistance(draggedSize(g.start, g.kind, dx, dy), area)
+      const size = resizeWithResistance(draggedSize(g.start, g.kind, dx, dy), area, s.aspect)
       const dims = pipDimensions(s.aspect, Math.min(size, Math.max(s.viewSize.width, s.viewSize.height)))
       this.place(anchoredResize(g.start, g.kind, dims.width, dims.height), true)
     }
@@ -610,7 +633,7 @@ export class PipPlayer {
     if (!s || !win || win.isDestroyed()) return
     const now = win.getBounds()
     const area = this.areaFor(now)
-    const size = clampPipSize(Math.max(now.width, now.height), area)
+    const size = clampPipSize(Math.max(now.width, now.height), area, s.aspect)
     const dims = pipDimensions(s.aspect, Math.min(size, Math.max(s.viewSize.width, s.viewSize.height)))
     const corner = settleCorner(area, now, velocity)
     const target = cornerRect(area, corner, dims.width, dims.height)
@@ -619,7 +642,10 @@ export class PipPlayer {
       if (p?.corner === corner && p.size === size) return
       d.settings.pipPlacement = { corner, size }
     })
-    this.animateSpring(now, target, velocity)
+    const rich = richMotion()
+    this.lastSettle = { from: now, to: target, ms: rich ? null : RELEASE_MS }
+    if (rich) this.animateSpring(now, target, velocity)
+    else this.animateTimed(now, target, RELEASE_MS, undefined, EASE_OUT_CURVE)
   }
 
   // ---- Geometry and motion ----
@@ -648,10 +674,19 @@ export class PipPlayer {
     }
   }
 
-  /** The enter motion: window and video change together on the "standard" curve (MD-16). */
-  private animateTimed(from: Rect, to: Rect, ms: number, done?: () => void): void {
+  /**
+   * A timed motion where window and video change together: the enter motion and "Back to tab" on
+   * the "standard" curve (MD-16), or a release's ease-out with reduced motion (FL-28).
+   */
+  private animateTimed(
+    from: Rect,
+    to: Rect,
+    ms: number,
+    done?: () => void,
+    curve: [number, number, number, number] = STANDARD_CURVE,
+  ): void {
     this.stopAnimation()
-    const ease = cubicBezier(...STANDARD_CURVE)
+    const ease = cubicBezier(...curve)
     const started = Date.now()
     const step = () => {
       const p = Math.min(1, (Date.now() - started) / ms)
@@ -777,6 +812,7 @@ export class PipPlayer {
     win.contentView.addChildView(ui)
     ui.setBounds({ x: 0, y: 0, width: 320, height: 180 })
     this.ctx.windows.registerUi(ui.webContents, windowId)
+    this.uiWindowId = windowId
     const contents = ui.webContents
     contents.on('will-navigate', (event, url) => {
       const entry = rendererEntry()
@@ -827,6 +863,7 @@ export class PipPlayer {
       animating: !!this.anim,
       lastEnter: this.lastEnter,
       lastBack: this.lastBack,
+      lastSettle: this.lastSettle,
       openMs: this.openMs,
       opening: !!this.opening,
     }
@@ -858,10 +895,14 @@ function velocityOf(samples: { x: number; y: number; t: number }[]): { x: number
   return { x: (last.x - first.x) / dt, y: (last.y - first.y) / dt }
 }
 
-/** The system asks for reduced motion (macOS, Windows); Linux has no setting Electron reads. */
+/**
+ * No reduced motion asked for (FL-28): macOS Reduce Motion, Windows animation effects, the GTK
+ * animation setting, or Chromium's force switches. The same signal as the pages'
+ * prefers-reduced-motion (`shouldRenderRichAnimation` ignores the switches).
+ */
 function richMotion(): boolean {
   try {
-    return systemPreferences.getAnimationSettings().shouldRenderRichAnimation
+    return !systemPreferences.getAnimationSettings().prefersReducedMotion
   } catch {
     return true
   }

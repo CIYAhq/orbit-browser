@@ -13,18 +13,34 @@ export const PIP_CORNERS: readonly PipCorner[] = ['top-left', 'top-right', 'bott
 export const PIP_MARGIN = 16
 /** Default longer side: 320 × 180 for a 16:9 video (MD-03). */
 export const PIP_DEFAULT_SIZE = 320
-/** Smallest longer side (MD-06: about 200 px). */
+/** Smallest width (MD-06: about 200 px wide). */
 export const PIP_MIN_SIZE = 200
 export const DEFAULT_PIP_PLACEMENT: PipPlacement = { corner: 'bottom-right', size: PIP_DEFAULT_SIZE }
 
-/** Largest longer side on a work area: about half the screen's width (MD-06). */
-export function maxPipSize(area: Rect): number {
-  return Math.max(PIP_MIN_SIZE, Math.floor(area.width / 2))
+// Sizes below are the player's longer side, for a video's shape (width / height; 16:9 if unknown).
+
+/** Smallest longer side: the player is at least about 200 px wide, a tall video too (MD-06). */
+export function minPipSize(aspect = 16 / 9): number {
+  const a = pipAspect(aspect, 1)
+  return a >= 1 ? PIP_MIN_SIZE : Math.ceil(PIP_MIN_SIZE / a)
 }
 
-export function clampPipSize(size: number, area: Rect): number {
+/**
+ * Largest longer side on a work area: about half the screen's width (MD-06), and never taller than
+ * the work area inside its margins, so a square or tall video still fits on the screen. A small
+ * screen still allows the smallest player.
+ */
+export function maxPipSize(area: Rect, aspect = 16 / 9): number {
+  const a = pipAspect(aspect, 1)
+  const tall = Math.max(1, area.height - 2 * PIP_MARGIN)
+  const fits = a >= 1 ? Math.floor(tall * a) : tall
+  return Math.max(PIP_MIN_SIZE, Math.min(Math.floor(area.width / 2), fits))
+}
+
+export function clampPipSize(size: number, area: Rect, aspect = 16 / 9): number {
   const n = Number.isFinite(size) ? size : PIP_DEFAULT_SIZE
-  return Math.round(Math.min(Math.max(n, PIP_MIN_SIZE), maxPipSize(area)))
+  // Where the two limits cross (a tall video on a small screen), fitting on the screen wins.
+  return Math.round(Math.min(Math.max(n, minPipSize(aspect)), maxPipSize(area, aspect)))
 }
 
 /** A usable aspect ratio (width / height); odd or unknown ones fall back to 16:9. */
@@ -89,9 +105,9 @@ export function rubberBand(excess: number, span: number): number {
  * The player's longer side while a corner is dragged: follows the pointer between the limits and
  * resists beyond them (it springs back to the limit on release).
  */
-export function resizeWithResistance(wanted: number, area: Rect): number {
-  const min = PIP_MIN_SIZE
-  const max = maxPipSize(area)
+export function resizeWithResistance(wanted: number, area: Rect, aspect = 16 / 9): number {
+  const max = maxPipSize(area, aspect)
+  const min = Math.min(minPipSize(aspect), max)
   if (wanted < min) return min - rubberBand(min - wanted, min * 0.25)
   if (wanted > max) return max + rubberBand(wanted - max, max * 0.25)
   return wanted
@@ -174,6 +190,8 @@ export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (t:
 
 /** feel.md FL-01 "standard" CSS curve (sidebar, Space settle, preview open), used to enter PiP. */
 export const STANDARD_CURVE: [number, number, number, number] = [0.2, 0.9, 0.1, 1]
+/** CSS `ease-out`: with reduced motion a released player settles on it, with no overshoot (FL-28). */
+export const EASE_OUT_CURVE: [number, number, number, number] = [0, 0, 0.58, 1]
 
 /** Interpolates two rects. */
 export function mixRect(a: Rect, b: Rect, t: number): Rect {
