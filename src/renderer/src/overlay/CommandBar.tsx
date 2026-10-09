@@ -120,6 +120,8 @@ export function CommandBar({
   st.maxRows = maxRows
   st.suggestOn = suggestOn
   if (!present) st.closed = true
+  /** Only the open bar carries test ids: a closing or warm-up one may still be in the DOM. */
+  const live = present && !warm
 
   // Plain (hoisted) functions: they read `st`, so they never go stale.
   function select(i: number) {
@@ -431,7 +433,7 @@ export function CommandBar({
         >
           <div className="cmdbar__input-row">
             {scope ? (
-              <span className="cmdbar__chip" data-testid="command-chip">
+              <span className="cmdbar__chip" data-testid={live ? 'command-chip' : undefined}>
                 {scope.kind === 'actions' ? <Zap size={13} /> : <Search size={13} />}
                 {scope.kind === 'actions' ? 'Actions' : scope.site.name}
                 <button
@@ -456,7 +458,7 @@ export function CommandBar({
             <input
               ref={inputRef}
               className="cmdbar__input"
-              data-testid={warm ? undefined : 'command-input'}
+              data-testid={live ? 'command-input' : undefined}
               placeholder={placeholder}
               spellCheck={false}
               autoComplete="off"
@@ -482,7 +484,7 @@ export function CommandBar({
               className="cmdbar__results"
               role="listbox"
               id={warm ? undefined : 'cmdbar-list'}
-              data-testid={warm ? undefined : 'command-results'}
+              data-testid={live ? 'command-results' : undefined}
             >
               {results.map((r, i) => (
                 <ResultRow
@@ -493,6 +495,7 @@ export function CommandBar({
                   onHover={onRowHover}
                   onChoose={onRowChoose}
                   onRemove={onRowRemove}
+                  live={live}
                 />
               ))}
             </div>

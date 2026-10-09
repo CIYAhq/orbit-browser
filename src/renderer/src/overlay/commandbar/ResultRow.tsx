@@ -56,6 +56,8 @@ interface RowProps {
   onHover: (index: number) => void
   onChoose: (r: SearchResult, e: MouseEvent) => void
   onRemove: (r: SearchResult) => void
+  /** False while the bar animates out: no test ids then. */
+  live: boolean
 }
 
 function sameRow(a: SearchResult, b: SearchResult): boolean {
@@ -74,14 +76,14 @@ function sameRow(a: SearchResult, b: SearchResult): boolean {
 
 /** One result row. Memoized by content so unchanged rows don't re-render while typing (FL-17). */
 export const ResultRow = memo(
-  function ResultRow({ r, index, selected, onHover, onChoose, onRemove }: RowProps) {
+  function ResultRow({ r, index, selected, onHover, onChoose, onRemove, live }: RowProps) {
     return (
       <div
         id={`cmdbar-option-${index}`}
         role="option"
         aria-selected={selected}
         className={`cmdbar__row${selected ? ' is-selected' : ''}`}
-        data-testid="command-result"
+        data-testid={live ? 'command-result' : undefined}
         data-id={r.id}
         data-kind={r.kind}
         data-label={r.label}
@@ -96,7 +98,7 @@ export const ResultRow = memo(
           {r.kind === 'current' ? null : <RowIcon r={r} />}
         </span>
         <span className="cmdbar__text">
-          <span className="cmdbar__title" data-testid="command-result-title">
+          <span className="cmdbar__title" data-testid={live ? 'command-result-title' : undefined}>
             {r.title}
           </span>
           {r.subtitle && <span className="cmdbar__subtitle">{middleTruncate(r.subtitle, 72)}</span>}
@@ -105,7 +107,7 @@ export const ResultRow = memo(
           <span className="cmdbar__hint">{r.hint === 'Tab' ? <kbd>Tab</kbd> : `${r.hint} ↩`}</span>
         )}
         {r.shortcut && (
-          <kbd className="cmdbar__shortcut" data-testid="command-shortcut">
+          <kbd className="cmdbar__shortcut" data-testid={live ? 'command-shortcut' : undefined}>
             {r.shortcut}
           </kbd>
         )}
@@ -116,7 +118,7 @@ export const ResultRow = memo(
             className="cmdbar__remove"
             aria-label="Remove from history"
             title="Remove from history"
-            data-testid="command-remove"
+            data-testid={live ? 'command-remove' : undefined}
             onMouseDown={(e) => {
               e.preventDefault()
               e.stopPropagation()
@@ -129,5 +131,5 @@ export const ResultRow = memo(
       </div>
     )
   },
-  (a, b) => a.selected === b.selected && a.index === b.index && sameRow(a.r, b.r),
+  (a, b) => a.selected === b.selected && a.index === b.index && a.live === b.live && sameRow(a.r, b.r),
 )
