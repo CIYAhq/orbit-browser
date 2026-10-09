@@ -22,6 +22,8 @@ export interface Slot {
   ancestors: string[]
   top: number
   height: number
+  /** Divider block: offset of the divider line from the slot top (above it = pinned). */
+  splitAt?: number
 }
 
 export type DropTarget =
@@ -91,8 +93,10 @@ export function computeDropTarget(
   if (i < 0) return endOf(opts.todayContainer, remaining.length)
   const s = remaining[i] as Slot
   const rel = (y - s.top) / Math.max(1, s.height)
-  if (s.kind === 'divider')
-    return rel < 0.5 ? endOf(opts.pinnedContainer, i) : between(opts.todayContainer, 0, 0, i + 1)
+  if (s.kind === 'divider') {
+    const split = s.splitAt ?? s.height / 2
+    return y - s.top < split ? endOf(opts.pinnedContainer, i) : between(opts.todayContainer, 0, 0, i + 1)
+  }
   if (s.folder === 'closed') {
     if (rel < 0.25) return between(s.container, s.index, s.depth, i)
     if (rel <= 0.75) return { type: 'into', folderId: s.key, at: i, gapTop: s.top - heightAbove(slots, s, dragged) }

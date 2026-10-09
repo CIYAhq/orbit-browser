@@ -3,7 +3,6 @@ import { dirname } from 'node:path'
 import { createInitialState, DEFAULT_SETTINGS } from '../shared/defaults'
 import type { OrbitState } from '../shared/state'
 import { STATE_SCHEMA } from '../shared/state'
-import { repairTree } from '../shared/tree'
 import type { Store } from './store'
 
 /**
@@ -70,13 +69,6 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
   }
   for (const d of Object.values(state.downloads)) {
     if (d.state === 'progressing' || d.state === 'paused') d.state = 'interrupted'
-  }
-  // Sidebar containers must reference existing items exactly once (tabs lane).
-  repairTree(state)
-  for (const win of Object.values(state.windows)) {
-    for (const [spaceId, tabId] of Object.entries(win.activeTab)) {
-      if (tabId && !state.tabs[tabId]) win.activeTab[spaceId] = null
-    }
   }
   return state
 }

@@ -29,6 +29,7 @@ import {
   removeItem,
   rootContainerOf,
   sectionOf,
+  setContainerItems,
   spaceOfContainer,
   splitOfTab,
   tabsInItem,
@@ -61,6 +62,7 @@ type TabPlacement = Pick<
 
 const MAX_RECENTLY_CLOSED = 50
 const MAX_ARCHIVE = 5000
+const ARCHIVE_TRIM_CHUNK = 500
 
 export class TabOps {
   readonly recentlyClosed: ClosedTab[] = []
@@ -175,7 +177,8 @@ export class TabOps {
   ): string | undefined {
     if (!tab.url || tab.url === 'about:blank') return undefined
     const id = newId('a')
-    d.archive.unshift({
+    // Appended (newest last): an unshift would rewrite every entry's patch path.
+    d.archive.push({
       id,
       url: tab.url,
       title: tabTitle(tab),
@@ -186,7 +189,8 @@ export class TabOps {
       reason,
       section,
     })
-    if (d.archive.length > MAX_ARCHIVE) d.archive.length = MAX_ARCHIVE
+    // Trim the oldest entries in chunks so the full-list rewrite happens rarely.
+    if (d.archive.length > MAX_ARCHIVE + ARCHIVE_TRIM_CHUNK) d.archive.splice(0, d.archive.length - MAX_ARCHIVE)
     return id
   }
 
@@ -216,13 +220,18 @@ export class TabOps {
       location: locate(state, splitOfTab(state, id) ?? id),
       history: this.historyOf(id),
     }))
+    const todayTabs = (spaceId: SpaceId) =>
+      new Set((state.spaces[spaceId]?.today ?? []).flatMap((id) => tabsInItem(state, id)))
     const pick =
       opts.reselect === 'pinned'
-        ? (spaceId: SpaceId) => mostRecentTab(state, spaceId, all, (t) => sectionOf(state, t.id) !== 'today')
+        ? (spaceId: SpaceId) => {
+            const today = todayTabs(spaceId)
+            return mostRecentTab(state, spaceId, all, (t) => !today.has(t.id))
+          }
         : (spaceId: SpaceId, current: TabId) => nextAfterClose(state, spaceId, current, all)
     this.ctx.store.update((d) => {
       reselectAway(d, all, pick, this.now())
-      // Archive bottom-up so the first tab of a batch ends up newest (top of the Archive list).
+      // Archive bottom-up so the first tab of a batch ends up newest (the top of the Archive list).
       for (const rec of [...records].reverse()) {
         const tab = d.tabs[rec.tab.id]
         if (!tab) continue
@@ -358,7 +367,10 @@ export class TabOps {
       this.ctx.store.update((d) => {
         const f = d.folders[folderId]
         const at = removeItem(d, folderId)
-        if (f && at) containerItems(d, at.container)?.splice(at.index, 0, ...f.children)
+        const list = at ? containerItems(d, at.container) : undefined
+        if (f && at && list) {
+          setContainerItems(d, at.container, [...list.slice(0, at.index), ...f.children, ...list.slice(at.index)])
+        }
         delete d.folders[folderId]
       })
       this.undo.push('Delete Folder', () => {
@@ -481,7 +493,10 @@ export class TabOps {
         }
       }
     })
-    for (const tid of reload) this.ctx.tabs.sleep(tid)
+    for (const tid of reload) {
+      this.ctx.tabs.sleep(tid)
+      this.ctx.tabs.savedHistory.delete(tid)
+    }
   }
 
   /** Keeps pinned URL, Space and profile consistent after tabs moved into `to`. Returns tabs to reload. */
@@ -568,8 +583,12 @@ export class TabOps {
         if (w) w.activeTab[p.spaceId] = p.next
       }
     })
-    // A different profile means a different session: the tab reloads there, keeping its history (TB-11).
-    for (const id of reload) this.ctx.tabs.sleep(id)
+    // A different profile means a different session: the tab reloads there from its URL. Its old
+    // history (with form state) stays behind so nothing leaks between profiles (PR-05).
+    for (const id of reload) {
+      this.ctx.tabs.sleep(id)
+      this.ctx.tabs.savedHistory.delete(id)
+    }
     if (opts.undoLabel !== false)
       this.undo.push(opts.undoLabel ?? 'Move', () => this.restorePlacement(before), this.now())
     return true

@@ -153,10 +153,38 @@ export function sidebarTabOrder(state: OrbitState, spaceId: SpaceId): TabId[] {
 
 // ---- Draft mutations (call inside store.update) ----
 
+/**
+ * Replaces a container's list. On an Immer draft this yields one `replace` patch instead
+ * of one patch per shifted index (inserting at the top of a 200-tab Today list would
+ * otherwise emit 201 patches).
+ */
+export function setContainerItems(state: OrbitState, ref: ContainerRef, items: ItemId[]): void {
+  switch (ref.kind) {
+    case 'favorites': {
+      const p = state.profiles[ref.profileId]
+      if (p) p.favorites = items
+      return
+    }
+    case 'pinned':
+    case 'today': {
+      const s = state.spaces[ref.spaceId]
+      if (s) s[ref.kind] = items
+      return
+    }
+    case 'folder': {
+      const f = state.folders[ref.folderId]
+      if (f) f.children = items
+    }
+  }
+}
+
 export function removeItem(state: OrbitState, id: ItemId): ItemLocation | undefined {
   const loc = locate(state, id)
   if (!loc) return undefined
-  containerItems(state, loc.container)?.splice(loc.index, 1)
+  const list = containerItems(state, loc.container)
+  if (!list) return undefined
+  if (loc.index === list.length - 1) list.pop()
+  else setContainerItems(state, loc.container, [...list.slice(0, loc.index), ...list.slice(loc.index + 1)])
   return loc
 }
 
@@ -164,7 +192,8 @@ export function insertItem(state: OrbitState, ref: ContainerRef, index: number, 
   const list = containerItems(state, ref)
   if (!list) throw new Error(`Unknown container ${JSON.stringify(ref)}`)
   const at = Math.max(0, Math.min(index, list.length))
-  list.splice(at, 0, id)
+  if (at === list.length) list.push(id)
+  else setContainerItems(state, ref, [...list.slice(0, at), id, ...list.slice(at)])
 }
 
 /**
@@ -184,6 +213,8 @@ export function moveItem(state: OrbitState, id: ItemId, to: ContainerRef, index:
  */
 export function canMoveTo(state: OrbitState, id: ItemId, to: ContainerRef): boolean {
   if (!containerItems(state, to)) return false
+  // Unknown ids and split panes (which live inside a split, not in a container) can't move on their own.
+  if (!locate(state, id)) return false
   if (isFolderId(id)) {
     if (to.kind === 'favorites' || to.kind === 'today') return false
     if (to.kind === 'folder' && isWithin(state, to.folderId, id)) return false
@@ -348,7 +379,7 @@ export function repairTree(state: OrbitState): void {
       continue
     }
     tab.spaceId = space.id
-    space.today.unshift(tab.id)
+    space.today = [tab.id, ...space.today]
     seen.add(tab.id)
   }
 }

@@ -1,14 +1,17 @@
 import { LayoutGroup, motion } from 'motion/react'
-import { forwardRef, memo } from 'react'
+import { forwardRef, memo, useMemo } from 'react'
 import { MAX_FAVORITES } from '../../../../shared/defaults'
 import { isTabId } from '../../../../shared/ids'
 import { isAwayFromPinned, tabTitle } from '../../../../shared/tabs'
 import { invoke } from '../../api'
 import { activeTabId } from '../../selectors'
-import { useOrbit, useOrbitShallow } from '../../store'
+import { useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
 import { pressItem } from './drag'
 import { clearSelection, useDrag } from './ui-state'
+
+/** Stable empty list (a fresh [] per call would re-render forever). */
+const NO_ITEMS: string[] = []
 
 /** Most tiles per grid row at the default width (FV-02). */
 const MAX_COLUMNS = 4
@@ -22,36 +25,24 @@ const TILE_SPRING = { type: 'spring', stiffness: 520, damping: 40, mass: 0.7 } a
  */
 export const Favorites = memo(
   forwardRef<HTMLDivElement, { profileId: string }>(function Favorites({ profileId }, ref) {
-    const favorites = useOrbitShallow((s) => (s.profiles[profileId]?.favorites ?? []).filter(isTabId))
-    const dragging = useDrag((s) => s.phase !== 'idle' && s.ghost?.source === 'list')
+    const ids = useOrbit((s) => s.profiles[profileId]?.favorites ?? NO_ITEMS)
     const favIndex = useDrag((s) => s.favIndex)
     const hidden = useDrag((s) => s.hidden)
+    const favorites = useMemo(() => ids.filter(isTabId), [ids])
     const visible = favorites.filter((id) => !(hidden[id] && favIndex !== null))
     const tiles: (string | null)[] = [...visible]
     if (favIndex !== null) tiles.splice(Math.min(favIndex, tiles.length), 0, null)
-    const full = favorites.length >= MAX_FAVORITES
+    const full = favorites.length >= MAX_FAVORITES && !favorites.some((id) => hidden[id])
     const columns = Math.max(1, Math.min(MAX_COLUMNS, tiles.length))
-    if (tiles.length === 0) {
-      // Empty: nothing, or a slim drop zone while a tab is being dragged (FV-02, FV-03).
-      return (
-        <div
-          ref={ref}
-          className={`favorites favorites--empty${dragging ? ' is-drop-zone' : ''}`}
-          data-testid="favorites"
-        >
-          {dragging && <div className="favorites__hint">Drop here to add to Favorites</div>}
-        </div>
-      )
-    }
     return (
       <div
         ref={ref}
-        className={`favorites${favIndex !== null && full ? ' is-full' : ''}`}
+        className={`favorites${tiles.length === 0 ? ' favorites--empty' : ''}${favIndex !== null && full ? ' is-full' : ''}`}
         data-testid="favorites"
-        style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+        style={tiles.length > 0 ? { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` } : undefined}
       >
         <LayoutGroup id={`favorites-${profileId}`}>
-          {tiles.map((id, i) =>
+          {tiles.map((id) =>
             id ? (
               <FavoriteTile key={id} tabId={id} />
             ) : (
@@ -60,9 +51,12 @@ export const Favorites = memo(
                 layout
                 className="favorite favorite--placeholder"
                 data-testid="favorite-placeholder"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
                 transition={TILE_SPRING}
-                data-index={i}
-              />
+              >
+                {visible.length === 0 && <span className="favorites__hint">Drop to add to Favorites</span>}
+              </motion.div>
             ),
           )}
         </LayoutGroup>

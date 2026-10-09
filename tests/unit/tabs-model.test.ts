@@ -272,3 +272,23 @@ describe('[TB-18] undo stack', () => {
     expect(stack.undo()).toBeUndefined()
   })
 })
+
+describe('[TB-03] cheap patches for sidebar lists (review F2)', () => {
+  it('inserting at the top of a long Today list is one replace patch, not one per row', async () => {
+    const { enablePatches, produceWithPatches } = await import('immer')
+    enablePatches()
+    const { insertItem, removeItem } = await import('../../src/shared/tree')
+    const { state, s1, add } = world()
+    for (let i = 0; i < 200; i++) add(s1, 'today')
+    const [, patches] = produceWithPatches(state, (d: OrbitState) => {
+      insertItem(d, { kind: 'today', spaceId: s1 }, 0, 't-new')
+    })
+    expect(patches).toHaveLength(1)
+    expect(patches[0]?.op).toBe('replace')
+    const middle = state.spaces[s1]?.today[100] as string
+    const [, removal] = produceWithPatches(state, (d: OrbitState) => {
+      removeItem(d, middle)
+    })
+    expect(removal).toHaveLength(1)
+  })
+})

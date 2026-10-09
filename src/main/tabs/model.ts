@@ -7,6 +7,7 @@ import {
   containerItems,
   locate,
   sectionOf,
+  setContainerItems,
   sidebarTabOrder,
   splitLeaves,
   splitOfTab,
@@ -59,6 +60,12 @@ export function activateInDraft(d: OrbitState, windowId: WindowId, tabId: TabId,
   }
   win.activeTab[win.spaceId] = tabId
   tab.lastActiveAt = now
+  // A page is live in one window at a time (TB-17): a window that was showing this tab hands
+  // it over and shows its next most recent tab instead.
+  for (const other of Object.values(d.windows)) {
+    if (other.id === windowId || other.activeTab[other.spaceId] !== tabId) continue
+    other.activeTab[other.spaceId] = mostRecentTab(d, other.spaceId, new Set([tabId]))
+  }
 }
 
 /** Tabs currently on screen: each window's selected tab, with all panes of its split view. */
@@ -158,7 +165,9 @@ export function detachFromSplit(d: OrbitState, tabId: TabId): void {
   delete d.splits[splitId]
   if (loc) {
     const list = containerItems(d, loc.container)
-    if (list) list.splice(loc.index, 1, ...remaining)
+    if (list) {
+      setContainerItems(d, loc.container, [...list.slice(0, loc.index), ...remaining, ...list.slice(loc.index + 1)])
+    }
   }
 }
 

@@ -1,4 +1,5 @@
 import {
+  type BrowserWindow,
   clipboard,
   dialog,
   Menu,
@@ -8,13 +9,13 @@ import {
 } from 'electron'
 import { isFolderId, isTabId, newId } from '../../shared/ids'
 import type { ContainerRef, Folder, FolderId, ItemId, TabId, WindowId } from '../../shared/state'
-import { containerItems, insertItem, locate, sectionOf, splitOfTab, tabsInItem } from '../../shared/tree'
+import { containerItems, insertItem, locate, repairTree, sectionOf, splitOfTab, tabsInItem } from '../../shared/tree'
 import { parseInput } from '../../shared/url'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
 import { TabMaintenance } from './maintenance'
 import { findMenuItem, folderMenu, type MenuOps, menuLabels, tabMenu } from './menus'
-import { activateInDraft, makeTab, numberedTarget, steppedTarget, todayInsertIndex } from './model'
+import { makeTab, numberedTarget, steppedTarget, todayInsertIndex } from './model'
 import { TabOps } from './ops'
 
 /** Test-only handle (ORBIT_E2E=1): globalThis.__orbitTabs. */
@@ -345,8 +346,9 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     else void confirmDeleteFolder(windowOf(c), folderId)
   })
 
-  // Links that open new windows become tabs (keeping window.opener), popups become small windows.
-  // Registered last so link-preview and Mini Window hooks get first refusal (PN-05).
+  // Links that open new windows become tabs (keeping window.opener), pop-ups become small windows
+  // (NV-09). The runtime already refused opens without a user gesture. Registered last so link
+  // preview and Mini Window hooks get first refusal (PN-05).
   queueMicrotask(() =>
     ctx.hooks.windowOpen.push((openerTabId, details) => {
       const opener = store.state.tabs[openerTabId]
@@ -363,9 +365,11 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
         action: 'allow',
         outlivesOpener: true,
         createWindow: (options) => {
-          const windowId = windows.windowOfTab(openerTabId)
+          const windowId = windows.windowOfTab(openerTabId) ?? windows.focusedWindowId()
           const spaceId = windowId ? ops.spaceOfWindow(windowId) : opener.spaceId
           const tab = makeTab({ spaceId, profileId: opener.profileId, url: details.url, openerTabId })
+          // Add the tab, give it the real (opener-linked) view, and only then select it: selecting
+          // first would make the layout pass create a second, orphan view (review M1).
           store.update((d) => {
             const space = d.spaces[spaceId]
             if (!space) return
@@ -377,15 +381,59 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
               todayInsertIndex(space, background ? 'background' : 'new'),
               tab.id,
             )
-            if (!background && windowId) activateInDraft(d, windowId, tab.id)
           })
           const view = new WebContentsView(options as WebContentsViewConstructorOptions)
           tabs.adopt(tab.id, view)
+          if (!background && windowId) ops.activate(windowId, tab.id)
           return view.webContents
         },
       }
     }),
   )
+
+  // Pop-up windows (OAuth, payments) are tracked: their own opens are gesture-gated and become
+  // tabs, and ⌘W/⌘R act on the pop-up itself rather than the main window (review M6).
+  ctx.hooks.tabCreated.push((openerTabId, contents) => {
+    contents.on('did-create-window', (popup) => trackPopup(popup, openerTabId))
+  })
+  const trackPopup = (popup: BrowserWindow, openerTabId: TabId) => {
+    const wc = popup.webContents
+    let gesture = { at: 0, used: true }
+    wc.on('input-event', (_e, input) => {
+      if (['mouseDown', 'mouseUp', 'keyDown', 'rawKeyDown', 'gestureTap', 'touchEnd'].includes(input.type)) {
+        gesture = { at: Date.now(), used: false }
+      }
+    })
+    wc.setWindowOpenHandler((details) => {
+      const windowId = windows.windowOfTab(openerTabId) ?? windows.focusedWindowId()
+      if (gesture.used || Date.now() - gesture.at > 1000) {
+        toast(windowId, 'Pop-up blocked')
+        return { action: 'deny' }
+      }
+      gesture.used = true
+      const opener = store.state.tabs[openerTabId]
+      ops.createTab({ url: details.url, spaceId: opener?.spaceId, windowId })
+      return { action: 'deny' }
+    })
+    wc.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown') return
+      const mod = process.platform === 'darwin' ? input.meta : input.control
+      const key = input.key.toLowerCase()
+      if (mod && !input.shift && key === 'w') {
+        event.preventDefault()
+        popup.close()
+      } else if (mod && key === 'r') {
+        event.preventDefault()
+        wc.reload()
+      }
+    })
+  }
+
+  tabs.onPopupBlocked = (tabId) => toast(windows.windowOfTab(tabId) ?? windows.focusedWindowId(), 'Pop-up blocked')
+  // A page that closes itself (window.close()) closes its tab (review M3).
+  tabs.onPageClosed = (tabId) => {
+    if (store.state.tabs[tabId]) ops.closeTabs([tabId], 'closed', { undoLabel: 'Close Tab' })
+  }
 
   // ⌘Z from a page (outside text fields) undoes the last sidebar change (TB-18, TB-07).
   tabs.onUndoShortcut = () => {
@@ -548,6 +596,17 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     onContents((w) => (w.isDevToolsOpened() ? w.closeDevTools() : w.openDevTools({ mode: 'detach' }))),
   )
 
+  // Sidebar containers must reference existing items exactly once; favicons are data URLs only
+  // (older states kept remote URLs, which Orbit's UI would fetch in the wrong session).
+  store.update((d) => {
+    repairTree(d)
+    for (const win of Object.values(d.windows)) {
+      for (const [spaceId, tabId] of Object.entries(win.activeTab)) {
+        if (tabId && !d.tabs[tabId]) win.activeTab[spaceId] = null
+      }
+    }
+    for (const tab of Object.values(d.tabs)) if (tab.favicon && !tab.favicon.startsWith('data:')) delete tab.favicon
+  })
   maintenance.start()
 
   if (ctx.e2e) {

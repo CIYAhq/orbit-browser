@@ -121,7 +121,14 @@ function SpaceHeader({ space, children }: { space: Space; children: ReactNode })
         title={collapsed ? 'Expand Pinned' : 'Collapse Pinned'}
         onClick={() => void invoke('tabs.setPinnedCollapsed', { spaceId: space.id, collapsed: !collapsed })}
       >
-        <ChevronDown size={13} className={collapsed ? 'is-collapsed' : ''} />
+        <motion.span
+          className="space-header__caret-glyph"
+          initial={false}
+          animate={{ rotate: collapsed ? -90 : 0 }}
+          transition={{ duration: 0.16 }}
+        >
+          <ChevronDown size={13} />
+        </motion.span>
       </button>
     </div>
   )
@@ -315,15 +322,23 @@ function useAutoReveal(scrollRef: React.RefObject<HTMLDivElement | null>, win: W
   const rowOf = (id: string) => rowIn(scrollRef.current, id)
   useEffect(() => {
     if (!active) return
-    const raf = requestAnimationFrame(() => {
+    const outside = () => {
       const scroll = scrollRef.current
       const el = rowIn(scroll, active)
-      if (!el || !scroll) return
+      if (!el || !scroll) return null
       const r = el.getBoundingClientRect()
       const s = scroll.getBoundingClientRect()
-      if (r.top < s.top || r.bottom > s.bottom) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-    })
-    return () => cancelAnimationFrame(raf)
+      return r.top < s.top || r.bottom > s.bottom ? el : null
+    }
+    const raf = requestAnimationFrame(() =>
+      outside()?.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' }),
+    )
+    // Rows that were still growing in may have moved the target: settle on the final position.
+    const settle = setTimeout(() => outside()?.scrollIntoView({ block: 'nearest' }), 450)
+    return () => {
+      cancelAnimationFrame(raf)
+      clearTimeout(settle)
+    }
   }, [active, scrollRef])
   useEffect(() => {
     const scroll = scrollRef.current
@@ -358,6 +373,8 @@ function useAutoReveal(scrollRef: React.RefObject<HTMLDivElement | null>, win: W
     go: () => rowOf(active)?.scrollIntoView({ block: 'center', behavior: 'smooth' }),
   }
 }
+
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
 function rowIn(scroll: HTMLElement | null, id: string): HTMLElement | null {
   return scroll?.querySelector<HTMLElement>(`[data-slot][data-key="${id}"]`) ?? null

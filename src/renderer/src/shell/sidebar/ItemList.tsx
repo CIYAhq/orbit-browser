@@ -353,6 +353,7 @@ const FolderRow = memo(function FolderRow({
   const focused = useKeyboardFocus((s) => s.id === folderId)
   const renaming = useRename((s) => s.id === folderId)
   const hidden = useDrag((s) => !!s.hidden[folderId])
+  const collapsedBefore = useRef<boolean | null>(null)
   if (!folder) return null
   const childAncestors = ancestors ? `${ancestors},${folderId}` : folderId
   const open = !folder.collapsed
@@ -381,12 +382,26 @@ const FolderRow = memo(function FolderRow({
           }}
           onClick={(e) => {
             if (renaming || e.detail > 1) return
+            collapsedBefore.current = folder.collapsed
             void invoke('folders.setCollapsed', { folderId, collapsed: open })
           }}
-          onDoubleClick={() => startRename(folderId)}
+          onDoubleClick={() => {
+            // A double-click renames (FD-03); undo the toggle its first click made.
+            const before = collapsedBefore.current
+            if (before !== null) void invoke('folders.setCollapsed', { folderId, collapsed: before })
+            collapsedBefore.current = null
+            startRename(folderId)
+          }}
           onContextMenu={(e) => openContextMenu(e, folderId)}
         >
-          <ChevronRight size={13} className={`folder-row__chevron${open ? ' is-open' : ''}`} />
+          <motion.span
+            className="folder-row__chevron-wrap"
+            initial={false}
+            animate={{ rotate: open ? 90 : 0 }}
+            transition={{ duration: 0.16, ease: EASE_OUT }}
+          >
+            <ChevronRight size={13} />
+          </motion.span>
           <span className="folder-row__icon">
             {folder.icon ? (
               <span className="tab-row__emoji">{folder.icon}</span>

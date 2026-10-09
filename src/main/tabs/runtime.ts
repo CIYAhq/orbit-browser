@@ -4,6 +4,11 @@ import { isAwayFromPinned, sameDocUrl } from '../../shared/tabs'
 import type { MainContext } from '../context'
 import { showPageContextMenu } from './context-menu'
 
+/** Input that counts as a user gesture for opening tabs and pop-ups (NV-09). */
+const GESTURE_INPUTS = new Set(['mouseDown', 'mouseUp', 'keyDown', 'rawKeyDown', 'gestureTap', 'touchEnd'])
+const GESTURE_WINDOW_MS = 1000
+const MAX_FAVICON_BYTES = 64 * 1024
+
 /** Script run in an isolated world: is keyboard focus in an editable field of the page? */
 const FOCUS_IS_EDITABLE = `(() => {
   const el = document.activeElement
@@ -39,6 +44,14 @@ export class TabRuntime {
   private homeLoads = new Set<TabId>()
   /** Sidebar undo, called for ⌘Z pressed in a page whose focus is not in a text field (TB-18). */
   onUndoShortcut?: (tabId: TabId) => void
+  /** A page closed itself (window.close()); treated like closing the tab (TB-06). */
+  onPageClosed?: (tabId: TabId) => void
+  /** A page tried to open a tab or pop-up without a user gesture. */
+  onPopupBlocked?: (tabId: TabId, url: string) => void
+  /** Last user gesture per tab, for the pop-up rule (NV-09). */
+  private gestures = new Map<TabId, { at: number; used: boolean }>()
+  /** Favicon URL → data URL, fetched in the tab's own session (no fetches from Orbit's UI). */
+  private favicons = new Map<string, string>()
   private ctx!: MainContext
 
   init(ctx: MainContext): void {
@@ -104,6 +117,14 @@ export class TabRuntime {
    */
   adopt(tabId: TabId, view: WebContentsView): void {
     const contents = view.webContents
+    // One view per tab: a previous view (e.g. created by a layout pass) is retired first.
+    const previous = this.views.get(tabId)
+    if (previous && previous !== view) {
+      this.views.delete(tabId)
+      this.byContents.delete(previous.webContents.id)
+      this.ctx.windows.detachView(tabId, previous)
+      if (!previous.webContents.isDestroyed()) previous.webContents.close()
+    }
     this.views.set(tabId, view)
     this.byContents.set(contents.id, tabId)
     view.setBackgroundColor('#ffffffff')
@@ -144,7 +165,11 @@ export class TabRuntime {
     })
     contents.on('page-favicon-updated', (_e, favicons) => {
       const icon = favicons.find((f) => /^(https?|data):/.test(f))
-      if (icon) this.update(tabId, { favicon: icon })
+      if (icon) void this.storeFavicon(tabId, contents, icon)
+    })
+    // Pop-ups need a recent user gesture in the opener (NV-09).
+    contents.on('input-event', (_e, input) => {
+      if (GESTURE_INPUTS.has(input.type)) this.gestures.set(tabId, { at: Date.now(), used: false })
     })
     contents.on('audio-state-changed', (e) => this.update(tabId, { audible: e.audible }))
     contents.on('did-fail-load', (_e, code, description, _url, isMainFrame) => {
@@ -157,6 +182,11 @@ export class TabRuntime {
     })
     contents.on('context-menu', (_e, params) => showPageContextMenu(this.ctx, tabId, contents, params))
     contents.setWindowOpenHandler((details) => {
+      // No tabs or pop-ups without a user gesture, and one per gesture (NV-09).
+      if (!this.consumeGesture(tabId)) {
+        this.onPopupBlocked?.(tabId, details.url)
+        return { action: 'deny' }
+      }
       for (const hook of this.ctx.hooks.windowOpen) {
         const response = hook(tabId, details)
         if (response) return response
@@ -165,10 +195,13 @@ export class TabRuntime {
     })
     contents.once('destroyed', () => {
       this.byContents.delete(contents.id)
-      if (this.views.get(tabId) === view) {
-        this.views.delete(tabId)
-        this.update(tabId, { asleep: true, loading: false, audible: false })
-      }
+      this.gestures.delete(tabId)
+      if (this.views.get(tabId) !== view) return
+      // Destroyed outside sleep()/destroy(): the page closed itself (window.close()).
+      this.views.delete(tabId)
+      this.ctx.windows.detachView(tabId, view)
+      this.update(tabId, { asleep: true, loading: false, audible: false })
+      if (!this.ctx.windows.quitting) this.onPageClosed?.(tabId)
     })
     this.ctx.windows.attachShortcuts(contents)
     for (const hook of this.ctx.hooks.tabCreated) hook(tabId, contents)
@@ -200,6 +233,44 @@ export class TabRuntime {
     this.views.delete(tabId)
     this.ctx.windows.detachView(tabId, view)
     if (!view.webContents.isDestroyed()) view.webContents.close()
+  }
+
+  /**
+   * True once per user gesture in the tab within the last second: a page may open one
+   * tab or pop-up per click or key press, never on its own (NV-09).
+   */
+  consumeGesture(tabId: TabId, now = Date.now()): boolean {
+    const g = this.gestures.get(tabId)
+    if (!g || g.used || now - g.at > GESTURE_WINDOW_MS) return false
+    g.used = true
+    return true
+  }
+
+  /** Stores the favicon as a small data URL fetched with the tab's session. */
+  private async storeFavicon(tabId: TabId, contents: WebContents, url: string): Promise<void> {
+    if (url.startsWith('data:')) {
+      if (url.length <= MAX_FAVICON_BYTES * 1.4) this.update(tabId, { favicon: url })
+      return
+    }
+    const cached = this.favicons.get(url)
+    if (cached) {
+      this.update(tabId, { favicon: cached })
+      return
+    }
+    try {
+      const res = await contents.session.fetch(url, { cache: 'force-cache' })
+      if (!res.ok) return
+      const type = (res.headers.get('content-type') ?? 'image/x-icon').split(';')[0]?.trim() || 'image/x-icon'
+      if (!type.startsWith('image/')) return
+      const buf = Buffer.from(await res.arrayBuffer())
+      if (buf.length === 0 || buf.length > MAX_FAVICON_BYTES) return
+      const data = `data:${type};base64,${buf.toString('base64')}`
+      if (this.favicons.size > 500) this.favicons.clear()
+      this.favicons.set(url, data)
+      if (!contents.isDestroyed()) this.update(tabId, { favicon: data })
+    } catch {
+      // Keep the previous icon (or the fallback glyph).
+    }
   }
 
   /** The next page this tab lands on is its pinned page (reset, wake at the pinned URL). */

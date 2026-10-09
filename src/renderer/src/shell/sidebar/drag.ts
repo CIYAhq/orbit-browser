@@ -113,9 +113,17 @@ function measureSlots(): Slot[] {
       ancestors: el.dataset.ancestors ? el.dataset.ancestors.split(',') : [],
       top: offsetTopWithin(el, scroll),
       height: el.offsetHeight,
+      splitAt: el.dataset.slot === 'divider' ? dividerSplit(el) : undefined,
     })
   }
   return out
+}
+
+/** The divider line's offset inside the divider block: above it pins, below it is Today. */
+function dividerSplit(block: HTMLElement): number | undefined {
+  const line = block.querySelector<HTMLElement>('.sidebar__divider')
+  if (!line) return undefined
+  return line.offsetTop + line.offsetHeight / 2
 }
 
 /** Selected tabs in sidebar order, when the pressed row is part of a multi-selection. */
@@ -256,10 +264,9 @@ function zoneAt(x: number, y: number): Zone {
   if (dot?.dataset.spaceId) return { kind: 'space', spaceId: dot.dataset.spaceId }
   const sidebar = ctx.sidebar?.getBoundingClientRect()
   if (!sidebar || x > sidebar.right + 4) return { kind: 'none' }
-  const fav = ctx.favorites?.getBoundingClientRect()
   const list = ctx.scroll?.getBoundingClientRect()
-  if (fav && fav.height > 0 && y >= fav.top - 6 && y <= fav.bottom) return { kind: 'favorites' }
-  if (list && y < list.top && (!fav || y > fav.bottom || fav.height === 0)) return { kind: 'favorites' }
+  // Anything above the list (the grid, or the top of the sidebar when there are no Favorites) (FV-03).
+  if (list && y < list.top) return { kind: 'favorites' }
   if (list && y >= list.top && y <= list.bottom) return { kind: 'list' }
   return { kind: 'none' }
 }

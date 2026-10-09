@@ -219,6 +219,7 @@ export interface OrbitState {
   tabs: Record<TabId, Tab>
   folders: Record<FolderId, Folder>
   splits: Record<SplitId, Split>
+  /** Oldest first: new entries are appended (cheap patches) and the list is trimmed in chunks. */
   archive: ArchivedTab[]
   settings: Settings
   downloads: Record<string, Download>

@@ -34,7 +34,7 @@ function layout(spec: { pinned: (string | { folder: string; open: boolean; child
       ancestors: [],
     })
     if (item.open) {
-      item.children.forEach((child, ci) =>
+      for (const [ci, child] of item.children.entries()) {
         push({
           key: child,
           kind: 'item',
@@ -42,8 +42,8 @@ function layout(spec: { pinned: (string | { folder: string; open: boolean; child
           index: ci,
           depth: 1,
           ancestors: [item.folder],
-        }),
-      )
+        })
+      }
     }
   })
   push({ key: 'divider', kind: 'divider', container: 'today:s', index: 0, depth: 0, ancestors: [], height: 58 })
