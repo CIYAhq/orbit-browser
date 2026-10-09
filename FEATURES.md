@@ -4,14 +4,14 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 484 spec’d · 0 built (26 partial) · 0 tested · 0 feel right.
+**Totals:** 485 spec’d · 0 built (26 partial) · 0 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
 | P0 | 174 | 0 | 0 |
 | P1 | 221 | 0 | 0 |
-| P2 | 82 | 0 | 0 |
+| P2 | 83 | 0 | 0 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -405,6 +405,7 @@ Spec: `spec/feel.md`
 | FL-29 | Responsiveness budgets (input to visual) | P0 | – | – | – |  |
 | FL-30 | What makes it feel native and smooth | P0 | – | – | – |  |
 | FL-31 | Haptics (macOS trackpads) | P2 | – | – | – |  |
+| FL-32 | Picture-in-picture and media tray motion | P2 | – | – | – |  |
 
 ## Appearance (global)
 
