@@ -7,6 +7,7 @@ import type { ColorMode, OrbitState, OverlayState, SpaceId, TabId, WindowId, Win
 import { paletteFor } from '../shared/theme'
 import { splitLeaves, splitOfTab } from '../shared/tree'
 import type { MainContext } from './context'
+import { fastSwitchPanes } from './split/layout'
 
 interface Pane {
   tabId: TabId
@@ -24,6 +25,8 @@ interface WindowRecord {
   radius: number
   /** Last single-pane content rect: lets tab switches swap views without a renderer round trip. */
   lastSingleRect?: Rect
+  /** Last reported content frame (all panes together); used to lay out split views on the fast path. */
+  frameRect?: Rect
   /** Ignore renderer pane reports older than this state sequence (after a main-side fast switch). */
   minPaneSeq: number
   overlayShown: boolean
@@ -121,10 +124,11 @@ export class WindowManager {
   init(ctx: MainContext): void {
     this.ctx = ctx
     ctx.store.subscribe((next, prev) => this.onState(next, prev))
-    ctx.events.on('layout.panes', ({ panes, radius, seq }, { windowId }) => {
+    ctx.events.on('layout.panes', ({ panes, radius, seq, frame }, { windowId }) => {
       if (!windowId) return
       const rec = this.records.get(windowId)
       if (!rec || seq < rec.minPaneSeq) return
+      if (frame) rec.frameRect = frame
       this.applyPanes(windowId, panes, radius)
     })
     syncAppearance(ctx.store.state.settings.appearance)
@@ -424,6 +428,7 @@ export class WindowManager {
       const entry = this.attached.get(tabId)
       if (entry?.windowId === rec.id) entry.view.setVisible(false)
     }
+    const shownBefore = rec.visible
     for (const pane of panes) {
       // A page that closed itself stays closed until the tab is selected again (onState).
       if (this.selfClosed.has(pane.tabId)) continue
@@ -441,6 +446,14 @@ export class WindowManager {
     if (rec.htmlFullscreen) this.layoutHtmlFullscreen(rec, wanted)
     // A Peek's overlay covers the page area, which just moved or resized.
     if (rec.overlayShown) this.fitOverlay(rec)
+    this.focusIfNewlyShown(rec, shownBefore)
+  }
+
+  /** A page that just appeared for the focused tab or pane (e.g. a split pane filled late) takes keyboard focus. */
+  private focusIfNewlyShown(rec: WindowRecord, shownBefore: Set<TabId>): void {
+    const active = activeTabOf(this.ctx.store.state, rec.id)
+    if (!active || !rec.visible.has(active) || shownBefore.has(active)) return
+    if (!rec.overlayShown && rec.win.isFocused()) this.liveContents(active)?.focus()
   }
 
   /** The page area: the bounding box of the window's page panes (window coordinates, DIP). */
@@ -705,7 +718,7 @@ export class WindowManager {
       const tabBefore = before ? activeTabOf(prev, rec.id) : null
       if (tabNow !== tabBefore) {
         if (tabNow) this.selfClosed.delete(tabNow)
-        this.fastSwitch(rec, next, tabNow)
+        this.fastSwitch(rec, next, prev, tabNow, tabBefore)
       }
       const spaceNow = next.spaces[now.spaceId]
       const spaceBefore = before ? prev.spaces[before.spaceId] : undefined
@@ -733,12 +746,23 @@ export class WindowManager {
     })
   }
 
-  /** Swap the visible tab immediately in the common single-pane case; the shell confirms the layout. */
-  private fastSwitch(rec: WindowRecord, state: OrbitState, tabId: TabId | null): void {
-    const singlePane = rec.panes.length <= 1 && rec.lastSingleRect
-    if (tabId && singlePane && !splitOfTab(state, tabId) && rec.lastSingleRect) {
+  /**
+   * Swap the visible tab (or split view) immediately using the last known frame; the shell
+   * confirms the layout. Focus moves within a split and splits that grow or shrink are left
+   * to the shell, which animates them.
+   */
+  private fastSwitch(
+    rec: WindowRecord,
+    state: OrbitState,
+    prev: OrbitState,
+    tabId: TabId | null,
+    before: TabId | null,
+  ): void {
+    const frame = rec.frameRect ?? rec.lastSingleRect
+    const panes = tabId && frame ? fastSwitchPanes(state, prev, tabId, before, frame) : null
+    if (panes) {
       rec.minPaneSeq = this.ctx.store.seq + 1
-      this.applyPanes(rec.id, [{ tabId, rect: rec.lastSingleRect }], rec.radius)
+      this.applyPanes(rec.id, panes, rec.radius)
     } else if (!tabId) {
       rec.minPaneSeq = this.ctx.store.seq + 1
       this.applyPanes(rec.id, [], rec.radius)

@@ -499,13 +499,402 @@ html.is-resizing * {
   transform: rotate(90deg);
 }
 
+/* A tab dragged onto a row's half joins it as a split on that side (SV-05). */
+.row-slot.is-split-target::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: calc(50% - 4px);
+  border-radius: var(--radius-row);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent);
+  pointer-events: none;
+  animation: pane-fade-in 100ms ease-out;
+}
+
+.row-slot.is-split-left::after {
+  left: 2px;
+}
+
+.row-slot.is-split-right::after {
+  right: 2px;
+}
+
+/* Split view row (split lane, SV-21): one pill, one segment per pane. */
 .split-row {
+  animation: split-row-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 2px;
-  border-radius: 10px;
-  box-shadow: inset 0 0 0 1px var(--divider);
+  align-items: center;
+  gap: 4px;
+  height: var(--row-h);
+  padding-right: 4px;
+  border-radius: var(--radius-row);
+  outline: none;
+  transition: background var(--dur-fast) ease;
+}
+
+.split-row:hover {
+  background: var(--hover);
+}
+
+.split-row.is-active {
+  background: var(--active);
+  box-shadow: var(--active-shadow);
+}
+
+.split-row__segments {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.split-segment {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 6px;
+  color: var(--text-muted);
+}
+
+.split-segment + .split-segment {
+  border-left: 1px solid var(--divider);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.split-row.is-active .split-segment,
+.split-row:hover .split-segment {
+  color: var(--text);
+}
+
+.split-segment.is-focused .split-segment__title {
+  font-weight: 600;
+}
+
+.split-segment.is-asleep .split-segment__title {
+  opacity: 0.78;
+}
+
+.split-segment__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+}
+
+.split-segment__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+
+.split-segment__audio,
+.split-row__close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  color: var(--text-muted);
+}
+
+.split-row__close {
+  width: 22px;
+  height: 22px;
+  opacity: 0;
+}
+
+.split-row:hover .split-row__close,
+.split-row.is-active .split-row__close {
+  opacity: 1;
+}
+
+.split-row__named {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 6px;
+}
+
+.split-row__icons {
+  flex: none;
+  display: flex;
+}
+
+.split-row__icon {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+}
+
+.split-row__icon + .split-row__icon {
+  margin-left: -4px;
+}
+
+.split-row__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.split-row__rename {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  margin-left: 4px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  outline: none;
+  font: inherit;
+  color: var(--text);
+  background: var(--active);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent);
+  user-select: text;
+}
+
+.split-row__close:hover,
+.split-segment__audio:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.split-favorite__icons {
+  display: flex;
+  gap: 3px;
+}
+
+/* ---------- Content frame and split view panes (split lane) ---------- */
+
+.frame-host {
+  position: relative;
+  height: 100%;
+}
+
+/* A page card. Position and size are written by the pane engine (shell/split/engine.ts). */
+.pane {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-frame);
+  background: color-mix(in srgb, var(--frame-top) 30%, white);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.08),
+    0 2px 10px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  will-change: transform, width, height;
+}
+
+/* Dark rendition (AP-04): page cards, empty panes and closing cards are dark too. */
+.shell[data-dark] .pane:not(.pane--drop) {
+  background: color-mix(in srgb, var(--frame-top) 40%, #19191c);
+}
+
+.pane--empty {
+  inset: 0;
+  width: auto;
+  height: auto;
+  will-change: auto;
+}
+
+.pane--blank {
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--frame-top) 45%, white);
+  animation: pane-fade-in 120ms ease-out;
+}
+
+.pane__hint {
+  color: var(--text-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.pane--ghost {
+  pointer-events: none;
+  transform-origin: 50% 50%;
+}
+
+/* Drop indicator (SV-04, AP-03): translucent, theme-coloured. */
+.pane--drop {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+  animation: pane-fade-in 100ms ease-out;
+}
+
+@keyframes pane-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Divider between panes (SV-13): it is the 8 px gap itself. */
+.split-divider {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  -webkit-app-region: no-drag;
+}
+
+.split-divider--row {
+  cursor: col-resize;
+}
+
+.split-divider--column {
+  cursor: row-resize;
+}
+
+.split-divider::after {
+  content: "";
+  position: absolute;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity var(--dur-fast) ease;
+}
+
+.split-divider--row::after {
+  left: 3px;
+  top: 50%;
+  width: 2px;
+  height: 36px;
+  margin-top: -18px;
+}
+
+.split-divider--column::after {
+  top: 3px;
+  left: 50%;
+  height: 2px;
+  width: 36px;
+  margin-left: -18px;
+}
+
+.split-divider:hover::after,
+html.is-resizing .split-divider::after,
+html.is-resizing-rows .split-divider::after {
+  opacity: 0.55;
+}
+
+html.is-resizing-rows,
+html.is-resizing-rows * {
+  cursor: row-resize !important;
+}
+
+/* Focused pane outline (SV-14): drawn in the gap around the page card. */
+.pane-focus-ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+  pointer-events: none;
+  border: 2px solid color-mix(in srgb, var(--accent) 80%, transparent);
+  border-radius: calc(var(--radius-frame) + 2px);
+}
+
+/* Pane strip view (SV-12): its own transparent web contents, sized to the strip. */
+html[data-view="strip"] body {
+  background: transparent;
+}
+
+.pane-strip {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 4px;
+  border-radius: 9px;
+  color: #1c1c1f;
+  background: color-mix(in srgb, var(--frame-top) 25%, rgba(255, 255, 255, 0.94));
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.16),
+    0 4px 12px rgba(0, 0, 0, 0.16);
+  animation: pane-strip-in 140ms var(--ease-out);
+}
+
+@media (prefers-color-scheme: dark) {
+  .pane-strip {
+    color: #f3f3f5;
+    background: color-mix(in srgb, var(--frame-top) 30%, rgba(30, 30, 34, 0.94));
+  }
+}
+
+.pane-strip.is-leaving {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 110ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes pane-strip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+.pane-strip__button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 22px;
+  border-radius: 6px;
+  opacity: 0.75;
+}
+
+.pane-strip__grip {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 22px;
+  border-radius: 6px;
+  opacity: 0.5;
+  cursor: grab;
+}
+
+.pane-strip__grip:active {
+  cursor: grabbing;
+}
+
+.pane-strip__button:hover {
+  opacity: 1;
+  background: rgba(127, 127, 127, 0.18);
+}
+
+@keyframes split-row-in {
+  from {
+    opacity: 0.5;
+    transform: scale(0.97);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .split-row,
+  .pane--blank,
+  .pane--drop,
+  .pane-strip {
+    animation-duration: 1ms;
+  }
 }
 
 /* Space bar: see src/renderer/src/shell/spaces/spaces.css (spaces lane). */

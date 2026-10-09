@@ -4,14 +4,14 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 120 built (40 partial) · 162 tested · 0 feel right.
+**Totals:** 485 spec’d · 140 built (45 partial) · 187 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 82 | 101 |
-| P1 | 221 | 35 | 57 |
-| P2 | 83 | 3 | 4 |
+| P0 | 174 | 97 | 117 |
+| P1 | 221 | 39 | 65 |
+| P2 | 83 | 4 | 5 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -196,32 +196,32 @@ Spec: `spec/split-view.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| SV-01 | What a split view is | P0 | – | – | – |  |
-| SV-02 | Create with the keyboard shortcut | P0 | – | – | – |  |
-| SV-03 | Create from the command bar | P0 | – | – | – |  |
-| SV-04 | Create by dragging a tab onto the page | P0 | – | – | – |  |
-| SV-05 | Create by dropping a tab onto another tab row | P0 | – | – | – |  |
-| SV-06 | Create from a multi-selection | P0 | – | – | – |  |
-| SV-07 | Create from the "+" menu or the window's split button | P1 | – | – | – |  |
-| SV-08 | Open a link into a split | P1 | – | – | – |  |
-| SV-09 | Option-click a tab row | P1 | – | – | – |  |
+| SV-01 | What a split view is | P0 | ✅ | ✅ e2e+unit | – | 2-4 live panes shown together; the split is one sidebar item |
+| SV-02 | Create with the keyboard shortcut | P0 | ✅ | ✅ e2e+unit | – | Ctrl+Shift+= adds an empty pane and opens the command bar; a URL or open tab fills it, Escape removes it; refused in an empty window |
+| SV-03 | Create from the command bar | P0 | ✅ | ✅ e2e | – | Add Split Right/Left/Above/Below and New Split View actions; the command bar stays open for the new pane |
+| SV-04 | Create by dragging a tab onto the page | P0 | ✅ | ✅ e2e+unit | – | drag a tab row over the page: theme-coloured drop indicator, the page makes room, release adds the pane |
+| SV-05 | Create by dropping a tab onto another tab row | P0 | ✅ | ✅ e2e+unit | – | resting a dragged tab on a tab or split row's middle band (~400 ms) highlights that half; dropping makes or extends a split there, undoable with Cmd/Ctrl+Z; quick drags reorder as usual |
+| SV-06 | Create from a multi-selection | P0 | ✅ | ✅ e2e+unit | – | Open in Split View in the tab menu for a 2-4 tab multi-selection (sidebar order); more than 4 is disabled with the hint |
+| SV-07 | Create from the "+" menu or the window's split button | P1 | 🟡 partial | ✅ unit | – | New Split View and Add Split Right/Left/Above/Below actions plus newSplitMenuItems(); the '+' menu and title-bar button belong to the sidebar chrome |
+| SV-08 | Open a link into a split | P1 | 🟡 partial | ✅ e2e+unit | – | Open Link in Split View in the page's link menu; Option-click and dragging links not built |
+| SV-09 | Option-click a tab row | P1 | ✅ | ✅ e2e+unit | – | Alt-click a tab row joins it (the selected tab duplicates beside itself); Alt-click a split row separates |
 | SV-10 | Notes and canvases in a split | P2 | – | – | – |  |
-| SV-11 | Layouts and flipping orientation | P0 | – | – | – |  |
-| SV-12 | Pane chrome: the hover strip | P0 | – | – | – |  |
-| SV-13 | Resize panes with the dividers | P0 | – | – | – |  |
-| SV-14 | The focused pane | P0 | – | – | – |  |
-| SV-15 | Change what a pane shows | P0 | – | – | – |  |
-| SV-16 | Keyboard navigation between panes | P1 | – | – | – |  |
-| SV-17 | Close one pane | P0 | – | – | – |  |
-| SV-18 | Separate a split into tabs | P0 | – | – | – |  |
-| SV-19 | Close the whole split | P0 | – | – | – |  |
-| SV-20 | Swap and move panes | P2 | – | – | – |  |
-| SV-21 | The split row in the sidebar | P0 | – | – | – |  |
-| SV-22 | The split as one unit: context menu | P1 | – | – | – |  |
-| SV-23 | Pinned and Favorite splits | P1 | – | – | – |  |
-| SV-24 | Splits persist | P0 | – | – | – |  |
-| SV-25 | Limits and edge cases | P1 | – | – | – |  |
-| SV-26 | Feel: create, resize, close | P1 | – | – | – |  |
+| SV-11 | Layouts and flipping orientation | P0 | ✅ | ✅ e2e+unit | – | row/column trees, 3-4 pane arrangements from where panes are added, flip transposes keeping ratios |
+| SV-12 | Pane chrome: the hover strip | P0 | ✅ | ✅ e2e | – | hover strip view with close and split-controls menu (flip, add split x4, move pane, separate); no per-pane toolbar yet |
+| SV-13 | Resize panes with the dividers | P0 | ✅ | ✅ e2e+unit | – | 1:1 divider drags, 240x160 px minimums, snapping to 1/3, 1/2, 2/3, double-click equalizes, sizes saved |
+| SV-14 | The focused pane | P0 | ✅ | ✅ e2e | – | clicking a page focuses its pane; outline in the gap; address, Cmd+L and page commands follow the focused pane |
+| SV-15 | Change what a pane shows | P0 | ✅ | ✅ e2e | – | Cmd+L on a pane changes only that pane; choosing an open Today tab swaps it in |
+| SV-16 | Keyboard navigation between panes | P1 | ✅ | ✅ e2e | – | Ctrl+Shift+1-4, Ctrl+Shift+[ / ], Ctrl+Shift+- |
+| SV-17 | Close one pane | P0 | ✅ | ✅ e2e+unit | – | strip close, Ctrl+Shift+-, Cmd/Ctrl+W (pinned and Favorite splits too) close one pane in one update; the others keep their arrangement; reopening restores its exact spot |
+| SV-18 | Separate a split into tabs | P0 | ✅ | ✅ e2e | – | Separate Tabs from the split menu, pane menu and Alt-click |
+| SV-19 | Close the whole split | P0 | ✅ | ✅ e2e+unit | – | the row's close closes the split as one unit (pinned unloads); one reopen brings the whole split back (layout, sizes, name, place); Archive entries stay per tab |
+| SV-20 | Swap and move panes | P2 | ✅ | ✅ e2e+unit | – | drag a pane by its strip grip: centre swaps, an edge moves it there (live preview); Move Pane Left/Right/Up/Down in the pane menu |
+| SV-21 | The split row in the sidebar | P0 | 🟡 partial | ✅ e2e | – | one row with a favicon+title segment per pane, segment click focuses; a custom name replaces the segments; command bar split result and custom icon not built |
+| SV-22 | The split as one unit: context menu | P1 | 🟡 partial | ✅ e2e | – | split menu: rename, per-pane submenus, flip, equalize, duplicate, pin/unpin, Add to Favorites, move to Space, separate, close; custom icon, archive below and share not built |
+| SV-23 | Pinned and Favorite splits | P1 | 🟡 partial | ✅ e2e+unit | – | pinning keeps panes/sizes/orientation; drops onto pinned tabs stay pinned; Favorite splits show a combined tile and drag like tiles; resetting every pane and Peek from pinned splits not built |
+| SV-24 | Splits persist | P0 | ✅ | ✅ e2e+unit | – | panes, order, orientation, sizes and focused pane survive relaunch |
+| SV-25 | Limits and edge cases | P1 | ✅ | ✅ e2e+unit | – | fifth pane refused with a toast on every route; no split from an empty window; HTML full screen (core) fills the window, hides the strip and returns to the split |
+| SV-26 | Feel: create, resize, close | P1 | 🟡 partial | ✅ e2e+unit | – | springs for create/close/flip, closing card fades, 1:1 resize, drop indicator fade/slide, frame colour until loaded, split row entrance; sidebar row-merge reflow belongs to the tabs lane's list animation |
 
 ## Page navigation, windows, links and page-level controls (prefix NV)
 
@@ -268,7 +268,7 @@ Spec: `spec/peek.md`
 | PK-05 | The Peek card's look | P0 | ✅ | ✅ e2e+unit | – | inset card, shadow, dimmed page area, Close / Open as Tab / Split buttons with shortcut tooltips; no toolbar (AP-07 not built) |
 | PK-06 | Open and close animation, and the dismiss gesture | P1 | ✅ | ✅ e2e+unit | – | spring grow from the link, 18% dim (20% dark), 160 ms shrink to 0.96 and fade, reduced motion; drag the top handle or swipe down beside the card: follows the input, closes past 25% or 500 px/s, else springs back |
 | PK-07 | Expand a Peek into a full tab | P0 | ✅ | ✅ e2e+unit | – | ⌘O / button: card morphs to the frame, live page becomes a selected Today tab (routing rules apply) |
-| PK-08 | Open a Peek in Split View | P1 | 🟡 partial | ✅ e2e | – | button, animation and split.addTab call done and e2e-tested against the split lane's branch; until Split View is in main the button opens the page as a tab |
+| PK-08 | Open a Peek in Split View | P1 | ✅ | ✅ e2e | – | the card slides to the right half, then split.addTab makes the source and the live Peek page one split in the source's place (a pinned source gives a pinned split), the page focused; refused, it opens as a tab |
 | PK-09 | Close a Peek | P0 | ✅ | ✅ e2e+unit | – | Esc (after fullscreen), ⌘W, ×, click outside; archived as from 'peek' |
 | PK-10 | Reopen a Peek closed by mistake | P1 | ✅ | ✅ e2e | – | ⌘Z right after closing, or ⌘⇧T, reopens on the same page with history |
 | PK-11 | Navigating and acting inside a Peek | P1 | 🟡 partial | ✅ e2e | – | links, back/forward, reload, zoom, copy URL, devtools act on the Peek; the sidebar address shows the Peek host; ⌘L makes it a tab and edits it; find in page waits for the find bar (core placeholder) |

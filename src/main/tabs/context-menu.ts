@@ -2,6 +2,7 @@ import { type ContextMenuParams, clipboard, Menu, type MenuItemConstructorOption
 import type { TabId } from '../../shared/state'
 import type { MainContext } from '../context'
 import { linkPeekMenuItems } from '../peek/menu'
+import { linkSplitMenuItem } from '../split/menu'
 
 /** Native right-click menu for web pages. */
 export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: WebContents, params: ContextMenuParams) {
@@ -15,6 +16,8 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
     items.push(
       { label: 'Open Link in New Tab', click: () => openInNewTab(params.linkURL, false) },
       ...linkPeekMenuItems(ctx, tabId, params.linkURL),
+      // A new pane beside the page's pane (SV-08).
+      linkSplitMenuItem(ctx, tabId, params.linkURL),
       { label: 'Copy Link Address', click: () => clipboard.writeText(params.linkURL) },
       { type: 'separator' },
     )
