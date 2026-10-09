@@ -1,5 +1,5 @@
 import type { LayoutPath, PaneSide, SplitAxis } from '../split'
-import type { SplitId, TabId } from '../state'
+import type { ContainerRef, SplitId, TabId } from '../state'
 
 /** Owned by the split lane (Split View, spec split-view.md SV-*). */
 export interface SplitCommands {
@@ -40,6 +40,8 @@ export interface SplitCommands {
   /** Moves a pane past its neighbour in a direction (SV-20). */
   'split.movePane': { args: { tabId: TabId; direction: PaneSide }; result: void }
   'split.duplicate': { args: { splitId: SplitId }; result: SplitId | null }
+  /** Moves a whole split (pin/unpin, Favorites, another Space), keeping panes, sizes and orientation (SV-23). */
+  'split.move': { args: { splitId: SplitId; to: ContainerRef; index?: number }; result: boolean }
   /** Right-click menu of a split row (SV-22). */
   'split.contextMenu': { args: { splitId: SplitId }; result: void }
   /** The split-controls menu of a pane (SV-12). */

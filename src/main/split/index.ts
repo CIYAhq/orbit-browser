@@ -1,4 +1,4 @@
-import { clipboard, Menu, type MenuItemConstructorOptions } from 'electron'
+import { clipboard, Menu, type MenuItemConstructorOptions, nativeTheme } from 'electron'
 import { newId } from '../../shared/ids'
 import {
   equalizeLayout,
@@ -8,13 +8,16 @@ import {
   neighborPane,
   type PaneSide,
   paneOrder,
+  removePane,
   replacePane,
   SPLIT_FULL_MESSAGE,
+  sameLayout,
   setSizesAt,
   siblingOf,
   swapPanes,
 } from '../../shared/split'
 import type { ContainerRef, OrbitState, SplitId, SplitLayout, TabId, WindowId } from '../../shared/state'
+import { paletteFor } from '../../shared/theme'
 import { insertItem, locate, moveItem, sectionOf, splitOfTab } from '../../shared/tree'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
@@ -120,8 +123,12 @@ export function registerSplit(ctx: MainContext): void {
   commands.register('split.addTab', ({ tabId, target, side = 'right', focus = true }, c) => {
     const windowId = windowOf(c)
     let result: ReturnType<typeof addPaneInDraft> = 'invalid'
+    // A split row as the target: the new pane goes after its last pane (or before its first for 'left'/'top').
+    const split = store.state.splits[target]
+    const order = split ? paneOrder(split.layout) : []
+    const anchor = split ? ((side === 'left' || side === 'top' ? order[0] : order[order.length - 1]) ?? target) : target
     store.update((d) => {
-      result = addPaneInDraft(d, tabId, target, side)
+      result = addPaneInDraft(d, tabId, anchor, side)
       if (!isFailure(result) && focus && windowId) focusInDraft(d, windowId, tabId)
     })
     if (isFailure(result)) {
@@ -313,6 +320,55 @@ export function registerSplit(ctx: MainContext): void {
     }
   })
 
+  // When the tab model closes a pane (e.g. ⌘W on the focused pane, SV-17), keep the remaining panes'
+  // arrangement and sizes, and keep the split on screen with a neighbouring pane focused. Runs in a
+  // microtask queued before the patch flush, so renderers only ever see the repaired state.
+  const leafSet = (layout: SplitLayout) => layoutLeaves(layout).sort().join()
+  store.subscribe((next, prev) => {
+    const arrangements: { splitId: SplitId; layout: SplitLayout }[] = []
+    for (const [splitId, split] of Object.entries(prev.splits)) {
+      const now = next.splits[splitId]
+      if (!now || now.layout === split.layout) continue
+      // Only when panes left because their tabs were closed (not on resizes, flips, adds…).
+      const closed = layoutLeaves(split.layout).filter((id) => !next.tabs[id])
+      if (closed.length === 0) continue
+      let kept: SplitLayout | null = split.layout
+      for (const id of closed) kept = kept ? removePane(kept, id) : null
+      if (kept && kept.type !== 'leaf' && leafSet(kept) === leafSet(now.layout) && !sameLayout(kept, now.layout)) {
+        arrangements.push({ splitId, layout: kept })
+      }
+    }
+    const focus: { windowId: WindowId; target: TabId; expected: TabId | null; spaceId: string }[] = []
+    for (const win of Object.values(next.windows)) {
+      const before = activeTabOf(prev, win.id)
+      const after = activeTabOf(next, win.id)
+      if (!before || before === after || next.tabs[before]) continue
+      const splitId = splitOfTab(prev, before)
+      const split = splitId ? prev.splits[splitId] : undefined
+      if (!split || prev.windows[win.id]?.spaceId !== win.spaceId) continue
+      const survivors = layoutLeaves(split.layout).filter((id) => id !== before && next.tabs[id])
+      if (survivors.length === 0 || (after && survivors.includes(after))) continue
+      const sibling = siblingOf(split.layout, before)
+      const target = sibling && survivors.includes(sibling) ? sibling : survivors[0]
+      if (target) focus.push({ windowId: win.id, target, expected: after, spaceId: win.spaceId })
+    }
+    if (arrangements.length === 0 && focus.length === 0) return
+    queueMicrotask(() =>
+      store.update((d) => {
+        for (const { splitId, layout } of arrangements) {
+          const current = d.splits[splitId]
+          if (current && leafSet(current.layout) === leafSet(layout)) current.layout = layout
+        }
+        for (const f of focus) {
+          const win = d.windows[f.windowId]
+          if (!win || win.spaceId !== f.spaceId || !d.tabs[f.target]) continue
+          if ((win.activeTab[win.spaceId] ?? null) !== f.expected) continue
+          focusInDraft(d, f.windowId, f.target)
+        }
+      }),
+    )
+  })
+
   // ---- Closing, separating, rearranging ----
 
   const closePane = (tabId: TabId) => {
@@ -422,17 +478,19 @@ export function registerSplit(ctx: MainContext): void {
     if (!split || !loc) return null
     const now = Date.now()
     const copies = new Map<TabId, TabId>()
+    const tabs = layoutLeaves(split.layout)
+      .map((tabId) => state.tabs[tabId])
+      .filter((t) => !!t)
+      .map((tab) => {
+        const copy = copyTab(tab, now)
+        copies.set(tab.id, copy.id)
+        return copy
+      })
+    let layout = split.layout
+    for (const [from, to] of copies) layout = replacePane(layout, from, to)
     const id = newId('v')
     store.update((d) => {
-      let layout = split.layout
-      for (const tabId of layoutLeaves(split.layout)) {
-        const tab = d.tabs[tabId]
-        if (!tab) continue
-        const copy = copyTab(tab, now)
-        d.tabs[copy.id] = copy
-        copies.set(tabId, copy.id)
-        layout = replacePane(layout, tabId, copy.id)
-      }
+      for (const copy of tabs) d.tabs[copy.id] = copy
       insertItem(d, loc.container, loc.index + 1, id)
       d.splits[id] = { id, layout, createdAt: now }
     })
@@ -451,14 +509,19 @@ export function registerSplit(ctx: MainContext): void {
   })
 
   /** Moves a whole split to another container (pin, Favorites, another Space), keeping its panes. */
-  const moveSplit = (splitId: SplitId, to: ContainerRef, index: number) => {
+  const moveSplit = (splitId: SplitId, to: ContainerRef, index: number): boolean => {
+    let ok = false
     let moved: TabId[] = []
     store.update((d) => {
-      if (!moveItem(d, splitId, to, index)) return
+      if (!d.splits[splitId] || !locate(d, splitId) || !moveItem(d, splitId, to, index)) return
+      ok = true
       moved = adoptPlacement(d, leavesOf(d, splitId), to)
     })
     reloadMoved(moved)
+    return ok
   }
+
+  commands.register('split.move', ({ splitId, to, index }) => moveSplit(splitId, to, index ?? Number.MAX_SAFE_INTEGER))
 
   // ---- Menus ----
 
@@ -614,7 +677,25 @@ export function registerSplit(ctx: MainContext): void {
       strip.onPageMouse(tabId, mouse)
     })
     contents.on('focus', () => focusFromPage(tabId))
+    placeholderUntilLoaded(tabId, contents)
   })
+
+  /** A page starting in a split pane shows the frame colour until it has loaded, never a white flash (SV-26). */
+  const placeholderUntilLoaded = (tabId: TabId, contents: Electron.WebContents) => {
+    const state = store.state
+    const tab = state.tabs[tabId]
+    const space = tab ? state.spaces[tab.spaceId] : undefined
+    const view = ctx.tabs.get(tabId)
+    if (!view || !space || !splitOfTab(state, tabId)) return
+    view.setBackgroundColor(paletteFor(space.theme, nativeTheme.shouldUseDarkColors).windowBackground)
+    const restore = () => {
+      clearTimeout(timer)
+      if (!contents.isDestroyed() && ctx.tabs.get(tabId) === view) view.setBackgroundColor('#ffffffff')
+    }
+    const timer = setTimeout(restore, 4000)
+    contents.once('did-finish-load', restore)
+    contents.once('did-fail-load', restore)
+  }
 
   // ---- Actions ----
 

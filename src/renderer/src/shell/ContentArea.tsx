@@ -8,6 +8,7 @@ import { invoke } from '../api'
 import { activeTabId } from '../selectors'
 import { useOrbit } from '../store'
 import { DROP_PANE, type DropPreview, dividerKey, FRAME_RADIUS, PaneEngine } from './split/engine'
+import { useAltClickSplit } from './split/useAltClickSplit'
 import { useTabDrop } from './split/useTabDrop'
 
 export { FRAME_RADIUS }
@@ -59,6 +60,7 @@ export function ContentArea({ win }: { win: WindowState }) {
   }, [engine, frame])
   useLayoutEffect(() => engine.setPreview(drop), [engine, drop])
   useTabDrop(engine, setDrop)
+  useAltClickSplit()
 
   const layout = frame?.layout ?? null
   const leaves = layout ? layoutLeaves(layout) : []

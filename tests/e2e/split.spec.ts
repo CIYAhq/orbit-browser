@@ -373,3 +373,76 @@ test('[SV-24] a resized three-pane split comes back after relaunch', async () =>
   const [pa, pb] = [await paneBox(orbit.shell, a), await paneBox(orbit.shell, b)]
   expect(pa.width / pb.width).toBeCloseTo(2, 1)
 })
+
+test('[SV-17] Ctrl+W closes only the focused pane and keeps the others’ arrangement', async () => {
+  const c = await openTab(orbit.app, 'Cee')
+  const a = await openTab(orbit.app, 'Ay')
+  const splitId = (await run(orbit.app, 'split.create', { tabIds: [a, c] })) as string
+  const b = await openTab(orbit.app, 'Bee')
+  await run(orbit.app, 'split.addTab', { tabId: b, target: a, side: 'bottom' })
+  const d = await openTab(orbit.app, 'Dee')
+  await run(orbit.app, 'split.addTab', { tabId: d, target: c, side: 'bottom' })
+  await run(orbit.app, 'split.resize', { splitId, path: [], sizes: [0.6, 0.4] })
+  await expectViewsOverPanes(orbit, [a, b, c, d])
+  expect(await activeTabId(orbit.app)).toBe(d)
+  await orbit.shell.keyboard.press('Control+W')
+  await expect(orbit.shell.getByTestId('split-row').getByTestId('split-segment')).toHaveCount(3)
+  // Focus stays in the split (on one of the remaining panes).
+  expect([a, b, c]).toContain(await activeTabId(orbit.app))
+  const layout = (await state(orbit.app)).splits[splitId]?.layout
+  expect(layout).toEqual({
+    type: 'row',
+    sizes: [0.6, 0.4],
+    children: [
+      {
+        type: 'column',
+        sizes: [0.5, 0.5],
+        children: [
+          { type: 'leaf', tabId: a },
+          { type: 'leaf', tabId: b },
+        ],
+      },
+      { type: 'leaf', tabId: c },
+    ],
+  })
+  await expectViewsOverPanes(orbit, [a, b, c])
+})
+
+test('[SV-09][SV-18] Alt-click a tab row joins it as a split; Alt-click the split row separates it', async () => {
+  const b = await openTab(orbit.app, 'Joiner')
+  const a = await openTab(orbit.app, 'Current')
+  await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${b}"]`).click({ modifiers: ['Alt'] })
+  await expect(orbit.shell.getByTestId('split-row')).toHaveCount(1)
+  const split = await splitOf(orbit.app, a)
+  expect(
+    split?.layout.type === 'row' && split.layout.children.map((ch) => (ch.type === 'leaf' ? ch.tabId : '')),
+  ).toEqual([a, b])
+  await expect.poll(() => activeTabId(orbit.app)).toBe(b)
+  await expectViewsOverPanes(orbit, [a, b])
+  await orbit.shell.getByTestId('split-row').click({ modifiers: ['Alt'] })
+  await expect(orbit.shell.getByTestId('split-row')).toHaveCount(0)
+  await expect(orbit.shell.getByTestId('tab-row')).toHaveCount(2)
+})
+
+test('[SV-22][SV-23] a split duplicates, pins and moves as one unit', async () => {
+  const b = await openTab(orbit.app, 'Unit2')
+  const a = await openTab(orbit.app, 'Unit1')
+  const splitId = (await run(orbit.app, 'split.create', { tabIds: [a, b] })) as string
+  const copy = (await run(orbit.app, 'split.duplicate', { splitId })) as string
+  await expect(orbit.shell.getByTestId('split-row')).toHaveCount(2)
+  const s1 = await state(orbit.app)
+  const copyLeaves = JSON.stringify(s1.splits[copy]?.layout).match(/t-[a-z0-9]+/g) ?? []
+  expect(copyLeaves.map((id) => s1.tabs[id]?.url)).toEqual([s1.tabs[a]?.url, s1.tabs[b]?.url])
+  const spaceId = s1.tabs[a]?.spaceId as string
+  expect(await run(orbit.app, 'split.move', { splitId, to: { kind: 'pinned', spaceId } })).toBe(true)
+  await expect(orbit.shell.getByTestId('pinned-list').getByTestId('split-row')).toHaveCount(1)
+  const s2 = await state(orbit.app)
+  expect(s2.tabs[a]?.pinnedUrl).toBe(s2.tabs[a]?.url)
+  expect(s2.tabs[b]?.pinnedUrl).toBe(s2.tabs[b]?.url)
+  // A tab dropped onto a pinned tab makes a split that stays pinned.
+  const loose = await openTab(orbit.app, 'Loose')
+  const pinnedTab = await openTab(orbit.app, 'PinnedOne')
+  await run(orbit.app, 'tabs.pin', { tabId: pinnedTab })
+  await run(orbit.app, 'split.addTab', { tabId: loose, target: pinnedTab, side: 'right' })
+  await expect(orbit.shell.getByTestId('pinned-list').getByTestId('split-row')).toHaveCount(2)
+})

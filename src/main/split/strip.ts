@@ -169,7 +169,7 @@ export class PaneStrip {
     for (const [windowId, s] of this.windows) {
       if (!s.tabId) continue
       const win = next.windows[windowId]
-      if (!win || win.overlay.kind !== 'none' || !next.tabs[s.tabId] || !this.isShownPane(next, windowId, s.tabId)) {
+      if (win?.overlay.kind !== 'none' || !next.tabs[s.tabId] || !this.isShownPane(next, windowId, s.tabId)) {
         this.hide(windowId)
       }
     }
