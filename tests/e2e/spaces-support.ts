@@ -66,6 +66,23 @@ export async function swipe(shell: Page, dx: number, steps: number, interval = 1
   }
 }
 
+/**
+ * A quick flick: wheel events dispatched inside the page at a fixed pace, so
+ * the release velocity doesn't depend on the test driver's latency.
+ */
+export async function flick(shell: Page, deltas: number[], intervalMs: number): Promise<void> {
+  await shell.evaluate(
+    async ([ds, ms]) => {
+      const target = document.querySelector('[data-testid="sidebar-scroll"]') as HTMLElement
+      for (const d of ds) {
+        target.dispatchEvent(new WheelEvent('wheel', { deltaX: d, deltaY: 0, bubbles: true, cancelable: true }))
+        await new Promise((r) => setTimeout(r, ms))
+      }
+    },
+    [deltas, intervalMs] as const,
+  )
+}
+
 /** Waits until the strip is back at rest (no previews mounted). */
 export async function settled(shell: Page): Promise<void> {
   await shell.waitForFunction(

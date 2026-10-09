@@ -221,7 +221,13 @@ export class SpaceSwitcher {
       this.newPage = undefined
       this.newTheme = undefined
     }
-    let slots = this.slots.filter((s) => s.id !== active)
+    if (this.newPage) {
+      // Switched to an existing Space (keys, click, another window) while the flow or the
+      // over-swipe hint was showing: abandon it.
+      this.newPage = undefined
+      this.newTheme = undefined
+    }
+    let slots = this.slots.filter((s) => s.id !== active && s.id !== 'new')
     if (target === undefined) {
       const dir =
         Math.sign(order.indexOf(active) - (order.indexOf(prev) >= 0 ? order.indexOf(prev) : prevOrder.indexOf(prev))) ||

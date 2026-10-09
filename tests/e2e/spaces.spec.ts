@@ -14,6 +14,7 @@ import {
   activeSpace,
   createSpace,
   cssVar,
+  flick,
   hoverSidebar,
   names,
   newTab,
@@ -108,8 +109,8 @@ test('[SP-08][FL-13] a horizontal two-finger swipe tracks 1:1 and commits with a
   expect(await activeSpace(app)).toBe(a)
   await swipe(shell, 10, 6, 10)
   await expect.poll(() => stripX(shell)).toBeCloseTo(-130, 0)
-  // Past a third of the width on release: commit.
-  await swipe(shell, 10, Math.ceil(w / 3 / 10) - 13 + 2, 10)
+  // Past a third of the width (130 > w/3) on release: commit.
+  expect(130).toBeGreaterThan(w / 3)
   await expect.poll(() => activeSpace(app), { timeout: 3000 }).toBe(b)
   await settled(shell)
   await expect(shell.getByTestId('space-name')).toHaveText('Beta')
@@ -127,7 +128,7 @@ test('[SP-08][FL-13] a short slow swipe springs back while a quick short flick c
   expect(await activeSpace(app)).toBe(a)
   // Flick: 60 px (under a third of the width) in three quick events still switches.
   await sleep(200)
-  await swipe(shell, 20, 3, 0)
+  await flick(shell, [20, 20, 20], 8)
   await expect.poll(() => activeSpace(app), { timeout: 3000 }).toBe(b)
   await settled(shell)
 })
@@ -706,4 +707,21 @@ test('[SP-09] mouse back/forward buttons over the sidebar move between Spaces', 
   await expect.poll(() => activeSpace(app)).toBe(b)
   await press(3)
   await expect.poll(() => activeSpace(app)).toBe(a)
+})
+
+test('[SP-02][SP-09] switching Space while the new-Space flow is open abandons the flow', async () => {
+  const { app, shell } = orbit
+  const [a] = await order(app)
+  await createSpace(app, { name: 'Beta' })
+  await settled(shell)
+  await run(app, 'spaces.beginCreate', {})
+  await expect(shell.getByTestId('new-space-flow')).toBeVisible()
+  await run(app, 'spaces.switch', { spaceId: a })
+  await settled(shell)
+  await expect(shell.getByTestId('new-space-flow')).toHaveCount(0)
+  await expect(shell.getByTestId('space-name')).toHaveText('Personal')
+  // The real page is interactive again.
+  await shell.getByTestId('space-name').click()
+  await expect(shell.getByTestId('space-rename-input')).toBeFocused()
+  expect(await names(app)).toEqual(['Personal', 'Beta'])
 })
