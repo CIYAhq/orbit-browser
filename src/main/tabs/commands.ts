@@ -389,6 +389,17 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
         }
       }
       const background = details.disposition === 'background-tab'
+      if (background) {
+        // ⌘/middle-click: an ordinary tab that loads in the background. A view handed back through
+        // createWindow would never be shown, and Chromium keeps the opener page waiting for it.
+        const windowId = windows.windowOfTab(openerTabId) ?? windows.focusedWindowId()
+        const spaceId = windowId ? ops.spaceOfWindow(windowId) : opener.spaceId
+        const id = ops.createTab({ url: details.url, spaceId, windowId, activate: false, openerTabId })
+        tabs.ensure(id)
+        // With the sidebar hidden the new tab would open unseen: say so (TB-02, SB-13).
+        if (windowId && !store.state.windows[windowId]?.sidebar.visible) toast(windowId, 'Opened in a new tab')
+        return { action: 'deny' }
+      }
       return {
         action: 'allow',
         outlivesOpener: true,
@@ -402,17 +413,12 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
             const space = d.spaces[spaceId]
             if (!space) return
             d.tabs[tab.id] = tab
-            // New tabs from links land at the top of Today; background ones are not selected (TB-03).
-            insertItem(
-              d,
-              { kind: 'today', spaceId },
-              todayInsertIndex(space, background ? 'background' : 'new'),
-              tab.id,
-            )
+            // New tabs from links land at the top of Today (TB-03).
+            insertItem(d, { kind: 'today', spaceId }, todayInsertIndex(space, 'new'), tab.id)
           })
           const view = new WebContentsView(options as WebContentsViewConstructorOptions)
           tabs.adopt(tab.id, view)
-          if (!background && windowId) ops.activate(windowId, tab.id)
+          if (windowId) ops.activate(windowId, tab.id)
           return view.webContents
         },
       }
@@ -421,9 +427,9 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
 
   // Pop-up windows (OAuth, payments) are tracked: their own opens are gesture-gated and become
   // tabs, and ⌘W/⌘R act on the pop-up itself rather than the main window (review M6).
-  ctx.hooks.tabCreated.push((openerTabId, contents) => {
-    contents.on('did-create-window', (popup) => trackPopup(popup, openerTabId))
-  })
+  ctx.hooks.tabCreated.push((openerTabId, contents) =>
+    contents.on('did-create-window', (popup) => trackPopup(popup, openerTabId)),
+  )
   const trackPopup = (popup: BrowserWindow, openerTabId: TabId) => {
     const wc = popup.webContents
     let gesture = { at: 0, used: true }

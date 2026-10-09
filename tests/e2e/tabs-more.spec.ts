@@ -543,3 +543,21 @@ test('[TB-07] recently closed tabs are listed newest first and any of them can b
   await expect.poll(() => activeId(app)).toBe(a)
   expect((await cmd<{ tabId: string }[]>(app, 'tabs.recentlyClosed')).map((r) => r.tabId)).toEqual([b])
 })
+
+test('[TB-02][TB-03] a Cmd/Ctrl-clicked link opens a background tab at the top of Today; with the sidebar hidden a toast says so', async () => {
+  const { app, shell } = orbit
+  const t = await newTab(app, fx.url('/page/Links'))
+  await waitTab(app, t, '/page/Links')
+  const page = await tabPage(app, '/page/Links')
+  await page.click('#next', { modifiers: [MOD_KEY] })
+  await expect.poll(async () => (await space(app)).today.length).toBe(2)
+  const bg = (await space(app)).today[0] as string
+  expect(await activeId(app)).toBe(t)
+  expect((await tab(app, bg))?.url).toContain('/page/Links-next')
+  // Sidebar hidden: the background open is announced.
+  await cmd(app, 'window.setSidebar', { visible: false })
+  await page.click('#next', { modifiers: [MOD_KEY] })
+  await expect.poll(async () => (await space(app)).today.length).toBe(3)
+  await expect(shell.getByTestId('toast').last()).toContainText('Opened in a new tab')
+  expect(await activeId(app)).toBe(t)
+})
