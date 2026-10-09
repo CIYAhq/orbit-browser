@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { createInitialState, DEFAULT_SETTINGS } from '../shared/defaults'
+import { createInitialState, DEFAULT_SETTINGS, DEFAULT_SITE_SEARCH } from '../shared/defaults'
 import type { OrbitState } from '../shared/state'
 import { STATE_SCHEMA } from '../shared/state'
 import type { Store } from './store'
@@ -47,6 +47,11 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
     downloads: input.downloads ?? {},
     tweaks: input.tweaks ?? {},
   }
+  // Site searches: keep well-formed entries; a missing list gets the defaults.
+  const sites = Array.isArray(state.settings.siteSearch) ? state.settings.siteSearch : DEFAULT_SITE_SEARCH
+  state.settings.siteSearch = sites
+    .filter((s) => s && typeof s.keyword === 'string' && typeof s.url === 'string' && s.url.includes('%s'))
+    .map((s) => ({ id: String(s.id || s.keyword), name: String(s.name || s.keyword), keyword: s.keyword, url: s.url }))
   // spaceOrder must list exactly the existing spaces.
   state.spaceOrder = state.spaceOrder.filter((id) => state.spaces[id])
   for (const id of Object.keys(state.spaces)) if (!state.spaceOrder.includes(id)) state.spaceOrder.push(id)

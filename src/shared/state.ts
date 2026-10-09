@@ -140,6 +140,15 @@ export interface WindowState {
 
 export type SearchEngineId = 'google' | 'duckduckgo' | 'bing' | 'brave' | 'ecosia' | 'kagi'
 
+/** Site search (CB-11, ST-06): type the keyword in the command bar, press Tab, then the query. */
+export interface SiteSearchEngine {
+  id: string
+  name: string
+  keyword: string
+  /** Results URL with %s where the query goes. */
+  url: string
+}
+
 export interface Settings {
   searchEngine: SearchEngineId
   /** Archive unpinned (Today) tabs not used for this long. 0 = never. */
@@ -154,6 +163,8 @@ export interface Settings {
   /** Links opened from other apps open in a Mini Window. */
   miniWindowForExternalLinks: boolean
   onboarded: boolean
+  /** Command bar site searches (CB-11); edited in Settings (ST-06). */
+  siteSearch: SiteSearchEngine[]
 }
 
 export interface ArchivedTab {

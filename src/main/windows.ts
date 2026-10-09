@@ -27,7 +27,12 @@ interface WindowRecord {
   /** Ignore renderer pane reports older than this state sequence (after a main-side fast switch). */
   minPaneSeq: number
   overlayShown: boolean
+  /** Pending hide after the overlay's exit animation. */
+  overlayHideTimer?: ReturnType<typeof setTimeout>
 }
+
+/** How long the overlay view stays up after closing so its exit animation can play (FL-16). */
+const OVERLAY_EXIT_MS = 110
 
 const isMac = process.platform === 'darwin'
 
@@ -216,6 +221,7 @@ export class WindowManager {
     win.on('maximize', saveBounds)
     win.on('unmaximize', saveBounds)
     win.on('closed', () => {
+      clearTimeout(rec.overlayHideTimer)
       for (const [tabId, winId] of [...this.attached]) {
         if (winId === id) {
           this.attached.delete(tabId)
@@ -373,6 +379,7 @@ export class WindowManager {
   }
 
   private showOverlay(rec: WindowRecord): void {
+    clearTimeout(rec.overlayHideTimer)
     const overlay = this.ensureOverlay(rec)
     this.fitOverlay(rec)
     rec.win.contentView.addChildView(overlay)
@@ -383,9 +390,20 @@ export class WindowManager {
 
   private hideOverlay(rec: WindowRecord): void {
     if (!rec.overlayShown || !rec.overlay) return
-    rec.overlay.setVisible(false)
     rec.overlayShown = false
+    // Focus returns to the page at once; the view stays up while the renderer animates out.
     if (rec.win.isFocused()) this.focusActiveTab(rec.id)
+    const overlay = rec.overlay
+    clearTimeout(rec.overlayHideTimer)
+    rec.overlayHideTimer = setTimeout(() => {
+      rec.overlayHideTimer = undefined
+      if (rec.overlayShown || rec.win.isDestroyed() || overlay.webContents.isDestroyed()) return
+      try {
+        overlay.setVisible(false)
+      } catch {
+        // The window is going away.
+      }
+    }, OVERLAY_EXIT_MS)
   }
 
   private fitOverlay(rec: WindowRecord): void {

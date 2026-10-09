@@ -48,7 +48,18 @@ export const SEARCH_ENGINES: Record<SearchEngineId, SearchEngine> = {
 }
 
 export function searchUrl(engine: SearchEngineId, query: string): string {
-  return SEARCH_ENGINES[engine].search.replace('%s', encodeURIComponent(query))
+  return fillSearchTemplate(SEARCH_ENGINES[engine].search, query)
+}
+
+/**
+ * Puts a query into a search URL template (%s). In the query string spaces
+ * become "+" (form encoding, e.g. `?q=orbit+test`); in a path they are %20.
+ */
+export function fillSearchTemplate(template: string, query: string): string {
+  const at = template.indexOf('%s')
+  const q =
+    template.lastIndexOf('?', at) >= 0 ? encodeURIComponent(query).replace(/%20/g, '+') : encodeURIComponent(query)
+  return template.replace('%s', q)
 }
 
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i
