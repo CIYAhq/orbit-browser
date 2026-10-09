@@ -270,6 +270,19 @@ describe('ranking', () => {
     expect(ids('gal')).toEqual(['history:https://gallery.example/'])
   })
 
+  it('[CB-07] a pasted URL after a scheme prefix still finds its history rows (review N2)', () => {
+    const h = historyOf([
+      ['https://github.com/orbit', 'Orbit repo'],
+      ['https://github.com/orbit/issues', 'Issues'],
+      ['https://github.com/orbit/pulls', 'Pull requests'],
+    ])
+    const base = { history: h.entries(), hosts: h.hostList(), noAutocomplete: true }
+    const count = (q: string) => rank(input(q, base)).results.filter((r) => r.kind === 'history').length
+    count('ht')
+    count('http')
+    expect(count('https://github.com/orbit')).toBe(3)
+  })
+
   it('[CB-07] dedupes the same URL, preferring the open tab', () => {
     const tabs = [tab('t-1', 'Wiki page', 'https://wiki.example/x')]
     const h = historyOf([['https://wiki.example/x', 'Wiki page']])

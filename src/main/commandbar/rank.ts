@@ -394,7 +394,8 @@ let narrowing: { history: readonly IndexedEntry[]; lower: string; matched: Index
 
 function historyPool(history: readonly IndexedEntry[], lower: string): readonly IndexedEntry[] {
   const n = narrowing
-  return n && n.history === history && lower.startsWith(n.lower) ? n.matched : history
+  // A typed scheme ("http" → "https://…", e.g. a paste) changes how the terms are read: start over.
+  return n && n.history === history && lower.startsWith(n.lower) && !lower.includes('://') ? n.matched : history
 }
 
 function rememberMatches(history: readonly IndexedEntry[], lower: string, ts: string[], matched: IndexedEntry[]) {

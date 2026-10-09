@@ -660,6 +660,12 @@ test('[CB-12][KS-04] ⌘⌥V / Ctrl+Alt+V opens the clipboard URL as a new tab',
   await orbit.shell.keyboard.press(process.platform === 'darwin' ? 'Meta+Alt+V' : 'Control+Alt+V')
   await expect.poll(tabCount).toBe(1)
   expect(Object.values((await state(orbit.app)).tabs)[0]?.url).toBe(url)
+  // With the bar open, the pasted tab replaces it: the bar closes (review N1).
+  const overlay = await openBar()
+  await overlay.keyboard.press(process.platform === 'darwin' ? 'Meta+Alt+V' : 'Control+Alt+V')
+  await expect.poll(tabCount).toBe(2)
+  await expect(bar(overlay)).toHaveCount(0)
+  await expect.poll(async () => Object.values((await state(orbit.app)).windows)[0]?.overlay.kind).toBe('none')
 })
 
 test('[CB-22] IME composition: Enter while composing commits the text and runs nothing', async () => {
