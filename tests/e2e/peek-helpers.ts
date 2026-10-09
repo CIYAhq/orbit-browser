@@ -17,7 +17,15 @@ export interface Sites {
   url: (path: string) => string
   /** The same path on the other site (127.0.0.1). */
   other: (path: string) => string
+  /** Every request the sites have received, oldest first, with its body. */
+  requests: () => Received[]
   close: () => Promise<void>
+}
+
+export interface Received {
+  method: string
+  path: string
+  body: string
 }
 
 const page = (title: string, body: string, bg: string) => `<!doctype html>
@@ -25,31 +33,65 @@ const page = (title: string, body: string, bg: string) => `<!doctype html>
 <style>body{font:16px system-ui;background:${bg};margin:0;padding:32px}a{color:#3b4bdb;display:inline-block;padding:4px}</style></head>
 <body><h1 id="title">${title}</h1>${body}<div style="height:3000px"></div><p id="end">End of ${title}</p></body></html>`
 
+/**
+ * A page of things that navigate without being links, as on a sign-in page: a form posted to the
+ * other site, a button whose script goes there, and a same-site sign-in whose answer posts a
+ * sign-in assertion on to the other site by itself (as SAML and OIDC form_post sign-ins do).
+ */
+const formsPage = (self: string, other: string) =>
+  page(
+    'Forms',
+    `<form method="post" action="${other}/post/target"><input name="user" value="alice"><button id="send">Send</button></form>
+     <p><button id="script" onclick="location.href = '${other}/site/Landing'">Sign in with Other</button></p>
+     <form method="post" action="${self}/idp/login"><input type="hidden" name="user" value="alice"><button id="sign-in">Sign in</button></form>`,
+    '#fff8ec',
+  )
+
+/** The sign-in answer that posts itself on to the other site. */
+const autoPost = (other: string) => `<!doctype html>
+<html><head><meta charset="utf-8"><title>Redirecting</title></head>
+<body><p>Redirecting…</p><form method="post" action="${other}/saml/acs"><input type="hidden" name="SAMLResponse" value="assertion-for-alice"></form>
+<script>document.forms[0].submit()</script></body></html>`
+
 export async function startSites(): Promise<Sites> {
   let port = 0
+  const received: Received[] = []
   const server: Server = createServer((req, res) => {
-    const u = new URL(req.url ?? '/', 'http://localhost')
-    const title = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() ?? 'index')
-    if (!u.pathname.startsWith('/site/')) {
-      res.writeHead(404, { 'content-type': 'text/plain' })
-      res.end('not found')
-      return
-    }
-    const other = `http://127.0.0.1:${port}`
-    const self = `http://${req.headers.host ?? `localhost:${port}`}`
-    res.writeHead(200, { 'content-type': 'text/html' })
-    res.end(
-      page(
-        title,
-        `<p><a id="same" href="${self}/site/${title}-Same">Same site</a>
+    const chunks: Buffer[] = []
+    req.on('data', (chunk: Buffer) => chunks.push(chunk))
+    req.on('end', () => {
+      const u = new URL(req.url ?? '/', 'http://localhost')
+      received.push({ method: req.method ?? '', path: u.pathname, body: Buffer.concat(chunks).toString() })
+      const other = `http://127.0.0.1:${port}`
+      const self = `http://${req.headers.host ?? `localhost:${port}`}`
+      const html = (body: string) => {
+        res.writeHead(200, { 'content-type': 'text/html' })
+        res.end(body)
+      }
+      if (u.pathname === '/forms') return html(formsPage(self, other))
+      if (u.pathname === '/idp/login' && req.method === 'POST') return html(autoPost(other))
+      if (u.pathname === '/post/target' || u.pathname === '/saml/acs') {
+        return html(page(`${req.method} ${u.pathname}`, '', '#eefbf0'))
+      }
+      if (!u.pathname.startsWith('/site/')) {
+        res.writeHead(404, { 'content-type': 'text/plain' })
+        res.end('not found')
+        return
+      }
+      const title = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() ?? 'index')
+      html(
+        page(
+          title,
+          `<p><a id="same" href="${self}/site/${title}-Same">Same site</a>
          <a id="other" href="${other}/site/Other">Other site</a>
          <a id="other-blank" href="${other}/site/OtherBlank" target="_blank">Other site, new tab</a>
          <a id="meeting" href="https://meet.google.com/abc-defg-hij">Join the call</a>
          <a id="next" href="${self}/site/${title}-Next">Next page</a>
          <a id="blank-same" href="${self}/site/${title}-Blank" target="_blank">Same site, new tab</a></p>`,
-        u.searchParams.get('bg') ?? '#f4f0ff',
-      ),
-    )
+          u.searchParams.get('bg') ?? '#f4f0ff',
+        ),
+      )
+    })
   })
   // Ports 3350-3399 (helpers.ts's fixtures use 3300-3349).
   const base = 3350 + (Number(process.env.TEST_PARALLEL_INDEX ?? 0) % 50)
@@ -65,6 +107,7 @@ export async function startSites(): Promise<Sites> {
   return {
     url: (path) => `http://localhost:${port}${path}`,
     other: (path) => `http://127.0.0.1:${port}${path}`,
+    requests: () => received.slice(),
     close: () => new Promise((r) => server.close(() => r())),
   }
 }
@@ -176,9 +219,22 @@ export async function pressInTab(app: ElectronApplication, tabId: string, accel:
   )
 }
 
+/** Moves the pointer to a point of a tab's page, through the browser's input handling. */
+export async function pointerTo(app: ElectronApplication, tabId: string, point: { x: number; y: number }) {
+  await app.evaluate(
+    (_e, [id, x, y]) => {
+      const contents = (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id)
+      if (!contents) throw new Error(`no page for ${id}`)
+      contents.sendInputEvent({ type: 'mouseMove', x, y })
+    },
+    [tabId, point.x, point.y] as const,
+  )
+}
+
 /**
  * Clicks a point of a tab's page through the browser's input handling, holding modifier keys the
  * way a person does (their key presses come first). Playwright's modifier clicks bypass that path.
+ * The pointer gets there first, as a real one does.
  */
 export async function clickInTab(
   app: ElectronApplication,
@@ -191,6 +247,7 @@ export async function clickInTab(
       const contents = (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id)
       if (!contents) throw new Error(`no page for ${id}`)
       const key = (m: string) => ({ control: 'Control', alt: 'Alt', meta: 'Meta', shift: 'Shift' })[m] as string
+      contents.sendInputEvent({ type: 'mouseMove', x, y })
       const held: typeof mods = []
       for (const m of mods) {
         held.push(m)

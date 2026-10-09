@@ -20,7 +20,7 @@ import { activateInDraft, todayInsertIndex } from '../tabs/model'
 import type { SavedHistory } from '../tabs/runtime'
 import { activeTabOf } from '../windows'
 import { archiveFloating, floatingTab, keepFloatingPagesOutOfTabClose } from './floating'
-import { ClickTracker, HeldModifiers, isMiniClick, type PageClick } from './input'
+import { ClickTracker, HeldModifiers, isMiniClick, PAGE_WORLD, type PageClick } from './input'
 import { runPageAction } from './page-actions'
 
 /** A Peek card open in a window: a floating tab whose view sits above the overlay, in the card. */
@@ -452,7 +452,7 @@ export function registerPeek(ctx: MainContext): void {
     const contents = tabs.contents(s.tabId)
     if (!contents || s.background) return
     contents
-      .executeJavaScriptInIsolatedWorld(1002, [
+      .executeJavaScriptInIsolatedWorld(PAGE_WORLD, [
         {
           code: `(() => { for (const el of [document.body, document.documentElement]) { if (!el) continue; const c = getComputedStyle(el).backgroundColor; if (c && !/rgba\\(.*,\\s*0\\)|transparent/.test(c)) return c } return '' })()`,
         },
@@ -693,24 +693,28 @@ export function registerPeek(ctx: MainContext): void {
     event: Electron.Event<WebContentsWillNavigateEventParams>,
   ) => {
     if (!event.isMainFrame) return
-    // Only a click on a link: scripts and redirects keep their tab.
-    const click = clicks.recent(contents)
+    // Only a click (or Enter) on the link to this very URL. Form posts, script navigations and
+    // auto-posted sign-ins keep their tab, and so does a click whose link isn't known yet.
+    const url = event.url
+    const click = clicks.onLink(contents, url)
     if (!click) return
     const source = sourceOf(tabId, contents)
     if (!source) return
-    const url = event.url
     const decision = decideLink('navigate', source, url, linkSettings())
     if (decision.to === 'peek') {
       const windowId = windows.windowOfTab(tabId)
       if (!canPeek(windowId)) return
       event.preventDefault()
+      clicks.forget(contents)
       const origin = clickOrigin(tabId, click)
       setImmediate(() => openPeek(windowId, url, { origin }))
     } else if (decision.to === 'tab') {
       event.preventDefault()
+      clicks.forget(contents)
       setImmediate(() => openTab(url, tabId, decision.spaceId))
     } else if (decision.to === 'mini') {
       event.preventDefault()
+      clicks.forget(contents)
       setImmediate(() => openMiniWindow(ctx, url))
     }
   }

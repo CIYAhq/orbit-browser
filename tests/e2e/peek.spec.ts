@@ -8,6 +8,7 @@ import {
   mainWindow,
   type OrbitGlobal,
   overlayOf,
+  pointerTo,
   pressInTab,
   type Sites,
   sidebarCount,
@@ -453,6 +454,67 @@ test('[PK-02] same-site links navigate the pinned tab; target=_blank to another 
   expect((await overlayOf(orbit.app)).kind === 'peek' && (await overlayOf(orbit.app))).toMatchObject({
     sourceTabId: fav.tabId,
     tabId: favPeek,
+  })
+})
+
+/** The pinned tab went on to `url` itself: no Peek, no new tab. */
+async function expectStayedInTab(tabId: string, url: string) {
+  await expect.poll(async () => (await viewInfo(orbit.app, tabId)).url).toBe(url)
+  expect((await overlayOf(orbit.app)).kind).toBe('none')
+  const s = await state(orbit.app)
+  expect(Object.values(s.tabs).filter((t) => t.floating)).toHaveLength(0)
+  const win = await mainWindow(orbit.app)
+  expect(s.spaces[win.spaceId]?.today).toHaveLength(0)
+  expect(win.activeTab[win.spaceId]).toBe(tabId)
+}
+
+/** What the fixture sites received at these paths since request number `since`. */
+const receivedAt = (since: number, ...paths: string[]) =>
+  sites
+    .requests()
+    .slice(since)
+    .filter((r) => paths.includes(r.path))
+    .map((r) => `${r.method} ${r.path} ${r.body}`.trim())
+
+test('[PK-02] a form a pinned tab posts to another site stays in the tab and arrives with its body', async () => {
+  const { tabId, page } = await pinned('/forms')
+  const since = sites.requests().length
+  await page.locator('#send').click({ noWaitAfter: true })
+  await expectStayedInTab(tabId, sites.other('/post/target'))
+  expect(receivedAt(since, '/post/target')).toEqual(['POST /post/target user=alice'])
+})
+
+test('[PK-02] a script that sends a pinned tab to another site keeps it in the tab', async () => {
+  const { tabId, page } = await pinned('/forms')
+  await page.locator('#script').click({ noWaitAfter: true })
+  await expectStayedInTab(tabId, sites.other('/site/Landing'))
+})
+
+test('[PK-02] a sign-in that posts itself on to another site stays in the pinned tab with its assertion', async () => {
+  const { tabId, page } = await pinned('/forms')
+  const since = sites.requests().length
+  // A same-site POST whose answer auto-submits a form to the other site (SAML or OIDC form_post).
+  await page.locator('#sign-in').click({ noWaitAfter: true })
+  await expectStayedInTab(tabId, sites.other('/saml/acs'))
+  expect(receivedAt(since, '/idp/login', '/saml/acs')).toEqual([
+    'POST /idp/login user=alice',
+    'POST /saml/acs SAMLResponse=assertion-for-alice',
+  ])
+})
+
+test('[PK-02] Enter on a focused other-site link in a pinned tab opens a Peek', async () => {
+  const { tabId: source } = await pinned('/site/Keys')
+  // The pointer rests on empty page; the keyboard moves the focus onto the other-site link.
+  await pointerTo(orbit.app, source, { x: 400, y: 400 })
+  await inTab(orbit.app, source, `document.querySelector('#same').focus()`)
+  await pressInTab(orbit.app, source, 'Tab')
+  await expect.poll(() => inTab(orbit.app, source, 'document.activeElement.id')).toBe('other')
+  await pressInTab(orbit.app, source, 'Enter')
+  const peekTab = await settledPeek()
+  await expect.poll(async () => (await viewInfo(orbit.app, peekTab)).url).toBe(sites.other('/site/Other'))
+  expect((await viewInfo(orbit.app, source)).url).toBe(sites.url('/site/Keys'))
+  expect((await overlayOf(orbit.app)).kind === 'peek' && (await overlayOf(orbit.app))).toMatchObject({
+    sourceTabId: source,
   })
 })
 
