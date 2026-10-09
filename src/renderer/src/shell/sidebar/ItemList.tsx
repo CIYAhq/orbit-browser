@@ -103,9 +103,13 @@ useMirror.subscribe((next, prev) => {
   if (useDrag.getState().phase !== 'idle') return
   const before = listsOf(prev.state)
   const now = performance.now()
+  for (const [id, d] of departed) if (now - d.at > 1000) departed.delete(id)
   for (const [key, items] of listsOf(next.state)) {
     const old = before.get(key)
     if (old === items) continue
+    // Only lists on screen: a row moving somewhere not drawn (a collapsed folder, another Space)
+    // just leaves (FL-07: it collapses out in place).
+    if (!document.querySelector(`[data-list="${key}"]`)) continue
     for (const id of items) {
       if (old?.includes(id)) continue
       const el = document.querySelector<HTMLElement>(`[data-slot][data-key="${id}"]:not([data-exiting])`)
@@ -254,7 +258,8 @@ function RowSlot({
   }, [travel, id, x, y])
   if (!present && hidden) return null
   // The copy left behind only makes room; the row itself is already travelling.
-  const leaving = !present && departed.has(id)
+  const gone = departed.get(id)
+  const leaving = !present && !!gone && performance.now() - gone.at < 250
   const order = present ? undefined : exitOrder.get(id)
   return (
     <motion.div
@@ -496,7 +501,8 @@ const FolderRow = memo(function FolderRow({
   const collapsedBefore = useRef<boolean | null>(null)
   if (!folder) return null
   const childAncestors = ancestors ? `${ancestors},${folderId}` : folderId
-  const open = !folder.collapsed
+  // A deleted folder animating out draws no children (they're gone or moved on).
+  const open = !!liveFolder && !folder.collapsed
   const FolderIcon = open ? FolderOpen : Folder
   return (
     <div className={`folder${hidden ? ' is-drag-hidden' : ''}`} data-testid="folder" data-folder-id={folderId}>

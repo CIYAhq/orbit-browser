@@ -520,8 +520,9 @@ test('[TB-22] relaunch restores windows, Spaces, pinned, Favorites, Today, folde
   const t2 = await newTab(app, fx.url('/page/Two'))
   await waitTab(app, t2, '/page/Two')
   await shell.keyboard.press('Escape')
-  // Saved window bounds (as the window manager records them) come back on relaunch.
-  await setState(app, 'for (const w of Object.values(d.windows)) w.bounds = { x: 40, y: 30, width: 1000, height: 700 }')
+  // The window's size comes back on relaunch.
+  const bw = await app.browserWindow(shell)
+  await bw.evaluate((w) => w.setBounds({ x: 40, y: 30, width: 1000, height: 700 }))
   await app.close()
 
   orbit = await launchOrbit({ userData })
@@ -587,7 +588,16 @@ test('[SB-22][SB-23] the selected tab is scrolled into view; keyboard focus move
   const last = ids[ids.length - 1] as string
   await expect.poll(() => activeId(app)).toBe(last)
   await expect(row(shell, last)).toBeInViewport()
-  // Scrolled away (with the wheel, like a user), a pill points back to it.
+  // Let the reveal scroll finish, then scroll away with the wheel (like a user): a pill points back.
+  await expect
+    .poll(() =>
+      scroll.evaluate(async (el) => {
+        const a = el.scrollTop
+        await new Promise((r) => setTimeout(r, 120))
+        return a === el.scrollTop
+      }),
+    )
+    .toBe(true)
   await scroll.hover()
   await shell.mouse.wheel(0, -5000)
   await expect.poll(() => scroll.evaluate((el) => el.scrollTop)).toBe(0)

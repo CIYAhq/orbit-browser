@@ -4,11 +4,22 @@ import { isAwayFromPinned, sameDocUrl } from '../../shared/tabs'
 import type { MainContext } from '../context'
 import { showPageContextMenu } from './context-menu'
 
+/**
+ * A view's web contents if it is alive. While a page closes itself, `view.webContents` is already
+ * undefined before 'destroyed' fires, so it must never be dereferenced blindly.
+ */
+function liveContents(view: WebContentsView | undefined): WebContents | undefined {
+  const contents = view?.webContents as WebContents | undefined
+  return contents && !contents.isDestroyed() ? contents : undefined
+}
+
 /** Input that counts as a user gesture for opening tabs and pop-ups (NV-09). */
 const GESTURE_INPUTS = new Set(['mouseDown', 'mouseUp', 'keyDown', 'rawKeyDown', 'gestureTap', 'touchEnd'])
 const GESTURE_WINDOW_MS = 1000
 /** Favicons live in state (and on disk): keep each one small. */
 const MAX_FAVICON_BYTES = 16 * 1024
+/** Icons nativeImage can't decode (ICO, GIF, WebP…) are kept as they are up to this size. */
+const MAX_RAW_FAVICON_BYTES = 48 * 1024
 const MAX_FAVICON_FETCH_BYTES = 512 * 1024
 const FAVICON_PX = 32
 
@@ -23,7 +34,7 @@ function faviconDataUrl(buf: Buffer, type: string): string | undefined {
       if (url.length <= MAX_FAVICON_BYTES * 1.4) return url
     }
   }
-  if (buf.length > MAX_FAVICON_BYTES) return undefined
+  if (buf.length > MAX_RAW_FAVICON_BYTES) return undefined
   return `data:${type};base64,${buf.toString('base64')}`
 }
 
@@ -72,6 +83,8 @@ export class TabRuntime {
   private gestures = new Map<TabId, { at: number; used: boolean }>()
   /** Favicon URL → data URL, fetched in the tab's own session (no fetches from Orbit's UI). */
   private favicons = new Map<string, string>()
+  /** The favicon each tab asked for last (a slower, older fetch must not win). */
+  private wantedFavicon = new Map<TabId, string>()
   private ctx!: MainContext
 
   init(ctx: MainContext): void {
@@ -83,8 +96,7 @@ export class TabRuntime {
   }
 
   contents(tabId: TabId): WebContents | undefined {
-    const view = this.views.get(tabId)
-    return view && !view.webContents.isDestroyed() ? view.webContents : undefined
+    return liveContents(this.views.get(tabId))
   }
 
   tabIdFor(contents: WebContents): TabId | undefined {
@@ -98,7 +110,7 @@ export class TabRuntime {
   /** Returns the tab's view, creating and loading it if the tab is asleep. */
   ensure(tabId: TabId): WebContentsView | undefined {
     const existing = this.views.get(tabId)
-    if (existing && !existing.webContents.isDestroyed()) return existing
+    if (liveContents(existing)) return existing
     const tab = this.ctx.store.state.tabs[tabId]
     if (!tab) return undefined
     const view = new WebContentsView({
@@ -141,9 +153,10 @@ export class TabRuntime {
     const previous = this.views.get(tabId)
     if (previous && previous !== view) {
       this.views.delete(tabId)
-      this.byContents.delete(previous.webContents.id)
+      const old = liveContents(previous)
+      if (old) this.byContents.delete(old.id)
       this.ctx.windows.detachView(tabId, previous)
-      if (!previous.webContents.isDestroyed()) previous.webContents.close()
+      old?.close()
     }
     this.views.set(tabId, view)
     this.byContents.set(contents.id, tabId)
@@ -218,6 +231,7 @@ export class TabRuntime {
     contents.once('destroyed', () => {
       this.byContents.delete(contents.id)
       this.gestures.delete(tabId)
+      this.wantedFavicon.delete(tabId)
       if (this.views.get(tabId) !== view) return
       // Destroyed outside sleep()/destroy(): the page closed itself (window.close()).
       this.views.delete(tabId)
@@ -233,8 +247,8 @@ export class TabRuntime {
   sleep(tabId: TabId): void {
     const view = this.views.get(tabId)
     if (!view) return
-    const contents = view.webContents
-    if (!contents.isDestroyed()) {
+    const contents = liveContents(view)
+    if (contents) {
       const entries = contents.navigationHistory.getAllEntries()
       if (entries.length > 0) {
         this.savedHistory.set(tabId, { entries, index: contents.navigationHistory.getActiveIndex() })
@@ -242,8 +256,10 @@ export class TabRuntime {
     }
     this.views.delete(tabId)
     this.ctx.windows.detachView(tabId, view)
-    if (!contents.isDestroyed()) contents.close()
-    this.byContents.delete(contents.id)
+    if (contents) {
+      this.byContents.delete(contents.id)
+      contents.close()
+    }
     this.update(tabId, { asleep: true, loading: false, audible: false })
   }
 
@@ -254,7 +270,7 @@ export class TabRuntime {
     if (!view) return
     this.views.delete(tabId)
     this.ctx.windows.detachView(tabId, view)
-    if (!view.webContents.isDestroyed()) view.webContents.close()
+    liveContents(view)?.close()
   }
 
   /**
@@ -270,6 +286,7 @@ export class TabRuntime {
 
   /** Stores the favicon as a small data URL fetched with the tab's session. */
   private async storeFavicon(tabId: TabId, contents: WebContents, url: string): Promise<void> {
+    this.wantedFavicon.set(tabId, url)
     if (url.startsWith('data:')) {
       if (url.length <= MAX_FAVICON_BYTES * 1.4) this.update(tabId, { favicon: url })
       return
@@ -290,7 +307,7 @@ export class TabRuntime {
       if (!data) return
       if (this.favicons.size > 500) this.favicons.clear()
       this.favicons.set(url, data)
-      if (!contents.isDestroyed()) this.update(tabId, { favicon: data })
+      if (!contents.isDestroyed() && this.wantedFavicon.get(tabId) === url) this.update(tabId, { favicon: data })
     } catch {
       // Keep the previous icon (or the fallback glyph).
     }
@@ -322,7 +339,8 @@ export class TabRuntime {
 
   navigate(tabId: TabId, url: string): void {
     const view = this.views.get(tabId)
-    if (!view) {
+    const contents = liveContents(view)
+    if (!contents) {
       this.savedHistory.delete(tabId)
       this.ctx.store.update((d) => {
         const tab = d.tabs[tabId]
@@ -330,7 +348,7 @@ export class TabRuntime {
       })
       return
     }
-    this.load(view.webContents, url)
+    this.load(contents, url)
   }
 
   private load(contents: WebContents, url: string): void {

@@ -281,3 +281,18 @@ test('[TB-08] dragging a split view row moves the whole split to the drop slot',
   })
   await expect.poll(async () => (await space(app)).today).toEqual([a, c, 'v-test'])
 })
+
+test('[FD-02][TB-18] undoing New Folder made from scattered pinned tabs restores their exact order', async () => {
+  const { app } = orbit
+  const sp = (await space(app)).id
+  const pin = (n: string) =>
+    newTab(app, fx.url(`/page/${n}`), { container: { kind: 'pinned', spaceId: sp }, activate: false })
+  const x = await pin('X')
+  const b = await pin('B')
+  const y = await pin('Y')
+  const folderId = await cmd<string>(app, 'folders.create', { items: [x, y] })
+  expect((await space(app)).pinned).toEqual([folderId, b])
+  await cmd(app, 'tabs.undo')
+  expect((await space(app)).pinned).toEqual([x, b, y])
+  expect((await state(app)).folders[folderId]).toBeUndefined()
+})

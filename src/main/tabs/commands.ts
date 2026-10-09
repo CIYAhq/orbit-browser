@@ -14,7 +14,6 @@ import {
   insertItem,
   locate,
   profileOfContainer,
-  repairTree,
   sectionOf,
   sidebarTabOrder,
   splitOfTab,
@@ -699,15 +698,9 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     onContents((w) => (w.isDevToolsOpened() ? w.closeDevTools() : w.openDevTools({ mode: 'detach' }))),
   )
 
-  // Sidebar containers must reference existing items exactly once; favicons are data URLs only
-  // (older states kept remote URLs, which Orbit's UI would fetch in the wrong session).
+  // Favicons are data URLs only: older states kept remote URLs, which Orbit's UI would fetch in
+  // the wrong session (sidebar integrity itself is restored by persist.normalizeState).
   store.update((d) => {
-    repairTree(d)
-    for (const win of Object.values(d.windows)) {
-      for (const [spaceId, tabId] of Object.entries(win.activeTab)) {
-        if (tabId && !d.tabs[tabId]) win.activeTab[spaceId] = null
-      }
-    }
     for (const tab of Object.values(d.tabs)) if (tab.favicon && !tab.favicon.startsWith('data:')) delete tab.favicon
   })
   maintenance.start()

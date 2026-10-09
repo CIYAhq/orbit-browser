@@ -399,11 +399,12 @@ function shiftsFor(s: Session, target: DropTarget | null): Record<string, number
   return rowShifts(s.slots, s.dragged, target ?? undefined)
 }
 
-function favoritesIndex(s: Session): number {
+/** Grid slot under the pointer; `withDragged` counts the dragged tile too (an ⌥-copy leaves it). */
+function favoritesIndex(s: Session, withDragged = false): number {
   const fav = ctx.favorites
   if (!fav) return 0
   const tiles = [...fav.querySelectorAll<HTMLElement>('[data-fav-id]')].filter(
-    (el) => !s.dragged.has(el.dataset.favId ?? ''),
+    (el) => withDragged || !s.dragged.has(el.dataset.favId ?? ''),
   )
   return gridDropIndex(
     tiles.map((el) => el.getBoundingClientRect()),
@@ -519,7 +520,7 @@ async function drop(s: Session, ev: PointerEvent): Promise<void> {
     // The original stays where it is, so a copy uses the index of the list as it is now.
     const index =
       zone.kind === 'favorites'
-        ? (state.favIndex ?? 0)
+        ? favoritesIndex(s, true)
         : target?.type === 'between'
           ? target.rawIndex
           : Number.MAX_SAFE_INTEGER
@@ -554,7 +555,8 @@ async function drop(s: Session, ev: PointerEvent): Promise<void> {
     requestAnimationFrame(() => settle(s, landing, state.intoFolder))
   }
   const unsubscribe = useMirror.subscribe((m) => {
-    if (m.seq > seqAtDrop && locKey(m.state) !== locAtDrop) land()
+    // A copy leaves the original in place: any newer state (with the copy) lands it.
+    if (m.seq > seqAtDrop && (copy || locKey(m.state) !== locAtDrop)) land()
   })
   let ok: unknown = false
   try {

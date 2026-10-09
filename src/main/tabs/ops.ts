@@ -297,7 +297,6 @@ export class TabOps {
     for (const rec of live) if (rec.history) this.ctx.tabs.savedHistory.set(rec.tab.id, rec.history)
     const now = this.now()
     const sorted = [...live].sort((a, b) => (a.location?.index ?? 0) - (b.location?.index ?? 0))
-    const profileChanged: TabId[] = []
     this.ctx.store.update((d) => {
       for (const rec of sorted) {
         const tab: Tab = { ...rec.tab, asleep: true, loading: false, audible: false, lastActiveAt: now }
@@ -316,7 +315,9 @@ export class TabOps {
           }
         }
         // Where it lands decides its Space, profile and pinned fields (the folder may have moved).
-        if (landed) profileChanged.push(...this.fixupTabs(d, [tab.id], landed))
+        // History from another profile's session stays behind (PR-05) — dropped here, before
+        // selecting it lets the layout pass wake the tab.
+        if (landed) for (const moved of this.fixupTabs(d, [tab.id], landed)) this.ctx.tabs.savedHistory.delete(moved)
         if (rec.archiveId) {
           const i = d.archive.findIndex((a) => a.id === rec.archiveId)
           if (i >= 0) d.archive.splice(i, 1)
@@ -325,8 +326,6 @@ export class TabOps {
       const last = live[live.length - 1]
       if (opts.select && opts.windowId && last) activateInDraft(d, opts.windowId, last.tab.id, now)
     })
-    // History from another profile's session stays behind (PR-05).
-    for (const id of profileChanged) this.ctx.tabs.savedHistory.delete(id)
     return live.map((r) => r.tab.id)
   }
 
@@ -479,7 +478,8 @@ export class TabOps {
     windowId?: WindowId
   }): FolderId {
     const state = this.state
-    const items = opts.items ?? []
+    // Panes stand for their split view; each item once.
+    const items = [...new Set((opts.items ?? []).map((i) => (isTabId(i) ? (splitOfTab(state, i) ?? i) : i)))]
     const spaceId = this.spaceOfWindow(opts.windowId)
     const first = items.map((i) => locate(state, i)).find((l) => !!l)
     let target: ContainerRef = opts.container ?? { kind: 'pinned', spaceId }
@@ -488,12 +488,13 @@ export class TabOps {
       target = first.container
       at = first.index
     }
-    const before = this.capture(items)
     const id = newId('f')
     this.ctx.store.update((d) => {
       d.folders[id] = { id, name: opts.name ?? 'New Folder', children: [], collapsed: false, createdAt: this.now() }
       insertItem(d, target, at, id)
     })
+    // Positions with the folder already in its slot, so undo puts items back before removing it.
+    const before = this.capture(items)
     if (items.length > 0)
       this.moveItems(items, { kind: 'folder', folderId: id }, 0, { windowId: opts.windowId, undoLabel: false })
     this.undo.push('New Folder', () => {

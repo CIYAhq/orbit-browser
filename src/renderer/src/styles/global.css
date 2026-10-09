@@ -883,9 +883,14 @@ html.is-dragging-tab * {
   }
 }
 
-/* A row travelling to another section draws above its neighbours (FL-07). */
+/* A row travelling to another section draws above its neighbours, unclipped (FL-07). */
 .row-slot.is-travelling {
   z-index: 2;
+  overflow: visible;
+}
+
+.pinned-section:has(.is-travelling),
+.folder__children:has(.is-travelling) {
   overflow: visible;
 }
 

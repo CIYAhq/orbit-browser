@@ -19,7 +19,7 @@ import {
 } from '../../src/shared/defaults'
 import type { OrbitState } from '../../src/shared/state'
 import { cleanUrl, isAwayFromPinned, markdownLink, rowTitle } from '../../src/shared/tabs'
-import { canMoveTo, moveItem, repairTree, visibleTabOrder } from '../../src/shared/tree'
+import { canMoveTo, moveItem, visibleTabOrder } from '../../src/shared/tree'
 
 const HOUR = 60 * 60 * 1000
 
@@ -218,23 +218,6 @@ describe('[FD-01] folders live only in the pinned area', () => {
   })
 })
 
-describe('[TB-22] restore repairs the sidebar tree', () => {
-  it('drops dangling and duplicate ids and re-homes orphaned tabs', () => {
-    const { state, s1, add } = world()
-    const a = add(s1, 'today')
-    const b = add(s1, 'pinned')
-    const orphan = makeTab({ spaceId: s1, profileId: DEFAULT_PROFILE_ID, url: 'https://o.test/' })
-    state.tabs[orphan.id] = orphan
-    state.spaces[s1]!.today.push('t-missing', a)
-    state.spaces[s1]!.pinned.push('f-missing')
-    state.folders['f-lost'] = { id: 'f-lost', name: 'x', children: [], collapsed: false, createdAt: 0 }
-    repairTree(state as OrbitState)
-    expect(state.spaces[s1]!.today).toEqual([orphan.id, a])
-    expect(state.spaces[s1]!.pinned).toEqual([b])
-    expect(state.folders['f-lost']).toBeUndefined()
-  })
-})
-
 describe('[PN-03][TB-20] tab display helpers', () => {
   it('shows a breadcrumb only when a pinned tab left its pinned page (redirects count as home)', () => {
     const tab = {
@@ -323,7 +306,7 @@ describe('[TB-03] cheap patches for sidebar lists (review F2)', () => {
   })
 })
 
-describe('[FV-03][FD-01][TB-22] review fixes in the tree rules', () => {
+describe('[FV-03] review fixes in the tree rules', () => {
   it('refuses a split view in the Favorites grid', () => {
     const { state, s1, add } = world()
     const a = add(s1, 'today')
@@ -344,15 +327,5 @@ describe('[FV-03][FD-01][TB-22] review fixes in the tree rules', () => {
     expect(canMoveTo(state, 'v-1', { kind: 'favorites', profileId: DEFAULT_PROFILE_ID })).toBe(false)
     // A pane is not an item of its own.
     expect(canMoveTo(state, a, { kind: 'pinned', spaceId: s1 })).toBe(false)
-  })
-
-  it('a folder found in Today on load is removed and its tabs come back to Today', () => {
-    const { state, s1, add } = world()
-    const a = add(s1, 'today')
-    state.spaces[s1]!.today = ['f-bad']
-    state.folders['f-bad'] = { id: 'f-bad', name: 'x', children: [a], collapsed: false, createdAt: 0 }
-    repairTree(state)
-    expect(state.folders['f-bad']).toBeUndefined()
-    expect(state.spaces[s1]!.today).toEqual([a])
   })
 })
