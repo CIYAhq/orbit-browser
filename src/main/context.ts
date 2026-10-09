@@ -1,4 +1,10 @@
-import type { HandlerDetails, WebContents, WindowOpenHandlerResponse } from 'electron'
+import type {
+  ContextMenuParams,
+  HandlerDetails,
+  MenuItemConstructorOptions,
+  WebContents,
+  WindowOpenHandlerResponse,
+} from 'electron'
 import type { TabId } from '../shared/state'
 import type { Perf } from './perf'
 import type { ActionRegistry, CommandRegistry, EventRegistry } from './registry'
@@ -17,6 +23,8 @@ export interface Hooks {
   tabCreated: ((tabId: TabId, contents: WebContents) => void)[]
   /** Called when a tab's main frame finished a navigation (url committed). */
   tabNavigated: ((tabId: TabId, contents: WebContents, url: string) => void)[]
+  /** Extra items at the top of a page's right-click menu (e.g. Picture in Picture on a video, MD-02). */
+  pageContextMenu?: ((tabId: TabId, contents: WebContents, params: ContextMenuParams) => MenuItemConstructorOptions[])[]
 }
 
 /** Everything a feature module needs. Passed to each module's register(). */

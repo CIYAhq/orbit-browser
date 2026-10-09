@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 46 built (21 partial) · 69 tested · 0 feel right.
+**Totals:** 485 spec’d · 53 built (32 partial) · 82 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 30 | 40 |
-| P1 | 221 | 15 | 27 |
+| P0 | 174 | 35 | 49 |
+| P1 | 221 | 17 | 31 |
 | P2 | 83 | 1 | 2 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -30,7 +30,7 @@ Spec: `spec/sidebar.md`
 | SB-07 | "+ New Tab" row | P0 | ✅ | ✅ e2e | – | + New Tab row with press animation opens the command bar |
 | SB-08 | Empty sidebar area: double-click, drag, right-click | P1 | – | – | – |  |
 | SB-09 | Bottom bar: Library, Space switcher, "+" menu | P0 | 🟡 partial | ✅ e2e | – | scaffold |
-| SB-10 | Transient trays above the bottom bar | P1 | – | – | – |  |
+| SB-10 | Transient trays above the bottom bar | P1 | 🟡 partial | – | – | media tray and call controls (media lane); downloads and update banner pending |
 | SB-11 | Show / hide the sidebar | P0 | 🟡 partial | – | – | scaffold |
 | SB-12 | Hover to reveal the hidden sidebar | P0 | – | – | – |  |
 | SB-13 | Feedback when things happen while the sidebar is hidden | P1 | – | – | – |  |
@@ -70,8 +70,8 @@ Spec: `spec/tabs.md`
 | TB-12 | Rename a tab and set a custom icon | P1 | ✅ | ✅ e2e | – | double-click/menu rename, empty reverts; emoji icon picker |
 | TB-13 | Multi-select tabs | P1 | 🟡 partial | ✅ e2e | – | Cmd-click, Shift-click ranges, Escape/plain click clears; Cmd+W, Copy URL, menu pin/unpin/move/new folder and group drag act on the selection; open-as-split is the split lane's |
 | TB-14 | Tab context menu | P0 | 🟡 partial | ✅ e2e | – | native menus with every tab, pinned, Favorite, folder and multi-selection item; not theme-coloured; split/share items belong to other lanes |
-| TB-15 | Audio, mute, microphone/camera and screen-share indicators | P1 | 🟡 partial | ✅ e2e | – | audio icon toggles mute; no mic/camera/screen-share indicators |
-| TB-16 | Tab sleeping and background resource limits | P1 | 🟡 partial | ✅ e2e+unit | – | sleep timer (settings.sleepAfterMs), Favorites warm 4x, audible/selected never sleep |
+| TB-15 | Audio, mute, microphone/camera and screen-share indicators | P1 | 🟡 partial | ✅ e2e | – | audio icon toggles mute; camera/microphone indicator (media lane); no screen-share indicator or Favorites notes |
+| TB-16 | Tab sleeping and background resource limits | P1 | 🟡 partial | ✅ e2e+unit | – | sleep timer (settings.sleepAfterMs), Favorites warm 4x; selected, audible, playing (muted too), PiP and camera/mic tabs never sleep |
 | TB-17 | Tabs across multiple windows | P1 | 🟡 partial | ✅ e2e+unit | – | tab handoff; no two windows ever show the same tab (close, Clear, archive, moves, undo, drag-out); no blank window yet |
 | TB-18 | Undo sidebar actions | P1 | ✅ | ✅ e2e+unit | – | Cmd+Z undoes moves, close, Clear, archive below, renames, icons and folder changes (page text fields keep their own undo); Cmd+Shift+Z redoes moves, closes and renames |
 | TB-19 | Back on a fresh child tab returns to its opener | P2 | 🟡 partial | ✅ e2e | – | Back with no history closes a link-opened Today tab and selects its opener (shortcut/command) |
@@ -187,7 +187,7 @@ Spec: `spec/commandbar.md`
 | CB-19 | Space and profile awareness | P0 | – | – | – |  |
 | CB-20 | Sidebar stays interactive while the bar is open | P1 | – | – | – |  |
 | CB-21 | Closing the bar and what happens to typed text | P0 | – | – | – |  |
-| CB-22 | Feel: open/close animation, latency and live updates | P0 | – | – | – |  |
+| CB-22 | Feel: open/close animation, latency and live updates | P0 | – | ✅ e2e | – |  |
 | CB-23 | The bar in other contexts (split pane, private window, Mini Window) | P1 | – | – | – |  |
 
 ## Split View (prefix SV)
@@ -306,22 +306,22 @@ Spec: `spec/media.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| MD-01 | Automatic picture-in-picture when leaving a video tab | P0 | – | – | – |  |
-| MD-02 | Open picture-in-picture manually | P1 | – | – | – |  |
-| MD-03 | The floating player's look and placement | P0 | – | – | – |  |
-| MD-04 | Floating player controls | P0 | – | – | – |  |
-| MD-05 | Keyboard and media keys for the floating player | P1 | – | – | – |  |
-| MD-06 | Move, resize and zoom the floating player | P1 | – | – | – |  |
-| MD-07 | Ending picture-in-picture | P0 | – | – | – |  |
-| MD-08 | Turning automatic picture-in-picture off | P0 | – | – | – |  |
-| MD-09 | Sidebar media controls for background audio | P0 | – | – | – |  |
-| MD-10 | Several players: the media tray | P1 | – | – | – |  |
-| MD-11 | Audio and recording indicators, mute | P0 | – | – | – |  |
-| MD-12 | Media and the tab lifecycle | P0 | – | – | – |  |
-| MD-13 | Video calls: automatic call picture-in-picture | P1 | – | – | – |  |
-| MD-14 | Call controls in the sidebar | P1 | – | – | – |  |
+| MD-01 | Automatic picture-in-picture when leaving a video tab | P0 | ✅ | ✅ e2e+unit | – | Chromium's own PiP, requested by Orbit's isolated page script when a tab with a playing, unmuted video leaves the screen (tab, Space or split change); ends on return, still playing |
+| MD-02 | Open picture-in-picture manually | P1 | ✅ | ✅ e2e | – | page right-click menu Picture in Picture on a video, Picture in Picture action, and the tray controller's PiP button |
+| MD-03 | The floating player's look and placement | P0 | ✅ | ✅ e2e | – | the engine's native PiP window: bottom-right, 320x180, borderless, always on top, keeps aspect ratio, controls on hover; corners/shadow follow the platform |
+| MD-04 | Floating player controls | P0 | 🟡 partial | ✅ e2e | – | native player: play/pause, Back to tab (Orbit selects the tab), x keeps audio playing in the sidebar, previous/next for Media Session pages, progress bar; no +/-15 s buttons, no ... menu (its choices are in the tray controller menu), no double-click |
+| MD-05 | Keyboard and media keys for the floating player | P1 | 🟡 partial | – | – | Chromium hardware media key handling switched on; Space/arrow keys are the native player's; not verifiable under Xvfb |
+| MD-06 | Move, resize and zoom the floating player | P1 | 🟡 partial | – | – | native window moves and resizes from its corners; no corner snap, zoom or remembered position |
+| MD-07 | Ending picture-in-picture | P0 | ✅ | ✅ e2e | – | returning ends PiP still playing; Back to tab selects the tab; x keeps playing in the sidebar; tab close/unload or navigation closes it; an ended video leaves PiP without replay |
+| MD-08 | Turning automatic picture-in-picture off | P0 | 🟡 partial | ✅ e2e+unit | – | global switch (settings.autoPip + action); per-site Always off / Off for today (until midnight) via media.setSitePip and the tray controller menu; muted tabs never trigger; site controls checkbox waits for the SB-04 panel |
+| MD-09 | Sidebar media controls for background audio | P0 | ✅ | ✅ e2e+unit | – | controller above the bottom bar: favicon, Media Session title/artist or tab title (marquee), play/pause, next (plays to the track end), previous on hover, x pauses and hides; click jumps to the tab (Space switch); audible-only pages get mute; no artwork yet |
+| MD-10 | Several players: the media tray | P1 | ✅ | ✅ e2e+unit | – | one controller per background tab, newest first, shows/hides by itself, PiP button sends a video back to PiP, works from every window; no travel animation |
+| MD-11 | Audio and recording indicators, mute | P0 | 🟡 partial | ✅ e2e | – | pulsing camera/microphone indicator on tab rows (live camera/mic tracks the page shows); speaker/mute is TB-15's; no screen-share indicator, split-pane mute or switcher indicators |
+| MD-12 | Media and the tab lifecycle | P0 | ✅ | ✅ e2e+unit | – | playing (muted too), PiP and camera/mic tabs never sleep, auto-archive, Clear or Archive Below; closing stops media, PiP and controller; isAnyMediaPlaying() is ready for the updates lane |
+| MD-13 | Video calls: automatic call picture-in-picture | P1 | 🟡 partial | ✅ e2e | – | leaving a call tab puts the largest participant video (never the self view) in PiP; the native player shows mic/camera/hang-up only if the site registers them; no document PiP |
+| MD-14 | Call controls in the sidebar | P1 | 🟡 partial | ✅ e2e+unit | – | background call tab gets a call controller with mic/camera toggles (track.enabled on the tracks the page shows) and jump; detection needs a self-view element |
 | MD-15 | Switch which tab is being screen-shared | P2 | – | – | – |  |
-| MD-16 | Feel: entering and leaving picture-in-picture | P1 | – | – | – |  |
+| MD-16 | Feel: entering and leaving picture-in-picture | P1 | 🟡 partial | – | – | tray slides up/down with the snappy spring (fade with reduced motion), play/pause flips at once; PiP open/close motion is the native window's; no Back to PiP travel animation |
 
 ## Archive, recently closed, history and sidebar backups (prefix AR)
 
@@ -357,7 +357,7 @@ Spec: `spec/shortcuts.md`
 | KS-08 | Page navigation and page tools | P0 | – | – | – |  |
 | KS-09 | Split view | P0 | – | – | – |  |
 | KS-10 | Peek and Mini Window | P1 | – | – | – |  |
-| KS-11 | Media | P1 | – | – | – |  |
+| KS-11 | Media | P1 | 🟡 partial | – | – | hardware media keys via Chromium; Space/arrows in the native player; Mute Tab action is assignable |
 | KS-12 | Library, history, downloads, settings, extensions, help | P1 | – | – | – |  |
 | KS-13 | Developer tools | P1 | – | – | – |  |
 | KS-14 | Canvases, notes, capture and Tweaks | P2 | – | – | – |  |
@@ -405,7 +405,7 @@ Spec: `spec/feel.md`
 | FL-29 | Responsiveness budgets (input to visual) | P0 | – | – | – |  |
 | FL-30 | What makes it feel native and smooth | P0 | – | – | – |  |
 | FL-31 | Haptics (macOS trackpads) | P2 | – | – | – |  |
-| FL-32 | Picture-in-picture and media tray motion | P2 | – | – | – |  |
+| FL-32 | Picture-in-picture and media tray motion | P2 | 🟡 partial | – | – | media tray slides up with the snappy spring; PiP drag/fling physics are the native window's |
 
 ## Appearance (global)
 

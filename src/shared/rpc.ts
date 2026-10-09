@@ -14,6 +14,7 @@ import type { CoreCommands, CoreEvents } from './commands/core'
 import type { DownloadCommands } from './commands/downloads'
 import type { ExtensionCommands } from './commands/extensions'
 import type { ImportCommands } from './commands/import'
+import type { MediaCommands } from './commands/media'
 import type { PeekCommands } from './commands/peek'
 import type { SettingsCommands } from './commands/settings'
 import type { SpaceCommands } from './commands/spaces'
@@ -33,7 +34,8 @@ export interface OrbitCommands
     ExtensionCommands,
     SettingsCommands,
     DownloadCommands,
-    ImportCommands {}
+    ImportCommands,
+    MediaCommands {}
 
 export interface OrbitEvents extends CoreEvents {}
 

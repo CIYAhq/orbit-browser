@@ -176,6 +176,19 @@ export const ACTIONS: ActionDef[] = [
   { id: 'page.zoomOut', title: 'Zoom Out', category: 'Page', mac: ['Cmd+-'], other: ['Ctrl+-'] },
   { id: 'page.zoomReset', title: 'Actual Size', category: 'Page', mac: ['Cmd+0'], other: ['Ctrl+0'] },
   { id: 'page.print', title: 'Print…', category: 'Page', mac: ['Cmd+P'], other: ['Ctrl+P'] },
+  // Media (media lane, MD-02, MD-08)
+  {
+    id: 'media.togglePip',
+    title: 'Picture in Picture',
+    category: 'Page',
+    keywords: ['pip', 'video', 'float', 'floating'],
+  },
+  {
+    id: 'media.toggleAutoPip',
+    title: 'Turn Automatic Picture in Picture On or Off',
+    category: 'Page',
+    keywords: ['pip', 'video', 'auto'],
+  },
   { id: 'page.viewSource', title: 'View Source', category: 'Developer', mac: ['Cmd+Alt+U'], other: ['Ctrl+U'] },
   {
     id: 'devtools.toggle',
