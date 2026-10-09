@@ -38,7 +38,7 @@ export function registerSpaces(ctx: MainContext): void {
     store.update((d) => {
       const space = d.spaces[spaceId]
       if (!space) return
-      if (name !== undefined && name.trim()) space.name = name.trim()
+      if (name?.trim()) space.name = name.trim()
       if (icon !== undefined) space.icon = icon
       if (theme) space.theme = { ...theme }
       if (profileId && d.profiles[profileId] && profileId !== space.profileId) {

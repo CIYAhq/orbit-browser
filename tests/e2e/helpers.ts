@@ -87,9 +87,7 @@ export async function tabView(app: ElectronApplication, tabId: string) {
       (
         globalThis as unknown as {
           __orbit: {
-            tabView: (
-              id: string,
-            ) => {
+            tabView: (id: string) => {
               bounds: { x: number; y: number; width: number; height: number }
               visible: boolean
               url: string

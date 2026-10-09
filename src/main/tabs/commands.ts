@@ -18,11 +18,9 @@ import {
   sectionOf,
   sidebarTabOrder,
   spaceOfContainer,
-  splitLeaves,
   splitOfTab,
   tabsInItem,
 } from '../../shared/tree'
-import { fallbackTitle } from '../../shared/url'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
 import { activateInDraft, detachFromSplit, makeTab, pickNextActive } from './model'

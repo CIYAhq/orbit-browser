@@ -135,7 +135,7 @@ export function isWithin(state: OrbitState, id: ItemId, ancestor: FolderId): boo
   let current: ItemId = id
   for (let depth = 0; depth < 64; depth++) {
     const loc = locate(state, current)
-    if (!loc || loc.container.kind !== 'folder') return false
+    if (loc?.container.kind !== 'folder') return false
     if (loc.container.folderId === ancestor) return true
     current = loc.container.folderId
   }
