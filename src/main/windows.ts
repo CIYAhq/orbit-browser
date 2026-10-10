@@ -189,6 +189,7 @@ export class WindowManager {
   /** Each tab's view that is placed in a window, and which window. Compared by view, not tab id. */
   private attached = new Map<TabId, Attachment>()
   private layoutListeners: ((windowId: WindowId) => void)[] = []
+  private createdListeners: ((windowId: WindowId, win: BrowserWindow) => void)[] = []
   /** Tabs whose page closed its own web contents (window.close()): not reopened until selected again. */
   private selfClosed = new Set<TabId>()
   private floatingOwners: ((tabId: TabId) => WindowId | undefined)[] = []
@@ -389,6 +390,7 @@ export class WindowManager {
     this.records.set(id, rec)
     // macOS: the traffic lights live in the sidebar's top row (SB-20).
     if (isMac && !winState.sidebar.visible) win.setWindowButtonVisibility(false)
+    for (const listener of this.createdListeners) listener(id, win)
 
     win.once('ready-to-show', () => {
       this.ctx.perf.mark(`window:${id}:ready-to-show`)
@@ -642,6 +644,11 @@ export class WindowManager {
   /** Runs after a window's pages were laid out again (tab switch, resize, split, full screen). */
   onLayout(listener: (windowId: WindowId) => void): void {
     this.layoutListeners.push(listener)
+  }
+
+  /** Runs for each main window as it is created, before it shows. */
+  onWindowCreated(listener: (windowId: WindowId, win: BrowserWindow) => void): void {
+    this.createdListeners.push(listener)
   }
 
   /** The page tools' web contents (NV-05, NV-06), started if it wasn't yet. */

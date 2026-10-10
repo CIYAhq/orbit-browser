@@ -19,6 +19,7 @@ import {
   pageCorner,
   pageMouse,
   setNativeFullScreen,
+  shellMouseMove,
   shellRoundTrip,
   spyCommand,
   startNavFixtures,
@@ -741,6 +742,36 @@ test('[SB-12] the edge does nothing while the sidebar is docked or the command b
   await cmd(app, 'sidebar.reveal')
   await shell.mouse.move(2, 320)
   await shellRoundTrip(shell)
+  expect((await sidebarState()).peeking).toBe(false)
+})
+
+test('[SB-12][FL-03] a pointer coming off the page brings the sidebar in with the first move the edge hears (review A-M2)', async () => {
+  const { app } = orbit
+  await openTab(app, page('Coming'))
+  await hideSidebar()
+  // Over the page, as a person's pointer is before it goes for the edge.
+  await pageMouse(app, '/page/Coming', 'mouseMove', 400, 300)
+  await pageMouse(app, '/page/Coming', 'mouseMove', 200, 300)
+  // One move at the edge: the first the shell hears, so it has no movement of its own.
+  await shellMouseMove(app, 3, 300)
+  await expect.poll(async () => (await sidebarState()).peeking).toBe(true)
+})
+
+test('[SB-12][FL-03] a pointer that leaves the page for the window’s very edge, where nothing in the window hears it (Linux keeps it for resizing), brings the sidebar in (review A-M2)', async () => {
+  const { app } = orbit
+  const id = await openTab(app, page('Leaving'))
+  await hideSidebar()
+  await pageMouse(app, '/page/Leaving', 'mouseMove', 300, 300)
+  const card = (await tabView(app, id))?.bounds
+  if (!card) throw new Error('no page view')
+  // The pointer jumps to x = 2 of the window: the page hears it leave, and nothing hears it arrive.
+  await pageMouse(app, '/page/Leaving', 'mouseLeave', 2 - card.x, 300)
+  await expect.poll(async () => (await sidebarState()).peeking).toBe(true)
+  // Somewhere else, it doesn't: the right edge.
+  await pageMouse(app, '/page/Leaving', 'mouseMove', 300, 300)
+  await expect.poll(async () => (await sidebarState()).peeking).toBe(false)
+  await pageMouse(app, '/page/Leaving', 'mouseLeave', card.width + 3, 300)
+  await shellRoundTrip(orbit.shell)
   expect((await sidebarState()).peeking).toBe(false)
 })
 

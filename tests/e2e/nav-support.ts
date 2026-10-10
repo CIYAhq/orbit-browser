@@ -583,7 +583,7 @@ export async function pressInPage(
 export async function pageMouse(
   app: ElectronApplication,
   urlPart: string,
-  type: 'mouseMove' | 'mouseDown' | 'mouseUp',
+  type: 'mouseMove' | 'mouseDown' | 'mouseUp' | 'mouseLeave',
   x: number,
   y: number,
 ): Promise<void> {
@@ -591,10 +591,22 @@ export async function pageMouse(
     ({ webContents }, [part, t, px, py]) => {
       const page = webContents.getAllWebContents().find((w) => w.getURL().includes(part))
       if (!page) throw new Error(`no page with ${part}`)
-      if (t === 'mouseMove') page.sendInputEvent({ type: t, x: px, y: py })
+      if (t === 'mouseMove' || t === 'mouseLeave') page.sendInputEvent({ type: t, x: px, y: py })
       else page.sendInputEvent({ type: t, x: px, y: py, button: 'left', clickCount: 1 })
     },
     [urlPart, type, x, y] as const,
+  )
+}
+
+/** Moves the mouse over the first window's shell the way the hardware does: through the browser process. */
+export async function shellMouseMove(app: ElectronApplication, x: number, y: number): Promise<void> {
+  await app.evaluate(
+    ({ webContents }, [px, py]) => {
+      const shell = webContents.getAllWebContents().find((w) => w.getURL().includes('view=shell'))
+      if (!shell) throw new Error('no shell')
+      shell.sendInputEvent({ type: 'mouseMove', x: px, y: py })
+    },
+    [x, y] as const,
   )
 }
 

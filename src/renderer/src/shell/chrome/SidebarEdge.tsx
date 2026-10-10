@@ -3,15 +3,16 @@ import { invoke } from '../../api'
 
 /**
  * The window's left edge while the sidebar is hidden (SB-12, FL-03): the pointer reaching it brings
- * the sidebar in as a floating card, at once. Only a pointer that moves counts: one resting there
- * when the sidebar is hidden (⌘S with the pointer at the edge) doesn't bring it straight back, and
- * neither does a drag passing by (a text selection, a tab).
+ * the sidebar in as a floating card, at once. A drag passing by (a text selection, a tab) doesn't.
+ * Main decides whether the pointer moved: one resting there when the sidebar is hidden (⌘S with the
+ * pointer at the edge) doesn't bring it straight back. The event's own movement can't tell, as the
+ * first event from a pointer coming off the page has none (review A-M2).
  */
 export function SidebarEdge() {
   const last = useRef(0)
   useLeavingWindow()
   const onMove = (e: MouseEvent) => {
-    if (e.buttons || (e.movementX === 0 && e.movementY === 0)) return
+    if (e.buttons) return
     const now = performance.now()
     if (now - last.current < 100) return
     last.current = now
