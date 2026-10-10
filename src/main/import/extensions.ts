@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { SourceExtension } from '../../shared/commands/import'
 import type { Scratch } from './copy'
@@ -15,6 +15,10 @@ const BROWSERS_OWN = new Set([5, 10])
 const FROM_STORE = 1
 /** An extension's id: 32 letters from a to p. */
 const ID = /^[a-p]{32}$/
+/** A JSON file larger than this isn't read: far above any real Preferences, and parsed on main's thread (F4). */
+export const MAX_JSON_BYTES = 16 * 1024 * 1024
+/** Extensions looked at per profile: real profiles have a few dozen. */
+const MAX_EXTENSIONS = 1000
 /** Names that mark an ad or content blocker, for IM-09's de-duplication. */
 const BLOCKER = /\b(ad ?block\w*|adguard|ublock\w*|\w*blocker|content filter)\b/i
 
@@ -29,26 +33,44 @@ interface Prefs {
   extensions?: { settings?: Record<string, ExtensionPrefs>; pinned_extensions?: unknown }
 }
 
+const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+
+/** Under MAX_JSON_BYTES. */
+const small = (path: string) =>
+  stat(path).then(
+    (s) => s.size <= MAX_JSON_BYTES,
+    () => false,
+  )
+
 /**
- * A JSON file of another browser's, read from a copy; undefined when it's missing, held or broken.
- * Listing is best effort, and nothing of a file's text is ever logged.
+ * A JSON object of another browser's, read from a copy; undefined when it's missing, held, broken or
+ * too large. Listing is best effort, and nothing of a file's text is ever logged.
  */
 async function readJson(scratch: Scratch, path: string): Promise<Record<string, unknown> | undefined> {
+  if (!(await small(path))) return undefined
   const copy = await scratch.take(path).catch(() => undefined)
-  if (!copy) return undefined
+  // The copy is what is read: checked again, in case the file grew.
+  if (!copy || !(await small(copy))) return undefined
   const value: unknown = await readFile(copy, 'utf8')
     .then((text) => JSON.parse(text.replace(/^\uFEFF/, '')))
     .catch(() => undefined)
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
+  return isObject(value) ? value : undefined
+}
+
+/** A file's extension settings, when they are an object (F4: anything else would be spread key by key). */
+function settingsOf(prefs: Prefs): Record<string, ExtensionPrefs> {
+  const settings = isObject(prefs.extensions) ? prefs.extensions.settings : undefined
+  return isObject(settings) ? (settings as Record<string, ExtensionPrefs>) : {}
 }
 
 export async function chromiumExtensions(scratch: Scratch, dir: string): Promise<SourceExtension[]> {
   const prefs = async (name: string) => ((await readJson(scratch, join(dir, name))) ?? {}) as Prefs
   const [open, secure] = [await prefs('Preferences'), await prefs('Secure Preferences')]
-  const settings = { ...open.extensions?.settings, ...secure.extensions?.settings }
-  const pinned = new Set(Array.isArray(open.extensions?.pinned_extensions) ? open.extensions.pinned_extensions : [])
+  const settings = { ...settingsOf(open), ...settingsOf(secure) }
+  const pinnedList = isObject(open.extensions) ? open.extensions.pinned_extensions : undefined
+  const pinned = new Set(Array.isArray(pinnedList) ? pinnedList.slice(0, MAX_EXTENSIONS) : [])
   const out: SourceExtension[] = []
-  for (const [id, s] of Object.entries(settings)) {
+  for (const [id, s] of Object.entries(settings).slice(0, MAX_EXTENSIONS)) {
     if (!ID.test(id) || !s || typeof s !== 'object' || BROWSERS_OWN.has(Number(s.location))) continue
     const name = await extensionName(scratch, dir, s)
     if (!name) continue

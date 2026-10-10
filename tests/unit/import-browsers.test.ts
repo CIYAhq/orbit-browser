@@ -13,6 +13,7 @@ import {
 } from '../../src/main/import/browsers'
 import { chromiumProfiles } from '../../src/main/import/chromium'
 import { type CopyFile, withScratch } from '../../src/main/import/copy'
+import { chromiumExtensions } from '../../src/main/import/extensions'
 import { firefoxProfiles } from '../../src/main/import/firefox'
 import { parseBplist } from '../../src/main/import/safari'
 import type { BookmarkNode } from '../../src/shared/commands/import'
@@ -190,6 +191,52 @@ describe('[IM-09] a Chromium profile’s extensions, listed', () => {
     const [me] = await contents(await source('chrome', join(dir, 'chrome')))
     expect(me?.extensions?.items).toEqual([{ id, name: 'Bloqueur', pinned: true, fromStore: true, blocker: false }])
   })
+})
+
+describe('[IM-09] a hostile Preferences file (F4)', () => {
+  const cpuUsage = typeof process.threadCpuUsage === 'function' ? process.threadCpuUsage : process.cpuUsage
+  const cpuMs = () => {
+    const { user, system } = cpuUsage.call(process)
+    return (user + system) / 1000
+  }
+  const id = 'abcdefghijklmnopabcdefghijklmnop'
+  const extension = { location: 1, manifest: { name: 'Reader' } }
+
+  /** A profile folder holding only `Preferences`. */
+  function profileWith(preferences: string): string {
+    const profile = join(scratchDir(), 'Default')
+    mkdirSync(profile, { recursive: true })
+    writeFileSync(join(profile, 'Preferences'), preferences)
+    return profile
+  }
+
+  it('settings that are a 4 MB string, not an object: nothing listed, and no stall', async () => {
+    const profile = profileWith(JSON.stringify({ extensions: { settings: 'x'.repeat(4 * 1024 * 1024) } }))
+    // Best of three rounds (D46), in this thread's CPU time (D51): reading 4 MB takes a few ms; spreading
+    // the string into an object took the review's run 7.3 s on main's thread.
+    const rounds: string[] = []
+    let passed = false
+    for (let round = 1; round <= 3 && !passed; round++) {
+      const c0 = cpuMs()
+      const t0 = performance.now()
+      const items = await withScratch((scratch) => chromiumExtensions(scratch, profile))
+      const cpu = cpuMs() - c0
+      rounds.push(`round ${round}: ${cpu.toFixed(0)} ms CPU (wall ${(performance.now() - t0).toFixed(0)})`)
+      expect(items).toEqual([])
+      passed = cpu < 250
+    }
+    console.info(`[F4] a 4 MB string as settings: ${rounds.join('; ')}`)
+    expect(passed, rounds.join('\n')).toBe(true)
+  }, 120_000)
+
+  it('a file over 16 MB isn’t read; one under is', async () => {
+    const prefs = (padding: number) =>
+      JSON.stringify({ extensions: { settings: { [id]: extension } }, padding: 'x'.repeat(padding) })
+    const listed = async (profile: string) =>
+      (await withScratch((scratch) => chromiumExtensions(scratch, profile))).map((x) => x.name)
+    expect(await listed(profileWith(prefs(15 * 1024 * 1024)))).toEqual(['Reader'])
+    expect(await listed(profileWith(prefs(17 * 1024 * 1024)))).toEqual([])
+  }, 60_000)
 })
 
 describe('[IM-03][IM-04] what a profile holds', () => {
