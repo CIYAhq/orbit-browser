@@ -659,10 +659,14 @@ function findHistory(history: readonly IndexedEntry[], key: string): IndexedEntr
   return best
 }
 
-/** Keeps one row per URL, preferring open tab > archived > history. */
+/**
+ * Keeps one row per URL, preferring open tab > archived > history. The kept row takes its own
+ * place in the order, not the dropped row's: rows that score the same stay in their kind's order
+ * (the most recently archived tab first, review N3).
+ */
 function dedupe(cands: Cand[]): Cand[] {
   const byKey = new Map<string, Cand>()
-  const out: Cand[] = []
+  const out: (Cand | undefined)[] = []
   for (const c of cands) {
     if (!c.key) {
       out.push(c)
@@ -675,11 +679,12 @@ function dedupe(cands: Cand[]): Cand[] {
     } else if (c.prio > seen.prio) {
       // Keep the better kind, and its chance to be the top row.
       const kept = { ...c, strong: c.strong || seen.strong }
-      out[out.indexOf(seen)] = kept
+      out[out.indexOf(seen)] = undefined
+      out.push(kept)
       byKey.set(c.key, kept)
     }
   }
-  return out
+  return out.filter((c): c is Cand => c !== undefined)
 }
 
 export const tabTarget = findSiteSearch
