@@ -432,44 +432,50 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
       return menuLabels(lastMenu)
     })
     // Fills the Archive for tests (lists, search at scale) without growing OrbitState.
-    commands.register('archive.testSeed', async ({ count, days = 30, profileId, spaceId, prefix = 'Seeded' }, c) => {
-      await store.load()
-      const s = state.state
-      const profile = profileOf(profileId, c)
-      const space = spaceId ?? s.spaceOrder.find((id) => s.spaces[id]?.profileId === profile) ?? s.spaceOrder[0] ?? ''
-      const now = Date.now()
-      const words = [
-        'alpha',
-        'budget',
-        'cinema',
-        'delta',
-        'garden',
-        'harbor',
-        'island',
-        'journal',
-        'kitchen',
-        'lantern',
-      ]
-      const span = Math.max(1, days) * 24 * 3600_000
-      const entries: ArchivedTab[] = []
-      for (let i = 0; i < count; i++) {
-        const word = words[i % words.length] as string
-        entries.push({
-          id: newId('a'),
-          url: `https://${word}${i % 97}.example.test/page/${i}`,
-          title: `${prefix} ${word} ${i}`,
-          spaceId: space,
-          profileId: profile,
-          // Oldest first, spread evenly over the span, the newest a minute ago.
-          archivedAt: now - 60_000 - Math.round(((count - 1 - i) / Math.max(1, count)) * span),
-          reason: i % 3 === 0 ? 'auto' : 'closed',
-          section: 'today',
-          // Every tenth (the "lantern" pages) closed in a Mini Window (AR-03's source filter).
-          ...(i % 10 === 9 ? { from: 'mini' as const } : {}),
-        })
-      }
-      return store.add(entries).length
-    })
+    commands.register(
+      'archive.testSeed',
+      async ({ count, days = 30, profileId, spaceId, prefix = 'Seeded', base }, c) => {
+        await store.load()
+        // Pages of the test's fixture server when given: opening one never reaches the network.
+        const origin =
+          typeof base === 'string' && /^http:\/\/(localhost|127\.0\.0\.1):\d{2,5}$/.test(base) ? base : undefined
+        const s = state.state
+        const profile = profileOf(profileId, c)
+        const space = spaceId ?? s.spaceOrder.find((id) => s.spaces[id]?.profileId === profile) ?? s.spaceOrder[0] ?? ''
+        const now = Date.now()
+        const words = [
+          'alpha',
+          'budget',
+          'cinema',
+          'delta',
+          'garden',
+          'harbor',
+          'island',
+          'journal',
+          'kitchen',
+          'lantern',
+        ]
+        const span = Math.max(1, days) * 24 * 3600_000
+        const entries: ArchivedTab[] = []
+        for (let i = 0; i < count; i++) {
+          const word = words[i % words.length] as string
+          entries.push({
+            id: newId('a'),
+            url: origin ? `${origin}/page/${word}${i % 97}-${i}` : `https://${word}${i % 97}.example.test/page/${i}`,
+            title: `${prefix} ${word} ${i}`,
+            spaceId: space,
+            profileId: profile,
+            // Oldest first, spread evenly over the span, the newest a minute ago.
+            archivedAt: now - 60_000 - Math.round(((count - 1 - i) / Math.max(1, count)) * span),
+            reason: i % 3 === 0 ? 'auto' : 'closed',
+            section: 'today',
+            // Every tenth (the "lantern" pages) closed in a Mini Window (AR-03's source filter).
+            ...(i % 10 === 9 ? { from: 'mini' as const } : {}),
+          })
+        }
+        return store.add(entries).length
+      },
+    )
   }
 
   return { store, sync, library }

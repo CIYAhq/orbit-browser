@@ -220,9 +220,13 @@ export interface ArchiveCommands {
    * With `appMenu`, the labels in the app menu's File > Recently Closed (none without an app menu).
    */
   'archive.testMenu': { args: { click?: string; appMenu?: boolean }; result: string[] }
-  /** Test-only (ORBIT_E2E=1): adds `count` entries spread over `days` days for one profile. */
+  /**
+   * Test-only (ORBIT_E2E=1): adds `count` entries spread over `days` days for one profile. With
+   * `base` (a loopback origin: the test's fixture server) they are pages of it, so a test that
+   * opens one stays off the network.
+   */
   'archive.testSeed': {
-    args: { count: number; days?: number; profileId?: ProfileId; spaceId?: SpaceId; prefix?: string }
+    args: { count: number; days?: number; profileId?: ProfileId; spaceId?: SpaceId; prefix?: string; base?: string }
     result: number
   }
 

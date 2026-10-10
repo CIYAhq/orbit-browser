@@ -46,10 +46,11 @@ interface LibraryInfo {
 }
 const info = (o: Orbit) => run(o.app, 'library.testInfo') as Promise<LibraryInfo>
 const status = (o: Orbit) => run(o.app, 'library.status') as Promise<LibraryShow & { open: boolean }>
+/** Seeded entries are pages of the fixture server, so restoring one never reaches the network. */
 const seed = (
   o: Orbit,
   args: { count: number; days?: number; spaceId?: string; profileId?: string; prefix?: string },
-) => run(o.app, 'archive.testSeed', args) as Promise<number>
+) => run(o.app, 'archive.testSeed', { base: fx.url(''), ...args }) as Promise<number>
 
 /** The Library's own view (`?view=library`), once it has been created. */
 async function libraryPage(app: ElectronApplication): Promise<Page> {
@@ -279,7 +280,10 @@ test('[AR-03][AR-04] at 10,000 entries the list is virtualised, search answers e
   await lib.getByTestId('archive-search').press('Enter')
   await expect.poll(async () => (await info(orbit)).open).toBe(false)
   const id = await activeId(app)
-  expect((await state(app)).tabs[id ?? '']?.url).toBe('https://harbor75.example.test/page/1045')
+  expect((await state(app)).tabs[id ?? '']?.url).toBe(fx.url('/page/harbor75-1045'))
+  // The page loads from the fixture server: no name lookup, no network.
+  await waitTab(app, id ?? '', '/page/harbor75-1045')
+  expect((await state(app)).tabs[id ?? '']?.title).toBe('harbor75-1045')
   expect((await query(orbit, { text: 'harbor 1045' })).total).toBe(0)
   // A second open is quick even with thousands of entries (DL-09).
   const marks = async () =>
