@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 475 spec’d · 174 built (72 partial) · 251 tested · 0 feel right. 10 more are out of scope and not counted.
+**Totals:** 472 spec’d · 174 built (72 partial) · 251 tested · 0 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 111 | 136 |
-| P1 | 221 | 54 | 104 |
-| P2 | 80 | 9 | 11 |
+| P1 | 219 | 54 | 104 |
+| P2 | 79 | 9 | 11 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -549,7 +549,7 @@ Spec: `spec/settings.md`
 | ST-12 | Privacy & security, and clearing browsing data | P1 | 🟡 partial | ✅ e2e+unit | – | privacy promise (Orbit sends nothing); Clear browsing data per profile (⌘⇧⌫ / Ctrl+Shift+Delete): history by time range; cookies and site data, and the cache, always from all time (Electron has no range), so they start ticked only for All time; Secure DNS (Automatic, Off, Cloudflare, Google, Quad9); graphics acceleration lives in Advanced. No HTTPS-first or Safe Browsing (not in Electron), no per-site clearing here |
 | ST-13 | Site settings (permissions) page | P1 | – | – | – |  |
 | ST-14 | Languages, spell check and translation | P2 | – | – | – |  |
-| ST-15 | Passwords and autofill settings | P1 | – | – | – |  |
+| ST-15 | Passwords and autofill settings | P1 | ⛔ out of scope | – | – | the settings of a password manager and an autofill store, which Orbit doesn't have (IM-08 and IM-11 are out of scope too, D52) |
 | ST-16 | Session restore on launch | P1 | – | – | – |  |
 | ST-17 | About Orbit | P1 | ✅ | ✅ e2e+unit | – | Settings → About: logo, version (a click copies it), build date, Chromium and Electron versions, system, Check for updates, release notes, Copy build info. Licence and Open-source credits open credits.html, built with the app (D43): Orbit's and Electron's licences, a link to the LICENSES.chromium.html Electron ships, and the licence of each npm package whose code ships. Release notes and help need access to the private repository for now |
 | ST-18 | Account, sign-in and sync sections | OOS | ⛔ out of scope | – | – | the spec leaves it out |
@@ -570,10 +570,10 @@ Spec: `spec/import.md`
 | IM-05 | Mapping bookmarks into Orbit (pinned tabs and folders) | P1 | – | – | – |  |
 | IM-06 | Target Space and profile for imported data | P1 | – | – | – |  |
 | IM-07 | History import | P1 | – | – | – |  |
-| IM-08 | Password import | P1 | – | – | – |  |
+| IM-08 | Password import | P1 | ⛔ out of scope | – | – | Orbit has no password manager to import into: the spec has no row for one (OT-11), and Electron has none. IM-03 offers no Passwords type, and IM-12 and IM-13 take no passwords CSV (D52) |
 | IM-09 | Extension import (Chromium-family sources) | P1 | – | – | – |  |
 | IM-10 | Cookies / signed-in sessions import | P2 | – | – | – |  |
-| IM-11 | Autofill addresses and payment cards import | P2 | – | – | – |  |
+| IM-11 | Autofill addresses and payment cards import | P2 | ⛔ out of scope | – | – | Orbit has no store for addresses and cards to import into: the spec has no row for one (OT-12), and Electron has none (D52) |
 | IM-12 | Bringing data over from Arc (user-facing exports only) | P1 | – | – | – |  |
 | IM-13 | Import from files (standard formats) | P1 | – | – | – |  |
 | IM-14 | Progress, summary and errors | P1 | – | – | – |  |
