@@ -597,16 +597,20 @@ export async function floatingPage(app: ElectronApplication): Promise<Page> {
 }
 
 /**
- * The pointer Orbit reads for the sidebar's edge at `x`, `y` of the first window's content, inside
- * it or not, as a real pointer no view in the window hears (fix check A, M1).
+ * The pointer Orbit reads for the sidebar's edge at `x`, `y` of a window's content (default: the
+ * first), inside it or not, as a real pointer no view in the window hears (fix check A, M1).
  */
-export async function pointerAt(app: ElectronApplication, x: number, y: number): Promise<void> {
-  await app.evaluate((_e, [px, py]) => (globalThis as unknown as Hooks).__orbitNav.pointerAt(px, py), [x, y] as const)
+export async function pointerAt(app: ElectronApplication, x: number, y: number, windowId?: string): Promise<void> {
+  await app.evaluate((_e, [px, py, w]) => (globalThis as unknown as Hooks).__orbitNav.pointerAt(px, py, w), [
+    x,
+    y,
+    windowId,
+  ] as const)
 }
 
-/** The first window's floating sidebar. */
-export function floatingInfo(app: ElectronApplication): Promise<FloatingInfo> {
-  return app.evaluate(() => (globalThis as unknown as Hooks).__orbitNav.floating())
+/** A window's floating sidebar (default: the first). */
+export function floatingInfo(app: ElectronApplication, windowId?: string): Promise<FloatingInfo> {
+  return app.evaluate((_e, w) => (globalThis as unknown as Hooks).__orbitNav.floating(w), windowId)
 }
 
 /** The corner radius a shown page's card was given (SB-19). */
