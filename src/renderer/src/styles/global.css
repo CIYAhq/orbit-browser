@@ -389,7 +389,7 @@ html.is-resizing * {
 .item-list {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 1px; /* ItemList's LIST_GAP: a row growing in or leaving takes its gap with it */
 }
 
 .tab-row,
@@ -1271,13 +1271,16 @@ html.is-dragging-tab * {
   contain-intrinsic-size: auto 32px;
 }
 
-/* A row growing in is always drawn: skipped mid-growth, it would keep that height once done. */
-.row-slot.is-growing {
+/*
+ * A row growing in is always drawn: skipped mid-growth, it would keep that height once done. It
+ * stays drawn until it first leaves the screen, so no row on screen is ever skipped for a frame.
+ */
+.row-slot.is-drawn {
   content-visibility: visible;
 }
 
-/* A tab opened in the background glows briefly so the eye finds it (FL-06). */
-.tab-row.is-new-background {
+/* A tab opened in the background glows briefly so the eye finds it (FL-06); selected, it shows at once. */
+.tab-row.is-new-background:not(.is-active) {
   animation: row-glow 420ms ease-out;
 }
 

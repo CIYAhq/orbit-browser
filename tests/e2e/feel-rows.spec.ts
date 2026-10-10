@@ -95,6 +95,11 @@ test('[FL-04] a quick sweep down 20 rows highlights each row as the pointer pass
   const bottom = await center(row(shell, ids.at(-1) as string))
   await shell.mouse.move(top.x, top.box.y - 24)
   await shell.waitForTimeout(300)
+  // The hover colour's alpha, and how far the fade in (instant timing, about 90 ms) steps in a frame.
+  const hoverAlpha = alpha(
+    await row(shell, ids[0] as string).evaluate((el) => getComputedStyle(el).getPropertyValue('--hover').trim()),
+  )
+  const inStep = (hoverAlpha * FRAME) / 80
   const rec = await record(shell, {
     rows: { selector: TODAY_ROWS, key: 'data-tab-id', style: ['background-color'], classes: true },
     titles: { selector: `${TODAY_ROWS} [data-testid="tab-title"]`, key: 'data-tab-id' },
@@ -138,12 +143,13 @@ test('[FL-04] a quick sweep down 20 rows highlights each row as the pointer pass
     if (close && Math.abs(close.frames - lit.frames) > 1)
       apart.push(`${id}: × ${close.frames}, highlight ${lit.frames}`)
     if (!leave) continue
-    // Out: from what it shows, never up to the full hover first (FL-01: no jumps).
+    // Out: from what it shows, never up to the full hover first (FL-01: no jumps). The fade in may
+    // take one more step before the pointer's leaving lands.
     const before = r.frames.filter((f) => f.i < leave.frame).at(-1)
     const after = r.frames[leave.frame]
     const a0 = alpha(before?.lists.rows?.[id]?.style?.['background-color'])
     const a1 = alpha(after?.lists.rows?.[id]?.style?.['background-color'])
-    if (a1 > a0 + 0.005) jumps.push(`${id}: ${a0.toFixed(3)} → ${a1.toFixed(3)}`)
+    if (a1 > a0 + inStep + 0.002) jumps.push(`${id}: ${a0.toFixed(3)} → ${a1.toFixed(3)}`)
     const dark = responseTo(r, leave, (f) => alpha(f.lists.rows?.[id]?.style?.['background-color']) === 0)
     offs.push(dark?.ms ?? Number.POSITIVE_INFINITY)
   }

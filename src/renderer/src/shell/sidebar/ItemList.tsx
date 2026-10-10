@@ -4,6 +4,7 @@ import {
   memo,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -13,7 +14,7 @@ import type { ItemId, OrbitState, TabId } from '../../../../shared/state'
 import { isAwayFromPinned, rowTitle } from '../../../../shared/tabs'
 import { splitOfTab, tabsInItem, visibleTabOrder } from '../../../../shared/tree'
 import { invoke, isMac } from '../../api'
-import { EASE, REDUCED, reducedMotion, SNAPPY, SNAPPY_EXIT, STANDARD, tween } from '../../motion'
+import { EASE, REDUCED, reducedMotion, SNAPPY, SNAPPY_EXIT, STANDARD, tween, waapi } from '../../motion'
 import { activeTabId } from '../../selectors'
 import { getOrbitState, useMirror, useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
@@ -27,6 +28,7 @@ import {
   useDrag,
   useFolderSearch,
   useKeyboardFocus,
+  usePressedTab,
   useRename,
   useSelection,
 } from './ui-state'
@@ -43,6 +45,8 @@ const ROW_SPRING = SNAPPY
 export const CHEVRON = { duration: 0.16, ease: EASE.snappy }
 export const REVEAL = { height: SNAPPY, opacity: tween('quick') }
 export const CONCEAL = { height: SNAPPY_EXIT, opacity: tween('quick', { exit: true }) }
+/** The gap between rows in a list (`.item-list`'s `gap`). */
+const LIST_GAP = 1
 /** Rows beyond this many in a batch leave together (FL-11 caps the sweep at about 450 ms). */
 const MAX_STAGGER_ROWS = 12
 
@@ -52,31 +56,41 @@ const MAX_STAGGER_ROWS = 12
  * row slides left 12 px as it fades; a Clear batch sweeps 24 px, 25 ms apart.
  */
 const rowVariants: Variants = {
-  hidden: { height: 0, opacity: 0 },
+  // A row with no height also gives back the list's 1 px gap beside it (`marginBottom`), so the rows
+  // below move by its whole room with the spring, never by a last pixel when it leaves the DOM.
+  hidden: { height: 0, marginBottom: -LIST_GAP, opacity: 0 },
   shown: {
     height: 'auto',
+    marginBottom: 0,
     opacity: 1,
     // FL-06: the content fades in over the last 60 % of the growth.
-    transition: { height: ROW_SPRING, opacity: tween('quick', { delay: 0.07 }) },
+    transition: { height: ROW_SPRING, marginBottom: ROW_SPRING, opacity: tween('quick', { delay: 0.07 }) },
   },
   exit: (c: { stagger?: boolean; index?: number } | undefined) => {
     if (reducedMotion()) {
       // FL-28: no slide and no stagger. Closing rows, or a whole Clear, fade out together, then
       // their room closes at once.
       const fade = REDUCED.fadeMs / 1000
+      const close = { duration: 0, delay: fade }
       return {
         height: 0,
+        marginBottom: -LIST_GAP,
         opacity: 0,
-        transition: { opacity: { duration: fade }, height: { duration: 0, delay: fade } },
+        transition: { opacity: { duration: fade }, height: close, marginBottom: close },
       }
     }
+    // FL-09: a closing row collapses while it fades and slides; a Clear's rows (FL-11) start
+    // collapsing a moment after their slide.
     const delay = c?.stagger ? Math.min(c.index ?? 0, MAX_STAGGER_ROWS) * 0.025 : 0
+    const collapse = { ...ROW_SPRING, delay: c?.stagger ? delay + 0.04 : 0 }
     return {
       height: 0,
+      marginBottom: -LIST_GAP,
       opacity: 0,
       x: c?.stagger ? -24 : -12,
       transition: {
-        height: { ...ROW_SPRING, delay: delay + 0.04 },
+        height: collapse,
+        marginBottom: collapse,
         opacity: { duration: c?.stagger ? 0.16 : 0.13, ease: EASE.quick, delay },
         x: { duration: c?.stagger ? 0.16 : 0.13, ease: EASE.quick, delay },
       },
@@ -233,6 +247,28 @@ interface SlotProps {
   ancestors: string
 }
 
+const offScreenCallbacks = new WeakMap<Element, () => void>()
+let offScreen: IntersectionObserver | null = null
+
+/** Calls `fn` once `el` is out of sight (clipped by the sidebar's scroller or the window). Returns the cancel. */
+function whenOffScreen(el: Element, fn: () => void): () => void {
+  offScreen ??= new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (entry.isIntersecting) continue
+      const callback = offScreenCallbacks.get(entry.target)
+      offScreen?.unobserve(entry.target)
+      offScreenCallbacks.delete(entry.target)
+      callback?.()
+    }
+  })
+  offScreenCallbacks.set(el, fn)
+  offScreen.observe(el)
+  return () => {
+    offScreen?.unobserve(el)
+    offScreenCallbacks.delete(el)
+  }
+}
+
 /** Wrapper that animates a row in and out and carries its drag-and-drop slot data. */
 function RowSlot({
   id,
@@ -266,9 +302,18 @@ function RowSlot({
   const [flying, setFlying] = useState(!!travel)
   // Rows that arrive or leave through a drag appear/disappear at once (the ghost covers them).
   const [instant] = useState(() => !!travel || hidden || reducedMotion() || !claimEnterAnimation())
-  // Drawn while it grows in, even off-screen (.is-growing): a skipped row would keep the height it had
-  // when it left the screen, its last remembered size, once its height is auto again (FL-21).
   const [growing, setGrowing] = useState(!instant)
+  // Drawn while it grows in, even off-screen (.is-drawn): a skipped row would keep the height it had
+  // when it left the screen, its last remembered size, once its height is auto again (FL-21). And
+  // drawn after, until it first leaves the screen: a row on screen going back to
+  // `content-visibility: auto` is skipped for a frame, and a press then lands on its slot, not on it
+  // (PR #10 review F1).
+  const [drawn, setDrawn] = useState(!instant)
+  useEffect(() => {
+    const el = ref.current
+    if (growing || !drawn || !el) return
+    return whenOffScreen(el, () => setDrawn(false))
+  }, [growing, drawn])
   useLayoutEffect(() => {
     if (!travel) return
     departed.delete(id)
@@ -296,14 +341,13 @@ function RowSlot({
   return (
     <motion.div
       ref={ref}
-      className={`${className}${hidden || leaving ? ' is-drag-hidden' : ''}${flying ? ' is-travelling' : ''}${growing ? ' is-growing' : ''}${splitSide ? ` is-split-target is-split-${splitSide}` : ''}`}
+      className={`${className}${hidden || leaving ? ' is-drag-hidden' : ''}${flying ? ' is-travelling' : ''}${growing ? ' is-growing' : ''}${drawn ? ' is-drawn' : ''}${splitSide ? ` is-split-target is-split-${splitSide}` : ''}`}
       style={{ y, x }}
       variants={rowVariants}
       custom={{ stagger: order !== undefined, index: order }}
       onAnimationComplete={(definition) => {
         if (!present) exitOrder.delete(id)
-        // One more frame drawn at full height, so that is the size the row remembers.
-        else if (definition === 'shown' && growing) requestAnimationFrame(() => setGrowing(false))
+        else if (definition === 'shown' && growing) setGrowing(false)
       }}
       initial={instant ? false : 'hidden'}
       animate="shown"
@@ -362,27 +406,71 @@ function onRowPointerDown(e: ReactPointerEvent<HTMLElement>, tabId: TabId) {
   // A press on a selected row keeps the selection (to drag the group); a plain click clears it.
   const inSelection = useSelection.getState().ids.includes(tabId)
   if (!inSelection) clearSelection()
+  pressSelect(tabId)
   void invoke('tabs.activate', { tabId })
   // A pane of a split view drags the whole split row.
   const item = splitOfTab(getOrbitState(), tabId) ?? tabId
   pressItem(e, item, 'list', inSelection ? clearSelection : undefined)
 }
 
+let pressTimer = 0
+
 /**
- * Hover fades (FL-04): in over ~90 ms, out over ~130 ms. Uses the Web Animations API on top of
- * the CSS :hover background, so nothing waits on it and no transition events are fired.
+ * FL-05: the pressed row is drawn selected in the frame after the press, and the row selected before
+ * loses its highlight in that frame too, without waiting for main's round trip. Main's state takes
+ * over as soon as it shows a different active tab; should it not (the press was refused), the real
+ * selection shows again after a moment.
+ */
+function pressSelect(tabId: TabId): void {
+  const was = activeTabId(getOrbitState())
+  if (was === tabId) return
+  usePressedTab.setState({ id: tabId, was })
+  clearTimeout(pressTimer)
+  pressTimer = window.setTimeout(() => usePressedTab.setState({ id: null, was: null }), 1000)
+}
+
+useMirror.subscribe((next, prev) => {
+  const pressed = usePressedTab.getState()
+  if (!pressed.id || next.state === prev.state || !next.state) return
+  if (activeTabId(next.state) === pressed.was) return
+  clearTimeout(pressTimer)
+  usePressedTab.setState({ id: null, was: null })
+})
+
+/** A row's selected look: the pressed row's, until main's state catches up; otherwise the state's. */
+function useShownActive(tabId: TabId): boolean {
+  const real = useOrbit((s) => activeTabId(s) === tabId)
+  const pressed = usePressedTab((p) => (p.id === tabId ? true : p.was === tabId ? false : undefined))
+  return pressed ?? real
+}
+
+/** Each row's running hover fade. */
+const hoverFades = new WeakMap<HTMLElement, Animation>()
+
+/**
+ * Hover fades (FL-04): in with the instant timing, out with the quick one. Uses the Web Animations
+ * API on top of the CSS :hover background, so nothing waits on it and no transition events are
+ * fired. A fade still running when the pointer turns round goes back from what the row shows (FL-01:
+ * a quick sweep never flashes a row up to full before it fades), and starts in the frame it is made.
  */
 function fadeHover(el: HTMLElement, entering: boolean) {
   if (reducedMotion() || useDrag.getState().phase !== 'idle') return
   if (el.classList.contains('is-active') || el.classList.contains('is-selected')) return
   const hover = getComputedStyle(el).getPropertyValue('--hover').trim()
   if (!hover) return
-  el.animate(
-    entering
-      ? [{ backgroundColor: 'transparent' }, { backgroundColor: hover }]
-      : [{ backgroundColor: hover }, { backgroundColor: 'transparent' }],
-    { duration: entering ? 90 : 130, easing: entering ? 'ease-out' : 'cubic-bezier(0.2, 0, 0, 1)' },
+  const running = hoverFades.get(el)
+  const from = running?.playState === 'running' ? getComputedStyle(el).backgroundColor : null
+  running?.cancel()
+  const fade = el.animate(
+    [
+      { backgroundColor: from ?? (entering ? 'transparent' : hover) },
+      { backgroundColor: entering ? hover : 'transparent' },
+    ],
+    entering ? waapi('instant') : waapi('quick'),
   )
+  const now = document.timeline.currentTime
+  if (typeof now === 'number') fade.startTime = now
+  hoverFades.set(el, fade)
 }
 
 function openContextMenu(e: ReactMouseEvent, id: ItemId) {
@@ -399,7 +487,18 @@ export const TabRow = memo(function TabRow({
   ancestors,
 }: { tabId: string } & SlotProps) {
   return (
-    <RowSlot id={tabId} depth={depth} containerKey={containerKey} index={index} ancestors={ancestors}>
+    <RowSlot
+      id={tabId}
+      depth={depth}
+      containerKey={containerKey}
+      index={index}
+      ancestors={ancestors}
+      onPointerDown={(e) => {
+        // A press the slot itself hears is a press on its row (PR #10 review F1): in the frame a row
+        // that grew in goes back to `content-visibility: auto`, the browser may hit-test the slot.
+        if (e.target === e.currentTarget) onRowPointerDown(e, tabId)
+      }}
+    >
       <TabRowBody tabId={tabId} depth={depth} />
     </RowSlot>
   )
@@ -412,19 +511,25 @@ export const TabRowBody = memo(function TabRowBody({ tabId, depth }: { tabId: st
   const last = useRef(live)
   if (live) last.current = live
   const tab = live ?? last.current
-  const active = useOrbit((s) => activeTabId(s) === tabId)
+  const active = useShownActive(tabId)
   const selected = useSelection((s) => s.ids.includes(tabId))
   const focused = useKeyboardFocus((s) => s.id === tabId)
   const renaming = useRename((s) => (s.id === tabId ? s.mode : null))
   const [iconHover, setIconHover] = useState(false)
   // A tab that just opened in the background glows once so the eye finds it (FL-06).
   const [fresh] = useState(() => !!tab && !active && Date.now() - tab.createdAt < 1500)
+  const rowRef = useRef<HTMLDivElement>(null)
+  // Selected: the highlight shows in this frame, not after a hover fade still running over it (FL-05).
+  useLayoutEffect(() => {
+    if (active && rowRef.current) hoverFades.get(rowRef.current)?.cancel()
+  }, [active])
   if (!tab) return null
   const { prefix, title } = rowTitle(tab)
   const away = isAwayFromPinned(tab)
   const showReset = away && iconHover
   return (
     <div
+      ref={rowRef}
       role="treeitem"
       tabIndex={-1}
       aria-selected={active}
