@@ -246,7 +246,42 @@ export const ACTIONS: ActionDef[] = [
     other: ['Ctrl+,'],
     keywords: ['preferences'],
   },
-  { id: 'app.archive', title: 'Show Archive', category: 'App', keywords: ['history', 'closed tabs'] },
+  {
+    id: 'app.archive',
+    title: 'View Archive',
+    category: 'App',
+    keywords: ['archive', 'archived tabs', 'closed tabs', 'library'],
+  },
+  {
+    id: 'app.library',
+    title: 'Open Library',
+    category: 'App',
+    mac: ['Cmd+Shift+L'],
+    keywords: ['library', 'archive', 'downloads', 'media'],
+  },
+  // Every page visit of the profile, in the Library (AR-10).
+  {
+    id: 'app.history',
+    title: 'View History',
+    category: 'App',
+    mac: ['Cmd+Y'],
+    other: ['Ctrl+H'],
+    keywords: ['history', 'browsing history', 'visited pages'],
+  },
+  // Help → Restore Data… and the command bar: sidebar backups in the Library (AR-11).
+  {
+    id: 'app.restoreData',
+    title: 'Restore Data…',
+    category: 'App',
+    keywords: ['backup', 'backups', 'snapshot', 'restore sidebar', 'recover tabs', 'lost tab'],
+  },
+  // Asks first; browsing history is kept (AR-07).
+  {
+    id: 'archive.clear',
+    title: 'Clear Archive…',
+    category: 'App',
+    keywords: ['clear archive', 'delete archived tabs', 'empty archive'],
+  },
 
   // Spaces
   { id: 'space.new', title: 'New Space', category: 'Spaces', keywords: ['create space'] },

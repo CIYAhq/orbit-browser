@@ -46,6 +46,8 @@ export const DEFAULT_SETTINGS: Settings = {
   secureDns: 'automatic',
   updateFeedUrl: '',
   updateChecks: true,
+  librarySection: 'archive',
+  archiveKeepDays: 30,
 }
 
 /** Favorites per profile (FV-02). */

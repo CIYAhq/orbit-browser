@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -42,6 +43,8 @@ const OFFLINE = `--proxy-server=http://${DEAD_PROXY}`
 export async function launchOrbit(
   opts: { userData?: string; env?: Record<string, string>; reducedMotion?: boolean; args?: string[] } = {},
 ): Promise<Orbit> {
+  // An app that quit on its own (its last window closed) was never asked to close: check it now.
+  for (const old of quitAlone) await old.close()
   const userData = opts.userData ?? mkdtempSync(join(tmpdir(), 'orbit-e2e-'))
   const motion = opts.reducedMotion ? '--force-prefers-reduced-motion' : '--force-prefers-no-reduced-motion'
   const args = [OFFLINE, motion, ...(opts.args ?? []), resolve('out/main/index.js')]
@@ -99,48 +102,99 @@ export function evaluateBetweenTasks(app: ElectronApplication): void {
   }) as ElectronApplication['evaluate']
 }
 
-/** How Orbit's main process logs an exception nothing caught (src/main/index.ts). */
+/**
+ * How Orbit's main process logs an exception nothing caught, or a promise rejection nothing handled
+ * (src/main/index.ts).
+ */
 const UNCAUGHT = '[orbit] uncaught exception:'
+/** What Orbit's main process logs in e2e mode when a quit reaches it (src/main/index.ts). */
+const QUITTING = '[orbit] quit requested'
+/** How long a quit may take once it has reached Orbit's main process. Healthy ones take under 0.5 s. */
+const QUIT_BUDGET = 15_000
+/**
+ * How long `app.close()` waits for the quit to reach main at all. Playwright does work of its own
+ * before it asks: about 5 s after a failed test here, and longer on a slower runner.
+ */
+const ASK_BUDGET = 35_000
+
+/** Apps that quit on their own, with no `app.close()` to check them yet. */
+const quitAlone = new Set<ElectronApplication>()
 
 /**
- * `app.close()` checks the quit too. The test fails if Orbit's main process logged an exception
- * nothing caught, even one thrown while quitting. If Orbit still hasn't quit 15 s after being asked,
- * the test fails and Orbit is killed, so one stuck quit can't hang the rest of the run (D28).
+ * `app.close()` checks the quit too (D28):
+ * - the test fails if Orbit's main process logged an exception nothing caught or a promise
+ *   rejection nothing handled, even while quitting;
+ * - if Orbit hasn't quit 15 s after the quit reached its main process, or the quit hasn't reached it
+ *   35 s after `app.close()`, the test fails and Orbit is killed, so one stuck quit can't hang the
+ *   rest of the run.
+ *
+ * An app that quits on its own is checked by the next `launchOrbit()`, or by its own `app.close()`.
  */
 export function checkQuit(app: ElectronApplication): () => string {
   const proc = app.process()
   let recent = ''
   let thrown = ''
+  let quitting = false
+  let onQuitting: (() => void) | undefined
   proc.stderr?.on('data', (chunk) => {
+    const piece = String(chunk)
+    // Look for the markers before trimming: one write can be longer than what is kept. The tail
+    // kept is just long enough to find a marker split across two writes.
+    const text = recent + piece
+    recent = text.slice(-Math.max(UNCAUGHT.length, QUITTING.length))
+    if (!quitting && text.includes(QUITTING)) {
+      quitting = true
+      onQuitting?.()
+    }
     if (thrown) {
-      if (thrown.length < 4000) thrown += String(chunk)
+      if (thrown.length < 4000) thrown += piece
       return
     }
-    // Look for the marker before trimming: one write can be longer than what is kept. The tail
-    // kept is just long enough to find a marker split across two writes.
-    const text = recent + String(chunk)
     const at = text.indexOf(UNCAUGHT)
     if (at >= 0) thrown = text.slice(at, at + 4000)
-    else recent = text.slice(-UNCAUGHT.length)
   })
   const outputDone = new Promise((resolve) => (proc.stderr ? proc.stderr.once('close', resolve) : resolve(null)))
   const close = app.close.bind(app)
+  let asked = false
   let checked = false
+  app.once('close', () => {
+    if (!asked) quitAlone.add(app)
+  })
   app.close = async () => {
-    let timer: NodeJS.Timeout | undefined
-    const late = new Promise<true>((resolve) => {
-      timer = setTimeout(() => resolve(true), 15_000)
-    })
+    asked = true
+    quitAlone.delete(app)
     const closed = close()
-    const stuck = await Promise.race([closed.then(() => false), late])
-    clearTimeout(timer)
+    const timers: NodeJS.Timeout[] = []
+    const stuck = await new Promise<string>((resolve, reject) => {
+      const settle = () => {
+        for (const t of timers) clearTimeout(t)
+        onQuitting = undefined
+      }
+      const done = (why: string) => {
+        settle()
+        resolve(why)
+      }
+      closed.then(
+        () => done(''),
+        (err) => {
+          settle()
+          reject(err)
+        },
+      )
+      const quitClock = () => timers.push(setTimeout(() => done('it had the quit for 15 s'), QUIT_BUDGET))
+      if (quitting) quitClock()
+      else onQuitting = quitClock
+      timers.push(setTimeout(() => done('the quit never reached its main process'), ASK_BUDGET))
+    })
     if (checked) return
     checked = true
     if (stuck) {
       const waiting = mainThreadWait(proc.pid)
       proc.kill('SIGKILL')
       await closed
-      expect.soft(`still running (main thread: ${waiting})`, 'Orbit 15 s after app.close(); it was killed').toBe('quit')
+      expect
+        .soft(`still running: ${stuck} (main thread: ${waiting})`, 'Orbit after app.close(); it was killed')
+        .toBe('quit')
     }
     await Promise.race([outputDone, new Promise((resolve) => setTimeout(resolve, 1000))])
     expect.soft(thrown, "Orbit's main process threw an exception nothing caught").toBe('')
@@ -153,13 +207,30 @@ export function checkQuit(app: ElectronApplication): () => string {
   }
 }
 
-/** Where a process's main thread is waiting in the kernel (Linux only). */
+/**
+ * Where a stuck process's main thread is: its wait in the kernel on Linux, the deepest frames of a
+ * one-second `sample` on macOS (no `/proc` there).
+ */
 function mainThreadWait(pid: number | undefined): string {
   try {
+    if (process.platform === 'darwin') return sampleMainThread(pid)
     return readFileSync(`/proc/${pid}/wchan`, 'utf8')
   } catch {
     return 'unknown'
   }
+}
+
+/** The deepest frames of the main thread in a one-second `sample` of the process (macOS). */
+function sampleMainThread(pid: number | undefined): string {
+  const file = join(mkdtempSync(join(tmpdir(), 'orbit-sample-')), 'sample.txt')
+  execFileSync('/usr/bin/sample', [String(pid), '1', '-file', file], { stdio: 'ignore', timeout: 20_000 })
+  const lines = readFileSync(file, 'utf8').split('\n')
+  const start = lines.findIndex((line) => line.includes('com.apple.main-thread'))
+  if (start < 0) return `unknown (no main thread in ${file})`
+  // The main thread's call tree runs until the next thread's header or the blank line after it.
+  const end = lines.findIndex((line, i) => i > start && (/^\s*\d+ Thread_/.test(line) || line.trim() === ''))
+  const frames = lines.slice(start + 1, end < 0 ? undefined : end).map((line) => line.replace(/^[\s+!:|]+/, ''))
+  return `${frames.slice(-40).join('\n')}\n(full sample: ${file})`
 }
 
 /** Finds an Orbit UI page (shell/overlay) by its ?view= query. */

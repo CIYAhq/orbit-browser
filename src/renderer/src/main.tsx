@@ -30,7 +30,9 @@ async function boot(): Promise<void> {
       ? import('./overlay/OverlayApp')
       : view === 'mini'
         ? import('./mini/MiniApp')
-        : import('./shell/ShellApp')
+        : view === 'library'
+          ? import('./library/LibraryApp')
+          : import('./shell/ShellApp')
   await initStore()
   installShortcutFallback()
   document.documentElement.dataset.view = view
@@ -48,6 +50,14 @@ async function boot(): Promise<void> {
     root.render(
       <StrictMode>
         <MiniApp />
+      </StrictMode>,
+    )
+  } else if (view === 'library') {
+    // The Library (archive lane, AR-02): its own view over the page area.
+    const { LibraryApp } = (await app) as typeof import('./library/LibraryApp')
+    root.render(
+      <StrictMode>
+        <LibraryApp />
       </StrictMode>,
     )
   } else if (view === 'strip') {

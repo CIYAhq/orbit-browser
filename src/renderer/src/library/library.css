@@ -1,0 +1,895 @@
+/* The Library view (AR-02, DL-09): a full card over the page area, section list on the left. */
+
+html[data-view="library"] body {
+  background: transparent;
+}
+
+.library {
+  --library-bg: color-mix(in oklab, var(--surface, #f7f7f9) 45%, #ffffff);
+  --library-nav-bg: color-mix(in oklab, var(--surface, #f2f2f5) 70%, #ffffff);
+  --library-row-hover: var(--hover);
+  --library-row-selected: color-mix(in srgb, var(--accent) 16%, transparent);
+  --library-row-highlight: color-mix(in srgb, var(--accent) 10%, transparent);
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 184px minmax(0, 1fr);
+  background: var(--library-bg);
+  color: var(--text);
+  transform-origin: 50% 40%;
+  overflow: hidden;
+}
+
+.library[data-open="false"] {
+  pointer-events: none;
+}
+
+.library[data-dark="true"] {
+  --library-bg: color-mix(in oklab, var(--surface, #222226) 82%, #000000);
+  --library-nav-bg: var(--surface, #222226);
+}
+
+/* ---- Section list ---- */
+
+.library__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 16px 8px;
+  background: var(--library-nav-bg);
+  border-right: 1px solid var(--divider);
+}
+
+.library__nav-title {
+  padding: 2px 10px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+.library__nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.library__nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--radius-row);
+  color: var(--text-muted);
+  text-align: left;
+  transition:
+    background var(--dur-fast) ease,
+    color var(--dur-fast) ease;
+}
+
+.library__nav-item:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.library__nav-item.is-active {
+  background: var(--active);
+  box-shadow: var(--active-shadow);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.library__nav-item:focus-visible,
+.library__close:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: -2px;
+}
+
+.library__nav-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Content ---- */
+
+.library__content {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  animation: library-section-in 90ms ease-out;
+}
+
+@keyframes library-section-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.library__empty {
+  margin: auto;
+  color: var(--text-muted);
+}
+
+.library__close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+
+/* Narrow windows: the section list shows icons only. */
+@media (max-width: 620px) {
+  .library {
+    grid-template-columns: 52px minmax(0, 1fr);
+  }
+  .library__nav-title,
+  .library__nav-label {
+    display: none;
+  }
+  .library__nav-item {
+    justify-content: center;
+    padding: 0;
+  }
+}
+
+/* ---- Toasts (FL-22): bottom centre of the card, three at most ---- */
+
+.library-toasts {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.library-toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(420px, 80vw);
+  padding: 8px 8px 8px 14px;
+  border-radius: 10px;
+  background: var(--surface, #ffffff);
+  color: var(--text);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.16),
+    0 0 0 0.5px rgba(0, 0, 0, 0.12);
+  pointer-events: auto;
+  animation: library-toast-in 230ms cubic-bezier(0.3, 1.25, 0.5, 1);
+}
+
+.library-toast.is-clickable {
+  cursor: pointer;
+}
+
+.library-toast__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-toast__action {
+  flex: none;
+  padding: 4px 9px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.library-toast__action:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+@keyframes library-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+}
+
+/* ---- The Archive section (AR-03, AR-04) ---- */
+
+.archive {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.archive__header {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 56px 10px 20px;
+}
+
+.archive__heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.archive__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.archive__profile {
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: var(--hover);
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.archive__count {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.archive__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.archive__search {
+  position: relative;
+  flex: 1 1 220px;
+  min-width: 160px;
+  display: flex;
+  align-items: center;
+}
+
+.archive__search-icon {
+  position: absolute;
+  left: 10px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.archive__search-input {
+  width: 100%;
+  height: 32px;
+  padding: 0 30px 0 32px;
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--library-bg) 60%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  user-select: text;
+}
+
+.archive__search-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.archive__search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.archive__search-clear {
+  position: absolute;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  color: var(--text-muted);
+}
+
+.archive__search-clear:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.archive__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.archive__segments {
+  display: inline-flex;
+  margin: 0;
+  padding: 2px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--hover);
+}
+
+.archive__segment {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.archive__segment.is-active {
+  background: var(--active);
+  box-shadow: var(--active-shadow);
+  color: var(--text);
+}
+
+.archive__select {
+  height: 30px;
+  max-width: 180px;
+  padding: 0 8px;
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.archive__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.archive__button:hover {
+  background: var(--hover);
+}
+
+.archive__button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.archive__selection {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.archive__selection > span {
+  margin-right: auto;
+}
+
+.archive__selection button {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 6px;
+  background: var(--hover);
+  color: var(--text);
+}
+
+.archive__selection button:hover {
+  background: var(--active);
+}
+
+.archive__scroller {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 12px 24px;
+  outline: none;
+  contain: strict;
+}
+
+.archive__canvas {
+  position: relative;
+}
+
+.archive-day,
+.archive-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+.archive__scroller.is-animating .archive-day,
+.archive__scroller.is-animating .archive-row {
+  transition: transform 190ms var(--ease-spring);
+}
+
+.archive-day {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 36px;
+  padding: 0 8px 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.archive-day__count {
+  color: var(--text-muted);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.archive-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 8px;
+  border-radius: var(--radius-row);
+  contain: layout style;
+}
+
+.archive-row:hover {
+  background: var(--library-row-hover);
+}
+
+.archive-row.is-highlighted {
+  background: var(--library-row-highlight);
+}
+
+.archive-row.is-selected {
+  background: var(--library-row-selected);
+}
+
+.archive-row.is-leaving {
+  opacity: 0;
+  transform: translateX(-12px) !important;
+  transition:
+    opacity 140ms ease-out,
+    transform 140ms ease-out;
+  pointer-events: none;
+}
+
+.archive-row__icon {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+}
+
+.archive-row__text {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.archive-row__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archive-row__host {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.archive-row__split {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.archive-row__space {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 120px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.archive-row__space-icon {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.archive-row__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dot, var(--text-muted));
+}
+
+.archive-row__space-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archive-row__time {
+  grid-area: 1 / 4;
+  min-width: 56px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/*
+ * Restore shows on hover (and for the keyboard highlight) in place of the time (AR-03). It shares
+ * the time's grid cell and always takes its room, so it never covers the Space name.
+ */
+.archive-row__restore {
+  grid-area: 1 / 4;
+  justify-self: end;
+  display: inline-flex;
+  visibility: hidden;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 6px;
+  background: var(--active);
+  box-shadow: var(--active-shadow);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.archive-row:hover .archive-row__restore,
+.archive-row.is-highlighted .archive-row__restore {
+  visibility: visible;
+}
+
+.archive-row:hover .archive-row__time,
+.archive-row.is-highlighted .archive-row__time {
+  visibility: hidden;
+}
+
+.archive-row__restore:hover {
+  color: var(--accent);
+}
+
+.archive-row--placeholder {
+  pointer-events: none;
+}
+
+.archive-row__skeleton {
+  grid-column: 2;
+  width: 40%;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--hover);
+}
+
+.archive__empty {
+  position: absolute;
+  inset: 80px 24px auto;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.archive__empty p {
+  margin: 0 0 6px;
+}
+
+.archive__empty-title {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .archive__scroller.is-animating .archive-day,
+  .archive__scroller.is-animating .archive-row,
+  .archive-row.is-leaving {
+    transition: opacity 120ms linear;
+  }
+  .library-toast,
+  .library__content {
+    animation: none;
+  }
+}
+
+/* ---- Questions over the Library (AR-07 Clear Archive, AR-11 Restore Data) ---- */
+
+.library-dialog__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, #000000 18%, transparent);
+  animation: library-dialog-fade 140ms ease-out;
+}
+
+.library-dialog {
+  width: min(380px, 100%);
+  padding: 18px 18px 14px;
+  border-radius: 12px;
+  background: var(--surface, #ffffff);
+  color: var(--text);
+  box-shadow:
+    0 0 0 1px var(--divider),
+    0 14px 40px rgba(0, 0, 0, 0.26);
+  animation: library-dialog-in 180ms var(--ease-out);
+}
+
+.library-dialog__title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.library-dialog__body {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.library-dialog__body p {
+  margin: 0 0 6px;
+}
+
+.library-dialog__buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.library-dialog__button {
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.library-dialog__button:hover {
+  background: var(--hover);
+}
+
+.library-dialog__button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.library-dialog__button.is-primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.library-dialog__button.is-destructive {
+  background: #d63c3c;
+}
+
+.library-dialog__button.is-primary:hover {
+  filter: brightness(1.07);
+}
+
+@keyframes library-dialog-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes library-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.97);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-dialog__backdrop,
+  .library-dialog {
+    animation: none;
+  }
+}
+
+/* ---- History (AR-10): the Archive's list, without the Space column; × removes on hover ---- */
+
+.history-row {
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+}
+
+.history-row .history-row__time {
+  grid-area: 1 / 3;
+}
+
+.history-row__remove {
+  grid-area: 1 / 3;
+  justify-self: end;
+  display: grid;
+  visibility: hidden;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.history-row:hover .history-row__remove,
+.history-row.is-highlighted .history-row__remove,
+.history-row__remove:focus-visible {
+  visibility: visible;
+}
+
+.history-row:hover .history-row__time,
+.history-row.is-highlighted .history-row__time {
+  visibility: hidden;
+}
+
+.history-row__remove:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* ---- Backups (AR-11): a short list, laid out in flow (no virtual list) ---- */
+
+.backups__intro {
+  max-width: 620px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.backups__list {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 12px 24px;
+  outline: none;
+}
+
+.backups__day {
+  display: flex;
+  align-items: flex-end;
+  height: 36px;
+  padding: 0 8px 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.backup-row {
+  display: grid;
+  grid-template-columns: minmax(72px, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  height: 40px;
+  padding: 0 8px;
+  border-radius: var(--radius-row);
+}
+
+.backup-row:hover {
+  background: var(--library-row-hover);
+}
+
+.backup-row.is-highlighted {
+  background: var(--library-row-highlight);
+}
+
+.backup-row__time {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.backup-row__counts {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.backup-row__ago,
+.backup-row__restore {
+  grid-area: 1 / 3;
+  justify-self: end;
+}
+
+.backup-row__ago {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Restore… shows on hover and for the highlighted row, in place of the age (as in the Archive). */
+.backup-row__restore {
+  display: inline-flex;
+  visibility: hidden;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 6px;
+  background: var(--active);
+  box-shadow: var(--active-shadow);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.backup-row:hover .backup-row__restore,
+.backup-row.is-highlighted .backup-row__restore,
+.backup-row__restore:focus-visible {
+  visibility: visible;
+}
+
+.backup-row:hover .backup-row__ago,
+.backup-row.is-highlighted .backup-row__ago {
+  visibility: hidden;
+}
+
+.backup-row__restore:hover {
+  color: var(--accent);
+}
+
+.backup-row__restore:disabled,
+.archive__button:disabled {
+  opacity: 0.5;
+}
+
+/* A backup whose file can't be read stays listed, dimmed, with no Restore… (AR-11). */
+.backup-row.is-unreadable .backup-row__time {
+  color: var(--text-muted);
+}
+
+.backup-row.is-unreadable .backup-row__restore {
+  display: none;
+}
+
+.backup-row.is-unreadable:hover .backup-row__ago,
+.backup-row.is-unreadable.is-highlighted .backup-row__ago {
+  visibility: visible;
+}

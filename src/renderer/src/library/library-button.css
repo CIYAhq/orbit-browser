@@ -1,0 +1,9 @@
+/* The Library button in the sidebar's bottom bar (SB-09): a 28×28 target, like the "+" at the right. */
+.spacebar__library {
+  justify-self: start;
+}
+
+.spacebar__library.is-open {
+  background: var(--hover);
+  color: var(--text);
+}
