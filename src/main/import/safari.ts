@@ -1,6 +1,5 @@
 import type { BookmarkNode } from '../../shared/commands/import'
-import { MAX_DEPTH } from './chromium'
-import { bookmark } from './netscape'
+import { bookmark, MAX_DEPTH } from './netscape'
 
 /**
  * Safari's files (macOS only): `Bookmarks.plist`, a binary property list, and `History.db`. Reading

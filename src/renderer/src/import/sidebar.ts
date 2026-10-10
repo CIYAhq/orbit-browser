@@ -1,5 +1,5 @@
 import type { ClipboardEvent as ReactClipboardEvent, DragEvent as ReactDragEvent } from 'react'
-import { parseLinkList } from '../../../shared/commands/import'
+import { MAX_FILE_BYTES, type ParsedFile, parseLinkList, TOO_LARGE } from '../../../shared/commands/import'
 import { pageMayOpen } from '../../../shared/link-routing'
 import { engineForSpace, parseInput } from '../../../shared/url'
 import { invoke } from '../api'
@@ -9,7 +9,8 @@ import { prefersReducedMotion } from '../theme'
 
 /** Files the import flow can read (IM-13): a bookmarks file, or a list of links. */
 const IMPORTABLE = /\.(html?|txt)$/i
-const MAX_BYTES = 64 * 1024 * 1024
+/** A paste is looked at this far for two links: a list's first two are well within it (D58). */
+const PASTE_LOOK = 256 * 1024
 
 /**
  * A bookmarks file (or a list of links) dropped on the sidebar opens the import flow at its
@@ -23,10 +24,16 @@ export function importDroppedFile(e: ReactDragEvent, text: string, spaceId: stri
   if (!file) return false
   e.preventDefault()
   void (async () => {
-    const parsed =
-      file.size > MAX_BYTES
-        ? ({ kind: 'error', name: file.name, message: 'No bookmarks found in this file' } as const)
-        : await invoke('import.parseFile', { name: file.name, text: await file.text() })
+    // A file over the limit isn't read at all (F2); one that can't be read says so in the import window (F1).
+    let parsed: ParsedFile
+    try {
+      parsed =
+        file.size > MAX_FILE_BYTES
+          ? { kind: 'error', name: file.name, message: TOO_LARGE }
+          : await invoke('import.parseFile', { name: file.name, text: await file.text() })
+    } catch {
+      parsed = { kind: 'error', name: file.name, message: 'Orbit couldn’t read this file' }
+    }
     if (parsed.kind === 'error' && text) {
       const { url } = parseInput(text, engineForSpace(getOrbitState(), spaceId))
       // As a dropped link (SidebarItems' onLinkDrop): a web page may have offered it, so a local
@@ -52,7 +59,8 @@ export function importPastedLinks(e: ReactClipboardEvent): boolean {
   const el = e.target instanceof Element ? e.target : null
   if (el?.closest('input, textarea, [contenteditable]:not([contenteditable="false"])')) return false
   const text = e.clipboardData.getData('text/plain')
-  if (!text || parseLinkList(text).links.length < 2) return false
+  // Read here, in the browser window: only the start, and only until two links are found (D58).
+  if (!text || parseLinkList(text.slice(0, PASTE_LOOK), 2).links.length < 2) return false
   e.preventDefault()
   void invoke('import.open', { start: { kind: 'links', text } })
   return true

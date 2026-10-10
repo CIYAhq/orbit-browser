@@ -3,6 +3,9 @@ import { memo, useMemo, useState } from 'react'
 import type { BookmarkNode } from '../../../shared/commands/import'
 import { leafKey, leafKeys, type TreeRoot } from './tree'
 
+/** A top-level folder holding more bookmarks than this starts closed (F5). */
+const OPEN_UP_TO = 1000
+
 function hostOf(url: string): string {
   try {
     return new URL(url).host.replace(/^www\./, '')
@@ -13,8 +16,9 @@ function hostOf(url: string): string {
 
 /**
  * A source's bookmark tree with checkboxes (IM-04). A folder's box sets every bookmark in it, and
- * shows mixed when only some are chosen. Folders below the top level start closed, so a big tree
- * draws only what is opened.
+ * shows mixed when only some are chosen. Folders below the top level start closed, and so does one
+ * holding over 1,000 bookmarks (as the sidebar does), so a big tree draws only what is opened. The
+ * list isn't virtualized: an opened big folder, or a long top-level list, draws every row (F5).
  */
 export function BookmarkTree({
   roots,
@@ -103,8 +107,8 @@ const FolderRow = memo(function FolderRow({
   depth: number
   ctx: RowContext
 }) {
-  const [open, setOpen] = useState(depth === 0)
   const keys = ctx.leavesOf(root, node)
+  const [open, setOpen] = useState(() => depth === 0 && keys.length <= OPEN_UP_TO)
   let chosen = 0
   for (const k of keys) if (ctx.selected.has(k)) chosen++
   const all = keys.length > 0 && chosen === keys.length

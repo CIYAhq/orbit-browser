@@ -91,7 +91,8 @@ export type ImportPlan = (
       sourceId: string
       profiles: { profileId: string; types: ImportDataType[]; bookmarks?: BookmarkNode[] }[]
     }
-  | { kind: 'file'; name: string; bookmarks: BookmarkNode[] }
+  /** `cut`: the file's bookmarks past the limit of one import, left out when it was read (IM-14). */
+  | { kind: 'file'; name: string; bookmarks: BookmarkNode[]; cut?: number }
   /** A pasted list of links (IM-12), or a .txt file's (`name`, IM-13). */
   | { kind: 'links'; folderName: string; text: string; name?: string }
 ) & {
@@ -142,9 +143,18 @@ export interface ImportJob {
   suggestions?: StarterSuggestion[]
 }
 
-/** A file dropped or chosen (IM-13), read. */
+/** Files larger than this aren't bookmark files (IM-13). */
+export const MAX_FILE_BYTES = 64 * 1024 * 1024
+/** What every route says of a file over `MAX_FILE_BYTES`, before reading it (F2). */
+export const TOO_LARGE = 'This file is too large to be a bookmarks file (the limit is 64 MB)'
+
+/**
+ * A file dropped or chosen (IM-13), read in a worker (D58). A bookmarks file's tree comes as JSON text (`json`, a
+ * `BookmarkNode[]`): main passes it on without reading it, so a big tree costs main's thread only a copy. `cut`: its
+ * bookmarks past the limit of one import, left out (IM-14).
+ */
 export type ParsedFile =
-  | { kind: 'bookmarks'; name: string; tree: BookmarkNode[]; count: number }
+  | { kind: 'bookmarks'; name: string; json: string; count: number; cut: number }
   | { kind: 'links'; name: string; text: string; count: number }
   | { kind: 'error'; name: string; message: string }
 
@@ -216,6 +226,15 @@ const TITLE_SEPARATORS = [' — ', ' – ', ' - ', '\t', ' | ']
 const SCHEME_URL = /^https?:\/\/[^\s/$.?#][^\s]*$/i
 const BARE_URL = /^(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?::\d+)?(?:[/?#][^\s]*)?$/i
 
+/** "[title](address)": the last "](" splits it, so a line is searched once, not once per "](" (D58). */
+function markdownLink(line: string): { title: string; target: string } | undefined {
+  if (!line.startsWith('[') || !line.endsWith(')')) return undefined
+  const mid = line.lastIndexOf('](')
+  if (mid < 1) return undefined
+  const target = line.slice(mid + 2, -1)
+  return target && !/\s/.test(target) ? { title: line.slice(1, mid), target } : undefined
+}
+
 function asUrl(text: string): string | undefined {
   const t = text.trim().replace(/^<(.+)>$/, '$1')
   if (SCHEME_URL.test(t)) return t
@@ -226,17 +245,20 @@ function asUrl(text: string): string | undefined {
 /**
  * A pasted list of links (IM-12): one URL per line, or "Title — URL" lines (an em or en dash, a
  * hyphen, a bar or a tab between), or Markdown links. Lines that aren't links are counted, not kept.
+ * Linear in the text's size (D58): each line is read a fixed number of times. `upTo` stops once that many links
+ * are found.
  */
-export function parseLinkList(text: string): { links: ParsedLink[]; skipped: number } {
+export function parseLinkList(text: string, upTo = Number.POSITIVE_INFINITY): { links: ParsedLink[]; skipped: number } {
   const links: ParsedLink[] = []
   let skipped = 0
   for (const raw of text.split(/\r?\n/)) {
+    if (links.length >= upTo) break
     const line = raw.trim().replace(/^[-*•]\s+/, '')
     if (!line) continue
-    const md = /^\[(.*)\]\((\S+)\)$/.exec(line)
-    const whole = md ? asUrl(md[2] as string) : asUrl(line)
+    const md = markdownLink(line)
+    const whole = asUrl(md ? md.target : line)
     if (whole) {
-      links.push(md?.[1] ? { url: whole, title: md[1] } : { url: whole })
+      links.push(md?.title ? { url: whole, title: md.title } : { url: whole })
       continue
     }
     let found: ParsedLink | undefined

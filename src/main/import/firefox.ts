@@ -1,7 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import type { BookmarkNode } from '../../shared/commands/import'
-import { MAX_DEPTH } from './chromium'
-import { bookmark } from './netscape'
+import { buildTree, type SourceItem } from './netscape'
 
 /**
  * Firefox's files: `profiles.ini` lists the profiles; each keeps its bookmarks and history in
@@ -72,25 +71,21 @@ export function firefoxBookmarks(rows: readonly PlacesRow[]): BookmarkNode[] {
   }
   for (const list of children.values()) list.sort((a, b) => a.position - b.position)
   let seq = 0
-  const walk = (parent: number, depth: number): BookmarkNode[] => {
-    if (depth > MAX_DEPTH) return []
-    const out: BookmarkNode[] = []
-    for (const r of children.get(parent) ?? []) {
-      const title = (r.title ?? '').trim()
-      if (r.type === 2)
-        out.push({ id: `f${seq++}`, title: title || 'Untitled folder', children: walk(r.id, depth + 1) })
-      else if (r.type === 1 && r.url)
-        out.push(bookmark(`f${seq++}`, title || (r.pageTitle ?? '').trim() || r.url, r.url))
-    }
-    return out
+  const id = () => `f${seq++}`
+  // A damaged file can make a folder its own ancestor: buildTree reads each list once.
+  const read = (r: PlacesRow): SourceItem<PlacesRow> => {
+    const title = (r.title ?? '').trim()
+    if (r.type === 2) return { title, children: children.get(r.id) ?? [] }
+    if (r.type === 1 && r.url) return { title: title || (r.pageTitle ?? '').trim() || r.url, url: r.url }
+    return undefined
   }
   const byGuid = new Map(rows.map((r) => [r.guid, r]))
   return ROOTS.map(([guid, title]) => {
     const root = byGuid.get(guid)
-    return { title, children: root ? walk(root.id, 1) : [] }
+    return { title, children: root ? buildTree(children.get(root.id) ?? [], 1, id, read) : [] }
   })
     .filter((root) => root.children.length > 0)
-    .map((root) => ({ id: `f${seq++}`, ...root }))
+    .map((root) => ({ id: id(), ...root }))
 }
 
 export function readFirefoxBookmarks(db: DatabaseSync): BookmarkNode[] {

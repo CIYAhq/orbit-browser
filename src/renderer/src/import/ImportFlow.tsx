@@ -1,17 +1,20 @@
 import { ArrowRight, ClipboardList, FileUp, HelpCircle } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type {
-  ImportDataType,
-  ImportJob,
-  ImportPlan,
-  ImportSession,
-  ImportSource,
-  ImportStart,
-  ImportTarget,
-  Inspection,
-  ParsedFile,
+import {
+  type BookmarkNode,
+  type ImportDataType,
+  type ImportJob,
+  type ImportPlan,
+  type ImportSession,
+  type ImportSource,
+  type ImportStart,
+  type ImportTarget,
+  type Inspection,
+  MAX_FILE_BYTES,
+  type ParsedFile,
+  parseLinkList,
+  TOO_LARGE,
 } from '../../../shared/commands/import'
-import { parseLinkList } from '../../../shared/commands/import'
 import { invoke } from '../api'
 import { useOrbit } from '../store'
 import { BookmarkTree } from './BookmarkTree'
@@ -33,6 +36,15 @@ const STEP_TITLES: Record<StepId, string> = {
   target: 'Where should it go?',
   progress: 'Importing',
 }
+
+/** A bookmarks file, read (IM-13): its tree, and its bookmarks left out past the limit of one import. */
+interface FileTree {
+  name: string
+  tree: BookmarkNode[]
+  cut: number
+}
+
+const UNREADABLE = 'Orbit couldn’t read this file'
 
 interface Target {
   spaceId: string
@@ -67,7 +79,7 @@ export function ImportFlow({
   const [profileIds, setProfileIds] = useState<string[]>([])
   const [inspection, setInspection] = useState<Inspection | 'loading'>()
   const [types, setTypes] = useState<ImportDataType[]>([])
-  const [file, setFile] = useState<Extract<ParsedFile, { kind: 'bookmarks' }>>()
+  const [file, setFile] = useState<FileTree>()
   const [fileError, setFileError] = useState<string>()
   const [linksText, setLinksText] = useState('')
   /** The .txt file the links came from (IM-13), if they weren't pasted. */
@@ -91,6 +103,9 @@ export function ImportFlow({
     }))
   }, [route, file, inspection])
   const allKeys = useMemo(() => roots.flatMap((r) => leafKeys(r.key, r.nodes)), [roots])
+  // Each new tree is drawn afresh: which folders are open isn't carried over from another file's.
+  const treeSeq = useRef({ roots, n: 0 })
+  if (treeSeq.current.roots !== roots) treeSeq.current = { roots, n: treeSeq.current.n + 1 }
 
   const steps = useMemo((): StepId[] => {
     if (route === 'file') return ['source', 'bookmarks', 'target', 'progress']
@@ -133,7 +148,8 @@ export function ImportFlow({
       return
     }
     setRoute('file')
-    setFile(parsed)
+    // The tree comes as JSON text, which main passed on without reading (D58).
+    setFile({ name: parsed.name, tree: JSON.parse(parsed.json) as BookmarkNode[], cut: parsed.cut })
     go('bookmarks')
   }
 
@@ -161,10 +177,18 @@ export function ImportFlow({
     [],
   )
 
-  const chooseFile = async () => {
-    const parsed = await invoke('import.chooseFile', {})
+  /** Reads a file, saying so when that fails (F1). */
+  const readFile = async (name: string, read: () => Promise<ParsedFile | null>) => {
+    let parsed: ParsedFile | null
+    try {
+      parsed = await read()
+    } catch {
+      parsed = { kind: 'error', name, message: UNREADABLE }
+    }
     if (parsed) openFile(parsed)
   }
+
+  const chooseFile = () => readFile('file', () => invoke('import.chooseFile', {}))
 
   // Inspect the chosen profiles when they change (IM-03).
   const inspect = useCallback(async (id: string, profiles: string[]) => {
@@ -245,7 +269,15 @@ export function ImportFlow({
         : { kind: 'space', spaceId: target.spaceId }
     const hold = embedded ? { hold: true } : {}
     if (route === 'file' && file) {
-      return { kind: 'file', name: file.name, bookmarks: filterTree(file.tree, '', selected), target: t, ...hold }
+      const bookmarks = filterTree(file.tree, '', selected)
+      return {
+        kind: 'file',
+        name: file.name,
+        bookmarks,
+        ...(file.cut > 0 ? { cut: file.cut } : {}),
+        target: t,
+        ...hold,
+      }
     }
     if (route === 'links') {
       const name = linksFile ? { name: linksFile } : {}
@@ -296,7 +328,12 @@ export function ImportFlow({
     const f = e.dataTransfer.files[0]
     if (!f || step === 'progress') return
     e.preventDefault()
-    openFile(await invoke('import.parseFile', { name: f.name, text: await f.text() }))
+    // A file over the limit isn't read at all (F2).
+    if (f.size > MAX_FILE_BYTES) {
+      openFile({ kind: 'error', name: f.name, message: TOO_LARGE })
+      return
+    }
+    await readFile(f.name, async () => invoke('import.parseFile', { name: f.name, text: await f.text() }))
   }
 
   // Enter is Next and Escape is Back (the window: Escape on the first step cancels). In onboarding the
@@ -409,7 +446,7 @@ export function ImportFlow({
                 Select none
               </button>
             </div>
-            <BookmarkTree roots={roots} selected={selected} onChange={setSelected} />
+            <BookmarkTree key={treeSeq.current.n} roots={roots} selected={selected} onChange={setSelected} />
           </>
         )}
         {step === 'links' && (

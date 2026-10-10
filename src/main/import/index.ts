@@ -1,14 +1,17 @@
-import { readFile, stat, writeFile } from 'node:fs/promises'
+import { stat, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { app, BrowserWindow, dialog } from 'electron'
 import { ACTIONS_BY_ID } from '../../shared/actions'
-import type {
-  ImportDataType,
-  ImportPlan,
-  ImportProgressItem,
-  ImportSource,
-  Inspection,
-  ParsedFile,
+import {
+  type ImportDataType,
+  type ImportPlan,
+  type ImportProgressItem,
+  type ImportSkip,
+  type ImportSource,
+  type Inspection,
+  MAX_FILE_BYTES,
+  type ParsedFile,
+  TOO_LARGE,
 } from '../../shared/commands/import'
 import type { WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
@@ -17,11 +20,12 @@ import type { CallContext } from '../registry'
 import { type FoundSource, findSources, inspectProfile, publicSource } from './browsers'
 import { withScratch } from './copy'
 import { pinnedExport } from './export'
-import { cleanTree, FILE_FOLDER_NAME, LINKS_FOLDER_NAME, linkNodes, MAX_FILE_BYTES, parseFile } from './files'
+import { cleanTree, FILE_FOLDER_NAME, LINKS_FOLDER_NAME, OVER_LIMIT } from './files'
 import { historyTask } from './history'
 import { ImportJobs, type Task } from './jobs'
 import { countBookmarks, NO_BOOKMARKS, writeBookmarksHtml } from './netscape'
 import { importPlaces } from './places'
+import { readFileOffMain, readLinksOffMain, UNREADABLE } from './reader'
 import { IMPORT_WINDOW_ID, ImportWindow } from './window'
 
 export function registerImport(ctx: MainContext, history: HistoryService): void {
@@ -70,11 +74,12 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
     })
     return { sourceId: source.id, browser: source.browser, name: source.name, profiles }
   })
-  commands.register('import.parseFile', ({ name, text }): ParsedFile => {
+  // A file is read in a worker, never on main's thread (D58).
+  commands.register('import.parseFile', async ({ name, text }): Promise<ParsedFile> => {
     const file = typeof name === 'string' ? basename(name) : 'file'
-    if (typeof text !== 'string' || text.length > MAX_FILE_BYTES)
-      return { kind: 'error', name: file, message: NO_BOOKMARKS }
-    return parseFile(file, text)
+    if (typeof text !== 'string') return { kind: 'error', name: file, message: NO_BOOKMARKS }
+    if (text.length > MAX_FILE_BYTES) return { kind: 'error', name: file, message: TOO_LARGE }
+    return readFileOffMain({ op: 'file', name: file, text })
   })
   commands.register('import.chooseFile', async (_args, c): Promise<ParsedFile | null> => {
     const parent = (c.windowId === IMPORT_WINDOW_ID ? win.window : undefined) ?? BrowserWindow.getFocusedWindow()
@@ -91,11 +96,11 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
     if (!path) return null
     const name = basename(path)
     try {
-      if ((await stat(path)).size > MAX_FILE_BYTES) return { kind: 'error', name, message: NO_BOOKMARKS }
-      return parseFile(name, await readFile(path, 'utf8'))
+      if ((await stat(path)).size > MAX_FILE_BYTES) return { kind: 'error', name, message: TOO_LARGE }
     } catch {
-      return { kind: 'error', name, message: 'Orbit couldn’t read this file' }
+      return { kind: 'error', name, message: UNREADABLE }
     }
+    return readFileOffMain({ op: 'path', name, path })
   })
 
   commands.register('import.start', async ({ plan }, c) => {
@@ -106,6 +111,12 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
       done: 0,
       ...(total !== undefined ? { total } : {}),
     })
+    /** Bookmarks (or links) past the limit of one import, as a summary line (IM-14). */
+    const overLimit = (count: number, [one, many] = ['bookmark', 'bookmarks']): ImportSkip => ({
+      what: count === 1 ? one : many,
+      count,
+      reason: OVER_LIMIT,
+    })
     if (p?.kind === 'file') {
       const bookmarks = item('bookmarks')
       const tasks: Task[] = [
@@ -114,9 +125,12 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
           // The tree comes back from the import window: checked again, a turn after the call returns.
           read: async (job) => {
             await new Promise((resolve) => setImmediate(resolve))
-            const nodes = cleanTree(p.bookmarks)
+            const { nodes, cut } = cleanTree(p.bookmarks)
             bookmarks.total = countBookmarks(nodes)
             job.bookmarks.set('', [{ title: '', nodes }])
+            // Left out when the file was read, and now (only a window that sent more than it was given).
+            const fromFile = typeof p.cut === 'number' && p.cut > 0 ? Math.min(Math.floor(p.cut), 1e9) : 0
+            jobs.addSkips(job, [overLimit(fromFile + cut)])
           },
           add: async (job) => jobs.addBookmarks(job, bookmarks),
         },
@@ -133,11 +147,14 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
         {
           item: links,
           read: async (job) => {
-            await new Promise((resolve) => setImmediate(resolve))
-            const { nodes, lines } = linkNodes(typeof p.text === 'string' ? p.text : '')
+            // Read in a worker (D58); main takes the answer a part at a time.
+            const { nodes, lines, cut } = await readLinksOffMain(typeof p.text === 'string' ? p.text : '')
             links.total = countBookmarks(nodes)
             job.bookmarks.set('', [{ title: '', nodes }])
-            jobs.addSkips(job, [{ what: lines === 1 ? 'line' : 'lines', count: lines, reason: 'Not a link' }])
+            jobs.addSkips(job, [
+              { what: lines === 1 ? 'line' : 'lines', count: lines, reason: 'Not a link' },
+              overLimit(cut, ['link', 'links']),
+            ])
           },
           add: async (job) => jobs.addBookmarks(job, links),
         },
@@ -161,11 +178,14 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
           read: async (job) => {
             await new Promise((resolve) => setImmediate(resolve))
             bookmarks.total = 0
+            let cut = 0
             for (const x of withMarks) {
-              const nodes = cleanTree(x.bookmarks)
-              bookmarks.total += countBookmarks(nodes)
-              job.bookmarks.set(x.profile.id, [{ title: '', nodes }])
+              const clean = cleanTree(x.bookmarks)
+              bookmarks.total += countBookmarks(clean.nodes)
+              cut += clean.cut
+              job.bookmarks.set(x.profile.id, [{ title: '', nodes: clean.nodes }])
             }
+            jobs.addSkips(job, [overLimit(cut)])
           },
           add: async (job) => jobs.addBookmarks(job, bookmarks),
         })

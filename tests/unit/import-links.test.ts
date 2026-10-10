@@ -57,7 +57,7 @@ describe('[IM-12] a pasted list of links', () => {
       ['Five', 'https://example.com/page/Five'],
     ])
     expect(lines).toBe(1)
-    expect(linkNodes('nothing here\nat all')).toEqual({ nodes: [], lines: 2 })
+    expect(linkNodes('nothing here\nat all')).toEqual({ nodes: [], lines: 2, cut: 0 })
   })
 
   it('makes one pinned folder, named by the user, with a pinned tab per link in order', () => {

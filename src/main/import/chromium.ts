@@ -1,12 +1,10 @@
 import type { BookmarkNode } from '../../shared/commands/import'
-import { bookmark } from './netscape'
+import { buildTree, type SourceItem } from './netscape'
 
 /**
  * The Chromium family's files (Chrome, Chromium, Brave, Edge, Vivaldi, Opera): `Local State` names
  * the profiles; each profile keeps `Bookmarks` (JSON). Pure, so it is unit-tested on fixtures.
  */
-
-export const MAX_DEPTH = 64
 
 /** A profile as its browser lists it: its folder and the name the user gave it. */
 export interface ProfileEntry {
@@ -59,20 +57,15 @@ interface RawNode {
 export function chromiumBookmarks(json: string): BookmarkNode[] {
   const data = JSON.parse(json) as { roots?: Record<string, RawNode | undefined> } | null
   let seq = 0
-  const walk = (list: unknown, depth: number): BookmarkNode[] => {
-    if (!Array.isArray(list) || depth > MAX_DEPTH) return []
-    const out: BookmarkNode[] = []
-    for (const n of list as (RawNode | null)[]) {
-      const title = typeof n?.name === 'string' ? n.name.trim() : ''
-      if (n?.type === 'folder') {
-        out.push({ id: `b${seq++}`, title: title || 'Untitled folder', children: walk(n.children, depth + 1) })
-      } else if (n?.type === 'url' && typeof n.url === 'string' && n.url) {
-        out.push(bookmark(`b${seq++}`, title || n.url, n.url))
-      }
-    }
-    return out
+  const id = () => `b${seq++}`
+  const list = (v: unknown): (RawNode | null)[] => (Array.isArray(v) ? v : [])
+  const read = (n: RawNode | null): SourceItem<RawNode | null> => {
+    const title = typeof n?.name === 'string' ? n.name.trim() : ''
+    if (n?.type === 'folder') return { title, children: list(n.children) }
+    if (n?.type === 'url' && typeof n.url === 'string' && n.url) return { title: title || n.url, url: n.url }
+    return undefined
   }
-  return ROOTS.map(([key, title]) => ({ title, children: walk(data?.roots?.[key]?.children, 1) }))
+  return ROOTS.map(([key, title]) => ({ title, children: buildTree(list(data?.roots?.[key]?.children), 1, id, read) }))
     .filter((root) => root.children.length > 0)
-    .map((root) => ({ id: `b${seq++}`, ...root }))
+    .map((root) => ({ id: id(), ...root }))
 }

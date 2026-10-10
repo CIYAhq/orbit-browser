@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { FIXTURE_ROOT, manyBookmarks, netscapeHtml, sampleTree } from '../../scripts/import-fixtures'
 import { cleanTree, parseFile } from '../../src/main/import/files'
 import {
+  cleanText,
   countAll,
   countBookmarks,
   decodeEntities,
@@ -15,6 +16,19 @@ import {
 import type { BookmarkNode } from '../../src/shared/commands/import'
 
 const fixture = (name: string) => readFileSync(join(FIXTURE_ROOT, 'files', name), 'utf8')
+
+/** How many folders deep the deepest bookmark is. */
+function depthOf(nodes: readonly BookmarkNode[]): number {
+  let deepest = 0
+  const lists: [readonly BookmarkNode[], number][] = [[nodes, 0]]
+  for (let at = lists.pop(); at; at = lists.pop()) {
+    for (const n of at[0]) {
+      if (n.children) lists.push([n.children, at[1] + 1])
+      else deepest = Math.max(deepest, at[1])
+    }
+  }
+  return deepest
+}
 
 /** The tree as titles and addresses, ids left out. */
 function shape(nodes: readonly BookmarkNode[]): unknown[] {
@@ -87,6 +101,52 @@ describe('[IM-13] reading a bookmarks file', () => {
     expect(parseBookmarksHtml('')).toBeUndefined()
   })
 
+  it('[D58] keeps each title to its own item when a file leaves out </A> and </H3>', () => {
+    const html = [
+      '<!DOCTYPE NETSCAPE-Bookmark-file-1>',
+      '<DL><p>',
+      '<DT><H3>Folder',
+      '<DL><p>',
+      '<DT><A HREF="https://a.example/">A title',
+      '<DD>What A is about',
+      '<DT><A HREF="https://b.example/"><B>B</B> title',
+      '</DL><p>',
+      '<DT><A HREF="https://c.example/">C title</A>',
+      '</DL>',
+    ].join('\n')
+    expect(shape(parseBookmarksHtml(html) ?? [])).toEqual([
+      { Folder: ['A title <https://a.example/>', 'B title <https://b.example/>'] },
+      'C title <https://c.example/>',
+    ])
+  })
+
+  it('[D58] cuts a title to 1,000 characters, never inside a character', () => {
+    const html = (title: string) =>
+      `<!DOCTYPE NETSCAPE-Bookmark-file-1><DL><DT><A HREF="https://x.example/">${title}</A></DL>`
+    expect(parseBookmarksHtml(html('t'.repeat(5000)))?.[0]?.title).toBe('t'.repeat(1000))
+    expect(parseBookmarksHtml(html(`${'t'.repeat(999)}😀`))?.[0]?.title).toBe('t'.repeat(999))
+    expect(cleanText(`<${'<'.repeat(10)}b>x`)).toBe(`${'<'.repeat(10)}x`)
+  })
+
+  it('[F1] reads a file nested 2,000 or 50,000 folders deep, flattening it into the 64th folder', () => {
+    for (const levels of [2000, 50_000]) {
+      const html = `<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<DL><p>\n${'<DT><H3>Deeper</H3>\n<DL><p>\n'.repeat(levels)}<DT><A HREF="https://deep.example/">Deep</A>\n<DT><A HREF="javascript:void 0">Script</A>\n${'</DL><p>\n'.repeat(levels)}<DT><A HREF="https://top.example/">Top</A>\n</DL>`
+      const read = parseFile('deep.html', html)
+      expect(read).toMatchObject({ kind: 'bookmarks', count: 2, cut: 0 })
+      const tree = read.kind === 'bookmarks' ? read.tree : []
+      expect(depthOf(tree)).toBe(64)
+      expect(countAll(tree)).toBe(3)
+      // The file's order is kept: the deep ones, then the one after all the folders.
+      expect(shape(tree).at(-1)).toBe('Top <https://top.example/>')
+      expect(JSON.parse(JSON.stringify(tree))).toEqual(tree)
+    }
+  })
+
+  it('[F3] counts the bookmarks of a file past 200,000, without keeping them', () => {
+    const html = `<!DOCTYPE NETSCAPE-Bookmark-file-1><DL>${'<DT><A HREF="https://example.com/">A</A>'.repeat(200_010)}</DL>`
+    expect(parseFile('many.html', html)).toMatchObject({ kind: 'bookmarks', count: 200_000, cut: 10 })
+  })
+
   it('reads what a cut-off file holds, up to where it stops', () => {
     const whole = fixture('bookmarks.htm')
     const cut = whole.slice(0, whole.indexOf('Morning paper'))
@@ -153,7 +213,7 @@ describe('[IM-13] a dropped or chosen file', () => {
   })
 
   it('checks a tree sent back by the import window again', () => {
-    const tree = cleanTree([
+    const { nodes: tree, cut } = cleanTree([
       { id: 'x', title: 'Folder', children: [{ id: 'y', title: 'Ok', url: 'https://ok.example/' }] },
       { id: 'z', title: 'Script', url: 'javascript:void 0' },
       { title: 42, url: 7 },
@@ -165,10 +225,25 @@ describe('[IM-13] a dropped or chosen file', () => {
       'Script (skip: Bookmarklet (a script, not a page))',
       expect.stringContaining('<https://untitled.example/page>'),
     ])
-    // Deeper than any real file: cut off.
-    let deep: unknown = [{ title: 'leaf', url: 'https://leaf.example/' }]
-    for (let i = 0; i < 100; i++) deep = [{ title: `f${i}`, children: deep }]
-    expect(countBookmarks(cleanTree(deep))).toBe(0)
+    expect(cut).toBe(0)
+  })
+
+  it('[F1] flattens folders deeper than 64 into the deepest one kept, at any depth, as reading a file does', () => {
+    for (const levels of [100, 50_000]) {
+      let deep: unknown = [{ title: 'leaf', url: 'https://leaf.example/' }]
+      for (let i = 0; i < levels; i++) deep = [{ title: `f${i}`, children: deep }]
+      const { nodes, cut } = cleanTree(deep)
+      expect(countBookmarks(nodes)).toBe(1)
+      expect(cut).toBe(0)
+      expect(depthOf(nodes)).toBe(64)
+    }
+  })
+
+  it('[F3] counts the bookmarks past 200,000 that it leaves out', () => {
+    const many = Array.from({ length: 200_010 }, (_, i) => ({ title: `b${i}`, url: `https://example.com/${i}` }))
+    const { nodes, cut } = cleanTree([{ title: 'All', children: many }])
+    expect(countBookmarks(nodes)).toBe(199_999)
+    expect(cut).toBe(11)
   })
 })
 

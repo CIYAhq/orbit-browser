@@ -215,6 +215,71 @@ test('[IM-13] a file with no bookmarks dropped with a local address opens no tab
   expect(await localTabs()).toEqual([])
 })
 
+test('[IM-13] hostile files of 1 MB are read off main’s thread: main never stalls 150 ms, and each says what it holds (D58)', async () => {
+  test.setTimeout(180_000)
+  orbit = await launchImport()
+  const { app } = orbit
+  const page = await openImport(app)
+  // The import review's shapes (M1), each 1 MB. Before D58 the first stalled main for seconds and the others for
+  // minutes: each scan searched to the end of the file from every tag, title or "](".
+  const MB = 1024 * 1024
+  const fill = (unit: string) => unit.repeat(Math.ceil(MB / unit.length))
+  const head = (folder: string) =>
+    `<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<TITLE>Bookmarks</TITLE>\n<DL><p>\n<DT><H3>${folder}</H3>\n<DL><p>\n`
+  const link = '<DT><A HREF="https://example.com/page">A page\n'
+  const folder = '<DT><H3>A folder\n<DL><p>\n<DT><A HREF="https://example.com/">A page</A>\n</DL><p>\n'
+  const count = (unit: string) => Math.ceil(MB / unit.length).toLocaleString('en-US')
+  const files: { name: string; text: string; type?: string; holds: string }[] = [
+    { name: 'no-close-a.html', text: head('Links') + fill(link), holds: `${count(link)} bookmarks` },
+    { name: 'no-close-h3.html', text: head('Folders') + fill(folder), holds: `${count(folder)} bookmarks` },
+    { name: 'open-a.html', text: `${head('Open')}<DT>${fill('<a ')}`, holds: 'none' },
+    {
+      name: 'title.html',
+      text: `${head('Title')}<DT><A HREF="https://example.com/">${'<'.repeat(MB)}</A>\n</DL>`,
+      holds: '1 bookmarks',
+    },
+    { name: 'brackets.txt', text: `[${fill('](')}`, type: 'text/plain', holds: 'none' },
+  ]
+  // Best of three rounds, each against the whole budget (D46). A round ends at the first file that misses it.
+  const rounds: Record<string, number>[] = []
+  for (let round = 0; round < 3; round++) {
+    const stalls: Record<string, number> = {}
+    rounds.push(stalls)
+    for (const file of files) {
+      await startMainLag(app)
+      await dropFile(page, '[data-testid="import-flow"]', file)
+      if (file.holds === 'none') {
+        await expect(page.getByTestId('import-file-error')).toHaveText(
+          `${file.name}: No bookmarks found in this file`,
+          {
+            timeout: 60_000,
+          },
+        )
+      } else {
+        const n = file.holds.split(' ')[0]
+        await expect(page.getByTestId('import-count')).toHaveText(`${n} of ${n} bookmarks selected`, {
+          timeout: 60_000,
+        })
+      }
+      stalls[file.name] = await mainLagMs(app)
+      if ((stalls[file.name] as number) >= 150) break
+    }
+    if (Object.keys(stalls).length === files.length && Object.values(stalls).every((ms) => ms < 150)) break
+  }
+  console.log(`[IM-13] main's longest stall per 1 MB hostile file, by round: ${JSON.stringify(rounds)}`)
+  const best = rounds.at(-1) as Record<string, number>
+  expect(Object.keys(best), JSON.stringify(rounds)).toEqual(files.map((f) => f.name))
+  expect(Math.max(...Object.values(best)), JSON.stringify(rounds)).toBeLessThan(150)
+  // The title of a million "<" is cut to 1,000 characters; a folder holding over 1,000 bookmarks starts closed (F5).
+  const title = files[3] as (typeof files)[number]
+  await dropFile(page, '[data-testid="import-flow"]', title)
+  await expect(page.getByTestId('import-count')).toHaveText('1 of 1 bookmarks selected')
+  await expect(page.getByTestId('import-tree-bookmark').locator('.im-tree__title')).toHaveText('<'.repeat(1000))
+  await dropFile(page, '[data-testid="import-flow"]', files[0] as (typeof files)[number])
+  await expect(page.getByTestId('import-tree-folder').getByRole('button', { name: 'Open Links' })).toBeVisible()
+  await expect(page.getByTestId('import-tree-bookmark')).toHaveCount(0)
+})
+
 test('[IM-05][IM-14] 2,000 bookmarks: one closed folder, nothing loaded, quick, and the window stays responsive', async () => {
   server = await loggedServer()
   const html = netscapeHtml(manyBookmarks(2000, server.url('')))
