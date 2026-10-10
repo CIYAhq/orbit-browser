@@ -696,6 +696,7 @@ export function registerMiniWindow(ctx: MainContext): void {
     if (!mini) return false
     switch (id) {
       case 'tab.close':
+      case 'window.close':
         closeWindow(mini)
         return true
       case 'peek.expand':

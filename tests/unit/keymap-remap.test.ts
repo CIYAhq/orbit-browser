@@ -158,7 +158,7 @@ describe('[KS-01][ST-08] changing bindings', () => {
     let custom = {}
     for (const n of [1, 2, 3, 4]) custom = bind(custom, { actionId: 'tab.new', accel: `F${n}` }, 'darwin').custom
     expect(custom).toEqual({ 'tab.new': ['Cmd+T', 'F1', 'F2', 'F3', 'F4'] })
-    const more = bind(custom, { actionId: 'tab.new', accel: 'F6' }, 'darwin')
+    const more = bind(custom, { actionId: 'tab.new', accel: 'F9' }, 'darwin')
     expect(more.result).toEqual({ ok: false, problem: `An action can have up to ${MAX_BINDINGS} shortcuts.` })
     expect(more.custom).toEqual(custom)
   })

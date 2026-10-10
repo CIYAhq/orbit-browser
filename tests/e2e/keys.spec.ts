@@ -201,3 +201,63 @@ test('[KS-01] an action keeps several bindings, or none and the command bar stil
   await overlay.keyboard.press('Enter')
   await expect.poll(sidebarVisible).toBe(false)
 })
+
+// ---------- Platform mapping and the window keys (KS-03, KS-05) ----------
+
+/** Presses a key wherever the keyboard is (the focused web contents), as a person would. */
+function pressAnywhere(keyCode: string, modifiers: ('shift' | 'control' | 'alt' | 'meta')[] = []): Promise<string> {
+  return orbit.app.evaluate(
+    ({ webContents }, [code, mods]) => {
+      const contents = webContents.getFocusedWebContents()
+      if (!contents) return '(nothing)'
+      contents.sendInputEvent({ type: 'keyDown', keyCode: code, modifiers: mods })
+      contents.sendInputEvent({ type: 'keyUp', keyCode: code, modifiers: mods })
+      return contents.getURL()
+    },
+    [keyCode, modifiers] as const,
+  )
+}
+
+/** The URL of the web contents that has the keyboard. */
+function focusedUrl(): Promise<string | undefined> {
+  return orbit.app.evaluate(({ webContents }) => webContents.getFocusedWebContents()?.getURL())
+}
+
+test('[KS-03][KS-06][KS-07] Linux and Windows: Alt+2 switches to Space 2 and Ctrl+2 selects the second sidebar item (macOS: ⌃2 and ⌘2)', async () => {
+  const { app, shell } = orbit
+  const space = await activeSpace(app)
+  const second = (await run(app, 'tabs.create', { url: fx.url('/page/Second'), activate: false })) as string
+  const first = (await run(app, 'tabs.create', { url: fx.url('/page/First'), activate: false })) as string
+  expect((await state(app)).spaces[space]?.today.slice(0, 2)).toEqual([first, second])
+  const other = await createSpace(app, { name: 'Other', activate: false })
+  await shell.keyboard.press(`${MOD}+2`)
+  await expect
+    .poll(async () => {
+      const win = Object.values((await state(app)).windows)[0]
+      return win?.activeTab[space]
+    })
+    .toBe(second)
+  await shell.keyboard.press(isMac ? 'Control+2' : 'Alt+2')
+  await expect.poll(() => activeSpace(app)).toBe(other)
+})
+
+test('[KS-05] ⌘⇧W / Ctrl+Shift+W closes the window, and F6 moves the keyboard between the page and the sidebar', async () => {
+  const { app } = orbit
+  const id = await openTab(app, fx.url('/page/Focus'))
+  await expect.poll(async () => (await state(app)).tabs[id]?.loading).toBe(false)
+  await cmd(app, 'tabs.focusPage', {})
+  await expect.poll(focusedUrl).toBe(fx.url('/page/Focus'))
+  expect(await pressAnywhere('F6')).toBe(fx.url('/page/Focus'))
+  await expect.poll(focusedUrl).toContain('view=shell')
+  await pressAnywhere('F6')
+  await expect.poll(focusedUrl).toBe(fx.url('/page/Focus'))
+
+  const firstWindow = Object.keys((await state(app)).windows)[0]
+  await action(app, 'window.new')
+  await expect.poll(async () => Object.keys((await state(app)).windows).length).toBe(2)
+  // The window closes on the key going down: the page is gone before the key comes up.
+  await orbit.shell.keyboard.press(`${MOD}+Shift+W`).catch(() => {})
+  await expect
+    .poll(async () => Object.keys((await state(app)).windows))
+    .toEqual([expect.not.stringMatching(`^${firstWindow}$`)])
+})

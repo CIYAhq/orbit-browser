@@ -282,7 +282,7 @@ export const ACTIONS: ActionDef[] = [
     id: 'devtools.toggle',
     title: 'Developer Tools',
     category: 'Developer',
-    mac: ['Cmd+Alt+I'],
+    mac: ['Cmd+Alt+I', 'F12'],
     other: ['Ctrl+Shift+I', 'F12'],
     keywords: ['inspect', 'console'],
   },
@@ -298,6 +298,17 @@ export const ACTIONS: ActionDef[] = [
     preferWebsites: true,
   },
   { id: 'window.new', title: 'New Window', category: 'Window', mac: ['Cmd+N'], other: ['Ctrl+N'] },
+  // Alt+F4 closes the window too, as the system's key (KS-05).
+  { id: 'window.close', title: 'Close Window', category: 'Window', mac: ['Cmd+Shift+W'], other: ['Ctrl+Shift+W'] },
+  {
+    // Keyboard focus between the sidebar and the page (KS-05, SB-22).
+    id: 'focus.cycle',
+    title: 'Move Focus Between Sidebar and Page',
+    category: 'Sidebar',
+    mac: ['F6'],
+    other: ['F6'],
+    keywords: ['keyboard', 'accessibility', 'focus sidebar', 'focus page'],
+  },
   {
     id: 'window.newMini',
     title: 'New Mini Window',

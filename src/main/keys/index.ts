@@ -4,6 +4,7 @@ import type { MainContext } from '../context'
 import { installMenu } from '../menu'
 import { bind, reset, setPriority, unbind } from './bindings'
 import { keyRouter } from './router'
+import { registerWindowKeys } from './window-keys'
 
 /**
  * The keymap in main (KS-01): the user's bindings follow `settings.shortcuts`, the menu bar is
@@ -64,6 +65,7 @@ export function registerKeys(ctx: MainContext): void {
     if (!text(actionId)) return
     savePriorities(setPriority(store.state.settings.shortcutPriority, actionId, priority, platform))
   })
+  registerWindowKeys(ctx)
   keyRouter.init(ctx)
   commands.register('keys.record', ({ on }, c) => keyRouter.setRecording(on ? c.windowId : undefined))
 }

@@ -1,5 +1,6 @@
 import { app, Menu, type MenuItemConstructorOptions } from 'electron'
 import { ACTIONS_BY_ID, shortcutsFor, toElectronAccelerator } from '../shared/actions'
+import { editsText } from '../shared/keymap'
 import { keepForMenu } from './archive/menus'
 import { recentlyClosedItems } from './archive/recently-closed'
 import type { MainContext } from './context'
@@ -22,10 +23,13 @@ export function installMenu(ctx: MainContext): void {
     return {
       label: label ?? action?.title ?? id,
       accelerator: accel ? toElectronAccelerator(accel) : undefined,
+      // A binding that types or edits text (KS-16) is only shown: the router runs it outside text
+      // fields, and the menu must not take it from one.
+      ...(accel && editsText(accel, 'darwin') ? { registerAccelerator: false } : {}),
       click: () => {
         const windowId = ctx.windows.focusedWindowId()
         // With a page's popup or detached DevTools focused, Close Tab closes that window instead.
-        if (!windowId && id === 'tab.close' && ctx.windows.closeFocusedForeign()) return
+        if (!windowId && (id === 'tab.close' || id === 'window.close') && ctx.windows.closeFocusedForeign()) return
         void ctx.actions.run(id, { windowId })
       },
     }
@@ -59,7 +63,7 @@ export function installMenu(ctx: MainContext): void {
         item('window.newPrivate'),
         { type: 'separator' },
         item('tab.close'),
-        { role: 'close', label: 'Close Window', accelerator: 'Command+Shift+W' },
+        item('window.close'),
         item('tab.reopenClosed'),
         // The last ~10 closed tabs (archive lane, AR-09); rebuilt as tabs close and come back.
         { label: 'Recently Closed', submenu: recentlyClosedItems(ctx) },
