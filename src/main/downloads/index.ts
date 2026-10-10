@@ -19,6 +19,7 @@ import { sectionOf } from '../../shared/tree'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
 import { activeTabOf } from '../windows'
+import { type DockHooks, showDownloadsInDock } from './dock'
 import { copyFileToClipboard, type FileActions, systemFiles } from './files'
 import { DownloadsLibrary, dragIcon, isScreenshotId } from './library'
 import { type DownloadFeedback, DownloadManager, type SaveLocation } from './manager'
@@ -43,6 +44,8 @@ import { DownloadStore } from './store'
  *   asked instead of), and answering the oldest still open: a path, or null for Cancel.
  * - `pickFolder`: what the folder picker (Download location → Other…, DL-07) answers next, a folder
  *   or null for Cancel; `folderPicks`, where each opened.
+ * - `dock`: the Dock and taskbar progress, bounces and notifications (DL-17); `dock.focused` says
+ *   whether Orbit is in front.
  */
 export interface DownloadTestHooks {
   quitAnswer?: 'quit' | 'cancel'
@@ -62,12 +65,13 @@ export interface DownloadTestHooks {
   answerSave: (path: string | null) => boolean
   pickFolder?: string | null
   folderPicks: string[]
+  dock: DockHooks
 }
 
 /**
- * Downloads (DL-01 to DL-08, DL-10 to DL-16): every profile session's downloads go to that profile's
- * download folder, or where the save dialog chooses (DL-07); the sidebar shows them while they run,
- * the Library's Downloads and Media sections afterwards.
+ * Downloads (DL-01 to DL-08, DL-10 to DL-17): every profile session's downloads go to that profile's
+ * download folder, or where the save dialog chooses (DL-07); the sidebar (and the Dock, DL-17) shows
+ * them while they run, the Library's Downloads and Media sections afterwards.
  * Main-process API for other features: `registerDownloads(ctx)` returns the DownloadManager.
  */
 export function registerDownloads(ctx: MainContext): DownloadManager {
@@ -161,6 +165,7 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
       return !!answer
     },
     folderPicks: [],
+    dock: { progress: null, bounces: 0, notifications: [] },
   }
   const files: FileActions = ctx.e2e
     ? {
@@ -212,6 +217,7 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
     if (!status.open) await commands.run('library.setSection', { section: 'downloads' }, { windowId: target })
   }
 
+  const dock = showDownloadsInDock(ctx, ctx.e2e ? hooks.dock : undefined)
   const manager: DownloadManager = new DownloadManager(
     ctx,
     new DownloadStore(join(ctx.paths.userData, 'downloads.json')),
@@ -225,6 +231,7 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
       feedback: (windowId, event, d) => {
         feedback(windowId, event, d)
         if (event === 'started') void libraryOnDownloads(windowId).catch(() => {})
+        if (event === 'done') dock.finished(manager.get(d.id)?.private ? undefined : d.filename)
       },
       notify: (windowId, message) => ctx.toast(mainWindow(windowId), message),
       closeBlankTab: (tabId) => closeBlankTab(ctx, tabId),

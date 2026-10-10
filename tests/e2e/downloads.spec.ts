@@ -251,6 +251,12 @@ type Hooks = {
   settle: () => Promise<void>
   saveDialogs: { defaultPath: string; unavailable?: string }[]
   folderPicks: string[]
+  dock: {
+    progress: { value: number; mode: string } | null
+    bounces: number
+    notifications: { title: string; body?: string }[]
+    focused?: boolean
+  }
 }
 
 /** Reads the downloads test hooks (main process). */
@@ -973,6 +979,42 @@ test('[DL-07] a chosen folder is used, never the one last used with Ask every ti
   await expect.poll(async () => (await named('fourth.csv'))?.state).toBe('completed')
   expect(readdirSync(chosen).sort()).toEqual(['fourth.csv', 'second.csv', 'third.csv'])
   expect(readdirSync(asked)).toEqual(['data.csv'])
+})
+
+// ---- DL-17: the Dock and the taskbar ----
+
+test('[DL-17] the Dock and taskbar show the progress; a download finishing in the background bounces once and notifies', async () => {
+  const shown = () =>
+    hooks((h) => (h.dock.progress ? [Math.round(h.dock.progress.value * 100), h.dock.progress.mode] : null))
+  expect(await shown()).toBeNull()
+  const { page } = await openPage()
+  await page.locator('#held').click()
+  await expect.poll(shown).toEqual([50, 'normal'])
+  const id = await idOf('big.bin')
+  await run(orbit.app, 'downloads.pause', { id })
+  await expect.poll(shown).toEqual([50, 'paused'])
+  await run(orbit.app, 'downloads.resume', { id })
+  await expect.poll(shown).toEqual([50, 'normal'])
+  // Orbit in the background: done, the bar goes, the Dock bounces once, a notification says so.
+  await orbit.app.evaluate(() => {
+    ;(globalThis as unknown as { __orbitDownloads: { dock: { focused?: boolean } } }).__orbitDownloads.dock.focused =
+      false
+  })
+  server.release('big.bin')
+  await expect.poll(async () => (await named('big.bin'))?.state).toBe('completed')
+  await expect.poll(shown).toBeNull()
+  expect(await hooks((h) => [h.dock.bounces, h.dock.notifications])).toEqual([
+    1,
+    [{ title: 'Download complete', body: 'big.bin' }],
+  ])
+  // In front: no bounce, no notification.
+  await orbit.app.evaluate(() => {
+    ;(globalThis as unknown as { __orbitDownloads: { dock: { focused?: boolean } } }).__orbitDownloads.dock.focused =
+      true
+  })
+  await page.locator('#attachment').click()
+  await expect.poll(async () => (await named('data.csv'))?.state).toBe('completed')
+  expect(await hooks((h) => h.dock.bounces)).toBe(1)
 })
 
 // ---- DL-05, DL-06, DL-09 to DL-12, DL-14: the Library's sections, recent files, the flyout, safety ----

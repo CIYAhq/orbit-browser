@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fileClipboardData, showsInline } from '../../src/main/downloads/file-kinds'
 import { type DownloadMenuActions, downloadMenu } from '../../src/main/downloads/menu'
+import { dockProgress, sameProgress } from '../../src/main/downloads/progress'
 import {
   formatBytes,
   formatProgress,
@@ -190,5 +191,33 @@ describe('[DL-04] files', () => {
       'text/uri-list': 'file:///tmp/a.zip',
       [raw('public.file-url')]: 'file:///tmp/a.zip',
     })
+  })
+})
+
+describe('[DL-17] the Dock and taskbar progress', () => {
+  const d = (state: DownloadEntry['state'], receivedBytes: number, totalBytes: number) =>
+    ({ state, receivedBytes, totalBytes }) as DownloadEntry
+
+  it('is the bytes received of those expected, over the downloads running or paused', () => {
+    expect(dockProgress([])).toBeUndefined()
+    expect(dockProgress([d('completed', 10, 10), d('interrupted', 1, 10)])).toBeUndefined()
+    expect(dockProgress([d('progressing', 25, 100), d('paused', 50, 100), d('completed', 1, 1)])).toEqual({
+      value: 0.375,
+      mode: 'normal',
+    })
+    // Sizes not known yet don't count; with none known, the bar can't tell.
+    expect(dockProgress([d('progressing', 30, 0), d('progressing', 10, 40)])).toEqual({ value: 0.25, mode: 'normal' })
+    expect(dockProgress([d('progressing', 30, 0)])).toEqual({ value: 2, mode: 'indeterminate' })
+    // Every one paused; more received than announced.
+    expect(dockProgress([d('paused', 5, 10)])).toEqual({ value: 0.5, mode: 'paused' })
+    expect(dockProgress([d('progressing', 15, 10)])).toEqual({ value: 1, mode: 'normal' })
+  })
+
+  it('changes on screen in whole percents', () => {
+    expect(sameProgress({ value: 0.501, mode: 'normal' }, { value: 0.504, mode: 'normal' })).toBe(true)
+    expect(sameProgress({ value: 0.5, mode: 'normal' }, { value: 0.51, mode: 'normal' })).toBe(false)
+    expect(sameProgress({ value: 0.5, mode: 'normal' }, { value: 0.5, mode: 'paused' })).toBe(false)
+    expect(sameProgress(undefined, undefined)).toBe(true)
+    expect(sameProgress(undefined, { value: 0, mode: 'normal' })).toBe(false)
   })
 })

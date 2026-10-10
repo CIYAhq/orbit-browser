@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 475 spec’d · 186 built (80 partial) · 272 tested · 0 feel right. 10 more are out of scope and not counted.
+**Totals:** 475 spec’d · 187 built (80 partial) · 273 tested · 0 feel right. 10 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 114 | 139 |
 | P1 | 221 | 63 | 120 |
-| P2 | 80 | 9 | 13 |
+| P2 | 80 | 10 | 14 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -526,7 +526,7 @@ Spec: `spec/downloads.md`
 | DL-14 | Downloads keyboard shortcut and menu | P1 | ✅ | ✅ e2e+unit | – | Windows/Linux: Ctrl+J opens the downloads flyout at the top left, beside the sidebar (Orbit has no top toolbar): the 12 newest with live progress, Keep/Discard, Resume/Retry/Cancel and Show in Folder; a click opens a file, rows drag out (DL-06), Show All opens the Library's Downloads section; Esc, Ctrl+J again or a click outside closes it. macOS: ⌘⇧J and ⌥⌘L open the Library's Downloads section (KS-12). The command bar has a "Downloads" action |
 | DL-15 | Pause, resume and retry | P1 | ✅ | ✅ e2e+unit | – | Pause/Resume from the row's menu (and a Resume button on a paused row); a cut-off download shows Resume when the server sent an ETag or Last-Modified (continues with a range request), else Retry (starts again); one cut off by quitting resumes after a restart from its partial file (kept under a hidden second name while the engine shuts down). Downloads never block the tab that started them |
 | DL-16 | Downloads in private windows, Little windows and Peek | P2 | 🟡 partial | ✅ e2e | – | Peek and Mini Window downloads go to the same list as any other. A private (in-memory) session's downloads save to disk but are in no saved list; they are listed while the session has pages and leave when its last page closes. Private windows themselves don't exist yet: tested with a profile on an in-memory session |
-| DL-17 | Dock / taskbar progress | P2 | – | – | – |  |
+| DL-17 | Dock / taskbar progress | P2 | ✅ | ✅ e2e+unit | – | While downloads run or are paused, their overall progress shows on the macOS Dock icon and on the windows' taskbar buttons: bytes received of those with a known size, the can't-tell bar when no size is known, Windows' paused colour when every one is paused; it goes when none runs. A download that finishes while no Orbit window has focus bounces the Dock icon once (macOS) and shows a "Download complete" notification naming the file (a private window's isn't named). Tests read what Orbit asks of the OS through test hooks; the OS's own drawing isn't checked on Linux |
 | DL-18 | Smart renaming of downloads | OOS | ⛔ out of scope | – | – | the spec leaves it out |
 
 ## Settings / preferences
