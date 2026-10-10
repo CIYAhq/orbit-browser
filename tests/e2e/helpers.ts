@@ -31,9 +31,21 @@ export interface Orbit {
 /**
  * Tests stay offline. Orbit runs behind a dead local proxy, which loopback (where the fixture pages
  * are served) bypasses, so a search or a link to a real site gets its URL but loads nothing.
+ * No host name resolves either, except localhost: Chromium looks up a link's host before anyone
+ * clicks it, and that lookup would leave the machine (PR #10 review F2).
  */
 const DEAD_PROXY = '127.0.0.1:9'
-const OFFLINE = `--proxy-server=http://${DEAD_PROXY}`
+const RESOLVER_RULES = '--host-resolver-rules='
+const NO_LOOKUPS = 'MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1'
+
+/**
+ * The switches that keep Orbit offline. A test's own resolver rules go first, so they still apply
+ * (the first rule that matches a host wins), and every other host still fails to resolve.
+ */
+export function offlineArgs(args: string[] = []): string[] {
+  const own = args.filter((a) => a.startsWith(RESOLVER_RULES)).map((a) => a.slice(RESOLVER_RULES.length))
+  return [`--proxy-server=http://${DEAD_PROXY}`, `${RESOLVER_RULES}${[...own, NO_LOOKUPS].join(', ')}`]
+}
 
 /**
  * Launches the built app (out/) with an isolated profile directory. `args` are extra Chromium
@@ -47,7 +59,9 @@ export async function launchOrbit(
   for (const old of quitAlone) await old.close()
   const userData = opts.userData ?? mkdtempSync(join(tmpdir(), 'orbit-e2e-'))
   const motion = opts.reducedMotion ? '--force-prefers-reduced-motion' : '--force-prefers-no-reduced-motion'
-  const args = [OFFLINE, motion, ...(opts.args ?? []), resolve('out/main/index.js')]
+  const extra = opts.args ?? []
+  const rest = extra.filter((a) => !a.startsWith(RESOLVER_RULES))
+  const args = [...offlineArgs(extra), motion, ...rest, resolve('out/main/index.js')]
   // Linux CI/dev boxes often lack the setuid sandbox helper; macOS runs fully sandboxed.
   if (process.platform === 'linux') args.unshift('--no-sandbox')
   const app = await electron.launch({

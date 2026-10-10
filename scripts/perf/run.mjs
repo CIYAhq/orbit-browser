@@ -77,9 +77,18 @@ function treeRssMb(rootPid) {
 
 // ---------- Orbit helpers ----------
 const MAIN = resolve('out/main/index.js')
+/**
+ * Offline, as in the e2e tests (tests/e2e/helpers.ts): a dead local proxy, which loopback (the
+ * fixture server) bypasses, and no host name resolves but localhost. Orbit and the Chromium baseline
+ * both run with these.
+ */
+const OFFLINE = [
+  '--proxy-server=http://127.0.0.1:9',
+  '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1',
+]
 async function launchOrbit(userData) {
   const app = await electron.launch({
-    args: process.platform === 'linux' ? ['--no-sandbox', MAIN] : [MAIN],
+    args: [...(process.platform === 'linux' ? ['--no-sandbox'] : []), ...OFFLINE, MAIN],
     env: { ...process.env, ORBIT_E2E: '1', ORBIT_USER_DATA: userData },
   })
   const deadline = Date.now() + 30_000
@@ -420,14 +429,14 @@ async function chromeBaseline(fx) {
   for (let i = 0; i < RUNS; i++) {
     const dir = mkdtempSync(join(tmpdir(), 'chrome-perf-'))
     const t0 = Date.now()
-    const ctx = await chromium.launchPersistentContext(dir, { headless: false })
+    const ctx = await chromium.launchPersistentContext(dir, { headless: false, args: OFFLINE })
     const page = ctx.pages()[0] ?? (await ctx.newPage())
     await page.goto(fx.url(`c${i}`))
     coldStart.push(Date.now() - t0)
     await ctx.close()
     rmSync(dir, { recursive: true, force: true })
   }
-  const server = await chromium.launchServer({ headless: false })
+  const server = await chromium.launchServer({ headless: false, args: OFFLINE })
   const pid = server.process().pid
   const browser = await chromium.connect(server.wsEndpoint())
   const ctx = await browser.newContext()
