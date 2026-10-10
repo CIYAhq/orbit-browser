@@ -295,6 +295,26 @@ describe('ArchiveStore persistence (AR-01)', () => {
     clean()
   })
 
+  it('[AR-01] after a crash mid-append, the next record starts on a line of its own (review F11)', async () => {
+    const file = tmpFile()
+    const kept = entry({ title: 'Kept' })
+    // The last append was cut short: a partial line, no newline at the end.
+    writeFileSync(file, `${JSON.stringify({ t: 'a', e: kept })}\n{"t":"a","e":{"id":"a-cut","url":"https://cut.te`)
+    const s = new ArchiveStore(file)
+    await s.load()
+    expect(s.all().map((e) => e.title)).toEqual(['Kept'])
+    s.add([entry({ title: 'Next' })])
+    s.close()
+    const t = new ArchiveStore(file)
+    await t.load()
+    expect(
+      t
+        .all()
+        .map((e) => e.title)
+        .sort(),
+    ).toEqual(['Kept', 'Next'])
+  })
+
   it('[AR-01] ignores torn or foreign lines in the log', async () => {
     const file = tmpFile()
     const good = entry({ title: 'Good' })

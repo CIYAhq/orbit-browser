@@ -10,7 +10,8 @@
  *     {"t":"c","p":"<profileId>","at":ms}     cleared: the profile's entries archived at or before `at`
  *   Every record is idempotent, so replaying one twice changes nothing.
  * - Records are appended synchronously in small batches (a short debounce), so they never land out
- *   of order; `flushSync()` writes what is queued (quit).
+ *   of order; `flushSync()` writes what is queued (quit). After a line cut short (a crash
+ *   mid-append), the next append starts on a new line, so only the cut record is lost.
  * - The log is rewritten (snapshot to a temp file, then rename) at load when more than half of it is
  *   dead, and later once dead records outnumber live ones. The snapshot is built in chunks between
  *   other work; records logged meanwhile are appended to it before the rename. A clear (Clear
@@ -170,6 +171,8 @@ export class ArchiveStore {
   /** Lines logged while a snapshot is being built; appended to it before it replaces the log. */
   private tail: string[] | undefined
   private deadRecords = 0
+  /** The log may end in a line cut short (a crash mid-append): the next append starts a new line. */
+  private openLine = false
   private phase: 'new' | 'loading' | 'ready' | 'closed' = 'new'
   private queued: (() => void)[] = []
   private loaded: Promise<void> | undefined
@@ -458,9 +461,12 @@ export class ArchiveStore {
     const lines = this.pending.splice(0)
     try {
       mkdirSync(dirname(this.file), { recursive: true })
-      appendFileSync(this.file, `${lines.join('\n')}\n`)
+      appendFileSync(this.file, `${this.openLine ? '\n' : ''}${lines.join('\n')}\n`)
+      this.openLine = false
     } catch (err) {
       console.error('[archive] could not write the archive log', err)
+      // Part of it may be on disk.
+      this.openLine = true
     }
   }
 
@@ -482,6 +488,7 @@ export class ArchiveStore {
     } catch {
       return
     }
+    this.openLine = text.length > 0 && !text.endsWith('\n')
     let lines = 0
     let cleared = false
     for (const line of text.split('\n')) {
@@ -599,6 +606,7 @@ export class ArchiveStore {
       mkdirSync(dirname(file), { recursive: true })
       writeFileSync(tmp, `${[...lines, ...tail].join('\n')}\n`)
       renameSync(tmp, file)
+      this.openLine = false
       this.deadRecords = tail.length
     } catch (err) {
       console.error('[archive] could not compact the archive log', err)
