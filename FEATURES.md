@@ -547,7 +547,7 @@ Spec: `spec/settings.md`
 | ST-09 | Links section | P1 | ✅ | ✅ e2e+unit | – | links from other apps open in a Mini Window (default), the most recent Space or one Space; routing rules (address contains / is exactly → a Space; first match wins; add, edit, reorder, remove); Peek options |
 | ST-10 | Advanced section | P1 | 🟡 partial | ✅ e2e+unit | – | tab sleep timer (TB-16), picture in picture, graphics acceleration; no site customizations, full-URL toggle, sounds or haptics, or edge-drag settings because those features don't exist yet |
 | ST-11 | Appearance section | P1 | 🟡 partial | ✅ e2e | – | Theme mode: Light / Dark / Match system (AP-01). Not built: window material (AP-10, Windows), app icon (AP-09), page defaults (P2) |
-| ST-12 | Privacy & security, and clearing browsing data | P1 | 🟡 partial | ✅ e2e+unit | – | privacy promise (Orbit sends nothing); Clear browsing data per profile (⌘⇧⌫ / Ctrl+Shift+Delete): history by time range, cookies, site data and cache for all time only (Electron has no range); Secure DNS (Automatic, Off, Cloudflare, Google, Quad9); graphics acceleration lives in Advanced. No HTTPS-first or Safe Browsing (not in Electron), no per-site clearing here |
+| ST-12 | Privacy & security, and clearing browsing data | P1 | 🟡 partial | ✅ e2e+unit | – | privacy promise (Orbit sends nothing); Clear browsing data per profile (⌘⇧⌫ / Ctrl+Shift+Delete): history by time range; cookies and site data, and the cache, always from all time (Electron has no range), so they start ticked only for All time; Secure DNS (Automatic, Off, Cloudflare, Google, Quad9); graphics acceleration lives in Advanced. No HTTPS-first or Safe Browsing (not in Electron), no per-site clearing here |
 | ST-13 | Site settings (permissions) page | P1 | – | – | – |  |
 | ST-14 | Languages, spell check and translation | P2 | – | – | – |  |
 | ST-15 | Passwords and autofill settings | P1 | – | – | – |  |
@@ -601,7 +601,7 @@ Spec: `spec/onboarding.md`
 | OB-11 | Contextual tips and one-time hints | P1 | – | – | – |  |
 | OB-12 | Essential keyboard shortcuts sheet | P1 | – | – | – |  |
 | OB-13 | Help and feedback entry points | P1 | 🟡 partial | ✅ e2e+unit | – | command-bar Help, Report a Bug, What's New and Copy Build Info; macOS Help menu (Orbit Help, Report a Bug…, Release Notes, Troubleshooting → Copy Build Info). Help opens the project README; Report a Bug opens a new issue on the public tracker with the build info filled in. The shortcut sheet entry comes with OB-12 (keys lane) |
-| OB-14 | Skip, resume and reset onboarding | P2 | ✅ | ✅ e2e+unit | – | Skip setup on every step but the last; the step is saved, so a quit part-way resumes there; Reset Onboarding (command bar only) runs the flow again over the open windows and deletes nothing. Decision: Skip keeps what earlier steps set (colours as picked, Favorites once continued past), so skipping at the start gives the default first window the spec describes |
+| OB-14 | Skip, resume and reset onboarding | P2 | ✅ | ✅ e2e+unit | – | Skip setup on every step but the last gives the spec's default first window: the theme step's colours and mode are undone and no Favorites are added (D44). The step and the picks so far are saved, so a quit part-way resumes there with them; Reset Onboarding (command bar only) runs the flow again over the open windows and deletes nothing |
 | OB-15 | AI features opt-in step | ? | – | – | – |  |
 | OB-16 | Personal welcome card | P2 | – | – | – |  |
 
