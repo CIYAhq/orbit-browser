@@ -137,6 +137,11 @@ export interface Profile {
   createdAt: number
   /** Per-profile auto-archive period for Today tabs (TD-03); falls back to settings.archiveAfterMs. */
   archiveAfterMs?: number
+  /**
+   * Default search engine (ST-06): a built-in engine id, or "site:<id>" for one of the site searches.
+   * Unset: the Default profile's choice, then settings.searchEngine (`engineFor` in src/shared/url.ts).
+   */
+  searchEngine?: string
 }
 
 export type CommandBarMode = 'new-tab' | 'edit-url' | 'search-tabs'
@@ -185,7 +190,7 @@ export interface WindowState {
   fullscreen: boolean
 }
 
-export type SearchEngineId = 'google' | 'duckduckgo' | 'bing' | 'brave' | 'ecosia' | 'kagi'
+export type SearchEngineId = 'google' | 'duckduckgo' | 'bing' | 'brave' | 'ecosia' | 'kagi' | 'startpage' | 'perplexity'
 
 /** Site search (CB-11, ST-06): type the keyword in the command bar, press Tab, then the query. */
 export interface SiteSearchEngine {

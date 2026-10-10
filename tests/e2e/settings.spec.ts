@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
 import type { SpaceTheme } from '../../src/shared/state'
 import { paletteFor } from '../../src/shared/theme'
 import {
@@ -232,4 +233,98 @@ test('[ST-01][AP-02] Settings takes the theme colours of the Space it was opened
   await expect.poll(accent).toBe(paletteFor(theme, true).accent)
   await run(orbit.app, 'spaces.setAppearance', { appearance: 'light' })
   await expect.poll(accent).toBe(paletteFor(theme, false).accent)
+})
+
+// ---- Search engines (ST-06) ----
+
+/** Types a search into the browser window's command bar and returns the URL of the tab it opens. */
+async function searchFromCommandBar(text: string): Promise<string> {
+  await focusBrowserWindow(orbit.app)
+  await expect.poll(() => browserFocused(orbit.app)).toBe(true)
+  const before = new Set(Object.keys((await state(orbit.app)).tabs))
+  await orbit.shell.keyboard.press(`${MOD}+T`)
+  const overlay = await viewPage(orbit.app, 'overlay')
+  const input = overlay.getByTestId('command-input')
+  await expect(input).toBeFocused()
+  await input.fill(text)
+  const top = overlay.getByTestId('command-result').first()
+  await expect(top).toHaveAttribute('data-kind', 'search')
+  await expect(top).toContainText(text)
+  await input.press('Enter')
+  let url = ''
+  await expect
+    .poll(async () => {
+      const tab = Object.values((await state(orbit.app)).tabs).find((t) => !before.has(t.id))
+      url = tab?.url ?? ''
+      return url
+    })
+    .not.toBe('')
+  return url
+}
+
+test('[ST-06] the default search engine chosen in Settings is the one the command bar searches with', async () => {
+  const page = await openSettings(orbit.app, { section: 'search' })
+  const select = page.getByTestId(`search-engine-${DEFAULT_PROFILE_ID}`)
+  await expect(select).toHaveValue('google')
+  // Orbit's list (ST-06), plain search URLs.
+  await expect(select.locator('option')).toHaveText([
+    'Google',
+    'Bing',
+    'DuckDuckGo',
+    'Brave Search',
+    'Ecosia',
+    'Startpage',
+    'Kagi',
+    'Perplexity',
+  ])
+  await select.selectOption({ label: 'DuckDuckGo' })
+  await expect.poll(async () => (await state(orbit.app)).profiles[DEFAULT_PROFILE_ID]?.searchEngine).toBe('duckduckgo')
+  expect(await searchFromCommandBar('orbit settings test')).toBe('https://duckduckgo.com/?q=orbit+settings+test')
+})
+
+test('[ST-06][ST-20] each profile has its own default search engine, labelled with the profile', async () => {
+  const spaceId = (await run(orbit.app, 'spaces.create', { name: 'Work', activate: false })) as string
+  const work = (await run(orbit.app, 'profiles.create', { name: 'Work', assignSpaceId: spaceId })) as string
+  const page = await openSettings(orbit.app, { section: 'search' })
+  await expect(page.getByTestId(`setting-search-engine-${DEFAULT_PROFILE_ID}`).locator('.st-scope')).toHaveText(
+    'Default',
+  )
+  await expect(page.getByTestId(`setting-search-engine-${work}`).locator('.st-scope')).toHaveText('Work')
+  await page.getByTestId(`search-engine-${work}`).selectOption({ label: 'Bing' })
+  await expect.poll(async () => (await state(orbit.app)).profiles[work]?.searchEngine).toBe('bing')
+
+  // The Default profile's Space still searches Google; the Work Space searches Bing.
+  expect(await searchFromCommandBar('first query')).toBe('https://www.google.com/search?q=first+query')
+  await run(orbit.app, 'spaces.switch', { spaceId })
+  expect(await searchFromCommandBar('second query')).toBe('https://www.bing.com/search?q=second+query')
+})
+
+test('[ST-06] a custom engine can be added, made the default, and removed', async () => {
+  const page = await openSettings(orbit.app, { section: 'search' })
+  await page.getByTestId('site-search-add').click()
+  await page.getByTestId('site-search-name').fill('Fixture Search')
+  // A keyword already in use is refused, with the reason next to it.
+  await page.getByTestId('site-search-keyword').fill('YT')
+  await page.getByTestId('site-search-url').fill(fx.url('/find?q=%s'))
+  await page.getByTestId('site-search-save').click()
+  await expect(page.getByRole('alert')).toHaveText('YouTube already uses “yt”')
+  await page.getByTestId('site-search-keyword').fill('fxs')
+  await page.getByTestId('site-search-save').click()
+  await expect(page.getByTestId('site-search-form')).toHaveCount(0)
+
+  const site = (await state(orbit.app)).settings.siteSearch.find((s) => s.keyword === 'fxs')
+  expect(site).toMatchObject({ name: 'Fixture Search', url: fx.url('/find?q=%s') })
+  const id = site?.id as string
+  await page.getByTestId(`site-search-menu-${id}`).click()
+  await page.getByRole('menuitem', { name: 'Make default' }).click()
+  await expect(page.getByTestId(`setting-site-search-${id}`).locator('.st-badge')).toHaveText('Default')
+  await expect(page.getByTestId(`search-engine-${DEFAULT_PROFILE_ID}`)).toHaveValue(`site:${id}`)
+  expect(await searchFromCommandBar('custom query')).toBe(fx.url('/find?q=custom+query'))
+
+  // Removing it: the profile searches Google again.
+  await page.getByTestId(`site-search-menu-${id}`).click()
+  await page.getByRole('menuitem', { name: 'Remove' }).click()
+  await expect(page.getByTestId(`setting-site-search-${id}`)).toHaveCount(0)
+  await expect(page.getByTestId(`search-engine-${DEFAULT_PROFILE_ID}`)).toHaveValue('google')
+  expect((await state(orbit.app)).profiles[DEFAULT_PROFILE_ID]?.searchEngine).toBeUndefined()
 })

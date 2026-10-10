@@ -1,5 +1,5 @@
-import { Check, ChevronDown } from 'lucide-react'
-import { type ReactNode, useEffect, useId } from 'react'
+import { Check, ChevronDown, Ellipsis } from 'lucide-react'
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
 /**
  * Building blocks for Settings pages (see ./registry). Rows carry `data-setting` (their id) and
@@ -257,5 +257,136 @@ export function Checkbox({
         {description && <span className="st-check__desc">{description}</span>}
       </span>
     </label>
+  )
+}
+
+/** A labelled text box with its error under it. */
+export function TextField({
+  value,
+  onChange,
+  label,
+  placeholder,
+  error,
+  testId,
+  autoFocus,
+  wide,
+}: {
+  value: string
+  onChange: (next: string) => void
+  label: string
+  placeholder?: string
+  error?: string
+  testId?: string
+  autoFocus?: boolean
+  wide?: boolean
+}) {
+  const errorId = useId()
+  const input = useRef<HTMLInputElement>(null)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on mount only
+  useEffect(() => {
+    if (autoFocus) input.current?.focus()
+  }, [])
+  return (
+    <label className={`st-field${wide ? ' st-field--wide' : ''}`}>
+      <span className="st-field__label">{label}</span>
+      <input
+        ref={input}
+        className="st-input"
+        type="text"
+        value={value}
+        placeholder={placeholder}
+        spellCheck={false}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? errorId : undefined}
+        data-testid={testId}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {error && (
+        <span className="st-field__error" id={errorId} role="alert">
+          {error}
+        </span>
+      )}
+    </label>
+  )
+}
+
+export interface MenuItem {
+  label: string
+  onSelect: () => void
+  danger?: boolean
+  disabled?: boolean
+  testId?: string
+}
+
+/** A row's "…" menu. */
+export function RowMenu({ label, items, testId }: { label: string; items: MenuItem[]; testId?: string }) {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  const button = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    root.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus()
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+  const close = () => {
+    setOpen(false)
+    button.current?.focus()
+  }
+  return (
+    <div className="st-menu" ref={root}>
+      <button
+        ref={button}
+        type="button"
+        className="st-icon-button"
+        aria-label={label}
+        title={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        data-testid={testId}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Ellipsis size={16} />
+      </button>
+      {open && (
+        <div
+          className="st-menu__list"
+          role="menu"
+          aria-label={label}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              close()
+              return
+            }
+            if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+            e.preventDefault()
+            const all = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')]
+            const i = all.indexOf(document.activeElement as HTMLButtonElement)
+            all[(i + (e.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length]?.focus()
+          }}
+        >
+          {items.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              role="menuitem"
+              className={`st-menu__item${item.danger ? ' st-menu__item--danger' : ''}`}
+              disabled={item.disabled}
+              data-testid={item.testId}
+              onClick={() => {
+                close()
+                item.onSelect()
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }

@@ -2,6 +2,7 @@ import { app, clipboard } from 'electron'
 import { ACTIONS_BY_ID } from '../../shared/actions'
 import type { BuildInfo } from '../../shared/commands/settings'
 import type { MainContext } from '../context'
+import { registerSearchSettings } from './search'
 import { applySettingsPatch } from './validate'
 import { SETTINGS_WINDOW_ID, SettingsWindow } from './window'
 
@@ -26,6 +27,8 @@ export function registerSettings(ctx: MainContext): void {
     })
     if (refused.length) console.warn(`[settings] ignored settings.update keys: ${refused.join(', ')}`)
   })
+
+  registerSearchSettings(ctx)
 
   commands.register('settings.openUrl', async ({ url }) => {
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return

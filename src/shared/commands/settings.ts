@@ -52,6 +52,19 @@ export type SettingsPatch = Partial<
   >
 >
 
+/** A custom search engine as typed in Settings (ST-06): with an `id`, an edit of that one. */
+export interface SiteSearchDraft {
+  id?: string
+  name: string
+  keyword: string
+  /** Results URL with %s where the query goes. */
+  url: string
+}
+
+export type SiteSearchSaved =
+  | { ok: true; id: string }
+  | { ok: false; field: 'name' | 'keyword' | 'url'; message: string }
+
 /** What About shows and "Copy build info" copies (ST-17). */
 export interface BuildInfo {
   version: string
@@ -77,4 +90,9 @@ export interface SettingsCommands {
   'settings.buildInfo': { args: Record<string, never>; result: BuildInfo }
   /** Copies the build info for a bug report (ST-17) and returns the text copied. */
   'settings.copyBuildInfo': { args: Record<string, never>; result: string }
+  /** A profile's default search engine (ST-06): a built-in id or "site:<site search id>". */
+  'settings.setSearchEngine': { args: { profileId: ProfileId; engine: string }; result: void }
+  /** Adds a custom search engine, or changes one (ST-06, CB-11). */
+  'settings.saveSiteSearch': { args: SiteSearchDraft; result: SiteSearchSaved }
+  'settings.removeSiteSearch': { args: { id: string }; result: void }
 }
