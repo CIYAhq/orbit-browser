@@ -158,6 +158,16 @@ export function shownTabs(state: OrbitState, windowId: WindowId): Set<TabId> {
   return new Set(split ? splitLeaves(split.layout) : [active])
 }
 
+/**
+ * A view's web contents while its page is alive. Once the page is gone `view.webContents` is
+ * undefined, so it is never dereferenced blindly: an exception in a timer or handler would block
+ * quitting (D28).
+ */
+export function viewContents(view: WebContentsView | undefined): WebContents | undefined {
+  const contents = view?.webContents as WebContents | undefined
+  return contents && !contents.isDestroyed() ? contents : undefined
+}
+
 /** The active tab of a window's current space. */
 export function activeTabOf(state: OrbitState, windowId: WindowId): TabId | null {
   const win = state.windows[windowId]
@@ -453,10 +463,10 @@ export class WindowManager {
       clearTimeout(rec.floatingDispose)
       clearTimeout(rec.buttonsTimer)
       clearTimeout(rec.toolsPrewarm)
-      if (rec.floating && !rec.floating.webContents.isDestroyed()) rec.floating.webContents.close()
-      if (rec.tools && !rec.tools.webContents.isDestroyed()) rec.tools.webContents.close()
-      if (rec.prompt && !rec.prompt.webContents.isDestroyed()) rec.prompt.webContents.close()
-      for (const view of rec.uiViews) if (!view.webContents.isDestroyed()) view.webContents.close()
+      viewContents(rec.floating)?.close()
+      viewContents(rec.tools)?.close()
+      viewContents(rec.prompt)?.close()
+      for (const view of rec.uiViews) viewContents(view)?.close()
       rec.uiViews.clear()
       this.records.delete(id)
       for (const [tabId, entry] of [...this.attached]) {
@@ -465,7 +475,7 @@ export class WindowManager {
           this.ctx.tabs.sleep(tabId)
         }
       }
-      if (rec.overlay && !rec.overlay.webContents.isDestroyed()) rec.overlay.webContents.close()
+      viewContents(rec.overlay)?.close()
       if (this.quitting) return
       if (this.ctx.store.state.windows[id]?.kind === 'main' && !this.hasOpenMain()) {
         // The last main window: keep its state. Linux and Windows quit right after this and
@@ -531,7 +541,7 @@ export class WindowManager {
     const forSidebar = channel.startsWith('sidebar:') || channel.startsWith('spaces:')
     if (floating && forSidebar) floating.send(`orbit:${channel}`, payload)
     else if (!rec.win.isDestroyed()) rec.win.webContents.send(`orbit:${channel}`, payload)
-    if (rec.overlay && !rec.overlay.webContents.isDestroyed()) rec.overlay.webContents.send(`orbit:${channel}`, payload)
+    viewContents(rec.overlay)?.send(`orbit:${channel}`, payload)
   }
 
   /** The corner radius a shown page was last given (SB-19), for tests. */
@@ -543,8 +553,7 @@ export class WindowManager {
   /** The floating sidebar's web contents while its card is out (SB-12). */
   floatingContents(windowId: WindowId): WebContents | undefined {
     const rec = this.records.get(windowId)
-    const contents = rec?.floatingShown ? rec.floating?.webContents : undefined
-    return contents && !contents.isDestroyed() ? contents : undefined
+    return rec?.floatingShown ? viewContents(rec.floating) : undefined
   }
 
   /** Where Orbit's sidebar is drawn: the floating card while it is out, else the window's shell. */
@@ -583,7 +592,7 @@ export class WindowManager {
   floatingInfo(windowId: WindowId): { exists: boolean; placed: boolean; shown: boolean; bounds?: Rect } {
     const rec = this.records.get(windowId)
     const view = rec?.floating
-    if (!rec || !view || view.webContents.isDestroyed()) return { exists: false, placed: false, shown: false }
+    if (!rec || !view || !viewContents(view)) return { exists: false, placed: false, shown: false }
     return {
       exists: true,
       placed: rec.win.contentView.children.includes(view),
@@ -639,8 +648,7 @@ export class WindowManager {
   toolsContents(windowId: WindowId): WebContents | undefined {
     const rec = this.records.get(windowId)
     if (!rec || rec.win.isDestroyed()) return undefined
-    const contents = this.ensureTools(rec).webContents
-    return contents.isDestroyed() ? undefined : contents
+    return viewContents(this.ensureTools(rec))
   }
 
   /** Places the page tools at `bounds` (window coordinates): above the pages, under the floating sidebar and the overlay. */
@@ -669,7 +677,8 @@ export class WindowManager {
     const view = rec?.tools
     if (!rec || !view || !rec.toolsShown) return
     rec.toolsShown = false
-    const focused = !view.webContents.isDestroyed() && webContents.getFocusedWebContents() === view.webContents
+    const contents = viewContents(view)
+    const focused = !!contents && webContents.getFocusedWebContents() === contents
     if (focused && !rec.overlayShown && rec.win.isFocused()) this.focusActiveTab(rec.id)
     this.removeChild(rec, view)
   }
@@ -678,7 +687,7 @@ export class WindowManager {
   toolsInfo(windowId: WindowId): { exists: boolean; placed: boolean; bounds?: Rect } {
     const rec = this.records.get(windowId)
     const view = rec?.tools
-    if (!rec || !view || view.webContents.isDestroyed()) return { exists: false, placed: false }
+    if (!rec || !view || !viewContents(view)) return { exists: false, placed: false }
     return { exists: true, placed: rec.win.contentView.children.includes(view), bounds: view.getBounds() }
   }
 
@@ -708,7 +717,8 @@ export class WindowManager {
     const view = rec?.prompt
     if (!rec || !view || !rec.promptShown) return
     rec.promptShown = false
-    const focused = !view.webContents.isDestroyed() && webContents.getFocusedWebContents() === view.webContents
+    const contents = viewContents(view)
+    const focused = !!contents && webContents.getFocusedWebContents() === contents
     if (focused && !rec.overlayShown && rec.win.isFocused()) this.focusActiveTab(rec.id)
     this.removeChild(rec, view)
   }
@@ -717,7 +727,7 @@ export class WindowManager {
   promptInfo(windowId: WindowId): { exists: boolean; placed: boolean; bounds?: Rect } {
     const rec = this.records.get(windowId)
     const view = rec?.prompt
-    if (!rec || !view || view.webContents.isDestroyed()) return { exists: false, placed: false }
+    if (!rec || !view || !viewContents(view)) return { exists: false, placed: false }
     return { exists: true, placed: rec.win.contentView.children.includes(view), bounds: view.getBounds() }
   }
 
@@ -744,7 +754,7 @@ export class WindowManager {
   /** Shows a createUiView() view at `bounds` (window coordinates); `focus` gives it the keyboard. */
   showUiView(windowId: WindowId, view: WebContentsView, bounds: Rect, focus = false): void {
     const rec = this.records.get(windowId)
-    if (!rec || rec.win.isDestroyed() || !rec.uiViews.has(view) || view.webContents.isDestroyed()) return
+    if (!rec || rec.win.isDestroyed() || !rec.uiViews.has(view) || !viewContents(view)) return
     const next = roundRect(bounds)
     const current = view.getBounds()
     if (
@@ -757,15 +767,15 @@ export class WindowManager {
     }
     this.placeAbovePages(rec, view)
     if (!view.getVisible()) view.setVisible(true)
-    if (focus) view.webContents.focus()
+    if (focus) viewContents(view)?.focus()
   }
 
   /** Hides a createUiView() view; keyboard focus in it goes back to the page. */
   hideUiView(windowId: WindowId, view: WebContentsView): void {
     const rec = this.records.get(windowId)
-    if (!rec || rec.win.isDestroyed() || !rec.uiViews.has(view) || view.webContents.isDestroyed()) return
+    if (!rec || rec.win.isDestroyed() || !rec.uiViews.has(view) || !viewContents(view)) return
     if (!view.getVisible()) return
-    const focused = webContents.getFocusedWebContents() === view.webContents
+    const focused = webContents.getFocusedWebContents() === viewContents(view)
     view.setVisible(false)
     if (focused && !rec.overlayShown && rec.win.isFocused()) this.focusActiveTab(rec.id)
   }
@@ -1206,7 +1216,7 @@ export class WindowManager {
 
   /** The floating sidebar's view (SB-12): a transparent view at the window's left edge. */
   private ensureFloating(rec: WindowRecord): WebContentsView {
-    if (rec.floating && !rec.floating.webContents.isDestroyed()) return rec.floating
+    if (rec.floating && viewContents(rec.floating)) return rec.floating
     clearTimeout(rec.floatingPrewarm)
     rec.floatingPrewarm = undefined
     const view = new WebContentsView({ webPreferences: uiWebPreferences(rec.id, 'sidebar') })
@@ -1244,9 +1254,10 @@ export class WindowManager {
   private hideFloating(rec: WindowRecord, afterMs: number): void {
     rec.floatingShown = false
     const view = rec.floating
-    if (!view || view.webContents.isDestroyed()) return
+    const contents = viewContents(view)
+    if (!view || !contents) return
     // Keyboard focus in the card goes back to the page.
-    if (webContents.getFocusedWebContents() === view.webContents && !rec.overlayShown) this.focusActiveTab(rec.id)
+    if (webContents.getFocusedWebContents() === contents && !rec.overlayShown) this.focusActiveTab(rec.id)
     clearTimeout(rec.floatingTimer)
     rec.floatingTimer = setTimeout(() => {
       rec.floatingTimer = undefined
@@ -1270,12 +1281,12 @@ export class WindowManager {
     rec.floatingTimer = undefined
     rec.floating = undefined
     if (!rec.win.isDestroyed()) this.removeChild(rec, view)
-    if (!view.webContents.isDestroyed()) view.webContents.close()
+    viewContents(view)?.close()
   }
 
   /** The page tools' view (NV-05, NV-06): transparent, sized by the nav module to what it shows. */
   private ensureTools(rec: WindowRecord): WebContentsView {
-    if (rec.tools && !rec.tools.webContents.isDestroyed()) return rec.tools
+    if (rec.tools && viewContents(rec.tools)) return rec.tools
     clearTimeout(rec.toolsPrewarm)
     rec.toolsPrewarm = undefined
     const view = new WebContentsView({ webPreferences: uiWebPreferences(rec.id, 'tools') })
@@ -1292,7 +1303,7 @@ export class WindowManager {
 
   /** The permission prompt's view (NV-15): transparent, sized by the permissions module to its card. */
   private ensurePrompt(rec: WindowRecord): WebContentsView {
-    if (rec.prompt && !rec.prompt.webContents.isDestroyed()) return rec.prompt
+    if (rec.prompt && viewContents(rec.prompt)) return rec.prompt
     const view = new WebContentsView({ webPreferences: uiWebPreferences(rec.id, 'prompt') })
     view.setBackgroundColor('#00000000')
     this.registerUi(view.webContents, rec.id)
@@ -1347,7 +1358,7 @@ export class WindowManager {
     }
     rec.overlayHideTimer = setTimeout(() => {
       rec.overlayHideTimer = undefined
-      if (rec.overlayShown || rec.win.isDestroyed() || overlay.webContents.isDestroyed()) return
+      if (rec.overlayShown || rec.win.isDestroyed() || !viewContents(overlay)) return
       try {
         overlay.setVisible(false)
       } catch {

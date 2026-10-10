@@ -1,7 +1,7 @@
 import type { WebContentsView } from 'electron'
 import type { TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
-import { activeTabOf } from '../windows'
+import { activeTabOf, viewContents } from '../windows'
 
 /** A page has to be loading this long before the indicator shows, so quick loads never flash it (FL-23). */
 export const LOADING_SHOW_AFTER_MS = 150
@@ -64,11 +64,12 @@ export function registerLoading(ctx: MainContext): { info: (windowId: WindowId) 
     return s
   }
 
-  const live = (view: WebContentsView | undefined): view is WebContentsView => !!view && !view.webContents.isDestroyed()
+  /** A view whose page is alive (its `webContents` is undefined once the page is gone). */
+  const live = (view: WebContentsView | undefined): view is WebContentsView => !!viewContents(view)
 
   const send = (s: WindowLoading, state: LoadingState) => {
     s.state = state
-    if (live(s.view)) s.view.webContents.send('orbit:loading:state', { state })
+    viewContents(s.view)?.send('orbit:loading:state', { state })
   }
 
   /** Where the pill goes over a tab's page, or undefined when the page isn't on screen. */
