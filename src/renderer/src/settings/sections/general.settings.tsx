@@ -1,7 +1,9 @@
-import { SlidersHorizontal } from 'lucide-react'
+import { CircleCheck, SlidersHorizontal } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import type { DefaultBrowserStatus, SettingsCapabilities } from '../../../../shared/commands/settings'
 import { invoke } from '../../api'
 import { useOrbit } from '../../store'
-import { type Option, Select, SettingGroup, SettingRow } from '../controls'
+import { Button, type Option, Select, SettingGroup, SettingRow } from '../controls'
 import { HOUR, withCurrent } from '../format'
 import type { SettingsSection } from '../registry'
 
@@ -14,24 +16,102 @@ const MINI_WINDOW_ARCHIVE: Option<number>[] = [
   { value: 0, label: 'Never' },
 ]
 
+/**
+ * Reads something main doesn't keep in state again whenever Settings comes to the front or main says
+ * it changed (`settings.refresh`): the user may have changed it outside Orbit.
+ */
+export function useMainValue<T>(read: () => Promise<T>): [T | undefined, (value: T) => void] {
+  const [value, setValue] = useState<T>()
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `read` is fixed per caller
+  useEffect(() => {
+    let live = true
+    const load = () => void read().then((v) => live && setValue(v))
+    load()
+    const off = window.orbit.on('settings.refresh', load)
+    window.addEventListener('focus', load)
+    return () => {
+      live = false
+      off()
+      window.removeEventListener('focus', load)
+    }
+  }, [])
+  return [value, setValue]
+}
+
+const readDefaultBrowser = () => invoke('settings.defaultBrowser', {})
+const readCapabilities = () => invoke('settings.capabilities', {})
+
+function DefaultBrowserRow() {
+  const [status, setStatus] = useMainValue<DefaultBrowserStatus>(readDefaultBrowser)
+  const [asking, setAsking] = useState(false)
+  const description = !status
+    ? undefined
+    : status.isDefault
+      ? 'Links you open in other apps open in Orbit.'
+      : (status.note ?? 'Links you open in other apps open in another browser.')
+  return (
+    <SettingRow id="default-browser" label="Default browser" description={description}>
+      {status?.isDefault ? (
+        <span className="st-status" data-testid="default-browser-status">
+          <CircleCheck size={16} aria-hidden="true" />
+          Orbit is your default browser
+        </span>
+      ) : (
+        <Button
+          testId="default-browser-set"
+          disabled={!status?.canSet || asking}
+          title={status?.note}
+          onClick={() => {
+            setAsking(true)
+            void invoke('settings.setDefaultBrowser', {})
+              .then(setStatus)
+              .finally(() => setAsking(false))
+          }}
+        >
+          Make Orbit the default
+        </Button>
+      )}
+    </SettingRow>
+  )
+}
+
 function GeneralPage() {
   const miniAfter = useOrbit((s) => s.settings.miniWindowArchiveAfterMs)
+  const [capabilities] = useMainValue<SettingsCapabilities>(readCapabilities)
   return (
-    <SettingGroup title="Mini Window">
-      <SettingRow
-        id="mini-window-archive"
-        label="Archive Mini Windows after"
-        description="A Mini Window left alone this long closes; its page goes to the Archive."
-      >
-        <Select
+    <>
+      <SettingGroup title="Default browser">
+        <DefaultBrowserRow />
+      </SettingGroup>
+      {capabilities?.importer && (
+        <SettingGroup title="Import">
+          <SettingRow
+            id="import"
+            label="Import bookmarks and data"
+            description="Bring bookmarks, history and more from another browser."
+          >
+            <Button testId="import-open" onClick={() => void invoke('settings.openImport', {})}>
+              Import…
+            </Button>
+          </SettingRow>
+        </SettingGroup>
+      )}
+      <SettingGroup title="Mini Window">
+        <SettingRow
+          id="mini-window-archive"
           label="Archive Mini Windows after"
-          value={miniAfter}
-          options={withCurrent(MINI_WINDOW_ARCHIVE, miniAfter)}
-          testId="mini-window-archive"
-          onChange={(v) => void invoke('settings.update', { miniWindowArchiveAfterMs: v })}
-        />
-      </SettingRow>
-    </SettingGroup>
+          description="A Mini Window left alone this long closes; its page goes to the Archive."
+        >
+          <Select
+            label="Archive Mini Windows after"
+            value={miniAfter}
+            options={withCurrent(MINI_WINDOW_ARCHIVE, miniAfter)}
+            testId="mini-window-archive"
+            onChange={(v) => void invoke('settings.update', { miniWindowArchiveAfterMs: v })}
+          />
+        </SettingRow>
+      </SettingGroup>
+    </>
   )
 }
 

@@ -1,3 +1,4 @@
+import type { ActionDef } from '../actions'
 import type { ProfileId, Settings, SpaceId, WindowId } from '../state'
 
 /**
@@ -24,6 +25,63 @@ export interface SettingsTarget {
   /** The profile the Profiles section shows (ST-04); the opener's by default. */
   profileId?: ProfileId
 }
+
+/** An action that opens Settings at a section or at one setting (ST-02). */
+export interface SettingsActionDef extends ActionDef {
+  /** Where it opens Settings. */
+  settings: SettingsTarget
+}
+
+/**
+ * Settings sections and common settings as actions (ST-02). The command bar lists them by name, and
+ * choosing one opens Settings there, scrolled to the setting (src/main/settings/index.ts registers
+ * them all). They are spread at the end of ACTIONS (src/shared/actions.ts). A lane that adds a
+ * Settings section adds its action here.
+ */
+export const SETTINGS_ACTIONS: SettingsActionDef[] = [
+  {
+    id: 'settings.general',
+    title: 'General Settings',
+    category: 'App',
+    settings: { section: 'general' },
+    keywords: ['preferences', 'mini window'],
+  },
+  {
+    id: 'settings.defaultBrowser',
+    title: 'Set as Default Browser',
+    category: 'App',
+    settings: { section: 'general', item: 'default-browser' },
+    keywords: ['default browser', 'make default'],
+  },
+  {
+    id: 'settings.search',
+    title: 'Search Engine Settings',
+    category: 'App',
+    settings: { section: 'search' },
+    keywords: ['default search engine', 'google', 'duckduckgo', 'bing', 'search suggestions'],
+  },
+  {
+    id: 'settings.siteSearch',
+    title: 'Site Search Settings',
+    category: 'App',
+    settings: { section: 'search', item: 'site-search' },
+    keywords: ['search keywords', 'custom search engine', 'add search engine'],
+  },
+  {
+    id: 'settings.appearance',
+    title: 'Appearance Settings',
+    category: 'App',
+    settings: { section: 'appearance' },
+    keywords: ['theme', 'dark mode', 'light mode', 'match system'],
+  },
+  {
+    id: 'settings.about',
+    title: 'About Orbit',
+    category: 'App',
+    settings: { section: 'about' },
+    keywords: ['version', 'build info', 'licence', 'license', 'credits'],
+  },
+]
 
 /** Sent to the Settings window each time it is opened again (`window.orbit.on('settings.reveal', …)`). */
 export interface SettingsReveal {
@@ -65,6 +123,21 @@ export type SiteSearchSaved =
   | { ok: true; id: string }
   | { ok: false; field: 'name' | 'keyword' | 'url'; message: string }
 
+/** Whether Orbit is the OS default browser (ST-03, OB-07). */
+export interface DefaultBrowserStatus {
+  isDefault: boolean
+  /** Whether Orbit can ask to become it (installed builds). */
+  canSet: boolean
+  /** Why it can't, when it can't. */
+  note?: string
+}
+
+/** Optional features other lanes provide, which Settings and onboarding offer when present. */
+export interface SettingsCapabilities {
+  /** The import lane's flow (`import.open`, IM-01). */
+  importer: boolean
+}
+
 /** What About shows and "Copy build info" copies (ST-17). */
 export interface BuildInfo {
   version: string
@@ -95,4 +168,11 @@ export interface SettingsCommands {
   /** Adds a custom search engine, or changes one (ST-06, CB-11). */
   'settings.saveSiteSearch': { args: SiteSearchDraft; result: SiteSearchSaved }
   'settings.removeSiteSearch': { args: { id: string }; result: void }
+  /** Whether Orbit is the default browser (ST-03). */
+  'settings.defaultBrowser': { args: Record<string, never>; result: DefaultBrowserStatus }
+  /** Asks the OS to make Orbit the default browser (ST-03, OB-07). */
+  'settings.setDefaultBrowser': { args: Record<string, never>; result: DefaultBrowserStatus }
+  'settings.capabilities': { args: Record<string, never>; result: SettingsCapabilities }
+  /** Opens the import flow (IM-01) in the browser window Settings belongs to, when the import lane provides it. */
+  'settings.openImport': { args: Record<string, never>; result: boolean }
 }

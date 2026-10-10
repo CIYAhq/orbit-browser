@@ -168,6 +168,51 @@ test('[ST-01] in Settings, ⌘F searches Settings and ⌘T opens the command bar
   expect(await settingsWindows()).toHaveLength(1)
 })
 
+/** Runs a command-bar action by typing its name in the browser window's command bar. */
+async function runFromCommandBar(name: string): Promise<void> {
+  await focusBrowserWindow(orbit.app)
+  await expect.poll(() => browserFocused(orbit.app)).toBe(true)
+  await orbit.shell.keyboard.press(`${MOD}+T`)
+  const overlay = await viewPage(orbit.app, 'overlay')
+  const input = overlay.getByTestId('command-input')
+  await expect(input).toBeFocused()
+  await input.fill(name.toLowerCase())
+  const top = overlay.getByTestId('command-result').first()
+  await expect(top).toHaveAttribute('data-kind', 'action')
+  await expect(top).toContainText(name)
+  await input.press('Enter')
+}
+
+test('[ST-02] Settings sections and settings are command-bar actions that open Settings there', async () => {
+  await runFromCommandBar('Site Search Settings')
+  const page = await pageOfView(orbit.app, 'settings')
+  await expect(page.getByTestId('settings-tab-search')).toHaveAttribute('aria-selected', 'true')
+  // Scrolled to the setting.
+  await expect(page.locator('[data-setting-group="site-search"]')).toBeInViewport()
+  await expect.poll(async () => (await settingsWindows()).map((w) => w.focused)).toEqual([true])
+
+  // Another one moves the same window.
+  await runFromCommandBar('Appearance Settings')
+  await expect(page.getByTestId('settings-tab-appearance')).toHaveAttribute('aria-selected', 'true')
+  await expect.poll(async () => (await settingsWindows()).map((w) => w.focused)).toEqual([true])
+})
+
+test('[ST-03][ST-02] General: make Orbit the default browser from Settings or the command bar', async () => {
+  const page = await openSettings(orbit.app, { section: 'general' })
+  // (Test runs use a stand-in: the OS setting never changes.)
+  await page.getByTestId('default-browser-set').click()
+  await expect(page.getByTestId('default-browser-status')).toHaveText('Orbit is your default browser')
+  // Import shows only once the import flow exists (IM-01).
+  await expect(page.getByTestId('setting-import')).toHaveCount(0)
+  await page.getByTestId('settings-tab-about').click()
+
+  // The command bar action opens General at that setting.
+  await runFromCommandBar('Set as Default Browser')
+  await expect(page.getByTestId('settings-tab-general')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('[data-setting="default-browser"]')).toBeInViewport()
+  await expect(page.getByTestId('default-browser-status')).toBeVisible()
+})
+
 // ---- Appearance (AP-01, ST-11) ----
 
 test('[AP-01][ST-11] Light, Dark or Match system, chosen in Settings, turns every window, the command bar, menus, pages and Settings at once', async () => {

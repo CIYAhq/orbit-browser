@@ -1,7 +1,10 @@
 import { app, clipboard } from 'electron'
 import { ACTIONS_BY_ID } from '../../shared/actions'
-import type { BuildInfo } from '../../shared/commands/settings'
+import { type BuildInfo, SETTINGS_ACTIONS } from '../../shared/commands/settings'
+import type { WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
+import type { CallContext } from '../registry'
+import { stubDefaultBrowser, systemDefaultBrowser } from './default-browser'
 import { registerSearchSettings } from './search'
 import { applySettingsPatch } from './validate'
 import { SETTINGS_WINDOW_ID, SettingsWindow } from './window'
@@ -37,6 +40,22 @@ export function registerSettings(ctx: MainContext): void {
     const win = windows.get(windowId)
     if (win && !win.isDestroyed()) win.focus()
   })
+  // Default browser (ST-03). Test runs never change the OS setting.
+  const defaultBrowser = ctx.e2e ? stubDefaultBrowser() : systemDefaultBrowser()
+  commands.register('settings.defaultBrowser', () => defaultBrowser.status())
+  commands.register('settings.setDefaultBrowser', () => defaultBrowser.set())
+
+  // Import (IM-01) is the import lane's: offered when it registers `import.open`.
+  commands.register('settings.capabilities', () => ({ importer: commands.has('import.open') }))
+  commands.register('settings.openImport', async () => {
+    if (!commands.has('import.open')) return false
+    const windowId = settings.browserWindow() ?? windows.open()
+    windows.get(windowId)?.focus()
+    const run = commands.run as unknown as (name: string, args: unknown, c: CallContext) => Promise<unknown>
+    await run('import.open', {}, { windowId })
+    return true
+  })
+
   commands.register('settings.buildInfo', () => buildInfo())
   commands.register('settings.copyBuildInfo', () => {
     const text = buildInfoText(buildInfo())
@@ -47,6 +66,15 @@ export function registerSettings(ctx: MainContext): void {
   // ⌘, (ST-01): replaces the core placeholder.
   actions.register('app.settings', (c) => settings.open({}, c.windowId ?? windows.focusedWindowId()))
 
+  // Settings sections and settings as actions (ST-02). `from` is the window the action came from.
+  const settingsActions = new Map<string, (from: WindowId | undefined) => void>()
+  for (const def of SETTINGS_ACTIONS) settingsActions.set(def.id, (from) => settings.open(def.settings, from))
+  settingsActions.set('settings.defaultBrowser', (from) => {
+    settings.open({ section: 'general', item: 'default-browser' }, from)
+    if (!defaultBrowser.status().isDefault) void defaultBrowser.set().then(() => settings.refresh())
+  })
+  for (const [id, run] of settingsActions) actions.register(id, (c) => run(c.windowId ?? windows.focusedWindowId()))
+
   // Shortcuts and menu items pressed while Settings has focus.
   actions.intercept((id, c) => {
     if (c.windowId !== SETTINGS_WINDOW_ID) return false
@@ -54,6 +82,8 @@ export function registerSettings(ctx: MainContext): void {
     else if (id === 'app.settings') settings.focus()
     // Find (⌘F) searches Settings (ST-02).
     else if (id === 'page.find') settings.window?.webContents.send('orbit:settings.find')
+    // A Settings action pressed in Settings stays there (ST-02).
+    else if (settingsActions.has(id)) settingsActions.get(id)?.(SETTINGS_WINDOW_ID)
     else if (FORWARDED.has(id) || ACTIONS_BY_ID[id]?.category === 'Window' || ACTIONS_BY_ID[id]?.category === 'App') {
       const target = settings.browserWindow()
       const win = target ? windows.get(target) : undefined

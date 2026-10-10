@@ -214,7 +214,8 @@ function useRevealItem(
     let tries = 0
     // The row may render a moment later (a page that loads its data first).
     const find = () => {
-      const row = root.querySelector<HTMLElement>(`[data-setting="${CSS.escape(item)}"]`)
+      const id = CSS.escape(item)
+      const row = root.querySelector<HTMLElement>(`[data-setting="${id}"], [data-setting-group="${id}"]`)
       if (!row) {
         if (++tries < 20) timer = setTimeout(find, 50)
         return

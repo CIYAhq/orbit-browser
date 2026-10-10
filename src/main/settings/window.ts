@@ -108,6 +108,12 @@ export class SettingsWindow {
     this.create()
   }
 
+  /** Tells the Settings page to read again what main doesn't keep in state (the default browser). */
+  refresh(): void {
+    const win = this.window
+    if (win && !win.isDestroyed() && !win.webContents.isLoading()) win.webContents.send('orbit:settings.refresh')
+  }
+
   focus(): void {
     const win = this.window
     if (!win) return
