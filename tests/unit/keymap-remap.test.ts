@@ -12,6 +12,7 @@ import {
 import {
   ACTIONS,
   ACTIONS_BY_ID,
+  type ActionDef,
   actionForAccelerator,
   actionForInput,
   buildKeymap,
@@ -155,6 +156,28 @@ describe('[KS-01][ST-08] changing bindings', () => {
     expect(bind(undefined, { actionId: 'sidebar.toggle', accel: 'F7' }, 'linux').result).toEqual({ ok: true })
   })
 
+  it('[KS-15] F1 stays Help on Windows and Linux; on macOS Help has no keys and can be given some', () => {
+    for (const platform of ['linux', 'win32']) {
+      expect(bind(undefined, { actionId: 'sidebar.toggle', accel: 'F1' }, platform).result).toEqual({
+        ok: false,
+        problem: 'F1 is kept for Help.',
+      })
+      expect(bind(undefined, { actionId: 'help.open', accel: 'F9' }, platform).result).toEqual({
+        ok: false,
+        problem: 'Help keeps its shortcut.',
+      })
+      // Whatever is stored, F1 is Help's.
+      const keymap = buildKeymap({ 'help.open': [], 'sidebar.toggle': ['F1'] }, platform)
+      expect(keymap.direct.get('F1')?.id).toBe('help.open')
+      expect(normalizeShortcuts({ 'help.open': ['F9'], 'tab.new': ['F1', 'F2'] }, platform)).toEqual({
+        'tab.new': ['F2'],
+      })
+    }
+    expect(shortcutsFor(ACTIONS_BY_ID['help.open'] as ActionDef, 'darwin')).toEqual([])
+    expect(bind(undefined, { actionId: 'help.open', accel: 'F9' }, 'darwin').result).toEqual({ ok: true })
+    expect(bind(undefined, { actionId: 'sidebar.toggle', accel: 'F1' }, 'darwin').result).toEqual({ ok: true })
+  })
+
   it(`keeps at most ${MAX_BINDINGS} bindings on an action`, () => {
     let custom = {}
     for (const n of [1, 2, 3, 4]) custom = bind(custom, { actionId: 'tab.new', accel: `F${n}` }, 'darwin').custom
@@ -200,7 +223,7 @@ describe('[KS-01] stored bindings survive a restart only as Orbit can use them',
   })
 
   it('keeps no more than the most bindings an action can have', () => {
-    const many = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7']
+    const many = ['F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8']
     expect(normalizeShortcuts({ 'tab.new': many }, 'linux')).toEqual({ 'tab.new': many.slice(0, MAX_BINDINGS) })
   })
 

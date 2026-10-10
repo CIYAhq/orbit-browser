@@ -1067,7 +1067,11 @@ export class WindowManager {
         event.preventDefault()
         return
       }
-      const action = actionForInput(input, process.platform)
+      // Where the key was pressed may decide the action (keys lane: ⌘O opens a file outside a Peek, KS-12).
+      const action = keyRouter.actionIn(
+        actionForInput(input, process.platform),
+        () => this.windowIdFor(contents) ?? this.focusedWindowId(),
+      )
       if (!action || !this.ctx.actions.has(action.id)) {
         this.runOutsideText(contents, input)
         return

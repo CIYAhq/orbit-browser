@@ -150,8 +150,9 @@ export const SETTINGS_LANE_ACTIONS: ActionDef[] = [
     id: 'help.open',
     title: 'Help',
     category: 'App',
-    // Windows and Linux: F1 (KS-15); macOS has ⌘? for the Help menu.
+    // Windows and Linux: F1, which can't be changed (KS-15); macOS has ⌘? for the Help menu.
     other: ['F1'],
+    fixed: 'other',
     keywords: ['documentation', 'user guide', 'support', 'readme'],
   },
   {

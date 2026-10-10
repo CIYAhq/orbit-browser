@@ -5,6 +5,7 @@ import type { MainContext } from '../context'
 import { installMenu } from '../menu'
 import { bind, reset, setPriority, unbind } from './bindings'
 import { lastMenuHints } from './menu-hints'
+import { registerOpenFile } from './open-file'
 import { keyRouter } from './router'
 import { registerShortcutSheet } from './sheet'
 import { registerSpecialWindows } from './special-windows'
@@ -82,6 +83,7 @@ export function registerKeys(ctx: MainContext): void {
   registerWindowKeys(ctx)
   registerTabKeys(ctx)
   registerShortcutSheet(ctx)
+  registerOpenFile(ctx)
   registerSpecialWindows(ctx)
   keyRouter.init(ctx)
   commands.register('keys.record', ({ on }, c) => keyRouter.setRecording(on ? c.windowId : undefined))

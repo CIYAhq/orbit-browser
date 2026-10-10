@@ -5,6 +5,7 @@ import {
   buildKeymap,
   defaultPriorityFor,
   defaultShortcutsFor,
+  isFixed,
 } from '../../shared/actions'
 import type { BindRequest, BindResult, ShortcutPriority } from '../../shared/commands/keys'
 import {
@@ -53,10 +54,10 @@ export function normalizeShortcuts(value: unknown, platform: string): Bindings |
   const out: Bindings = {}
   const taken = new Set<string>()
   for (const action of ACTIONS)
-    if (action.fixed) for (const key of canon(defaultShortcutsFor(action, platform))) taken.add(key)
+    if (isFixed(action, platform)) for (const key of canon(defaultShortcutsFor(action, platform))) taken.add(key)
   for (const action of ACTIONS) {
     const raw = value[action.id]
-    if (action.fixed || !Array.isArray(raw)) continue
+    if (isFixed(action, platform) || !Array.isArray(raw)) continue
     const list: string[] = []
     for (const accel of raw) {
       if (typeof accel !== 'string' || bindingProblem(accel, platform) !== undefined) continue
@@ -76,7 +77,7 @@ export function normalizePriorities(value: unknown, platform: string): Record<st
   const out: Record<string, ShortcutPriority> = {}
   for (const [id, priority] of Object.entries(value)) {
     const action = ACTIONS_BY_ID[id]
-    if (!action || action.fixed || (priority !== 'websites' && priority !== 'orbit')) continue
+    if (!action || isFixed(action, platform) || (priority !== 'websites' && priority !== 'orbit')) continue
     if (priority !== defaultPriorityFor(action, platform)) out[id] = priority
   }
   return Object.keys(out).length > 0 ? out : undefined
@@ -96,7 +97,7 @@ export function bind(
   const custom = copy(stored)
   const action = ACTIONS_BY_ID[req.actionId]
   if (!action) return fail(custom, 'That action no longer exists.')
-  if (action.fixed) return fail(custom, `${action.title} keeps its shortcut.`)
+  if (isFixed(action, platform)) return fail(custom, `${action.title} keeps its shortcut.`)
   const problem = bindingProblem(req.accel, platform)
   if (problem) return fail(custom, problem)
   const accel = canonicalAccelerator(req.accel) as string
@@ -105,7 +106,7 @@ export function bind(
   const mine = canon(keymap.lists.get(action.id) ?? [])
   const owner = keymap.direct.get(accel) ?? keymap.outsideText.get(accel)
   if (owner && owner.id !== action.id) {
-    if (owner.fixed) {
+    if (isFixed(owner, platform)) {
       return fail(custom, `${formatAccelerator(accel, platform)} is kept for ${owner.title}.`)
     }
     if (!req.onConflict) {
@@ -138,7 +139,7 @@ export function unbind(
   const custom = copy(stored)
   const action = ACTIONS_BY_ID[actionId]
   const key = canonicalAccelerator(accel)
-  if (!action || action.fixed || !key) return custom
+  if (!action || isFixed(action, platform) || !key) return custom
   const list = canon(buildKeymap(custom, platform).lists.get(actionId) ?? [])
   if (list.includes(key))
     settle(
@@ -154,7 +155,7 @@ export function unbind(
 export function reset(stored: CustomBindings | undefined, actionId: string, platform: string): Bindings {
   const custom = copy(stored)
   const action = ACTIONS_BY_ID[actionId]
-  if (!action || action.fixed) return custom
+  if (!action || isFixed(action, platform)) return custom
   delete custom[actionId]
   const defaults = new Set(canon(defaultShortcutsFor(action, platform)))
   for (const [id, list] of Object.entries(custom)) {
@@ -175,7 +176,7 @@ export function setPriority(
 ): Record<string, ShortcutPriority> {
   const out = { ...(stored ?? {}) }
   const action = ACTIONS_BY_ID[actionId]
-  if (!action || action.fixed || (priority !== 'websites' && priority !== 'orbit')) return out
+  if (!action || isFixed(action, platform) || (priority !== 'websites' && priority !== 'orbit')) return out
   if (priority === defaultPriorityFor(action, platform)) delete out[actionId]
   else out[actionId] = priority
   return out

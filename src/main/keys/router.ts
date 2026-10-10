@@ -4,6 +4,7 @@ import type { RecordedKey } from '../../shared/commands/keys'
 import { acceleratorFromInput, modifiersOf } from '../../shared/keymap'
 import type { WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
+import { actionInWindow } from './open-file'
 import { pageCanAnswer, pageVerdict, watchPageKeys } from './page-keys'
 
 /** A second press of the same keys within this long after the page took the first runs the action (KS-02). */
@@ -108,6 +109,15 @@ export class KeyRouter {
     if (!windowId || !recent?.active(windowId)) return false
     if (!input.isAutoRepeat) recent.closeHighlighted(windowId)
     return true
+  }
+
+  /**
+   * The action a key press runs where it was pressed: Open Peek as Tab's keys open a file in a
+   * window with no Peek or Mini Window (KS-12).
+   */
+  actionIn(action: ActionDef | undefined, windowOf: () => WindowId | undefined): ActionDef | undefined {
+    if (!action || !this.ctx) return action
+    return actionInWindow(action, this.ctx.store.state, windowOf)
   }
 
   /**

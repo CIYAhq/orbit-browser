@@ -1,5 +1,5 @@
 import { app, Menu, type MenuItemConstructorOptions } from 'electron'
-import { ACTIONS_BY_ID, shortcutsFor, toElectronAccelerator } from '../shared/actions'
+import { ACTIONS_BY_ID, borrowedShortcutsFor, shortcutsFor, toElectronAccelerator } from '../shared/actions'
 import { editsText } from '../shared/keymap'
 import { keepForMenu } from './archive/menus'
 import { recentlyClosedItems } from './archive/recently-closed'
@@ -20,13 +20,16 @@ export function installMenu(ctx: MainContext): void {
   }
   const item = (id: string, label?: string): MenuItemConstructorOptions => {
     const action = ACTIONS_BY_ID[id]
-    const accel = action ? shortcutsFor(action, 'darwin')[0] : undefined
+    const own = action ? shortcutsFor(action, 'darwin')[0] : undefined
+    // Keys lent by another action (⌘O for Open File where there is no Peek, KS-12) are shown too.
+    const lent = own || !action ? undefined : borrowedShortcutsFor(action, 'darwin')?.keys[0]
+    const accel = own ?? lent
     return {
       label: label ?? action?.title ?? id,
       accelerator: accel ? toElectronAccelerator(accel) : undefined,
       // A binding that types or edits text (KS-16) is only shown: the router runs it outside text
-      // fields, and the menu must not take it from one.
-      ...(accel && editsText(accel, 'darwin') ? { registerAccelerator: false } : {}),
+      // fields, and the menu must not take it from one. So are lent keys: the router picks the action.
+      ...(accel && (lent || editsText(accel, 'darwin')) ? { registerAccelerator: false } : {}),
       click: () => {
         // A key let through to a page that left it alone reaches the menu too: it runs once (KS-02).
         if (!keyRouter.menuRuns(id)) return
@@ -64,6 +67,7 @@ export function installMenu(ctx: MainContext): void {
         item('window.new'),
         item('window.newMini'),
         item('window.newPrivate'),
+        item('file.open'),
         { type: 'separator' },
         item('tab.close'),
         item('window.close'),

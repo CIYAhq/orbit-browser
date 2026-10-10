@@ -690,7 +690,7 @@ export function registerMiniWindow(ctx: MainContext): void {
   actions.register('mini.toggleAll', toggleAll)
 
   // In a Mini Window, keys act on its page; sidebar, Space and tab-list keys do nothing (KS-20).
-  // Help → Keyboard Shortcuts opens over the browser window behind (OB-12, keys lane).
+  // Help → Keyboard Shortcuts and File → Open File… act in the browser window behind (OB-12, KS-12, keys lane).
   const APP_ACTIONS = new Set([
     'window.new',
     'window.newMini',
@@ -698,6 +698,7 @@ export function registerMiniWindow(ctx: MainContext): void {
     'app.settings',
     'app.archive',
     'help.shortcuts',
+    'file.open',
   ])
   actions.intercept((id, c) => {
     const mini = miniOf(c)

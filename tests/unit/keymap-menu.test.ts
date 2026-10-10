@@ -22,7 +22,7 @@ vi.mock('../../src/main/keys/router', () => ({ keyRouter: { menuRuns: () => true
 
 import type { MainContext } from '../../src/main/context'
 import { installMenu } from '../../src/main/menu'
-import { ACTIONS_BY_ID } from '../../src/shared/actions'
+import { ACTIONS_BY_ID, type ActionDef, isFixed } from '../../src/shared/actions'
 import { bindingProblem, setCustomBindings } from '../../src/shared/keymap'
 
 const platform = Object.getOwnPropertyDescriptor(process, 'platform') as PropertyDescriptor
@@ -64,8 +64,10 @@ describe('the macOS menu bar', () => {
       expect(bindingProblem('Alt+F4', p)).toContain('closing the window')
       expect(bindingProblem('Alt+Tab', p)).toContain('switching apps')
     }
-    // Windows and Linux have no Help menu: F1 opens Help (OB-13).
-    expect(ACTIONS_BY_ID['help.open']?.other).toEqual(['F1'])
+    // Windows and Linux have no Help menu: F1 opens Help (OB-13) and can't be changed there.
+    const help = ACTIONS_BY_ID['help.open'] as ActionDef
+    expect(help.other).toEqual(['F1'])
+    expect([isFixed(help, 'linux'), isFixed(help, 'win32'), isFixed(help, 'darwin')]).toEqual([true, true, false])
   })
 
   it('[KS-01][KS-18] shows each item’s keys as they are now, and none for an action without keys', () => {
@@ -86,6 +88,17 @@ describe('the macOS menu bar', () => {
     expect(pin?.accelerator).toBe('Command+A')
     expect(pin?.registerAccelerator).toBe(false)
     expect(find(build().View ?? [], 'Toggle Sidebar')?.registerAccelerator).toBeUndefined()
+  })
+
+  it('[KS-12] File → Open File… shows Open Peek as Tab’s ⌘O, which opens a file where there is no Peek; keys of its own replace it', () => {
+    const open = find(build().File ?? [], 'Open File…')
+    expect(open?.accelerator).toBe('Command+O')
+    // The key router decides what ⌘O does: the menu only shows it.
+    expect(open?.registerAccelerator).toBe(false)
+    setCustomBindings({ 'file.open': ['Cmd+Shift+F2'] })
+    const own = find(build().File ?? [], 'Open File…')
+    expect(own?.accelerator).toBe('Command+Shift+F2')
+    expect(own?.registerAccelerator).toBeUndefined()
   })
 
   it('[OB-12][OB-13] Help → Keyboard Shortcuts comes after Orbit Help', () => {

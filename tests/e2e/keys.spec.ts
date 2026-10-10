@@ -1,3 +1,7 @@
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { expect, type Page, test } from '@playwright/test'
 import { action, isMac, launchOrbit, MOD, type Orbit, run, state, tabPage, viewPage } from './helpers'
 import {
@@ -1104,4 +1108,89 @@ test('[KS-20][KS-06] in full screen with the sidebar hidden, ⌘1–9 and ⌘⌥
   const win = await windowState(app)
   expect(win.fullscreen).toBe(true)
   expect(win.sidebar.visible).toBe(false)
+})
+
+// ---------- Open File (KS-12) and F1 (KS-15) ----------
+
+/** The next Open dialogs answer with these files (none: cancelled); returns how often one was asked. */
+async function answerOpenDialog(files: string[]): Promise<() => Promise<number>> {
+  await orbit.app.evaluate(({ dialog }, list) => {
+    const g = globalThis as unknown as { __openAsked: number }
+    g.__openAsked = 0
+    dialog.showOpenDialog = (async () => {
+      g.__openAsked++
+      return { canceled: list.length === 0, filePaths: list }
+    }) as typeof dialog.showOpenDialog
+  }, files)
+  return () => orbit.app.evaluate(() => (globalThis as unknown as { __openAsked: number }).__openAsked)
+}
+
+test('[KS-12] ⌘O / Ctrl+O with no Peek open, and Open File… from a Mini Window, open files from the disk in new tabs, the last one selected', async () => {
+  const { app } = orbit
+  const dir = mkdtempSync(join(tmpdir(), 'orbit-open-'))
+  const one = join(dir, 'one.html')
+  const two = join(dir, 'two file.html')
+  writeFileSync(one, '<title>First File</title><p>one</p>')
+  writeFileSync(two, '<title>Second File</title><p>two</p>')
+  const spaceId = await activeSpace(app)
+  const start = await openTab(app, fx.url('/page/Start'))
+  await selectPage(start, fx.url('/page/Start'))
+  const tabWith = async (file: string) =>
+    Object.values((await state(app)).tabs).find((t) => t.url === pathToFileURL(file).href)
+  let asked = await answerOpenDialog([one, two])
+  await pressMod('O')
+  await expect.poll(async () => (await tabWith(two))?.title).toBe('Second File')
+  // The first one opened behind it.
+  expect(await tabWith(one)).toBeDefined()
+  expect(await asked()).toBe(1)
+  await expect.poll(activeTab).toBe((await tabWith(two))?.id)
+  expect((await state(app)).spaces[spaceId]?.today).toHaveLength(3)
+
+  // Cancelled: nothing opens.
+  asked = await answerOpenDialog([])
+  await selectPage(start, fx.url('/page/Start'))
+  await pressMod('O')
+  await expect.poll(asked).toBe(1)
+  expect((await state(app)).spaces[spaceId]?.today).toHaveLength(3)
+  await expect.poll(activeTab).toBe(start)
+
+  // File → Open File… with a Mini Window in front: the file opens in the browser window.
+  const main = Object.values((await state(app)).windows).find((w) => w.kind === 'main')
+  await app.evaluate(({ app: a }, u) => a.emit('open-url', { preventDefault() {} }, u), fx.url('/page/InMini'))
+  const miniOf = async () => Object.values((await state(app)).windows).find((w) => w.kind === 'mini')
+  await expect.poll(async () => (await miniOf())?.id).toBeTruthy()
+  const mini = (await miniOf()) as NonNullable<Awaited<ReturnType<typeof miniOf>>>
+  const three = join(dir, 'three.html')
+  writeFileSync(three, '<title>Third File</title>')
+  asked = await answerOpenDialog([three])
+  await actionIn(mini.id, 'file.open')
+  await expect.poll(async () => (await tabWith(three))?.title).toBe('Third File')
+  const s = await state(app)
+  expect(s.spaces[spaceId]?.today).toContain((await tabWith(three))?.id)
+  expect(s.windows[main?.id ?? '']?.activeTab[spaceId]).toBe((await tabWith(three))?.id)
+  expect(s.windows[mini.id]).toBeDefined()
+})
+
+test('[KS-12][KS-15][ST-08] Settings → Shortcuts: Open File… shows the ⌘O it has where no Peek is open; F1 for Help can’t be changed on Windows and Linux', async () => {
+  const { app } = orbit
+  const page = await openSettings(app, { section: 'shortcuts' })
+  const open = shortcutRow(page, 'file.open')
+  await expect(open.getByTestId('shortcut-note')).toHaveText(
+    `Also ${isMac ? '⌘O' : 'Ctrl+O'} (the keys of Open Peek as Tab), where no Peek or Mini Window is open.`,
+  )
+  await expect(open.getByTestId('shortcut-record')).toBeVisible()
+  // The note follows Open Peek as Tab's keys.
+  expect(
+    await run(app, 'keys.bind', { actionId: 'peek.expand', accel: `${PRIMARY}+Shift+E`, onConflict: 'clear' }),
+  ).toEqual({ ok: true })
+  await run(app, 'keys.unbind', { actionId: 'peek.expand', accel: `${PRIMARY}+O` })
+  await expect(open.getByTestId('shortcut-note')).toContainText(isMac ? 'Also ⇧⌘E (' : 'Also Ctrl+Shift+E (')
+  const help = shortcutRow(page, 'help.open')
+  if (isMac) {
+    await expect(help.getByTestId('shortcut-record')).toBeVisible()
+  } else {
+    await expect(help.getByTestId('shortcut-binding')).toHaveText(['F1'])
+    await expect(help).toContainText('This shortcut can’t be changed.')
+    await expect(help.getByTestId('shortcut-record')).toHaveCount(0)
+  }
 })

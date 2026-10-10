@@ -10,7 +10,15 @@ import {
   useRef,
   useState,
 } from 'react'
-import { ACTIONS, ACTIONS_BY_ID, formatAccelerator, shortcutsFor } from '../../../shared/actions'
+import {
+  ACTIONS,
+  ACTIONS_BY_ID,
+  type ActionDef,
+  borrowedShortcutsFor,
+  formatAccelerator,
+  isFixed,
+  shortcutsFor,
+} from '../../../shared/actions'
 import type { BindingConflict, BindResult, RecordedKey, ShortcutPriority } from '../../../shared/commands/keys'
 import { acceleratorFromInput, MAX_BINDINGS, modifiersOf } from '../../../shared/keymap'
 import { invoke } from '../api'
@@ -185,6 +193,13 @@ function useRecorder() {
   return { recording, problem, conflict, start, stop, resolve, dismiss: () => setConflict(undefined) }
 }
 
+/** Keys another action lends this one, said under its row (⌘O for Open File where there is no Peek, KS-12). */
+function lentKeysNote(action: ActionDef): string | undefined {
+  const lent = borrowedShortcutsFor(action, platform)
+  if (!lent) return undefined
+  return `Also ${lent.keys.map(keys).join(' or ')} (the keys of ${lent.from.title}), ${lent.where}.`
+}
+
 /** The first binding of an action as this platform shows it, or ''. */
 function firstKeys(actionId: string): string {
   const action = ACTIONS_BY_ID[actionId]
@@ -246,7 +261,7 @@ export function ShortcutsPage() {
     const row = target.closest('[data-setting]')
     const actionId = row?.querySelector<HTMLElement>('[data-shortcut-action]')?.dataset.shortcutAction
     const entry = actionId ? entries.get(actionId) : undefined
-    if (!entry || entry.action.fixed) return
+    if (!entry || isFixed(entry.action, platform)) return
     e.preventDefault()
     stop()
     // From the keyboard (⇧F10, the menu key) the menu opens at the row's keys.
@@ -338,7 +353,8 @@ export function ShortcutsPage() {
                 actionId={id}
                 title={entry.title}
                 bindings={entry.bindings.join(' ')}
-                fixed={!!entry.action.fixed}
+                fixed={isFixed(entry.action, platform)}
+                note={lentKeysNote(entry.action)}
                 websites={entry.priority === 'websites'}
                 recording={mine ? (mine.replace ?? '') : undefined}
                 held={mine?.held ?? ''}
@@ -417,6 +433,7 @@ const ShortcutRow = memo(function ShortcutRow({
   title,
   bindings,
   fixed,
+  note,
   websites,
   recording,
   held,
@@ -430,6 +447,8 @@ const ShortcutRow = memo(function ShortcutRow({
   /** Its bindings, space-separated. */
   bindings: string
   fixed: boolean
+  /** Said under the row when there is nothing more pressing. */
+  note?: string
   websites: boolean
   /** Recording: '' for a new binding, else the binding being changed. */
   recording: string | undefined
@@ -462,6 +481,8 @@ const ShortcutRow = memo(function ShortcutRow({
     )
   } else if (fixed) {
     description = 'This shortcut can’t be changed.'
+  } else if (note) {
+    description = <span data-testid="shortcut-note">{note}</span>
   }
   const toggle = (replace?: string) => {
     if (recording === (replace ?? '')) stop()

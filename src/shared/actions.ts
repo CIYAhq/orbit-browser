@@ -55,9 +55,10 @@ export interface ActionDef {
   /**
    * The shortcuts can't be changed (KS-01 "fixed": OS conventions such as ⌘, for Settings, and keys
    * that belong to an overlay such as the recent-tab switcher's). Settings → Shortcuts shows them
-   * without a way to record new ones.
+   * without a way to record new ones. 'other': on Windows and Linux only (F1 for Help, KS-15).
+   * Read it through `isFixed`.
    */
-  fixed?: boolean
+  fixed?: boolean | 'other'
   /**
    * KS-02 "prefer websites": when a page also handles one of the action's keys, the page gets the
    * first press, and pressing again within about a second runs the action. `true` on every
@@ -187,13 +188,22 @@ export const ACTIONS: ActionDef[] = [
   },
   { id: 'tab.toggleMute', title: 'Mute / Unmute Tab', category: 'Tabs', keywords: ['audio', 'sound'] },
   {
-    // In a Mini Window the same keys move its page into the most recent Space (MW-05).
+    // In a Mini Window the same keys move its page into the most recent Space (MW-05); in a
+    // window with no Peek they open a file (KS-12, BORROWED_KEYS).
     id: 'peek.expand',
     title: 'Open Peek as Tab',
     category: 'Tabs',
     mac: ['Cmd+O'],
     other: ['Ctrl+O'],
     keywords: ['expand', 'preview', 'mini window', 'move to space'],
+  },
+  // Files from the disk in new tabs (KS-12): on Open Peek as Tab's keys where there is no Peek or
+  // Mini Window, and keys of its own if given some.
+  {
+    id: 'file.open',
+    title: 'Open File…',
+    category: 'App',
+    keywords: ['open file', 'local file', 'file from disk', 'browse files', 'html', 'pdf'],
   },
   {
     id: 'tabs.clearToday',
@@ -496,6 +506,15 @@ export const ACTIONS: ActionDef[] = [
 
 export const ACTIONS_BY_ID: Record<string, ActionDef> = Object.fromEntries(ACTIONS.map((a) => [a.id, a]))
 
+/**
+ * Actions that also run on another action's keys where that one has nothing to act on (KS-12):
+ * Open File on Open Peek as Tab's ⌘O / Ctrl+O in a window with no Peek or Mini Window. The key
+ * router picks between them (src/main/keys/open-file.ts); menus and Settings show the keys.
+ */
+export const BORROWED_KEYS: Readonly<Record<string, { from: string; where: string }>> = {
+  'file.open': { from: 'peek.expand', where: 'where no Peek or Mini Window is open' },
+}
+
 /** The action's shortcuts as Orbit ships them (KS-03): `mac` on macOS, `other` elsewhere. */
 export function defaultShortcutsFor(action: ActionDef, platform: string): string[] {
   const mac = platform === 'darwin'
@@ -503,6 +522,11 @@ export function defaultShortcutsFor(action: ActionDef, platform: string): string
     ...((mac ? action.mac : action.other) ?? []),
     ...((mac ? action.macOutsideText : action.otherOutsideText) ?? []),
   ]
+}
+
+/** Whether the action's shortcuts can't be changed on this platform (KS-01, KS-15). */
+export function isFixed(action: ActionDef, platform: string): boolean {
+  return action.fixed === true || (action.fixed === 'other' && platform !== 'darwin')
 }
 
 /** Who gets the action's keys first by default when a page also handles them (KS-02). */
@@ -517,7 +541,7 @@ export function priorityFor(
   platform: string,
   chosen?: Readonly<Record<string, ShortcutPriority>>,
 ): ShortcutPriority {
-  return (!action.fixed && chosen?.[action.id]) || defaultPriorityFor(action, platform)
+  return (!isFixed(action, platform) && chosen?.[action.id]) || defaultPriorityFor(action, platform)
 }
 
 /** A keymap: which action each binding runs, and each action's bindings (KS-01). */
@@ -531,7 +555,8 @@ export interface Keymap {
 }
 
 /** Whether the user's list for an action applies: fixed actions keep their defaults. */
-const ownsList = (action: ActionDef, custom: CustomBindings) => !action.fixed && custom[action.id] !== undefined
+const ownsList = (action: ActionDef, custom: CustomBindings, platform: string) =>
+  !isFixed(action, platform) && custom[action.id] !== undefined
 
 /**
  * The keymap for a platform with the user's bindings `custom`: theirs where they changed an
@@ -552,10 +577,12 @@ export function buildKeymap(custom: CustomBindings, platform: string): Keymap {
     }
     lists.set(action.id, list)
   }
-  for (const action of ACTIONS) if (action.fixed) claim(action, defaultShortcutsFor(action, platform))
-  for (const action of ACTIONS) if (ownsList(action, custom)) claim(action, custom[action.id] ?? [])
+  for (const action of ACTIONS) if (isFixed(action, platform)) claim(action, defaultShortcutsFor(action, platform))
+  for (const action of ACTIONS) if (ownsList(action, custom, platform)) claim(action, custom[action.id] ?? [])
   for (const action of ACTIONS) {
-    if (!action.fixed && !ownsList(action, custom)) claim(action, defaultShortcutsFor(action, platform))
+    if (!isFixed(action, platform) && !ownsList(action, custom, platform)) {
+      claim(action, defaultShortcutsFor(action, platform))
+    }
   }
   const direct = new Map<string, ActionDef>()
   const outsideText = new Map<string, ActionDef>()
@@ -580,6 +607,18 @@ function liveIndex(platform: string): Keymap {
  */
 export function shortcutsFor(action: ActionDef, platform: string): string[] {
   return liveIndex(platform).lists.get(action.id) ?? []
+}
+
+/** The keys another action lends this one (BORROWED_KEYS) as they are now, and that action. */
+export function borrowedShortcutsFor(
+  action: ActionDef,
+  platform: string,
+): { keys: string[]; from: ActionDef; where: string } | undefined {
+  const lent = BORROWED_KEYS[action.id]
+  const from = lent ? ACTIONS_BY_ID[lent.from] : undefined
+  if (!lent || !from) return undefined
+  const keys = shortcutsFor(from, platform)
+  return keys.length > 0 ? { keys, from, where: lent.where } : undefined
 }
 
 /** The action that owns a binding now, if any (Settings → Shortcuts' conflict check). */
