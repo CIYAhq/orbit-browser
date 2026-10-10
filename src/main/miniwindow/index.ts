@@ -690,7 +690,15 @@ export function registerMiniWindow(ctx: MainContext): void {
   actions.register('mini.toggleAll', toggleAll)
 
   // In a Mini Window, keys act on its page; sidebar, Space and tab-list keys do nothing (KS-20).
-  const APP_ACTIONS = new Set(['window.new', 'window.newMini', 'window.newPrivate', 'app.settings', 'app.archive'])
+  // Help → Keyboard Shortcuts opens over the browser window behind (OB-12, keys lane).
+  const APP_ACTIONS = new Set([
+    'window.new',
+    'window.newMini',
+    'window.newPrivate',
+    'app.settings',
+    'app.archive',
+    'help.shortcuts',
+  ])
   actions.intercept((id, c) => {
     const mini = miniOf(c)
     if (!mini) return false
@@ -706,6 +714,8 @@ export function registerMiniWindow(ctx: MainContext): void {
         if (mini.tabId) send(mini, 'mini:choose-space')
         return true
       case 'url.edit':
+        // The keyboard goes to the address field too: the page had it (KS-20, keys lane).
+        if (!mini.win.isDestroyed()) mini.win.webContents.focus()
         send(mini, 'mini:edit-url')
         return true
       case 'tab.new': {

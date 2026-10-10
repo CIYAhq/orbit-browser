@@ -1,6 +1,7 @@
 import { SHORTCUT_SHEET } from '../../shared/commands/keys'
 import type { WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
+import { browserWindowFor } from './browser-window'
 
 /**
  * Help → Keyboard Shortcuts (OB-12): the sheet of essential shortcuts shows in a browser window's
@@ -14,12 +15,9 @@ export function registerShortcutSheet(ctx: MainContext): void {
     return overlay?.kind === 'panel' && overlay.panel === SHORTCUT_SHEET
   }
   const close = (windowId: WindowId) => void commands.run('overlay.close', {}, { windowId })
-  const browserWindow = (id: WindowId | undefined): id is WindowId =>
-    !!id && !!windows.get(id) && !!store.state.windows[id] && store.state.windows[id]?.kind !== 'mini'
 
   actions.register('help.shortcuts', (c) => {
-    const from = c.windowId ?? windows.focusedWindowId()
-    const windowId = browserWindow(from) ? from : (windows.ids().filter(browserWindow).at(-1) ?? windows.open())
+    const windowId = browserWindowFor(ctx, c.windowId ?? windows.focusedWindowId())
     // Asked again while it is up: it closes, as the command bar does.
     if (sheetOpen(windowId)) {
       close(windowId)

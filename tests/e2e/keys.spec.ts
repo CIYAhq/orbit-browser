@@ -1,6 +1,19 @@
 import { expect, type Page, test } from '@playwright/test'
 import { action, isMac, launchOrbit, MOD, type Orbit, run, state, tabPage, viewPage } from './helpers'
-import { cmd, type NavFixtures, openTab, pressInPage, startNavFixtures, visit } from './nav-support'
+import {
+  cmd,
+  cmdIn,
+  type NavFixtures,
+  openTab,
+  pressInPage,
+  setNativeFullScreen,
+  startNavFixtures,
+  uiPageOf,
+  visit,
+  windowList,
+  windowState,
+  zoomOf,
+} from './nav-support'
 import { openSettings, osWindows, pageOfView } from './settings-support'
 import { activeSpace, createSpace } from './spaces-support'
 
@@ -921,4 +934,174 @@ test('[OB-12][KS-18][KS-12] Help → Keyboard Shortcuts shows the essential keys
   const settings = await pageOfView(app, 'settings')
   await expect(settings.getByTestId('settings-tab-shortcuts')).toHaveAttribute('aria-selected', 'true')
   await expect.poll(async () => Object.values((await state(app)).windows)[0]?.overlay.kind).toBe('none')
+})
+
+// ---------- Keys in special windows (KS-20) ----------
+
+type ActionHook = { __orbit: { action: (id: string, windowId?: string) => Promise<void> } }
+
+/** Runs an action as if from this window (its menu, its command bar). */
+function actionIn(windowId: string, id: string): Promise<void> {
+  return orbit.app.evaluate(async (_e, [w, a]) => (globalThis as unknown as ActionHook).__orbit.action(a, w), [
+    windowId,
+    id,
+  ] as const)
+}
+
+/** Counts the hints main shows from now on, by message. */
+async function countHints(): Promise<() => Promise<Record<string, number>>> {
+  await orbit.app.evaluate(() => {
+    const g = globalThis as unknown as {
+      __orbit: { ctx: { toast: (w: string | undefined, m: string) => void } }
+      __hints?: Record<string, number>
+    }
+    const seen: Record<string, number> = {}
+    g.__hints = seen
+    const show = g.__orbit.ctx.toast.bind(g.__orbit.ctx)
+    g.__orbit.ctx.toast = (w, m) => {
+      seen[m] = (seen[m] ?? 0) + 1
+      show(w, m)
+    }
+  })
+  return () => orbit.app.evaluate(() => ({ ...(globalThis as unknown as { __hints: Record<string, number> }).__hints }))
+}
+
+test('[KS-20][SB-25] in a private window the keys for pinning, Spaces and Clear do nothing and say so; tab keys still work', async () => {
+  const { app, shell } = orbit
+  await createSpace(app, { name: 'Other', activate: false })
+  await openTab(app, fx.url('/page/Normal'))
+  await shell.keyboard.press(`${MOD}+Shift+N`)
+  await expect.poll(async () => (await windowList(app)).map((w) => w.kind)).toEqual(['main', 'private'])
+  const [main, priv] = await windowList(app)
+  if (!main || !priv) throw new Error('no private window')
+  await cmdIn(app, priv.id, 'overlay.close')
+  const first = await cmdIn<string>(app, priv.id, 'tabs.create', { url: fx.url('/page/PrivOne') })
+  const second = await cmdIn<string>(app, priv.id, 'tabs.create', { url: fx.url('/page/PrivTwo') })
+  await expect.poll(() => fx.hits('/page/PrivTwo')).toBe(1)
+  await expect.poll(async () => (await state(app)).tabs[second]?.loading).toBe(false)
+  const where = async () => {
+    const s = await state(app)
+    const space = s.spaces[priv.spaceId]
+    return {
+      privateSpace: s.windows[priv.id]?.spaceId,
+      mainSpace: s.windows[main.id]?.spaceId,
+      pinned: space?.pinned.length,
+      today: space?.today.length,
+      spaces: s.spaceOrder.length,
+    }
+  }
+  const before = await where()
+  expect(before).toMatchObject({ privateSpace: priv.spaceId, mainSpace: main.spaceId, pinned: 0, today: 2 })
+  const hints = await countHints()
+  const HINT = 'Not available in a private window'
+  const keys: [name: string, key: string, mods: Mod[]][] = [
+    ['Pin', 'D', PRIMARY_MOD],
+    ['Space 2', '2', isMac ? ['control'] : ['alt']],
+    ['Next Space', 'Right', isMac ? ['meta', 'alt'] : ['control', 'alt']],
+    ['Clear Today', 'K', [...PRIMARY_MOD, 'shift']],
+  ]
+  for (const [i, [name, key, mods]] of keys.entries()) {
+    await pressInPage(app, '/page/PrivTwo', key, mods)
+    await expect.poll(async () => (await hints())[HINT], name).toBe(i + 1)
+    expect(await where(), name).toEqual(before)
+  }
+  // The hint shows in the private window.
+  const sidebar = await uiPageOf(app, 'shell', priv.id)
+  await expect(sidebar.getByTestId('toast').filter({ hasText: HINT }).first()).toBeVisible()
+  // The same from its menus and command bar.
+  await actionIn(priv.id, 'space.new')
+  await expect.poll(async () => (await hints())[HINT]).toBe(keys.length + 1)
+  expect(await where()).toEqual(before)
+  // Keys for its own tabs work: ⌘2 selects the second, the one opened first.
+  expect((await state(app)).spaces[priv.spaceId]?.today).toEqual([second, first])
+  await pressInPage(app, '/page/PrivTwo', '2', PRIMARY_MOD)
+  await expect.poll(async () => (await state(app)).windows[priv.id]?.activeTab[priv.spaceId]).toBe(first)
+})
+
+test('[KS-20][KS-10][OB-12] in a Mini Window keys act on its page: ⌘L edits its address, ⌘R and zoom work, sidebar and Space keys do nothing, ⌘⌥O offers the Spaces and ⌘W closes it', async () => {
+  const { app } = orbit
+  await createSpace(app, { name: 'Elsewhere', activate: false })
+  const main = Object.values((await state(app)).windows)[0]
+  if (!main) throw new Error('no window')
+  const path = '/page/InMini'
+  await app.evaluate(({ app: a }, u) => a.emit('open-url', { preventDefault() {} }, u), fx.url(path))
+  const miniOf = async () => Object.values((await state(app)).windows).find((w) => w.kind === 'mini')
+  await expect.poll(async () => (await miniOf())?.id).toBeTruthy()
+  const mini = (await miniOf()) as NonNullable<Awaited<ReturnType<typeof miniOf>>>
+  await expect.poll(() => fx.hits(path)).toBe(1)
+  await expect.poll(async () => (await state(app)).tabs[mini.activeTab[mini.spaceId] ?? '']?.loading).toBe(false)
+  // Native menus are recorded rather than shown.
+  await app.evaluate(({ Menu }) => {
+    const g = globalThis as unknown as { __popups: string[][] }
+    g.__popups = []
+    Menu.prototype.popup = function (this: Electron.Menu) {
+      g.__popups.push(this.items.map((i) => i.label))
+    }
+  })
+  const popups = () => app.evaluate(() => (globalThis as unknown as { __popups: string[][] }).__popups)
+
+  // Sidebar and Space keys do nothing; the zoom after them shows they were taken in order.
+  await pressInPage(app, path, 'S', PRIMARY_MOD)
+  await pressInPage(app, path, '2', isMac ? ['control'] : ['alt'])
+  await pressInPage(app, path, '=', PRIMARY_MOD)
+  await expect.poll(() => zoomOf(app, path)).toBeCloseTo(1.1, 3)
+  const s = await state(app)
+  expect(s.windows[main.id]?.sidebar.visible).toBe(main.sidebar.visible)
+  expect(s.windows[main.id]?.spaceId).toBe(main.spaceId)
+  // ⌘R reloads its page.
+  await pressInPage(app, path, 'R', PRIMARY_MOD)
+  await expect.poll(() => fx.hits(path)).toBe(2)
+  // ⌘⌥O offers the Spaces to move the page into (MW-05).
+  await pressInPage(app, path, 'O', [...PRIMARY_MOD, 'alt'])
+  await expect.poll(popups).toEqual([expect.arrayContaining([expect.stringContaining('Elsewhere')])])
+  // ⌘L edits its address, and the keyboard goes with it: what is typed next goes into the field.
+  await pressInPage(app, path, 'L', PRIMARY_MOD)
+  const ui = app.windows().find((p) => p.url().includes('view=mini'))
+  if (!ui) throw new Error('no Mini Window UI')
+  const address = ui.getByTestId('mini-address-input')
+  await expect(address).toBeFocused()
+  await expect.poll(focusedUrl).toContain('view=mini')
+  expect(await typeAnywhere(['q'])).toEqual([expect.stringContaining('view=mini')])
+  await expect(address).toHaveValue('q')
+  await ui.keyboard.press('Escape')
+  await expect(address).toHaveCount(0)
+  // Help → Keyboard Shortcuts asked with the Mini Window in front opens over the browser window.
+  await actionIn(mini.id, 'help.shortcuts')
+  await expect
+    .poll(async () => (await state(app)).windows[main.id]?.overlay)
+    .toMatchObject({ kind: 'panel', panel: 'shortcuts' })
+  expect((await state(app)).windows[mini.id]).toBeDefined()
+  await cmdIn(app, main.id, 'overlay.close')
+  // ⌘W closes it, and only it.
+  await pressInPage(app, path, 'W', PRIMARY_MOD)
+  await expect.poll(miniOf).toBeUndefined()
+  expect((await state(app)).windows[main.id]).toBeDefined()
+})
+
+test('[KS-20][KS-06] in full screen with the sidebar hidden, ⌘1–9 and ⌘⌥↑ / ⌘⌥↓ switch tabs without it', async () => {
+  const { app } = orbit
+  const spaceId = await activeSpace(app)
+  const c = await openTab(app, fx.url('/page/FsThird'))
+  const b = await openTab(app, fx.url('/page/FsSecond'))
+  const a = await openTab(app, fx.url('/page/FsFirst'))
+  expect((await state(app)).spaces[spaceId]?.today).toEqual([a, b, c])
+  await setNativeFullScreen(app, true)
+  await action(app, 'sidebar.toggle')
+  await expect.poll(async () => (await windowState(app)).sidebar.visible).toBe(false)
+  await selectPage(a, fx.url('/page/FsFirst'))
+  const mod: Mod = isMac ? 'meta' : 'control'
+  await pressMod('3')
+  await expect.poll(activeTab).toBe(c)
+  await expect.poll(focusedUrl).toBe(fx.url('/page/FsThird'))
+  await pressAnywhere('Up', [mod, 'alt'])
+  await expect.poll(activeTab).toBe(b)
+  await expect.poll(focusedUrl).toBe(fx.url('/page/FsSecond'))
+  await pressAnywhere('Down', [mod, 'alt'])
+  await expect.poll(activeTab).toBe(c)
+  await expect.poll(focusedUrl).toBe(fx.url('/page/FsThird'))
+  await pressMod('1')
+  await expect.poll(activeTab).toBe(a)
+  const win = await windowState(app)
+  expect(win.fullscreen).toBe(true)
+  expect(win.sidebar.visible).toBe(false)
 })

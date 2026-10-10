@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 209 built (74 partial) · 292 tested · 0 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 210 built (75 partial) · 293 tested · 0 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 136 | 164 |
-| P1 | 219 | 64 | 117 |
+| P1 | 219 | 65 | 118 |
 | P2 | 79 | 9 | 11 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -355,7 +355,7 @@ Spec: `spec/shortcuts.md`
 | KS-07 | Spaces | P0 | ✅ | ✅ e2e+unit | – | Space shortcuts wired through the action table |
 | KS-08 | Page navigation and page tools | P0 | 🟡 partial | ✅ e2e+unit | – | Back, Forward, Reload, hard reload, Stop, find (Cmd+F, Cmd+G, Shift+Cmd+G, F3, Ctrl+G), Cmd+J and zoom keys done; print, save page, reader mode and the rest come with their NV items |
 | KS-09 | Split view | P0 | ✅ | ✅ e2e+unit | – | ⌃⇧= adds a pane the command bar fills, ⌃⇧− closes the focused pane, ⌃⇧1–4 focus a pane, ⌃⇧] / ⌃⇧[ the next / previous pane (Ctrl+Shift on Windows/Linux), ⌘L / Ctrl+L changes the focused pane's address (SV-15), Add Right/Left/Above/Below Split from the command bar; tested from a page |
-| KS-10 | Peek and Mini Window | P1 | – | ✅ unit | – |  |
+| KS-10 | Peek and Mini Window | P1 | ✅ | ✅ e2e+unit | – | ⌘O / Ctrl+O expands a Peek into a selected Today tab (PK-07); Esc and ⌘W / Ctrl+W close it (PK-09, Esc fixed); ⌘⇧T and ⌘Z reopen it (PK-10); ⌘⌥N / Ctrl+Alt+N opens a Mini Window (MW-06); in a Mini Window ⌘O moves its page into the most recent Space (MW-05), ⌘⌥O (also ⌘⇧O) / Ctrl+Alt+O offers the Spaces, ⌘W closes it (MW-09). All from the one keymap and remappable but Esc; the tests press the keys (peek, mini-window and keys specs) |
 | KS-11 | Media | P1 | 🟡 partial | ✅ e2e+unit | – | Space and arrows in the focused player, Cmd/Ctrl+scroll and pinch zoom (tested), hardware media keys via Chromium (untested), Mute Tab action assignable; the calendar meeting shortcut (P2) belongs to TB-21/FV-09 |
 | KS-12 | Library, history, downloads, settings, extensions, help | P1 | 🟡 partial | ✅ e2e+unit | – | ⌘Y / Ctrl+H View History (AR-10); ⌘⇧L Open Library on macOS, the command bar elsewhere; View Archive with no key, assignable; ⌘, / Ctrl+, Settings, which cannot be remapped, and again brings the same Settings window to the front; ⌘⇧⌫ / Ctrl+Shift+Delete Clear Browsing Data…; Shortcut Settings (command bar, assignable); the shortcut sheet from Help → Keyboard Shortcuts (macOS) and the command bar (OB-12); Alt+F stays free for the Windows/Linux app menu (SB-03, SB-26, not built). Not built: Open Downloads (DL-14, downloads lane), Open a local file (⌘O / Ctrl+O when no Peek or Mini Window has focus), pinned extensions (EX-06) |
 | KS-13 | Developer tools | P1 | – | ✅ unit | – |  |
@@ -365,7 +365,7 @@ Spec: `spec/shortcuts.md`
 | KS-17 | Mouse, trackpad and modifier-click bindings | P0 | – | – | – |  |
 | KS-18 | Shortcut hints everywhere | P1 | ✅ | ✅ e2e+unit | – | button tooltips (address, copy link, site controls, sidebar toggle, back/forward/reload, find, zoom, Library, Clear, Space dots, Peek, Mini Window Open in…), the empty-window hint, command-bar rows, macOS menu items, the shortcut sheet (OB-12) and the right-click menus of a tab, a multi-selection, the page and a split pane (an item that does what a key does shows that key’s first binding) follow a remap without a restart; a menu shows it the next time it opens. Windows and Linux have no app menu yet (SB-03, SB-26), so there is no menu bar there to label |
 | KS-19 | Keys inside overlays | P0 | 🟡 partial | ✅ e2e | – | the open overlay takes its keys first: command bar (⌘T/⌘L/⌘W/Esc), find bar (Enter/⇧Enter/Esc, NV-05), Peek (Esc, ⌘O, ⌘W, PK-09; Esc closes the Peek and the tab under it keeps loading), the recent-tab switcher (Tab/⇧Tab/`, W, letting go of ⌃), permission prompt and site controls (Esc), the sidebar with keyboard focus (arrows, Enter, Esc back to the page, SB-22); Esc then stops a loading page, as before, even one that uses Esc itself: Electron runs no isolated-world script in a page while it loads, so Orbit can't learn in time whether the page used the key (needs a lead decision: a script in the page's own world or a preload channel, D40) |
-| KS-20 | Shortcuts in special windows | P1 | – | – | – |  |
+| KS-20 | Shortcuts in special windows | P1 | 🟡 partial | ✅ e2e+unit | – | private window: the same keys, but the actions that need Spaces, pinned tabs, Favorites or folders (⌘D, ⌃1–9 / Alt+1–9, ⌘⌥← / ⌘⌥→, ⌘⇧K Clear, Favorite, New Folder, every Space action) do nothing there, from a key, a menu or the command bar, and a toast says “Not available in a private window”; tab keys work. Mini Window: ⌘W closes it, ⌘O / ⌘⌥O move or offer to move its page (KS-10), ⌘L edits its address with the keyboard in the field, ⌘R, zoom and print act on its page, sidebar and Space keys do nothing, Help → Keyboard Shortcuts opens over the browser window. Full screen: every key works with the sidebar hidden; ⌘1–9 and ⌘⌥↑ / ⌘⌥↓ switch tabs without bringing it out. Not built: ⌘F in a Mini Window (it has no find bar, Mini Window lane), the blank window (TB-17), extension keys in private windows (EX-06, EX-10) |
 
 ## Interaction feel and motion targets (prefix FL)
 

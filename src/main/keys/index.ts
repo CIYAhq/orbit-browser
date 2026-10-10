@@ -7,6 +7,7 @@ import { bind, reset, setPriority, unbind } from './bindings'
 import { lastMenuHints } from './menu-hints'
 import { keyRouter } from './router'
 import { registerShortcutSheet } from './sheet'
+import { registerSpecialWindows } from './special-windows'
 import { setSystemClashesForTest, systemClashes } from './system'
 import { registerTabKeys } from './tab-keys'
 import { registerWindowKeys } from './window-keys'
@@ -81,6 +82,7 @@ export function registerKeys(ctx: MainContext): void {
   registerWindowKeys(ctx)
   registerTabKeys(ctx)
   registerShortcutSheet(ctx)
+  registerSpecialWindows(ctx)
   keyRouter.init(ctx)
   commands.register('keys.record', ({ on }, c) => keyRouter.setRecording(on ? c.windowId : undefined))
   // Tests say which keys the system keeps instead of asking it, and read the keys a menu showed.
