@@ -16,7 +16,7 @@ import { findSiteSearch, type SearchResponse, type SearchResult } from '../../sh
 import type { CommandBarMode, FolderId, SiteSearchEngine, SpaceId, TabId } from '../../shared/state'
 import { fillSearchTemplate, parseInput, SEARCH_ENGINES } from '../../shared/url'
 import { frecency, type HostInfo, type IndexedEntry, urlKeyOf } from '../history/store'
-import { type DocMatch, initials, matchDoc, matchName, terms as splitTerms } from './match'
+import { type DocMatch, initials, matchDoc, matchName, PREFIX, terms as splitTerms } from './match'
 
 export const MAX_RESULTS = 9
 const EMPTY_STATE_ROWS = 6
@@ -646,6 +646,9 @@ export function rank(input: RankInput): SearchResponse {
 }
 
 function actionMatch(ts: string[], lower: string, a: ActionDoc): DocMatch {
+  // The words typed starting the title, in order ("clear archive" → Clear Archive…), beat the same
+  // words matched one by one (Clear Today Tabs has the keyword "archive").
+  if (ts.length > 1 && a.titleLower.startsWith(ts.join(' '))) return { score: PREFIX, strong: true, hostPrefix: false }
   const m = matchName(ts, a.titleLower, a.keywords)
   if (m.score > 0) return m
   // Initials: "dt" → Developer Tools, "ns" → New Space.

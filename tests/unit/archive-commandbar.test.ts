@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { type ArchiveDoc, type RankInput, rank } from '../../src/main/commandbar/rank'
+import { initials } from '../../src/main/commandbar/match'
+import { type ActionDoc, type ArchiveDoc, type RankInput, rank } from '../../src/main/commandbar/rank'
 import { HistoryStore, urlKeyOf } from '../../src/main/history/store'
+import { ACTIONS_BY_ID } from '../../src/shared/actions'
 import { DEFAULT_SITE_SEARCH } from '../../src/shared/defaults'
 
 const NOW = 1_800_000_000_000
@@ -89,5 +91,33 @@ describe('Archived tabs in the command bar (AR-04, review N3)', () => {
     const oldRow = old.find((r) => r.url === closed)
     expect(oldRow).toMatchObject({ kind: 'archived' })
     expect(oldRow?.score ?? 0).toBeLessThan(old.find((r) => r.url === visited)?.score ?? 0)
+  })
+})
+
+/** An action as the command bar lists it (sources.ts): title, category and keywords, lowercased. */
+const actionDoc = (id: string): ActionDoc => {
+  const a = ACTIONS_BY_ID[id]
+  if (!a) throw new Error(`no action ${id}`)
+  const titleLower = a.title.toLowerCase()
+  return {
+    id,
+    title: a.title,
+    titleLower,
+    keywords: [a.category.toLowerCase(), ...(a.keywords ?? []).map((k) => k.toLowerCase())],
+    initials: initials(titleLower),
+    needsTab: false,
+  }
+}
+
+describe('Clear Archive in the command bar (AR-07)', () => {
+  it('[AR-07] typing "clear archive" puts Clear Archive… on top, not Clear Today Tabs (whose keyword is "archive")', () => {
+    const actions = ['tabs.clearToday', 'app.archive', 'archive.clear'].map(actionDoc)
+    for (const q of ['clear archive', 'Clear  Archive', 'clear arch']) {
+      expect(rank(input(q, { actions })).results[0]).toMatchObject({ kind: 'action', actionId: 'archive.clear' })
+    }
+    // Words matched one by one still find the others.
+    expect(rank(input('clear today', { actions })).results[0]).toMatchObject({ actionId: 'tabs.clearToday' })
+    const archiveWord = rank(input('archive', { actions })).results.map((r) => r.actionId)
+    expect(archiveWord).toEqual(expect.arrayContaining(['tabs.clearToday', 'app.archive', 'archive.clear']))
   })
 })
