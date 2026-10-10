@@ -18,6 +18,7 @@ import { ArchiveStore } from '../../src/main/archive/store'
 import type { MainContext } from '../../src/main/context'
 import { floatingTab } from '../../src/main/peek/floating'
 import { deleteProfileInDraft } from '../../src/main/spaces/model'
+import { createSplitInDraft } from '../../src/main/split/model'
 import { Store } from '../../src/main/store'
 import { makeTab } from '../../src/main/tabs/model'
 import { TabOps } from '../../src/main/tabs/ops'
@@ -28,7 +29,8 @@ import {
   createWindowState,
   DEFAULT_PROFILE_ID,
 } from '../../src/shared/defaults'
-import type { OrbitState, SpaceId, TabId } from '../../src/shared/state'
+import { layoutLeaves } from '../../src/shared/split'
+import type { OrbitState, SpaceId, SplitId, TabId } from '../../src/shared/state'
 
 const syncs: ArchiveSync[] = []
 const dirs: string[] = []
@@ -655,6 +657,34 @@ describe('Restore Data (AR-11)', () => {
     expect(w.ops.undo.undo()).toBe('Delete Folder')
     expect(w.store.state.folders[folderId]?.children).toEqual([y])
     expect(traces(w, y)).toEqual({ open: true, rows: 1, archived: 0, stored: 0 })
+  })
+
+  it('[AR-11][SV-19][TB-18] undoing a split’s close after undoing a Restore Data brings the split back once, with no Archive entry left (re-review R1, fix check M1)', async () => {
+    const w = await world()
+    const backups = new BackupStore(backupsDir())
+    const restore = new RestoreData(w.ctx, w.archive, backups)
+    const x = w.tab(w.a, 'https://x.test/')
+    const y = w.tab(w.a, 'https://y.test/')
+    let splitId = '' as SplitId
+    w.store.update((d) => {
+      splitId = createSplitInDraft(d, [x, y], { at: x }) as SplitId
+    })
+    const earlier = await backups.take(w.store.state, Date.now() - 5 * MIN)
+    const panes = () => [x, y].map((id) => traces(w, id))
+    // Close both panes: the split goes to the Archive as one unit, an entry per pane.
+    w.ops.closeTabs([x, y], 'closed')
+    expect(w.store.state.splits[splitId]).toBeUndefined()
+    for (const p of panes()) expect(p).toMatchObject({ open: false, archived: 1, stored: 1 })
+    expect(await restore.restore(earlier.id)).toMatchObject({ restored: true })
+    for (const p of panes()) expect(p).toMatchObject({ open: true, archived: 0, stored: 0 })
+    // ⌘Z takes the restore back: both panes go to the Archive again, as new entries.
+    expect(w.ops.undo.undo()).toBe('Restore Data')
+    for (const p of panes()) expect(p).toMatchObject({ open: false, archived: 1, stored: 1 })
+    // ⌘Z again undoes the close: the split is back as one unit, and no entry is left to open a second copy from.
+    expect(w.ops.undo.undo()).toBe('Close Tabs')
+    const split = Object.values(w.store.state.splits).find((sp) => layoutLeaves(sp.layout).includes(x))
+    expect(split && layoutLeaves(split.layout).toSorted()).toEqual([x, y].toSorted())
+    for (const p of panes()) expect(p).toMatchObject({ open: true, archived: 0, stored: 0 })
   })
 
   it('[AR-11] the toast’s Undo takes the restore back while it is the newest change, and only then (review F2)', async () => {
