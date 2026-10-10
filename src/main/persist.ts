@@ -13,6 +13,7 @@ import {
   MIN_SIDEBAR_WIDTH,
 } from '../shared/defaults'
 import { isFolderId, isSplitId, isTabId } from '../shared/ids'
+import { normalizeMediaSettings } from '../shared/media'
 import { withoutPrivate } from '../shared/private'
 import type { ItemId, OrbitState, ProfileId, SpaceId, SplitLayout, TabId } from '../shared/state'
 import { STATE_SCHEMA } from '../shared/state'
@@ -103,6 +104,7 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
     tweaks: record(input.tweaks),
   }
   if (!['system', 'light', 'dark'].includes(state.settings.appearance)) state.settings.appearance = 'system'
+  normalizeMediaSettings(state.settings, Date.now())
   seedAppearanceFromOldThemes(state)
   normalizeEntities(state, base)
   // Site searches (CB-11): keep well-formed http(s) entries; a missing list gets the defaults.
@@ -137,6 +139,7 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
     tab.canGoBack = tab.canGoBack ?? false
     tab.canGoForward = tab.canGoForward ?? false
     tab.muted = tab.muted ?? false
+    delete tab.media
   }
   for (const win of Object.values(state.windows)) {
     win.focused = false
@@ -425,6 +428,7 @@ const RUNTIME_ONLY: Record<string, ReadonlySet<string>> = {
     'blockedPopups',
     'permissionPrompt',
     'pendingUrl',
+    'media',
   ]),
   windows: new Set(['focused', 'fullscreen', 'overlay']),
   downloads: new Set(['receivedBytes']),

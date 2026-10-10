@@ -15,6 +15,7 @@ import type { DownloadCommands } from './commands/downloads'
 import type { ExtensionCommands } from './commands/extensions'
 import type { HistoryCommands } from './commands/history'
 import type { ImportCommands } from './commands/import'
+import type { MediaCommands, MediaEvents } from './commands/media'
 import type { NavCommands } from './commands/nav'
 import type { PeekCommands, PeekEvents } from './commands/peek'
 import type { SettingsCommands } from './commands/settings'
@@ -37,9 +38,10 @@ export interface OrbitCommands
     SettingsCommands,
     DownloadCommands,
     ImportCommands,
-    NavCommands {}
+    NavCommands,
+    MediaCommands {}
 
-export interface OrbitEvents extends CoreEvents, PeekEvents {}
+export interface OrbitEvents extends CoreEvents, PeekEvents, MediaEvents {}
 
 export type CommandName = keyof OrbitCommands
 export type CommandArgs<K extends CommandName> = OrbitCommands[K] extends { args: infer A } ? A : never
@@ -73,6 +75,8 @@ export type RendererView =
   /** The page loading indicator (SB-28) and the link status pill (SB-27), chrome lane. */
   | 'loading'
   | 'link'
+  /** Media lane: the picture-in-picture window. */
+  | 'pip'
 
 /** The API the preload exposes on `window.orbit` to Orbit's own UI renderers. */
 export interface OrbitBridge {

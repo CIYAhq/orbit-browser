@@ -9,6 +9,7 @@ import type { WindowState } from '../../../../shared/state'
 import { invoke } from '../../api'
 import { useOrbit } from '../../store'
 import { PrivateSidebar } from '../chrome/PrivateSidebar'
+import { MediaTray } from '../media/MediaTray'
 import { SpaceStrip } from '../spaces/SpaceStrip'
 import { UndoToast } from '../spaces/UndoToast'
 import { SpaceBar } from './SpaceBar'
@@ -40,6 +41,8 @@ export function Sidebar({ win, floating = false }: { win: WindowState; floating?
         <>
           <SpaceStrip windowId={win.id} spaceId={win.spaceId} />
           <UndoToast />
+          {/* Media lane: transient media tray above the bottom bar (SB-10, MD-09). */}
+          <MediaTray />
           <SpaceBar win={win} />
         </>
       )}

@@ -172,10 +172,17 @@ test('[CB-04] the bar is centred in the window with the sidebar shown or hidden'
     const width = await overlay.evaluate(() => window.innerWidth)
     return { delta: (box?.x ?? 0) + (box?.width ?? 0) / 2 - width / 2, top: box?.y ?? 0 }
   }
+  // Measured at rest: the bar opens from 97 % scale and 4 px up, which keeps it centred but moves its top.
+  const still = () =>
+    expect
+      .poll(() => bar(overlay).evaluate((el) => getComputedStyle(el).transform))
+      .toMatch(/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/)
+  await still()
   await expect.poll(async () => Math.abs((await centre()).delta)).toBeLessThanOrEqual(1)
   const before = await centre()
   await run(orbit.app, 'window.setSidebar', { visible: false })
   await expect(overlay.getByTestId('command-bar')).toBeVisible()
+  await still()
   const after = await centre()
   expect(Math.abs(after.delta)).toBeLessThanOrEqual(1)
   expect(Math.abs(after.top - before.top)).toBeLessThanOrEqual(1)
