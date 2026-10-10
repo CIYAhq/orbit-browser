@@ -283,6 +283,20 @@ test('[SB-04] the address shows only the host; clicking it edits the full URL in
   expect((await windowState(app)).overlay).toMatchObject({ kind: 'commandbar', mode: 'edit-url' })
 })
 
+test('[SB-04][NV-04] while a page is on its way, editing the address starts from where it is going, as the address shows (review A-F3)', async () => {
+  const { app, shell } = orbit
+  const id = await openTab(app, page('Before'))
+  const going = fx.url('/slow/After?ms=30000')
+  await cmd(app, 'tabs.navigate', { tabId: id, url: going })
+  const pill = shell.getByTestId('address-pill')
+  await expect(pill).toHaveAttribute('title', going)
+  await pill.click()
+  const input = (await viewPage(app, 'overlay')).getByTestId('command-input')
+  await expect(input).toBeFocused()
+  await expect(input).toHaveValue(going)
+  expect((await state(app)).tabs[id]?.url).toBe(page('Before'))
+})
+
 test('[SB-04] no padlock on pages; plain http to another machine shows a warning', async () => {
   const { app, shell } = orbit
   const address = shell.getByTestId('address')

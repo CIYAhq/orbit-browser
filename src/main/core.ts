@@ -64,8 +64,9 @@ export function registerCore(ctx: MainContext): void {
       setOverlay(windowId, { kind: 'none' })
       return
     }
-    const tabId = activeTabOf(store.state, windowId)
-    const url = tabId ? (store.state.tabs[tabId]?.url ?? '') : ''
+    const tab = store.state.tabs[activeTabOf(store.state, windowId) ?? '']
+    // What the address shows: where a navigation Orbit started is going, before it commits (NV-04; review A-F3).
+    const url = tab ? (tab.pendingUrl ?? tab.url ?? '') : ''
     // CB-23: with no current page, ⌘L behaves like ⌘T.
     const effective = mode === 'edit-url' && (!url || url === 'about:blank') ? 'new-tab' : mode
     ctx.perf.mark('commandbar:open:start')
