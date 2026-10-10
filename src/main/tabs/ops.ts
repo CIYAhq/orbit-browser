@@ -5,6 +5,7 @@
  */
 import { createWindowState, FAVORITES_FULL_MESSAGE, MAX_FAVORITES } from '../../shared/defaults'
 import { isFolderId, isTabId, newId } from '../../shared/ids'
+import { isMediaBusy } from '../../shared/media'
 import { isPendingPane, layoutLeaves, paneAfterClose, SPLIT_FULL_MESSAGE } from '../../shared/split'
 import type {
   ArchivedTab,
@@ -473,7 +474,9 @@ export class TabOps {
   clearToday(spaceId: SpaceId): void {
     const space = this.state.spaces[spaceId]
     if (!space) return
-    const tabs = space.today.flatMap((id) => tabsInItem(this.state, id)).filter((id) => !this.state.tabs[id]?.audible)
+    const tabs = space.today
+      .flatMap((id) => tabsInItem(this.state, id))
+      .filter((id) => !isMediaBusy(this.state.tabs[id]))
     this.closeTabs(tabs, 'cleared', { reselect: 'pinned', undoLabel: 'Clear Today' })
   }
 
@@ -488,7 +491,7 @@ export class TabOps {
     const tabs = space.today
       .slice(loc.index + 1)
       .flatMap((id) => tabsInItem(state, id))
-      .filter((id) => !state.tabs[id]?.audible)
+      .filter((id) => !isMediaBusy(state.tabs[id]))
     this.closeTabs(tabs, 'cleared', { undoLabel: 'Archive Tabs Below' })
   }
 
