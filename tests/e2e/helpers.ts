@@ -36,14 +36,28 @@ export interface Orbit {
  */
 const DEAD_PROXY = '127.0.0.1:9'
 const RESOLVER_RULES = '--host-resolver-rules='
+/**
+ * These rules don't stop an mDNS lookup: Chromium still multicasts the mapped name on the local
+ * network. Nothing in Orbit or the tests asks for one (`resolveHost` with `source: 'mdns'`).
+ */
 const NO_LOOKUPS = 'MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1'
+/** Hosts a test may exclude from the rules: Chromium or the hosts file answers them, on this machine. */
+const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|::1|[\w.-]+\.localhost)$/
 
 /**
- * The switches that keep Orbit offline. A test's own resolver rules go first, so they still apply
- * (the first rule that matches a host wins), and every other host still fails to resolve.
+ * The switches that keep Orbit offline. A test's own resolver rules go first, so its MAP rules win
+ * (the first MAP that matches a host does), and every other host still fails to resolve. Chromium
+ * checks every EXCLUDE before any MAP, wherever it is in the list, and an excluded host is looked up
+ * for real, so a test may only exclude loopback hosts (PR #19 review F3).
  */
 export function offlineArgs(args: string[] = []): string[] {
   const own = args.filter((a) => a.startsWith(RESOLVER_RULES)).map((a) => a.slice(RESOLVER_RULES.length))
+  for (const rule of own.flatMap((r) => r.split(','))) {
+    const host = /^\s*EXCLUDE\s+(\S+)\s*$/i.exec(rule)?.[1]
+    if (host !== undefined && !LOOPBACK_HOST.test(host)) {
+      throw new Error(`a test's resolver rules exclude ${host}, which would be looked up for real`)
+    }
+  }
   return [`--proxy-server=http://${DEAD_PROXY}`, `${RESOLVER_RULES}${[...own, NO_LOOKUPS].join(', ')}`]
 }
 

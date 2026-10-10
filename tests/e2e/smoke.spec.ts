@@ -64,14 +64,16 @@ test('stays offline: no host name but localhost resolves, in any profile (PR #10
         (r) => r.endpoints.map((e) => e.address).join(' '),
         (e: Error) => e.message,
       )
+    // An address needs no lookup, so only the rules refuse 127.0.0.2, and no query can leave the
+    // machine even when the rules are missing (a host name would then be looked up; PR #19 review F5).
     return Promise.all(
-      sessions.map(async (s) => ({ web: await lookUp(s, 'example.com'), local: await lookUp(s, 'localhost') })),
+      sessions.map(async (s) => ({ mapped: await lookUp(s, '127.0.0.2'), local: await lookUp(s, 'localhost') })),
     )
   }, partitions)
   expect(lookups.length).toBeGreaterThan(1)
-  for (const { web, local } of lookups) {
-    // Refused by the resolver rules at once: no query leaves the machine.
-    expect(web).toContain('ERR_NAME_NOT_RESOLVED')
+  for (const { mapped, local } of lookups) {
+    // Refused by the resolver rules at once, as every host but localhost is.
+    expect(mapped).toContain('ERR_NAME_NOT_RESOLVED')
     expect(local).toMatch(/127\.0\.0\.1|::1/)
   }
 })
