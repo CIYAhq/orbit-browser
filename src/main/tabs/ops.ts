@@ -558,6 +558,9 @@ export class TabOps {
           }
         }
         insertItem(d, loc.container, loc.index, folderId)
+        // Its Space may have changed profile meanwhile: the tabs take that profile, and history
+        // from the old profile's session stays behind (PR-05).
+        for (const moved of this.fixupTabs(d, tabIds, loc.container)) this.ctx.tabs.savedHistory.delete(moved)
       })
     })
   }

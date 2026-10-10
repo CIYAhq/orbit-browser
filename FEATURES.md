@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 144 built (48 partial) · 196 tested · 0 feel right.
+**Totals:** 485 spec’d · 145 built (47 partial) · 196 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 101 | 123 |
+| P0 | 174 | 102 | 123 |
 | P1 | 221 | 39 | 67 |
 | P2 | 83 | 4 | 6 |
 
@@ -333,7 +333,7 @@ Spec: `spec/archive.md`
 | AR-02 | Where the Archive lives and how to open it | P0 | ✅ | ✅ e2e | – | Library view over the page area (its own view above the tabs, below the command bar and Peek) from the bottom-bar button, ⌘⇧L (Open Library), ⌘T View Archive / Open Library and the macOS Archive menu; reopens to the last section; Esc, ⌘W or selecting another tab closes it and the page gets the keys back; section registry (*.library-section.tsx) for other lanes |
 | AR-03 | Archive list layout | P0 | ✅ | ✅ e2e+unit | – | newest first under Today / Yesterday / date headings; favicon, title, host, time and origin-Space badge; filters by source (all, sidebar, Mini Window), Space and how it closed; per profile (PR-05); virtualised and paged, fast at 10k entries. Row click previews with AR-06 (until then a click selects) |
 | AR-04 | Search the Archive | P0 | ✅ | ✅ e2e+unit | – | search field filters on each keystroke (title and URL, case-insensitive, partial words, every word) using the Archive store's keys (history queryTerms/urlKeyOf); typing on narrows the last answer; Enter restores and shows the top or highlighted match; ⌘F focuses it. Command bar results still come from the recent window in state |
-| AR-05 | Restore an archived tab | P0 | 🟡 partial | ✅ e2e+unit | – | Restore (hover button, Enter, double-click, row menu, several selected) puts tabs at the top of their Space's Today in order, with their tab id and back/forward history when the profile matches (never across profiles); routing rule > origin Space > current Space; toast with Go to Space when it lands elsewhere; command bar restores without a jump. Delete Folder undo review (W3) still to do |
+| AR-05 | Restore an archived tab | P0 | ✅ | ✅ e2e+unit | – | Restore (hover button, Enter, double-click, row menu, several selected) puts tabs at the top of their Space's Today in order, with their tab id and back/forward history when the profile matches (never across profiles); routing rule > origin Space > current Space; toast with Go to Space when it lands elsewhere; command bar restores without a jump. Undoing Delete Folder after the Space changed profile also follows the new profile (W3) |
 | AR-06 | Preview an archived item without restoring | P2 | – | – | – |  |
 | AR-07 | Clear the Archive | P1 | – | – | – |  |
 | AR-08 | Retention of archived entries | P1 | – | – | – |  |

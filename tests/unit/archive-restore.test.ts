@@ -63,7 +63,7 @@ function world() {
     return entry
   }
   const today = (spaceId: SpaceId) => store.state.spaces[spaceId]?.today ?? []
-  return { store, archive, savedHistory, ctx, a, b: b.id, c: c.id, work: work.id, w1: w1.id, archived, today }
+  return { store, archive, savedHistory, ctx, ops, a, b: b.id, c: c.id, work: work.id, w1: w1.id, archived, today }
 }
 
 describe('Restore from the Archive (AR-05)', () => {
@@ -153,6 +153,33 @@ describe('Restore from the Archive (AR-05)', () => {
     restoreEntries(ctx, archive, [again.id], { windowId: w1, open: true })
     expect(store.state.windows[w1]?.spaceId).toBe(b)
     expect(store.state.windows[w1]?.activeTab[b]).toBe(again.tabId)
+  })
+
+  it('[AR-05][PR-05] undoing Delete Folder after the Space changed profile brings its tabs back in the new profile, without the old history (W3)', () => {
+    const { store, savedHistory, ops, b, work } = world()
+    // A pinned tab that went from Fa to Fa2, in a folder in Space B.
+    const tab = makeTab({ spaceId: b, profileId: DEFAULT_PROFILE_ID, url: 'https://fa2.test/', title: 'Fa2' })
+    store.update((d) => {
+      d.tabs[tab.id] = { ...tab, pinnedUrl: tab.url, pinnedTitle: tab.title, pinnedResolvedUrl: tab.url }
+      d.spaces[b]?.pinned.push(tab.id)
+    })
+    const fa = { url: 'https://fa.test/', title: 'Fa' }
+    savedHistory.set(tab.id, { entries: [fa, { url: tab.url, title: 'Fa2' }], index: 1 })
+    const folderId = ops.createFolder({ container: { kind: 'pinned', spaceId: b }, items: [tab.id] })
+    expect(store.state.folders[folderId]?.children).toEqual([tab.id])
+    ops.deleteFolder(folderId, false)
+    expect(store.state.tabs[tab.id]).toBeUndefined()
+    // Its view and runtime history went with it.
+    savedHistory.delete(tab.id)
+    // The Space moves to the Work profile.
+    store.update((d) => {
+      const space = d.spaces[b]
+      if (space) space.profileId = work
+    })
+    expect(ops.undo.undo()).toBe('Delete Folder')
+    expect(store.state.folders[folderId]?.children).toEqual([tab.id])
+    expect(store.state.tabs[tab.id]).toMatchObject({ spaceId: b, profileId: work, url: tab.url })
+    expect(savedHistory.has(tab.id)).toBe(false)
   })
 
   it('[AR-05] here puts the tab in the current Space (the command bar); a used tab id is not taken', () => {
