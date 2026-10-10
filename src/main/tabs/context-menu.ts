@@ -6,6 +6,8 @@ import {
   keepPageMenu,
   linkWindowItems,
   lookUpItems,
+  menuReferrer,
+  openLinkInTab,
   pageItems,
   saveLinkItem,
   searchLabel,
@@ -24,15 +26,20 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
     const tab = ctx.store.state.tabs[tabId]
     void ctx.commands.run('tabs.create', { url, spaceId: tab?.spaceId, activate }, {})
   }
+  // A link or image from the page: a background tab, with the page as referrer (review B-F1).
+  const referrer = menuReferrer(params)
+  const openFromPage = (url: string) => {
+    if (!openLinkInTab(ctx, tabId, url, referrer)) openInNewTab(url, false)
+  }
 
   if (params.linkURL) {
     items.push(
-      { label: 'Open Link in New Tab', click: () => openInNewTab(params.linkURL, false) },
+      { label: 'Open Link in New Tab', click: () => openFromPage(params.linkURL) },
       // A new pane beside the page's pane (SV-08).
       linkSplitMenuItem(ctx, tabId, params.linkURL),
       // Then Peek and Mini Window, new and private windows: the order NV-12 lists.
       ...linkPeekMenuItems(ctx, tabId, params.linkURL),
-      ...linkWindowItems(ctx, tabId, params.linkURL),
+      ...linkWindowItems(ctx, tabId, params.linkURL, referrer),
       { label: 'Copy Link Address', click: () => clipboard.writeText(params.linkURL) },
       saveLinkItem(contents, params.linkURL),
       { type: 'separator' },
@@ -40,7 +47,7 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
   }
   if (params.mediaType === 'image' && params.srcURL) {
     items.push(
-      { label: 'Open Image in New Tab', click: () => openInNewTab(params.srcURL, false) },
+      { label: 'Open Image in New Tab', click: () => openFromPage(params.srcURL) },
       { label: 'Save Image As…', click: () => contents.downloadURL(params.srcURL) },
       { label: 'Copy Image', click: () => contents.copyImageAt(params.x, params.y) },
       { label: 'Copy Image Address', click: () => clipboard.writeText(params.srcURL) },

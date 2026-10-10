@@ -34,7 +34,17 @@ export interface NavFixtures {
   hits: (path: string) => number
   /** The Cache-Control header of the latest request for a path (a hard reload sends no-cache). */
   cacheControl: (path: string) => string | undefined
+  /** What the latest request for a path said about where it came from, or undefined before one. */
+  sentFrom: (path: string) => SentFrom | undefined
   close: () => Promise<void>
+}
+
+/** Request headers that say where a request comes from (review B-F1); absent ones are left out. */
+export interface SentFrom {
+  referer?: string
+  /** Sec-Fetch-Site: `none` for an address typed by the user, `cross-site` for a link from another site. */
+  site?: string
+  cookie?: string
 }
 
 const ICON =
@@ -49,9 +59,10 @@ const escapeHtml = (text: string) => text.replace(/[&<>"]/g, (c) => `&#${c.charC
  * tab), and buttons that open a small pop-up window (`/page/Popup-<title>`, #popup) and close it
  * again (#closepopup).
  * `background` is its CSS background; `text` goes in a paragraph (#text); `open` is a page it
- * opens in a pop-up as soon as it loads, without a click.
+ * opens in a pop-up as soon as it loads, without a click; `away` is the address of one more link
+ * (#away).
  */
-function page(title: string, background = '#f2fbf5', text = '', open = ''): string {
+function page(title: string, background = '#f2fbf5', text = '', open = '', away = ''): string {
   const name = encodeURIComponent(title)
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>${title}</title><link rel="icon" href="${ICON}">
@@ -61,6 +72,7 @@ function page(title: string, background = '#f2fbf5', text = '', open = ''): stri
 <p><input id="box" autocomplete="off"></p>
 <p><a id="next" href="/page/${encodeURIComponent(`${title}-next`)}">Next page</a></p>
 <p><a id="child" href="/page/${encodeURIComponent(`${title}-child`)}" target="_blank">Child page</a></p>
+${away ? `<p><a id="away" href="${escapeHtml(away)}">Away</a></p>` : ''}
 <p><a id="download" href="/download/${name}.txt" target="_blank">Download</a>
 <button id="popup" onclick="window.__popup = window.open('/page/Popup-${name}', 'pop', 'width=420,height=360')">Pop-up</button>
 <button id="closepopup" onclick="window.__popup && window.__popup.close()">Close pop-up</button></p>
@@ -83,11 +95,15 @@ ${open ? `window.open(${JSON.stringify(open)}, 'auto', 'width=400,height=300')` 
  * - `/slow/<title>?ms=N`: the page after N ms (default 30 s): keeps a tab loading.
  * - `/slow-reload/<title>`: the page at once on the first request, then slowly (30 s) on reloads.
  * - `/page/<title>?open=<path>`: the page, opening `<path>` in a pop-up as it loads (no click).
+ * - `/page/<title>?away=<url>`: the page with a link (#away) to `<url>`.
  * - `/download/<name>`: a small text file sent as a download (Content-Disposition: attachment).
+ * - `/cookies`: a page that sets two cookies for its host, `strict=1` (SameSite=Strict) and
+ *   `lax=1` (SameSite=Lax).
  */
 export async function startNavFixtures(): Promise<NavFixtures> {
   const hits = new Map<string, number>()
   const cacheControl = new Map<string, string | undefined>()
+  const sentFrom = new Map<string, SentFrom>()
   const pending = new Set<ServerResponse>()
   const sockets = new Set<Socket>()
   const server = createServer((req, res) => {
@@ -95,6 +111,12 @@ export async function startNavFixtures(): Promise<NavFixtures> {
     const count = (hits.get(u.pathname) ?? 0) + 1
     hits.set(u.pathname, count)
     cacheControl.set(u.pathname, req.headers['cache-control'])
+    const from: SentFrom = {}
+    if (req.headers.referer) from.referer = req.headers.referer
+    const site = req.headers['sec-fetch-site']
+    if (typeof site === 'string') from.site = site
+    if (req.headers.cookie) from.cookie = req.headers.cookie
+    sentFrom.set(u.pathname, from)
     const [, kind = '', raw = 'index'] = u.pathname.split('/')
     const title = decodeURIComponent(raw)
     const send = () => {
@@ -107,6 +129,7 @@ export async function startNavFixtures(): Promise<NavFixtures> {
           u.searchParams.get('bg') ?? undefined,
           u.searchParams.get('text') ?? '',
           u.searchParams.get('open') ?? '',
+          u.searchParams.get('away') ?? '',
         ),
       )
     }
@@ -126,6 +149,14 @@ export async function startNavFixtures(): Promise<NavFixtures> {
         'cache-control': 'no-store',
       })
       return res.end(`Downloaded ${title}\n`)
+    }
+    if (kind === 'cookies') {
+      res.writeHead(200, {
+        'content-type': 'text/html',
+        'cache-control': 'no-store',
+        'set-cookie': ['strict=1; SameSite=Strict; Path=/', 'lax=1; SameSite=Lax; Path=/'],
+      })
+      return res.end('<!doctype html><title>Cookies</title><p>Cookies set.</p>')
     }
     if (kind === 'slow') return later(Number(u.searchParams.get('ms') ?? 30_000))
     if (kind === 'slow-reload') return count === 1 ? send() : later(30_000)
@@ -153,6 +184,7 @@ export async function startNavFixtures(): Promise<NavFixtures> {
     urlOn: (host, path) => `http://${host}:${port}${path}`,
     hits: (path) => hits.get(path) ?? 0,
     cacheControl: (path) => cacheControl.get(path),
+    sentFrom: (path) => sentFrom.get(path),
     close: () =>
       new Promise((r) => {
         for (const socket of sockets) socket.destroy()

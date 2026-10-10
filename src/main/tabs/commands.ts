@@ -28,7 +28,7 @@ import { tabSplitMenuItems } from '../split/menu'
 import { TabMaintenance } from './maintenance'
 import { findMenuItem, folderMenu, type MenuOps, menuLabels, tabMenu } from './menus'
 import { makeTab, numberedTarget, steppedTarget, todayInsertIndex } from './model'
-import { TabOps } from './ops'
+import { TabOps, type TabPage } from './ops'
 
 /** Test-only handle (ORBIT_E2E=1): globalThis.__orbitTabs. */
 export interface TabTestHooks {
@@ -433,16 +433,31 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
         // The size and position the page asked for (features) are kept.
         return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true, title: '' } }
       }
-      const background = details.disposition === 'background-tab'
-      if (background) {
-        // ⌘/middle-click: an ordinary tab that loads in the background. A view handed back through
-        // createWindow would never be shown, and Chromium keeps the opener page waiting for it.
+      // A new tab for the link, given its page or loading it with the page as referrer (review B-F1).
+      const linkTab = (activate: boolean) => (page: TabPage) => {
         const windowId = windows.windowOfTab(openerTabId) ?? windows.focusedWindowId()
         const spaceId = windowId ? ops.spaceOfWindow(windowId) : opener.spaceId
-        const id = ops.createTab({ url: details.url, spaceId, windowId, activate: false, openerTabId })
+        const id = ops.createTab({ url: details.url, spaceId, windowId, activate, openerTabId, ...page })
+        if (activate) return
         tabs.ensure(id)
         // With the sidebar hidden the new tab would open unseen: say so (TB-02, SB-13).
         if (windowId && !store.state.windows[windowId]?.sidebar.visible) toast(windowId, 'Opened in a new tab')
+      }
+      /** A link the engine left to the browser, opened by its page itself (TabRuntime.openFromPage). */
+      const fromPage = (open: (page: TabPage) => void) => {
+        const load = { httpReferrer: details.referrer }
+        tabs.openFromPage(
+          openerTabId,
+          details.url,
+          details.referrer,
+          (view) => open({ view, load }),
+          () => open({ load }),
+        )
+      }
+      if (details.disposition === 'background-tab') {
+        // ⌘/middle-click: an ordinary tab that loads in the background. A view handed back through
+        // createWindow would never be shown, and Chromium keeps the opener page waiting for it.
+        fromPage(linkTab(false))
         return { action: 'deny' }
       }
       return {
@@ -453,9 +468,12 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
           const spaceId = windowId ? ops.spaceOfWindow(windowId) : opener.spaceId
           if (!(options as { webContents?: unknown }).webContents) {
             // ⇧⌘-click: the engine brings no page of its own (a view built from these options
-            // would throw), so an ordinary new tab loads the link (NV-08).
-            const id = ops.createTab({ url: details.url, spaceId, windowId, activate: true, openerTabId })
-            return (tabs.ensure(id) as WebContentsView).webContents
+            // would throw), so the page opens the link itself, as a new selected tab (NV-08).
+            fromPage(linkTab(true))
+            // Electron uses nothing that comes back for an open without a page of its own.
+            const spare = new WebContentsView()
+            setImmediate(() => spare.webContents.close())
+            return spare.webContents
           }
           const tab = makeTab({ spaceId, profileId: opener.profileId, url: details.url, openerTabId })
           // Add the tab, give it the real (opener-linked) view, and only then select it: selecting

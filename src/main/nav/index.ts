@@ -7,7 +7,7 @@ import { isPrivateTab, isPrivateWindow } from '../../shared/private'
 import type { TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
-import type { TabOps } from '../tabs/ops'
+import type { TabOps, TabPage } from '../tabs/ops'
 import { type LinkPillInfo, registerLinkPill } from './link-pill'
 import { type LinksTestHooks, registerLinks } from './links'
 import { type LoadingInfo, registerLoading } from './loading'
@@ -286,18 +286,32 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
   // Private windows (NV-11).
   const privateWindows: PrivateWindows = registerPrivate(ctx, ops, prefs)
   /** A link in a new window: a private one when it comes from a private window (NV-08, NV-12). */
-  const openLinkWindow = (url: string, from: { tabId?: TabId; windowId?: WindowId }) => {
+  const openLinkWindow = (url: string, from: { tabId?: TabId; windowId?: WindowId }, page?: TabPage) => {
     const state = store.state
     if ((from.tabId && isPrivateTab(state, from.tabId)) || isPrivateWindow(state, from.windowId)) {
-      privateWindows.open({ url, fromWindowId: from.windowId })
+      privateWindows.open({ url, fromWindowId: from.windowId, page })
     } else {
-      openUrlInNewWindow(ctx, ops, url, from.windowId)
+      openUrlInNewWindow(ctx, ops, url, from.windowId, page)
     }
   }
   // Modified clicks on links, pop-ups and downloads (NV-08, NV-09).
   const links = registerLinks(ctx, { ops, prefs, openWindow: openLinkWindow })
   // The page menu's Open Link in New Window / Private Window (NV-12).
   setLinkOpeners({
+    tab: (url, from, referrer) => {
+      const opener = from.tabId ? store.state.tabs[from.tabId] : undefined
+      const windowId = from.windowId ?? windows.focusedWindowId()
+      const id = ops.createTab({
+        url,
+        spaceId: opener?.spaceId,
+        windowId,
+        activate: false,
+        openerTabId: opener?.id,
+        load: { httpReferrer: referrer },
+      })
+      // It loads in the background, as a ⌘-clicked link's tab does.
+      tabs.ensure(id)
+    },
     window: openLinkWindow,
     private: (url, from) => void privateWindows.open({ url, fromWindowId: from.windowId }),
   })

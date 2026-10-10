@@ -1,5 +1,15 @@
 import { join } from 'node:path'
-import { type NavigationEntry, nativeImage, type WebContents, WebContentsView } from 'electron'
+import {
+  type LoadURLOptions,
+  type NavigationEntry,
+  nativeImage,
+  type Referrer,
+  type WebContents,
+  WebContentsView,
+  type WebContentsViewConstructorOptions,
+  type WindowOpenHandlerResponse,
+} from 'electron'
+import { reopenReferrerPolicy } from '../../shared/nav'
 import { isPrivateProfileId } from '../../shared/private'
 import type { Tab, TabId } from '../../shared/state'
 import { isAwayFromPinned, sameDocUrl } from '../../shared/tabs'
@@ -86,6 +96,36 @@ const FOCUS_IS_EDITABLE = `(() => {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'IFRAME' || tag === 'EMBED' || tag === 'OBJECT'
 })()`
 
+/** The isolated world Orbit asks pages to open links from (`openFromPage`). */
+const LINK_WORLD = 1003
+/** How long a page has to open a link Orbit asked it to open (it may be busy) before Orbit loads it. */
+const PAGE_OPEN_MS = 2000
+
+/**
+ * Opens `url` from the page as a click on a link to it would: a link of Orbit's that isn't in the
+ * document (so no page script sees the click), with the given referrer policy, into a new window
+ * without an opener. Does nothing on a page from another origin than the one the link was on.
+ */
+const openLinkScript = (url: string, origin: string, policy: string) => `(() => {
+  if (self.origin !== ${JSON.stringify(origin)}) return false
+  const a = document.createElement('a')
+  a.href = ${JSON.stringify(url)}
+  a.target = '_blank'
+  a.rel = 'noopener'
+  a.referrerPolicy = ${JSON.stringify(policy)}
+  a.click()
+  return true
+})()`
+
+/** A link a page was asked to open (`openFromPage`). */
+interface PageOpen {
+  url: string
+  place: (view: WebContentsView) => void
+  fallback: () => void
+  /** waiting: not opened yet; taken: the page opened it; late: Orbit loaded it itself. */
+  state: 'waiting' | 'taken' | 'late'
+}
+
 type RuntimeFields = Partial<
   Pick<
     Tab,
@@ -117,11 +157,15 @@ export class TabRuntime {
   /** Control was released in a page (ends recent-tab switching, TB-05). */
   onControlUp?: () => void
   /** A page tried to open a tab or pop-up without a user gesture. */
-  onPopupBlocked?: (tabId: TabId, url: string) => void
+  onPopupBlocked?: (tabId: TabId, url: string, referrer: Referrer) => void
   /** True when the tab's site may open pop-ups without a click (allowed in site controls, NV-09). */
   allowsPopups?: (tabId: TabId) => boolean
   /** Last user gesture per tab, for the pop-up rule (NV-09). */
   private gestures = new Map<TabId, { at: number; used: boolean }>()
+  /** Links pages were asked to open, by the asking page's contents id (`openFromPage`). */
+  private pageOpens = new Map<number, PageOpen[]>()
+  /** Options for a tab's first load, used once: the page a link came from (review B-F1). */
+  readonly loadOptions = new Map<TabId, LoadURLOptions>()
   /** Favicon URL → data URL, fetched in the tab's own session (no fetches from Orbit's UI). */
   private favicons = new Map<string, string>()
   /** Icons by origin, out of OrbitState (lane review MF-2). */
@@ -173,6 +217,8 @@ export class TabRuntime {
     this.adopt(tabId, view)
     const saved = this.savedHistory.get(tabId)
     this.savedHistory.delete(tabId)
+    const options = this.loadOptions.get(tabId)
+    this.loadOptions.delete(tabId)
     const contents = view.webContents
     if (tab.pinnedUrl && sameDocUrl(tab.url, tab.pinnedUrl) && !(saved && saved.entries.length > 0)) {
       this.homeLoads.add(tabId)
@@ -182,7 +228,7 @@ export class TabRuntime {
         .restore({ entries: saved.entries, index: saved.index })
         .catch(() => this.load(contents, tab.url))
     } else {
-      this.load(contents, tab.url)
+      this.load(contents, tab.url, options)
     }
     if (tab.muted) contents.setAudioMuted(true)
     return view
@@ -267,9 +313,12 @@ export class TabRuntime {
     })
     contents.on('context-menu', (_e, params) => showPageContextMenu(this.ctx, tabId, contents, params))
     contents.setWindowOpenHandler((details) => {
+      // A link Orbit asked this page to open (openFromPage): the click was counted already.
+      const asked = this.takePageOpen(contents.id, details.url)
+      if (asked) return asked
       // No tabs or pop-ups without a user gesture, and one per gesture (NV-09).
       if (!this.consumeGesture(tabId) && !this.allowsPopups?.(tabId)) {
-        this.onPopupBlocked?.(tabId, details.url)
+        this.onPopupBlocked?.(tabId, details.url, details.referrer)
         return { action: 'deny' }
       }
       for (const hook of this.ctx.hooks.windowOpen) {
@@ -280,6 +329,7 @@ export class TabRuntime {
     })
     contents.once('destroyed', () => {
       this.byContents.delete(contents.id)
+      this.pageOpens.delete(contents.id)
       this.gestures.delete(tabId)
       this.wantedFavicon.delete(tabId)
       if (this.views.get(tabId) !== view) return
@@ -316,6 +366,7 @@ export class TabRuntime {
   /** Destroys a tab's contents without remembering history (tab is being removed). */
   destroy(tabId: TabId): void {
     this.savedHistory.delete(tabId)
+    this.loadOptions.delete(tabId)
     const view = this.views.get(tabId)
     if (!view) return
     this.views.delete(tabId)
@@ -421,9 +472,89 @@ export class TabRuntime {
     this.load(contents, url)
   }
 
-  private load(contents: WebContents, url: string): void {
+  /**
+   * Opens a link from `tabId`'s page the way the page itself requests it (review B-F1). Chromium
+   * hands ⌘-, middle-, ⇧⌘- and ⇧-clicks on links to the browser as a bare address, with no page
+   * made for it, and loading that from here would request it as if typed: no Referer,
+   * `Sec-Fetch-Site: none`, and the site's SameSite=Strict cookies. So the page is asked to open
+   * the link itself, from an isolated world and with a user gesture, and the page Chromium makes for
+   * that goes to `place`, to be shown as a tab or a window. `fallback` loads the link Orbit's way
+   * when no page comes: a link that isn't http(s), a page with an opaque origin (sandboxed), one
+   * that went away or moved to another origin, or one too busy to do it within PAGE_OPEN_MS.
+   */
+  openFromPage(
+    tabId: TabId,
+    url: string,
+    referrer: Referrer,
+    place: (view: WebContentsView) => void,
+    fallback: () => void,
+  ): void {
+    const contents = this.contents(tabId)
+    const origin = contents?.mainFrame.origin
+    if (!contents || !origin || origin === 'null' || !/^https?:/i.test(url)) {
+      fallback()
+      return
+    }
+    const key = contents.id
+    const open: PageOpen = { url, place, fallback, state: 'waiting' }
+    this.pageOpens.set(key, [...(this.pageOpens.get(key) ?? []), open])
+    const giveUp = () => {
+      if (open.state !== 'waiting') return
+      open.state = 'late'
+      try {
+        fallback()
+      } catch (err) {
+        console.error('[tabs] could not open a link', err)
+      }
+    }
+    const timer = setTimeout(giveUp, PAGE_OPEN_MS)
+    const code = openLinkScript(url, origin, reopenReferrerPolicy(referrer, origin))
+    contents
+      .executeJavaScriptInIsolatedWorld(LINK_WORLD, [{ code }], true)
+      .catch(() => false)
+      .then(() => {
+        clearTimeout(timer)
+        const rest = (this.pageOpens.get(key) ?? []).filter((o) => o !== open)
+        if (rest.length > 0) this.pageOpens.set(key, rest)
+        else this.pageOpens.delete(key)
+        // The page opened nothing (or not this link): Orbit loads it.
+        giveUp()
+      })
+  }
+
+  /** The answer to a page opening a link Orbit asked it to open (`openFromPage`), if this is one. */
+  private takePageOpen(contentsId: number, url: string): WindowOpenHandlerResponse | undefined {
+    const opens = (this.pageOpens.get(contentsId) ?? []).filter((o) => o.url === url)
+    const open = opens.find((o) => o.state === 'waiting') ?? opens.find((o) => o.state === 'late')
+    if (!open) return undefined
+    // Orbit has loaded the link itself already.
+    if (open.state === 'late') return { action: 'deny' }
+    open.state = 'taken'
+    return {
+      action: 'allow',
+      outlivesOpener: true,
+      createWindow: (options) => {
+        const guest = (options as { webContents?: WebContents }).webContents
+        // No page after all (only links the browser opens come without one): Orbit loads it.
+        const view = new WebContentsView(guest ? (options as WebContentsViewConstructorOptions) : {})
+        const created = view.webContents
+        const createdId = created.id
+        try {
+          if (guest) open.place(view)
+          else open.fallback()
+        } catch (err) {
+          console.error('[tabs] could not open a link', err)
+        }
+        // A view no tab took (Electron ignores what comes back for an open without a page).
+        if (!this.byContents.has(createdId)) setImmediate(() => liveContents(view)?.close())
+        return created
+      },
+    }
+  }
+
+  private load(contents: WebContents, url: string, options?: LoadURLOptions): void {
     if (!url || url === 'about:blank') return
-    contents.loadURL(url).catch(() => {
+    contents.loadURL(url, options).catch(() => {
       // Failures surface through did-fail-load; ERR_ABORTED is normal on redirects.
     })
   }

@@ -3,6 +3,7 @@
  * drag-and-drop and the maintenance timers all go through these so the rules
  * (selection after close, archive, undo, pinned URL bookkeeping) live in one place.
  */
+import type { LoadURLOptions, WebContentsView } from 'electron'
 import { createWindowState, FAVORITES_FULL_MESSAGE, MAX_FAVORITES } from '../../shared/defaults'
 import { isFolderId, isTabId, newId } from '../../shared/ids'
 import { isMediaBusy } from '../../shared/media'
@@ -69,6 +70,17 @@ import {
 } from './model'
 import type { SavedHistory } from './runtime'
 import { UndoStack } from './undo'
+
+/** How a new tab gets its page, when not by loading its URL as typed (review B-F1). */
+export interface TabPage {
+  /**
+   * The page the engine made for a link its page opened (`TabRuntime.openFromPage`). A page from
+   * another profile's session is closed, and the tab loads its URL instead.
+   */
+  view?: WebContentsView
+  /** Options for the tab's first load of its URL: the page a link came from, as referrer. */
+  load?: LoadURLOptions
+}
 
 export interface ClosedTab {
   tab: Tab
@@ -140,18 +152,20 @@ export class TabOps {
 
   // ---- Create / activate ----
 
-  createTab(opts: {
-    url?: string
-    spaceId?: SpaceId
-    container?: ContainerRef
-    index?: number
-    activate?: boolean
-    windowId?: WindowId
-    openerTabId?: TabId
-    history?: SavedHistory
-    title?: string
-    favicon?: string
-  }): TabId {
+  createTab(
+    opts: {
+      url?: string
+      spaceId?: SpaceId
+      container?: ContainerRef
+      index?: number
+      activate?: boolean
+      windowId?: WindowId
+      openerTabId?: TabId
+      history?: SavedHistory
+      title?: string
+      favicon?: string
+    } & TabPage,
+  ): TabId {
     const state = this.state
     const url = opts.url ?? 'about:blank'
     const space =
@@ -175,16 +189,29 @@ export class TabOps {
       tab.pinnedTitle = tab.title
     }
     if (opts.history) this.ctx.tabs.savedHistory.set(tab.id, opts.history)
+    // The engine's page is used only in the tab's own profile's session.
+    const given = opts.view?.webContents
+    const view =
+      given && !given.isDestroyed() && given.session === this.ctx.sessions.get(profileId) ? opts.view : undefined
+    if (given && !view && !given.isDestroyed()) given.close()
+    if (!view && opts.load) this.ctx.tabs.loadOptions.set(tab.id, opts.load)
     const index =
       opts.index ??
       (target.kind === 'today'
         ? todayInsertIndex(spaceObj, opts.activate === false ? 'background' : 'new')
         : Number.MAX_SAFE_INTEGER)
+    const activate = opts.activate !== false && !!opts.windowId
     this.ctx.store.update((d) => {
       d.tabs[tab.id] = tab
       insertItem(d, target, index, tab.id)
-      if (opts.activate !== false && opts.windowId) activateInDraft(d, opts.windowId, tab.id, this.now())
+      // A tab given its page is selected once it has it: selecting first would make the layout
+      // pass create a second view for it (review M1).
+      if (activate && !view && opts.windowId) activateInDraft(d, opts.windowId, tab.id, this.now())
     })
+    if (view) {
+      this.ctx.tabs.adopt(tab.id, view)
+      if (activate && opts.windowId) this.activate(opts.windowId, tab.id)
+    }
     return tab.id
   }
 

@@ -11,7 +11,7 @@ import {
 import type { ItemId, OrbitState, Profile, ProfileId, SpaceId, SpaceTheme, WindowId } from '../../shared/state'
 import { tabsInItem } from '../../shared/tree'
 import type { MainContext } from '../context'
-import type { TabOps } from '../tabs/ops'
+import type { TabOps, TabPage } from '../tabs/ops'
 import type { SitePrefs } from './site-prefs'
 
 /** Actions for what a private window doesn't have (SB-25). */
@@ -24,9 +24,10 @@ export const PRIVATE_WINDOW_SWITCH = '--private-window'
 export interface PrivateWindows {
   /**
    * Opens a private window, a step down and right of `fromWindowId`: with `url` in its first tab,
-   * else with the command bar open for one (SB-25).
+   * else with the command bar open for one (SB-25). `page` is how that tab gets its page, when not
+   * by loading the URL as typed (review B-F1).
    */
-  open(opts?: { url?: string; fromWindowId?: WindowId }): WindowId | null
+  open(opts?: { url?: string; fromWindowId?: WindowId; page?: TabPage }): WindowId | null
   /** The current private session's profile, while a private window is open. */
   profileId(): ProfileId | undefined
 }
@@ -55,7 +56,7 @@ export function registerPrivate(ctx: MainContext, ops: TabOps, prefs: SitePrefs)
     }
   }
 
-  const open: PrivateWindows['open'] = ({ url, fromWindowId } = {}) => {
+  const open: PrivateWindows['open'] = ({ url, fromWindowId, page } = {}) => {
     const now = Date.now()
     const from = fromWindowId ?? windows.focusedWindowId()
     let windowId: WindowId | undefined
@@ -77,7 +78,7 @@ export function registerPrivate(ctx: MainContext, ops: TabOps, prefs: SitePrefs)
       spaceId = space.id
     })
     if (!windowId || !spaceId) return null
-    if (url) ops.createTab({ url, spaceId, windowId, activate: true })
+    if (url) ops.createTab({ url, spaceId, windowId, activate: true, ...page })
     const created = store.state.windows[windowId]
     if (!created) return null
     const id = windows.open(created)

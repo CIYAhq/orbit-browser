@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { connectionOf, LINK_PILL_MAX_URL, linkPillText } from '../../src/shared/nav'
+import {
+  connectionOf,
+  LINK_PILL_MAX_URL,
+  linkPillText,
+  referrerPolicyName,
+  reopenReferrerPolicy,
+} from '../../src/shared/nav'
 
 describe('connectionOf (SB-04)', () => {
   it('treats https as secure: no padlock, no warning', () => {
@@ -63,5 +69,39 @@ describe('linkPillText (SB-27)', () => {
     const long = `data:text/plain,${'x'.repeat(LINK_PILL_MAX_URL * 2)}`
     expect(linkPillText(long, true)).toHaveLength(LINK_PILL_MAX_URL + 1)
     expect(linkPillText(long, false).endsWith('…')).toBe(true)
+  })
+})
+
+describe('referrer policies of links Orbit opens (NV-08, review B-F1)', () => {
+  it('names a link’s or page’s policy word as Electron does, and anything else as the default', () => {
+    expect(referrerPolicyName('no-referrer')).toBe('no-referrer')
+    expect(referrerPolicyName(' Strict-Origin ')).toBe('strict-origin')
+    expect(referrerPolicyName('unsafe-url')).toBe('unsafe-url')
+    // Electron has no name for it: its stricter twin.
+    expect(referrerPolicyName('origin-when-cross-origin')).toBe('strict-origin-when-cross-origin')
+    // The old <meta name="referrer"> words.
+    expect(referrerPolicyName('never')).toBe('no-referrer')
+    expect(referrerPolicyName('always')).toBe('unsafe-url')
+    expect(referrerPolicyName('')).toBe('default')
+    expect(referrerPolicyName('nonsense')).toBe('default')
+    expect(referrerPolicyName(undefined)).toBe('default')
+  })
+
+  it('reopens a link from its page with the policy the click had', () => {
+    const page = 'https://a.example'
+    expect(reopenReferrerPolicy({ url: 'https://a.example/', policy: 'strict-origin-when-cross-origin' }, page)).toBe(
+      'strict-origin-when-cross-origin',
+    )
+    expect(reopenReferrerPolicy({ url: 'https://a.example/list?q=1', policy: 'unsafe-url' }, page)).toBe('unsafe-url')
+    // The page's own policy decides.
+    expect(reopenReferrerPolicy({ url: 'https://a.example/', policy: 'default' }, page)).toBe('')
+  })
+
+  it('sends no referrer when the click had none, or came from a frame of another origin', () => {
+    const page = 'https://a.example'
+    expect(reopenReferrerPolicy({ url: '', policy: 'no-referrer' }, page)).toBe('no-referrer')
+    expect(reopenReferrerPolicy({ url: '', policy: 'strict-origin-when-cross-origin' }, page)).toBe('no-referrer')
+    expect(reopenReferrerPolicy({ url: 'https://ads.example/frame', policy: 'unsafe-url' }, page)).toBe('no-referrer')
+    expect(reopenReferrerPolicy({ url: 'not a url', policy: 'unsafe-url' }, page)).toBe('no-referrer')
   })
 })

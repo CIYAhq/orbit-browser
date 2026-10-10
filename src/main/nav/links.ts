@@ -1,10 +1,10 @@
-import { type BrowserWindow, Menu, type MenuItemConstructorOptions, type WebContents } from 'electron'
-import { popupTitle, shownTabId } from '../../shared/nav'
+import { type BrowserWindow, Menu, type MenuItemConstructorOptions, type Referrer, type WebContents } from 'electron'
+import { type PageReferrer, popupTitle, referrerPolicyName, shownTabId } from '../../shared/nav'
 import type { TabId, WindowId } from '../../shared/state'
 import { sectionOf } from '../../shared/tree'
 import type { MainContext } from '../context'
 import { heldModifiers } from '../peek/input'
-import type { TabOps } from '../tabs/ops'
+import type { TabOps, TabPage } from '../tabs/ops'
 import { activeTabOf, shownTabs } from '../windows'
 import { NAV_WORLD } from './focus'
 import type { SitePrefs } from './site-prefs'
@@ -16,8 +16,10 @@ const BLOCKED_SHOWN = 5
 
 /**
  * The link under the pointer in the page's main frame (through open shadow roots), as
- * `{ href }`; `{ frame: true }` when the pointer is over a frame or something Orbit can't look
- * into (the link may be inside); null over anything else.
+ * `{ href, policy }`; `{ frame: true }` when the pointer is over a frame or something Orbit can't
+ * look into (the link may be inside); null over anything else. `policy` is the referrer policy the
+ * link sets for itself (`rel=noreferrer`, `referrerpolicy`) or else the page's
+ * `<meta name="referrer">`; a policy the page sets in its response headers is out of reach.
  */
 const HOVERED_LINK = `(() => {
   let root = document, el = null
@@ -34,7 +36,11 @@ const HOVERED_LINK = `(() => {
     if (n.localName !== 'a' && n.localName !== 'area') continue
     const raw = n.href
     const href = typeof raw === 'string' ? raw : raw && raw.baseVal ? new URL(raw.baseVal, document.baseURI).href : ''
-    if (href) return { href }
+    if (!href) continue
+    const metas = document.querySelectorAll('meta[name="referrer" i]')
+    const meta = metas.length ? metas[metas.length - 1].getAttribute('content') || '' : ''
+    const own = n.relList && n.relList.contains('noreferrer') ? 'no-referrer' : n.referrerPolicy || n.getAttribute('referrerpolicy') || ''
+    return { href, policy: own || meta }
   }
   const tag = el.localName
   return tag === 'iframe' || tag === 'frame' || tag === 'object' || tag === 'embed' || el.shadowRoot ? { frame: true } : null
@@ -42,6 +48,7 @@ const HOVERED_LINK = `(() => {
 
 interface Hovered {
   href?: string
+  policy?: string
   frame?: boolean
 }
 
@@ -69,8 +76,11 @@ function hostOf(url: string | undefined): string {
 export interface LinksDeps {
   ops: TabOps
   prefs: SitePrefs
-  /** A new window showing `url`: private when the link came from a private tab (NV-08, NV-12). */
-  openWindow: (url: string, from: { tabId?: TabId; windowId?: WindowId }) => void
+  /**
+   * A new window showing `url`: private when the link came from a private tab (NV-08, NV-12).
+   * `page` is how its tab gets the page, when not by loading the URL as typed (review B-F1).
+   */
+  openWindow: (url: string, from: { tabId?: TabId; windowId?: WindowId }, page?: TabPage) => void
 }
 
 export interface LinksTestHooks {
@@ -110,7 +120,16 @@ export function registerLinks(ctx: MainContext, deps: LinksDeps): LinksTestHooks
   ctx.hooks.windowOpen.push((openerTabId, details) => {
     if (details.disposition !== 'new-window' || details.features) return undefined
     if (!openable(details.url)) return undefined
-    deps.openWindow(details.url, { tabId: openerTabId, windowId: windows.windowOfTab(openerTabId) })
+    const from = { tabId: openerTabId, windowId: windows.windowOfTab(openerTabId) }
+    const load = { httpReferrer: details.referrer }
+    // The engine leaves the link to the browser: the page opens it itself (review B-F1).
+    tabs.openFromPage(
+      openerTabId,
+      details.url,
+      details.referrer,
+      (view) => deps.openWindow(details.url, from, { view, load }),
+      () => deps.openWindow(details.url, from, { load }),
+    )
     return { action: 'deny' }
   })
 
@@ -118,10 +137,13 @@ export function registerLinks(ctx: MainContext, deps: LinksDeps): LinksTestHooks
   const hovered = new Map<TabId, string>()
   const altClicks = new Map<TabId, AltClick>()
 
-  const openInSplit = (tabId: TabId, url: string) => {
+  /** The link in a pane beside the page's; `referrer` is the page it came from, when known. */
+  const openInSplit = (tabId: TabId, url: string, referrer?: PageReferrer) => {
     const windowId = windows.windowOfTab(tabId)
     if (!windowId || !store.state.tabs[tabId]) return
-    void commands.run('split.openUrl', { url, target: tabId, side: 'right' }, { windowId }).catch(() => {})
+    void commands
+      .run('split.openUrl', { url, target: tabId, side: 'right', ...(referrer ? { referrer } : {}) }, { windowId })
+      .catch(() => {})
   }
 
   const onAltClick = async (tabId: TabId, contents: WebContents) => {
@@ -141,7 +163,8 @@ export function registerLinks(ctx: MainContext, deps: LinksDeps): LinksTestHooks
     if (found?.href) {
       if (!openable(found.href)) return
       altClicks.set(tabId, { url: found.href, until, split: false })
-      openInSplit(tabId, found.href)
+      // Sent with the page as referrer, as the link's policy or the page's allows (review B-F1).
+      openInSplit(tabId, found.href, { url: contents.getURL(), policy: referrerPolicyName(found.policy) })
     } else if (found?.frame && openable(fallback)) {
       // A link in a frame: the engine's download of it says which, and opens the split.
       altClicks.set(tabId, { url: fallback, until, split: true })
@@ -215,12 +238,14 @@ export function registerLinks(ctx: MainContext, deps: LinksDeps): LinksTestHooks
   }
 
   // ---- Blocked pop-ups (NV-09) ----
-  const blocked = new Map<TabId, string[]>()
+  /** A pop-up a page tried to open, and the referrer it would have had. */
+  type Blocked = { url: string; referrer: Referrer }
+  const blocked = new Map<TabId, Blocked[]>()
   // Private profiles' choices stay in memory (SitePrefs).
   const popupsAllowed = (profileId: string, host: string) => prefs.popupsAllowed(profileId, host)
   const setPopupsAllowed = (profileId: string, host: string, allowed: boolean) =>
     prefs.setPopupsAllowed(profileId, host, allowed)
-  const setBlocked = (tabId: TabId, urls: string[]) => {
+  const setBlocked = (tabId: TabId, urls: Blocked[]) => {
     if (urls.length > 0) blocked.set(tabId, urls)
     else blocked.delete(tabId)
     const count = urls.length || undefined
@@ -239,10 +264,10 @@ export function registerLinks(ctx: MainContext, deps: LinksDeps): LinksTestHooks
     return !!tab && !!host && popupsAllowed(tab.profileId, host)
   }
   const previousBlocked = tabs.onPopupBlocked
-  tabs.onPopupBlocked = (tabId, url) => {
-    previousBlocked?.(tabId, url)
-    const list = (blocked.get(tabId) ?? []).filter((u) => u !== url)
-    list.push(url)
+  tabs.onPopupBlocked = (tabId, url, referrer) => {
+    previousBlocked?.(tabId, url, referrer)
+    const list = (blocked.get(tabId) ?? []).filter((b) => b.url !== url)
+    list.push({ url, referrer })
     setBlocked(tabId, list.slice(-20))
   }
   // A new page starts with nothing blocked.
@@ -266,14 +291,22 @@ export function registerLinks(ctx: MainContext, deps: LinksDeps): LinksTestHooks
         .slice(-BLOCKED_SHOWN)
         .reverse()
         .map(
-          (url): MenuItemConstructorOptions => ({
+          ({ url, referrer }): MenuItemConstructorOptions => ({
             label: `Open ${url.length > 60 ? `${url.slice(0, 59)}…` : url}`,
             click: () => {
               setBlocked(
                 tabId,
-                (blocked.get(tabId) ?? []).filter((u) => u !== url),
+                (blocked.get(tabId) ?? []).filter((b) => b.url !== url),
               )
-              ops.createTab({ url, spaceId: tab.spaceId, windowId, activate: true, openerTabId: tabId })
+              // With the referrer the page's own request would have had (review B-F1).
+              ops.createTab({
+                url,
+                spaceId: tab.spaceId,
+                windowId,
+                activate: true,
+                openerTabId: tabId,
+                load: { httpReferrer: referrer },
+              })
             },
           }),
         ),

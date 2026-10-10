@@ -1,9 +1,11 @@
 import { join } from 'node:path'
 import { app, type ContextMenuParams, dialog, type MenuItemConstructorOptions, type WebContents } from 'electron'
+import { type PageReferrer, referrerPolicyName } from '../../shared/nav'
 import { isPrivateTab } from '../../shared/private'
 import type { TabId, WindowId } from '../../shared/state'
 import { SEARCH_ENGINES } from '../../shared/url'
 import type { MainContext } from '../context'
+import type { TabPage } from '../tabs/ops'
 import { NAV_WORLD } from './focus'
 
 /**
@@ -15,8 +17,10 @@ import { NAV_WORLD } from './focus'
 type From = { tabId?: TabId; windowId?: WindowId }
 
 interface LinkOpeners {
+  /** A link in a new background tab, loaded with `referrer` (review B-F1). */
+  tab: (url: string, from: From, referrer: PageReferrer) => void
   /** A link in a new window (a private one from a private window). */
-  window: (url: string, from: From) => void
+  window: (url: string, from: From, page?: TabPage) => void
   /** A link in a new private window. */
   private: (url: string, from: From) => void
 }
@@ -30,14 +34,42 @@ export function setLinkOpeners(next: LinkOpeners): void {
 }
 
 /**
- * Open Link in New Window / in Private Window. A private window opens both as private windows,
- * so it shows only the first (NV-11).
+ * The referrer for what the page menu opens: the frame the menu is over, trimmed by that frame's
+ * policy, as a click there would send it (review B-F1).
  */
-export function linkWindowItems(ctx: MainContext, tabId: TabId, url: string): MenuItemConstructorOptions[] {
+export function menuReferrer(params: ContextMenuParams): PageReferrer {
+  // Typed as a Referrer, but Electron passes the policy's name.
+  const raw = params.referrerPolicy as unknown
+  const policy = typeof raw === 'string' ? raw : (raw as { policy?: string } | undefined)?.policy
+  return { url: params.frameURL || params.pageURL, policy: referrerPolicyName(policy) }
+}
+
+/**
+ * Open Link (or Image) in New Tab: a background tab, loaded with the page as referrer (review
+ * B-F1). False when the nav module isn't there to open it.
+ */
+export function openLinkInTab(ctx: MainContext, tabId: TabId, url: string, referrer: PageReferrer): boolean {
+  if (!openers) return false
+  openers.tab(url, { tabId, windowId: ctx.windows.windowOfTab(tabId) }, referrer)
+  return true
+}
+
+/**
+ * Open Link in New Window / in Private Window. A private window opens both as private windows,
+ * so it shows only the first (NV-11). A new window gets `referrer`; a private one from a normal
+ * window gets none, so it doesn't tell the site where the link was.
+ */
+export function linkWindowItems(
+  ctx: MainContext,
+  tabId: TabId,
+  url: string,
+  referrer?: PageReferrer,
+): MenuItemConstructorOptions[] {
   if (!openers) return []
   const from = (): From => ({ tabId, windowId: ctx.windows.windowOfTab(tabId) })
+  const page: TabPage = referrer ? { load: { httpReferrer: referrer } } : {}
   const items: MenuItemConstructorOptions[] = [
-    { label: 'Open Link in New Window', click: () => openers?.window(url, from()) },
+    { label: 'Open Link in New Window', click: () => openers?.window(url, from(), page) },
   ]
   if (!isPrivateTab(ctx.store.state, tabId)) {
     items.push({ label: 'Open Link in Private Window', click: () => openers?.private(url, from()) })

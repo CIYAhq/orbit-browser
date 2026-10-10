@@ -164,6 +164,117 @@ test('[NV-08] ⇧-click opens the link in a new window, a step down and right, w
   expect([second.bounds?.x, second.bounds?.y]).not.toEqual([first.bounds?.x, first.bounds?.y])
 })
 
+/**
+ * A page on localhost with a link (#away) to a page on the other site, 127.0.0.1, which has
+ * cookies: `away(n)` points it at `/page/<name>-<n>` there.
+ */
+async function linkToOtherSite(
+  app: ElectronApplication,
+  name: string,
+): Promise<{ src: string; srcTab: string; away: (n: number) => Promise<string> }> {
+  await openTab(app, fx.urlOn('127.0.0.1', '/cookies'))
+  const target = (n: number) => fx.urlOn('127.0.0.1', `/page/${name}-${n}`)
+  const src = fx.url(`/page/${name}?away=${encodeURIComponent(target(0))}`)
+  const srcTab = await openTab(app, src)
+  const tab = await tabPage(app, src)
+  /** Points the link at <name>-n. */
+  const away = async (n: number) => {
+    await tab.evaluate((href) => document.querySelector('#away')?.setAttribute('href', href), target(n))
+    return target(n)
+  }
+  return { src, srcTab, away }
+}
+
+/** How a click on a link to the other site is requested: as the page's own, as a browser's is. */
+const sentAsLink = () => ({ referer: `http://localhost:${fx.port}/`, site: 'cross-site', cookie: 'lax=1' })
+
+test('[NV-08] links opened with ⌘-, middle-, ⇧- and ⇧⌘-click are requested as the page’s own clicks: with a Referer, as cross-site, without the SameSite=Strict cookie (review B-F1)', async () => {
+  const { app } = orbit
+  await app.evaluate(() => {
+    const g = globalThis as unknown as {
+      __orbit: { ctx: { store: { update: (f: (d: { settings: Record<string, unknown> }) => void) => void } } }
+    }
+    // ⇧-click opens a new window, not Peek (peek.md).
+    g.__orbit.ctx.store.update((d) => {
+      d.settings.peekShiftClick = false
+    })
+  })
+  const { src, away } = await linkToOtherSite(app, 'Clicked')
+  const opener = await selectedTab(app)
+  const requested = async (n: number) => {
+    await expect.poll(() => fx.hits(`/page/Clicked-${n}`)).toBe(1)
+    expect(fx.sentFrom(`/page/Clicked-${n}`)).toEqual(sentAsLink())
+  }
+
+  // ⌘-click (Ctrl-click) and middle-click: background tabs at the top of Today.
+  const url1 = await away(1)
+  await clickInPage(app, src, '#away', [mod])
+  await requested(1)
+  await expect.poll(async () => urlOf(app, (await today(app))[0])).toBe(url1)
+  const [first] = await today(app)
+  expect((await state(app)).tabs[first as string]?.openerTabId).toBe(opener)
+  await waitLoaded(app, first as string, url1)
+  const url2 = await away(2)
+  await clickInPage(app, src, '#away', [], 'middle')
+  await requested(2)
+  await expect.poll(async () => urlOf(app, (await today(app))[0])).toBe(url2)
+  expect(await selectedTab(app)).toBe(opener)
+
+  // ⇧-click: a new window.
+  const url3 = await away(3)
+  await clickInPage(app, src, '#away', ['shift'])
+  await requested(3)
+  await expect.poll(async () => (await windowList(app)).length).toBe(2)
+  const second = (await windowList(app))[1]
+  const shown = second ? (await state(app)).windows[second.id]?.activeTab[second.spaceId] : undefined
+  expect(await urlOf(app, shown ?? undefined)).toBe(url3)
+
+  // ⇧⌘-click (Ctrl+Shift-click): a new tab, selected.
+  const url4 = await away(4)
+  await clickInPage(app, src, '#away', [mod, 'shift'])
+  await requested(4)
+  await expect.poll(async () => urlOf(app, await selectedTab(app))).toBe(url4)
+  // Each was requested once: the page's request, not Orbit's as well.
+  expect([1, 2, 3, 4].map((n) => fx.hits(`/page/Clicked-${n}`))).toEqual([1, 1, 1, 1])
+})
+
+test('[NV-08][NV-09][NV-12] links Orbit opens for a page (its menu, ⌥-click, a blocked pop-up) are sent with the page as Referer (review B-F1)', async () => {
+  const { app, shell } = orbit
+  const { src, srcTab, away } = await linkToOtherSite(app, 'Opened')
+  const referer = `http://localhost:${fx.port}/`
+  const fromMenu = async (label: string) => {
+    await clickInPage(app, src, '#away', [], 'right')
+    await expect.poll(async () => (await pageMenu(app))?.labels ?? []).toContain(label)
+    expect(await choosePageMenu(app, label)).toBe(true)
+  }
+  const url1 = await away(1)
+  await fromMenu('Open Link in New Tab')
+  await expect.poll(async () => urlOf(app, (await today(app))[0])).toBe(url1)
+  // Shown, in case it hasn't loaded in the background.
+  await cmd(app, 'tabs.activate', { tabId: (await today(app))[0] })
+  await expect.poll(() => fx.hits('/page/Opened-1')).toBe(1)
+  expect(fx.sentFrom('/page/Opened-1')?.referer).toBe(referer)
+  await cmd(app, 'tabs.activate', { tabId: srcTab })
+  await expect.poll(() => selectedTab(app)).toBe(srcTab)
+  await away(2)
+  await fromMenu('Open Link in New Window')
+  await expect.poll(() => fx.hits('/page/Opened-2')).toBe(1)
+  expect(fx.sentFrom('/page/Opened-2')?.referer).toBe(referer)
+  // ⌥-click: split view.
+  await away(3)
+  await clickInPage(app, src, '#away', ['alt'])
+  await expect.poll(() => fx.hits('/page/Opened-3')).toBe(1)
+  expect(fx.sentFrom('/page/Opened-3')?.referer).toBe(referer)
+  // A pop-up blocked as the page loaded, opened from the address display.
+  const blocked = fx.urlOn('127.0.0.1', '/page/Opened-4')
+  await openTab(app, fx.url(`/page/Eager?open=${encodeURIComponent(blocked)}`))
+  await shell.getByTestId('popups-blocked').click()
+  await expect.poll(() => blockedMenu(app)).toContain(`Open ${blocked}`)
+  expect(await chooseBlocked(app, `Open ${blocked}`)).toBe(true)
+  await expect.poll(() => fx.hits('/page/Opened-4')).toBe(1)
+  expect(fx.sentFrom('/page/Opened-4')?.referer).toBe(referer)
+})
+
 test('[NV-08][MW-07] ⌥-click opens split view and ⌘⌥-click (Ctrl+Alt-click) a Mini Window: neither takes the other’s click', async () => {
   const { app } = orbit
   const id = await openTab(app, page('Both'))

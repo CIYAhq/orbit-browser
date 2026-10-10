@@ -221,3 +221,63 @@ export function linkPillText(url: string, expanded: boolean): string {
   const short = `${parsed.host}${path}${parsed.search}${parsed.hash}`
   return short.length > LINK_PILL_MAX_URL ? `${short.slice(0, LINK_PILL_MAX_URL)}…` : short
 }
+
+/** A referrer policy as Electron names them (`Electron.Referrer['policy']`). */
+export type ReferrerPolicyName =
+  | 'default'
+  | 'unsafe-url'
+  | 'no-referrer-when-downgrade'
+  | 'no-referrer'
+  | 'origin'
+  | 'strict-origin-when-cross-origin'
+  | 'same-origin'
+  | 'strict-origin'
+
+/** The page a request comes from and the policy that trims it, as `loadURL`'s `httpReferrer` takes it. */
+export interface PageReferrer {
+  url: string
+  policy: ReferrerPolicyName
+}
+
+const REFERRER_POLICIES: Record<string, ReferrerPolicyName> = {
+  'unsafe-url': 'unsafe-url',
+  'no-referrer-when-downgrade': 'no-referrer-when-downgrade',
+  'no-referrer': 'no-referrer',
+  origin: 'origin',
+  'strict-origin-when-cross-origin': 'strict-origin-when-cross-origin',
+  'same-origin': 'same-origin',
+  'strict-origin': 'strict-origin',
+  // Electron has no name for this one; its stricter twin differs only from https to http.
+  'origin-when-cross-origin': 'strict-origin-when-cross-origin',
+  // The old `<meta name="referrer">` words.
+  never: 'no-referrer',
+  always: 'unsafe-url',
+  'origin-when-crossorigin': 'strict-origin-when-cross-origin',
+}
+
+/**
+ * A referrer policy word (a link's `referrerpolicy`, a page's `<meta name="referrer">`) as Electron
+ * names it; anything else is the default policy (review B-F1).
+ */
+export function referrerPolicyName(word: string | undefined): ReferrerPolicyName {
+  return REFERRER_POLICIES[(word ?? '').trim().toLowerCase()] ?? 'default'
+}
+
+/**
+ * The `referrerpolicy` a link gets when Orbit asks its page to open it again (review B-F1): the one
+ * the engine reported for the click (empty for the page's own), but `no-referrer` when the engine
+ * had no referrer to send, or the link was in a frame from another origin: the page would send its
+ * own address, which that frame's link never could.
+ */
+export function reopenReferrerPolicy(referrer: { url: string; policy: string }, pageOrigin: string): string {
+  if (!referrer.url) return 'no-referrer'
+  let from: string
+  try {
+    from = new URL(referrer.url).origin
+  } catch {
+    return 'no-referrer'
+  }
+  if (from !== pageOrigin) return 'no-referrer'
+  const policy = referrerPolicyName(referrer.policy)
+  return policy === 'default' ? '' : policy
+}
