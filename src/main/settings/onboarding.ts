@@ -2,8 +2,8 @@ import { BrowserWindow, nativeTheme, type Rectangle, screen } from 'electron'
 import { ACTIONS_BY_ID } from '../../shared/actions'
 import { DEFAULT_PROFILE_ID, MAX_FAVORITES } from '../../shared/defaults'
 import { chosenApps, isOnboardingStep, type OnboardingInfo } from '../../shared/onboarding'
-import type { WindowId } from '../../shared/state'
-import { NEUTRAL_THEME, paletteFor } from '../../shared/theme'
+import type { ColorMode, Settings, WindowId } from '../../shared/state'
+import { NEUTRAL_THEME, normalizeSpaceTheme, paletteFor } from '../../shared/theme'
 import type { MainContext } from '../context'
 import { loadRenderer, uiWebPreferences } from '../windows'
 import { guardOwnWindow } from './ui-window'
@@ -24,6 +24,15 @@ let current: Onboarding | undefined
  */
 export function startOnboarding(): boolean {
   return current?.startIfDue() ?? false
+}
+
+const isColorMode = (v: unknown): v is ColorMode => v === 'system' || v === 'light' || v === 'dark'
+
+/** What a run of onboarding keeps until it ends: its step and picks (OB-14). */
+function forgetProgress(settings: Settings): void {
+  delete settings.onboardingStep
+  delete settings.onboardingFavorites
+  delete settings.onboardingThemeBefore
 }
 
 /** Brings the onboarding window forward if it is open (a second launch, say). Returns whether it is. */
@@ -68,7 +77,7 @@ class Onboarding {
   reset(): void {
     this.ctx.store.update((d) => {
       d.settings.onboarded = false
-      delete d.settings.onboardingStep
+      forgetProgress(d.settings)
     })
     if (this.window) this.focus()
     else this.open()
@@ -81,7 +90,42 @@ class Onboarding {
       spaceId: spaceOrder[0],
       importer: this.ctx.commands.has('import.open'),
       returning: this.browserWindows().length > 0,
+      favorites: chosenApps(settings.onboardingFavorites).map((app) => app.id),
     }
+  }
+
+  /** The theme step's live change (OB-04). The first one keeps what it replaces, for Skip (D44). */
+  async setTheme(theme: unknown, appearance: unknown): Promise<void> {
+    const state = this.ctx.store.state
+    if (!this.window || this.finishing || state.settings.onboarded) return
+    const spaceId = state.spaceOrder[0]
+    const space = spaceId ? state.spaces[spaceId] : undefined
+    if (!spaceId || !space) return
+    if (!state.settings.onboardingThemeBefore) {
+      this.ctx.store.update((d) => {
+        d.settings.onboardingThemeBefore = { spaceId, theme: space.theme, appearance: state.settings.appearance }
+      })
+    }
+    if (theme !== undefined)
+      await this.ctx.commands.run('spaces.update', { spaceId, theme: normalizeSpaceTheme(theme) })
+    if (isColorMode(appearance)) await this.ctx.commands.run('settings.update', { appearance })
+  }
+
+  /** Keeps the Favorites picked so far in the state file, so a quit resumes with them (OB-14). */
+  setFavorites(favorites: unknown): void {
+    if (!this.window || this.finishing || this.ctx.store.state.settings.onboarded) return
+    const ids = chosenApps(favorites).map((app) => app.id)
+    this.ctx.store.update((d) => {
+      d.settings.onboardingFavorites = ids
+    })
+  }
+
+  /**
+   * Skip setup (OB-14, D44): a default first window, as the spec words it: the theme step's change
+   * is undone (the colours and mode from before it), and no Favorites are added or anything imported.
+   */
+  skip(): Promise<void> {
+    return this.finish([], true)
   }
 
   setStep(step: unknown): void {
@@ -92,10 +136,17 @@ class Onboarding {
   }
 
   /** Adds the chosen Favorites, marks onboarding done and shows the browser window (OB-09). */
-  async finish(favorites: unknown): Promise<void> {
+  async finish(favorites: unknown, skipped = false): Promise<void> {
     if (!this.window || this.finishing) return
     this.finishing = true
     try {
+      const before = this.ctx.store.state.settings.onboardingThemeBefore
+      if (skipped && before) {
+        if (this.ctx.store.state.spaces[before.spaceId]) {
+          await this.ctx.commands.run('spaces.update', { spaceId: before.spaceId, theme: before.theme })
+        }
+        await this.ctx.commands.run('settings.update', { appearance: before.appearance })
+      }
       const state = this.ctx.store.state
       const firstSpace = state.spaceOrder[0]
       const profileId = (firstSpace ? state.spaces[firstSpace]?.profileId : undefined) ?? DEFAULT_PROFILE_ID
@@ -115,7 +166,7 @@ class Onboarding {
       }
       this.ctx.store.update((d) => {
         d.settings.onboarded = true
-        delete d.settings.onboardingStep
+        forgetProgress(d.settings)
       })
       // After Reset onboarding a browser window is open already: go back to it. Otherwise this is the
       // first one. It opens before this window closes, so Orbit never has no window (and quits).
@@ -212,7 +263,10 @@ export function registerOnboarding(ctx: MainContext): void {
   const { commands, actions } = ctx
   commands.register('onboarding.info', () => onboarding.info())
   commands.register('onboarding.setStep', ({ step }) => onboarding.setStep(step))
+  commands.register('onboarding.setTheme', ({ theme, appearance }) => onboarding.setTheme(theme, appearance))
+  commands.register('onboarding.setFavorites', ({ favorites }) => onboarding.setFavorites(favorites))
   commands.register('onboarding.finish', ({ favorites }) => onboarding.finish(favorites))
+  commands.register('onboarding.skip', () => onboarding.skip())
   actions.register('onboarding.reset', () => onboarding.reset())
 
   // Keys and menu items while onboarding has focus: it has no tabs or Spaces to act on yet.

@@ -217,7 +217,7 @@ test('[OB-01][OB-04][OB-05][OB-07][OB-08][OB-09] a first run starts with onboard
   expect(remoteRequests(orbit.netLog).filter((url) => !SPELLCHECK_DICTIONARY.test(url))).toEqual([])
 })
 
-test('[OB-14][OB-01] onboarding resumes where a quit left it; Skip setup opens a default first window; it never shows again', async () => {
+test('[OB-14][OB-01] onboarding resumes where a quit left it, picks and all; Skip setup opens a default first window; it never shows again', async () => {
   orbit = await launchWithOnboarding()
   let { app } = orbit
   const { userData } = orbit
@@ -238,9 +238,27 @@ test('[OB-14][OB-01] onboarding resumes where a quit left it; Skip setup opens a
   app = orbit.app
   page = await onboardingPage(app, 'theme')
   expect(await browserWindowIds(app)).toEqual([])
+  // The theme step changes the first Space's colours and the mode as they're picked.
+  const mode = (await state(app)).settings.appearance
+  await page.getByTestId('theme-preset').nth(2).click()
+  await expect.poll(() => firstSpaceTheme(app)).not.toEqual(neutral)
+  await page.getByTestId(`onboarding-appearance-${mode === 'dark' ? 'light' : 'dark'}`).click()
+  await expect.poll(async () => (await state(app)).settings.appearance).not.toBe(mode)
   await next(page, 'favorites')
-  // Skip setup is on every step, top right. Tiles picked here but not continued past aren't added.
+  // Favorites are kept as they're picked: quitting on this step resumes with them.
   await page.getByTestId('onboarding-app-gmail').click()
+  await page.getByTestId('onboarding-app-github').click()
+  await expect(page.getByTestId('onboarding-favorites-count')).toHaveText('2 chosen')
+  await expect.poll(async () => (await state(app)).settings.onboardingFavorites).toEqual(['gmail', 'github'])
+  await app.close()
+  orbit = await launchWithOnboarding(userData)
+  app = orbit.app
+  page = await onboardingPage(app, 'favorites')
+  await expect(page.getByTestId('onboarding-favorites-count')).toHaveText('2 chosen')
+  await expect(page.getByTestId('onboarding-app-github')).toHaveAttribute('aria-pressed', 'true')
+
+  // Skip setup is on every step, top right. It opens a default first window: the colours and mode
+  // from before the theme step, and none of the Favorites picked (D44).
   await closing(page, () => page.getByTestId('onboarding-skip').click())
   const shell = await viewPage(app, 'shell')
   await expect(shell.getByTestId('sidebar')).toBeVisible()
@@ -250,6 +268,9 @@ test('[OB-14][OB-01] onboarding resumes where a quit left it; Skip setup opens a
   expect(s.settings.onboardingStep).toBeUndefined()
   expect(s.profiles[DEFAULT_PROFILE_ID]?.favorites).toEqual([])
   expect(s.spaces[s.spaceOrder[0] as string]?.theme).toEqual(neutral)
+  expect(s.settings.appearance).toBe(mode)
+  expect(s.settings).not.toHaveProperty('onboardingFavorites')
+  expect(s.settings).not.toHaveProperty('onboardingThemeBefore')
 
   // Later starts go straight to a browser window, even with none to restore (every window closed).
   await app.close()

@@ -122,7 +122,8 @@ const MODES: { mode: ColorMode; label: string; icon: ReactNode }[] = [
 /** Light, Dark or Match system (AP-01). */
 function ModeSwitch() {
   const appearance = useOrbit((s) => s.settings.appearance)
-  const set = (mode: ColorMode) => void invoke('settings.update', { appearance: mode })
+  // Through onboarding, which keeps the mode it replaces for Skip setup (D44).
+  const set = (mode: ColorMode) => void invoke('onboarding.setTheme', { appearance: mode })
   return (
     <div className="ob-modes" role="radiogroup" aria-label="Appearance">
       {MODES.map((m, i) => (
@@ -204,9 +205,9 @@ export function ThemeStep({ spaceId, onNext }: { spaceId: string; onNext: () => 
   useEffect(
     () => () => {
       cancelAnimationFrame(frame.current)
-      if (pending.current) void invoke('spaces.update', { spaceId, theme: pending.current })
+      if (pending.current) void invoke('onboarding.setTheme', { theme: pending.current })
     },
-    [spaceId],
+    [],
   )
   // Applies live at drag rate, at most once a frame, like the Space theme picker (FL-14).
   const change = (next: SpaceTheme) => {
@@ -217,7 +218,8 @@ export function ThemeStep({ spaceId, onNext }: { spaceId: string; onNext: () => 
       frame.current = 0
       const theme = pending.current
       pending.current = null
-      if (theme) void invoke('spaces.update', { spaceId, theme })
+      // Through onboarding, which keeps the colours it replaces for Skip setup (D44).
+      if (theme) void invoke('onboarding.setTheme', { theme })
     })
   }
   return (

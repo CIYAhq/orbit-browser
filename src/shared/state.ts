@@ -297,6 +297,13 @@ export interface Settings {
   onboarded: boolean
   /** The onboarding step a quit left off at, resumed on the next start (OB-14); see ONBOARDING_STEPS. */
   onboardingStep?: string
+  /** Favorites picked so far in onboarding (STARTER_APPS ids): a quit resumes with them (OB-14). */
+  onboardingFavorites?: string[]
+  /**
+   * The first Space's colours and the appearance before onboarding's theme step first changed them:
+   * Skip setup puts them back (OB-14, D44). Kept until onboarding ends, across a quit.
+   */
+  onboardingThemeBefore?: { spaceId: SpaceId; theme: SpaceTheme; appearance: ColorMode }
   /** The Settings window's section shown last: Settings reopens there (ST-01). */
   settingsSection: string
   /** The Settings window's size when last resized (ST-01). */

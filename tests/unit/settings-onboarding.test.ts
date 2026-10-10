@@ -69,3 +69,53 @@ describe('[OB-14] the step a quit left onboarding at', () => {
     expect(draft.onboarded).toBe(false)
   })
 })
+
+describe('[OB-14] the picks a quit left onboarding with (D44)', () => {
+  const theme = { colors: ['#2fbf8f'], intensity: 0.6, grain: 0.2 }
+
+  it('keeps known Favorites and what the theme step replaced while onboarding is unfinished', () => {
+    const fresh = createInitialState(0)
+    const spaceId = fresh.spaceOrder[0] as string
+    const state = withSettings({
+      onboarded: false,
+      onboardingFavorites: ['github', 'nope', 'gmail', 'github'],
+      onboardingThemeBefore: { spaceId, theme, appearance: 'dark' },
+    })
+    state.spaces = fresh.spaces
+    state.spaceOrder = fresh.spaceOrder
+    normalizeSettingsPrefs(state)
+    expect(state.settings.onboardingFavorites).toEqual(['github', 'gmail'])
+    expect(state.settings.onboardingThemeBefore).toEqual({ spaceId, theme, appearance: 'dark' })
+  })
+
+  it('forgets them once onboarding is done, and drops ones that make no sense', () => {
+    const fresh = createInitialState(0)
+    const spaceId = fresh.spaceOrder[0] as string
+    const done = withSettings({
+      onboarded: true,
+      onboardingFavorites: ['gmail'],
+      onboardingThemeBefore: { spaceId, theme, appearance: 'light' },
+    })
+    normalizeSettingsPrefs(done)
+    expect(done.settings).not.toHaveProperty('onboardingFavorites')
+    expect(done.settings).not.toHaveProperty('onboardingThemeBefore')
+    for (const bad of [{ spaceId: 'gone', theme, appearance: 'light' }, 'theme', 3]) {
+      const raw = withSettings({ onboarded: false, onboardingFavorites: ['nope'], onboardingThemeBefore: bad })
+      const state = normalizeState(JSON.parse(JSON.stringify(raw)))
+      expect(state.settings).not.toHaveProperty('onboardingFavorites')
+      expect(state.settings).not.toHaveProperty('onboardingThemeBefore')
+    }
+  })
+
+  it('cannot be set through settings.update', () => {
+    const state = createInitialState(0)
+    const draft = structuredClone(state.settings)
+    const patch = { onboardingFavorites: ['gmail'], onboardingThemeBefore: { spaceId: 's', theme, appearance: 'dark' } }
+    expect(applySettingsPatch(draft, patch as never, state).sort()).toEqual([
+      'onboardingFavorites',
+      'onboardingThemeBefore',
+    ])
+    expect(draft).not.toHaveProperty('onboardingFavorites')
+    expect(draft).not.toHaveProperty('onboardingThemeBefore')
+  })
+})

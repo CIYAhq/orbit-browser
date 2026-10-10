@@ -58,12 +58,15 @@ function useThemeFade(dark: boolean): void {
   }, [dark])
 }
 
-const FAVORITES_AT = ONBOARDING_STEPS.indexOf('favorites')
-
 function Flow({ info }: { info: OnboardingInfo }) {
   const [index, setIndex] = useState(() => Math.max(0, ONBOARDING_STEPS.indexOf(info.step)))
   const [forward, setForward] = useState(true)
-  const [favorites, setFavorites] = useState<string[]>([])
+  // Picks are kept in the state file as they're made, so a quit resumes with them (OB-14).
+  const [favorites, setFavorites] = useState<string[]>(info.favorites)
+  const pickFavorites = useCallback((ids: string[]) => {
+    setFavorites(ids)
+    void invoke('onboarding.setFavorites', { favorites: ids })
+  }, [])
   const [browser, setBrowser] = useState<DefaultBrowserStatus>()
   const [declined, setDeclined] = useState(false)
   const [finishing, setFinishing] = useState(false)
@@ -99,9 +102,13 @@ function Flow({ info }: { info: OnboardingInfo }) {
     [finishing],
   )
   const finish = useCallback(() => end(favorites), [end, favorites])
-  // Skip setup (OB-14): what earlier steps set stays (colours apply as they're picked, Favorites once
-  // continued past) and the rest keep their defaults. From the start, that's the default first window.
-  const skip = useCallback(() => end(index > FAVORITES_AT ? favorites : []), [end, favorites, index])
+  // Skip setup (OB-14, D44): a default first window from any step. Main puts back the colours and mode
+  // the theme step changed, and adds none of the Favorites picked.
+  const skip = useCallback(() => {
+    if (finishing) return
+    setFinishing(true)
+    invoke('onboarding.skip', {}).catch(() => setFinishing(false))
+  }, [finishing])
   const next = useCallback(() => (index === last ? finish() : go(index + 1)), [finish, go, index, last])
   const back = useCallback(() => go(index - 1), [go, index])
 
@@ -170,7 +177,7 @@ function Flow({ info }: { info: OnboardingInfo }) {
           {step === 'welcome' && <WelcomeStep onNext={next} />}
           {step === 'import' && <ImportStep importer={info.importer} onNext={next} />}
           {step === 'theme' && info.spaceId && <ThemeStep spaceId={info.spaceId} onNext={next} />}
-          {step === 'favorites' && <FavoritesStep chosen={favorites} onChange={setFavorites} onNext={next} />}
+          {step === 'favorites' && <FavoritesStep chosen={favorites} onChange={pickFavorites} onNext={next} />}
           {step === 'browser' && (
             <BrowserStep
               status={browser}

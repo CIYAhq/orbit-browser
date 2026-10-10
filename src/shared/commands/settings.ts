@@ -1,6 +1,16 @@
 import type { ActionDef } from '../actions'
 import type { OnboardingInfo, OnboardingStep } from '../onboarding'
-import type { LinkRule, ProfileId, SearchEngineId, SecureDnsChoice, Settings, SpaceId, WindowId } from '../state'
+import type {
+  ColorMode,
+  LinkRule,
+  ProfileId,
+  SearchEngineId,
+  SecureDnsChoice,
+  Settings,
+  SpaceId,
+  SpaceTheme,
+  WindowId,
+} from '../state'
 import type { UpdateStatus } from '../updates'
 
 /**
@@ -322,10 +332,22 @@ export interface SettingsCommands {
   /** Remembers the step shown, so a quit part-way resumes there (OB-14). */
   'onboarding.setStep': { args: { step: OnboardingStep }; result: void }
   /**
-   * Ends onboarding (OB-09) or skips the rest of it (OB-14): adds the chosen Favorites (STARTER_APPS
-   * ids) and opens the first browser window, or returns to the one already open.
+   * The theme step's live change (OB-04): the first Space's colours and/or the appearance. The first
+   * one records what was there before, for Skip setup.
+   */
+  'onboarding.setTheme': { args: { theme?: SpaceTheme; appearance?: ColorMode }; result: void }
+  /** Remembers the Favorites picked so far (STARTER_APPS ids), so a quit resumes with them (OB-14). */
+  'onboarding.setFavorites': { args: { favorites: string[] }; result: void }
+  /**
+   * Ends onboarding (OB-09): adds the chosen Favorites (STARTER_APPS ids) and opens the first browser
+   * window, or returns to the one already open.
    */
   'onboarding.finish': { args: { favorites: string[] }; result: void }
+  /**
+   * Skip setup (OB-14, D44): a default first window. The theme step's change is undone, no Favorites
+   * are added and nothing is imported; then as onboarding.finish.
+   */
+  'onboarding.skip': { args: Record<string, never>; result: void }
   /** Copies Orbit's version (UP-03: clicking the version copies it) and returns it. */
   'settings.copyVersion': { args: Record<string, never>; result: string }
   /**

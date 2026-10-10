@@ -62,4 +62,6 @@ export interface OnboardingInfo {
   importer: boolean
   /** A browser window is open already (Reset onboarding): finishing returns to it. */
   returning: boolean
+  /** The Favorites picked so far (STARTER_APPS ids), when resuming after a quit (OB-14). */
+  favorites: string[]
 }

@@ -1,7 +1,8 @@
 import { SECURE_DNS_CHOICES } from '../../shared/commands/settings'
 import { DEFAULT_SETTINGS } from '../../shared/defaults'
-import { isOnboardingStep } from '../../shared/onboarding'
-import type { OrbitState, Settings } from '../../shared/state'
+import { chosenApps, isOnboardingStep } from '../../shared/onboarding'
+import type { ColorMode, OrbitState, Settings } from '../../shared/state'
+import { normalizeSpaceTheme } from '../../shared/theme'
 import { cleanVersion, feedUrlProblem } from '../../shared/updates'
 import { engineById, isBuiltInEngine } from '../../shared/url'
 
@@ -24,6 +25,7 @@ export function normalizeSettingsPrefs(state: OrbitState): void {
   const s = state.settings
   if (typeof s.onboarded !== 'boolean') s.onboarded = DEFAULT_SETTINGS.onboarded
   if (s.onboarded || !isOnboardingStep(s.onboardingStep)) delete s.onboardingStep
+  normalizeOnboardingPicks(state)
   if (!(typeof s.settingsSection === 'string' && SECTION_ID_RE.test(s.settingsSection))) {
     s.settingsSection = DEFAULT_SETTINGS.settingsSection
   }
@@ -45,6 +47,25 @@ export function normalizeSettingsPrefs(state: OrbitState): void {
     if (typeof engine !== 'string' || !engineById(state, engine)) delete profile.searchEngine
   }
 }
+
+/** What a run of onboarding picked so far (OB-14): kept only while it isn't done, and only if sane. */
+function normalizeOnboardingPicks(state: OrbitState): void {
+  const s = state.settings
+  const picked = chosenApps(s.onboardingFavorites).map((app) => app.id)
+  if (s.onboarded || picked.length === 0) delete s.onboardingFavorites
+  else s.onboardingFavorites = picked
+  const before: unknown = s.onboardingThemeBefore
+  if (s.onboarded || !isRecord(before) || typeof before.spaceId !== 'string' || !state.spaces[before.spaceId]) {
+    delete s.onboardingThemeBefore
+    return
+  }
+  const appearance = COLOR_MODES.includes(before.appearance as ColorMode)
+    ? (before.appearance as ColorMode)
+    : DEFAULT_SETTINGS.appearance
+  s.onboardingThemeBefore = { spaceId: before.spaceId, theme: normalizeSpaceTheme(before.theme), appearance }
+}
+
+const COLOR_MODES: readonly ColorMode[] = ['system', 'light', 'dark']
 
 /** Update settings (UP-01, UP-06): a feed address that isn't usable turns checks off. */
 function normalizeUpdatePrefs(s: Settings): void {
