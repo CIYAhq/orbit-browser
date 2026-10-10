@@ -75,6 +75,8 @@ export type RendererView =
   /** The page loading indicator (SB-28) and the link status pill (SB-27), chrome lane. */
   | 'loading'
   | 'link'
+  /** Archive lane: the Library view. */
+  | 'library'
   /** Media lane: the picture-in-picture window. */
   | 'pip'
 

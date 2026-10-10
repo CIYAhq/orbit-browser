@@ -553,7 +553,9 @@ export class TabRuntime {
   }
 
   private load(contents: WebContents, url: string, options?: LoadURLOptions): void {
-    if (!url || url === 'about:blank') return
+    // A tab closed while its history was restoring lands here from restore's catch, after its
+    // contents are gone: loadURL would throw, and the rejection would go unhandled.
+    if (!url || url === 'about:blank' || contents.isDestroyed()) return
     contents.loadURL(url, options).catch(() => {
       // Failures surface through did-fail-load; ERR_ABORTED is normal on redirects.
     })

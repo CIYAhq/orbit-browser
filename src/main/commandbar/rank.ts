@@ -16,7 +16,7 @@ import { findSiteSearch, type SearchResponse, type SearchResult } from '../../sh
 import type { CommandBarMode, FolderId, SiteSearchEngine, SpaceId, TabId } from '../../shared/state'
 import { fillSearchTemplate, parseInput, SEARCH_ENGINES } from '../../shared/url'
 import { frecency, type HostInfo, type IndexedEntry, urlKeyOf } from '../history/store'
-import { type DocMatch, initials, matchDoc, matchName, terms as splitTerms } from './match'
+import { type DocMatch, initials, matchDoc, matchName, PREFIX, terms as splitTerms } from './match'
 
 export const MAX_RESULTS = 9
 const EMPTY_STATE_ROWS = 6
@@ -141,7 +141,12 @@ interface Cand {
   strong: boolean
   /** Dedupe preference: higher wins for the same URL. */
   prio: number
+  /** Keeps the score of the row it replaces when that is higher (a page closed a moment ago). */
+  lift?: boolean
 }
+
+/** A page closed this recently ranks where its history row would (AR-09, TB-07), not after history. */
+const RECENT_CLOSE_MS = 10 * 60_000
 
 /** URL identity for dedupe: no scheme, no "www.", no fragment, no trailing slash. */
 export function normKey(url: string): string {
@@ -554,6 +559,7 @@ export function rank(input: RankInput): SearchResponse {
         key,
         strong: m.strong,
         prio: 2,
+        lift: now - a.archivedAt < RECENT_CLOSE_MS,
       })
     }
 
@@ -640,6 +646,9 @@ export function rank(input: RankInput): SearchResponse {
 }
 
 function actionMatch(ts: string[], lower: string, a: ActionDoc): DocMatch {
+  // The words typed starting the title, in order ("clear archive" → Clear Archive…), beat the same
+  // words matched one by one (Clear Today Tabs has the keyword "archive").
+  if (ts.length > 1 && a.titleLower.startsWith(ts.join(' '))) return { score: PREFIX, strong: true, hostPrefix: false }
   const m = matchName(ts, a.titleLower, a.keywords)
   if (m.score > 0) return m
   // Initials: "dt" → Developer Tools, "ns" → New Space.
@@ -659,10 +668,15 @@ function findHistory(history: readonly IndexedEntry[], key: string): IndexedEntr
   return best
 }
 
-/** Keeps one row per URL, preferring open tab > archived > history. */
+/**
+ * Keeps one row per URL, preferring open tab > archived > history. The kept row takes its own
+ * place in the order, not the dropped row's: rows that score the same stay in their kind's order
+ * (the most recently archived tab first, review N3). A page closed a moment ago keeps its history
+ * row's score (recently closed pages rank highly, AR-09).
+ */
 function dedupe(cands: Cand[]): Cand[] {
   const byKey = new Map<string, Cand>()
-  const out: Cand[] = []
+  const out: (Cand | undefined)[] = []
   for (const c of cands) {
     if (!c.key) {
       out.push(c)
@@ -674,12 +688,14 @@ function dedupe(cands: Cand[]): Cand[] {
       out.push(c)
     } else if (c.prio > seen.prio) {
       // Keep the better kind, and its chance to be the top row.
-      const kept = { ...c, strong: c.strong || seen.strong }
-      out[out.indexOf(seen)] = kept
+      const lifted = c.lift && seen.r.score > c.r.score ? { r: { ...c.r, score: seen.r.score } } : {}
+      const kept = { ...c, strong: c.strong || seen.strong, ...lifted }
+      out[out.indexOf(seen)] = undefined
+      out.push(kept)
       byKey.set(c.key, kept)
     }
   }
-  return out
+  return out.filter((c): c is Cand => c !== undefined)
 }
 
 export const tabTarget = findSiteSearch

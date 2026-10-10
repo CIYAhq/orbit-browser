@@ -4,14 +4,14 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 173 built (56 partial) · 237 tested · 0 feel right.
+**Totals:** 485 spec’d · 183 built (59 partial) · 250 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 121 | 149 |
-| P1 | 221 | 47 | 82 |
-| P2 | 83 | 5 | 6 |
+| P0 | 174 | 127 | 155 |
+| P1 | 221 | 49 | 86 |
+| P2 | 83 | 7 | 9 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -29,7 +29,7 @@ Spec: `spec/sidebar.md`
 | SB-06 | Space title row placement | P0 | ✅ | ✅ e2e | – | title row: inline rename, hover profile badge and … menu (pinned caret is PN-09) |
 | SB-07 | "+ New Tab" row | P0 | ✅ | ✅ e2e | – | + New Tab row with press animation opens the command bar |
 | SB-08 | Empty sidebar area: double-click, drag, right-click | P1 | – | – | – |  |
-| SB-09 | Bottom bar: Library, Space switcher, "+" menu | P0 | 🟡 partial | ✅ e2e | – | switcher and + menu done; Library button arrives with the archive lane |
+| SB-09 | Bottom bar: Library, Space switcher, "+" menu | P0 | 🟡 partial | ✅ e2e | – | switcher, + menu and the Library button (opens the Library); the recent-files hover popover belongs to the downloads lane |
 | SB-10 | Transient trays above the bottom bar | P1 | 🟡 partial | ✅ e2e | – | media tray and call controls (media lane), above the bottom bar, pushing the list up; download progress and the update banner belong to other lanes |
 | SB-11 | Show / hide the sidebar | P0 | ✅ | ✅ e2e | – | Cmd+S / Ctrl+S, toggle button, View menu and command bar; the sidebar slides out as the card widens (one curve, reversible mid-way); the page views, which can't move in step, keep out of its way while it slides (where they end as it shows, where they were as it hides; the page colour fills the rest); back at the same width, scroll and selected tab; per window, persisted; new windows show it |
 | SB-12 | Hover to reveal the hidden sidebar | P0 | ✅ | ✅ e2e | – | left 6 px edge brings a floating card in its own view over the page, which never moves; main decides whether the pointer moved (not from where it was when the sidebar hid, so Cmd+S at the edge doesn't) and reads it for 300 ms after it leaves a page or the shell, so a flick to the edge (or onto the Linux resize border) brings the card; 0 ms dwell; stays while hovered (16 px band), while a field in it is edited or the command bar is open; goes 400 ms after the pointer moves on, at once on a click into the page (the click reaches the page); not over full-screen video; stays out while the pointer is on another window over it, until it comes back (review A-F1) |
@@ -114,7 +114,7 @@ Spec: `spec/tabs.md`
 | FD-07 | Folder icon | P1 | 🟡 partial | ✅ e2e | – | emoji icon via Change Icon; open/closed glyphs; not full-colour |
 | FD-08 | Folder hover preview and search | P1 | ✅ | ✅ e2e | – | magnifier on folder hover opens a search popover (custom names, first match selected, Enter opens and peeks) |
 | FD-09 | Folder context menu | P1 | 🟡 partial | ✅ e2e | – | Rename, Change Icon, Duplicate, Copy All Links, Paste URL, Move to, Delete; no Open [Folder] command |
-| FD-10 | Delete a folder | P1 | ✅ | ✅ e2e | – | confirm when non-empty, contents to Archive, Cmd+Z restores all |
+| FD-10 | Delete a folder | P1 | ✅ | ✅ e2e+unit | – | confirm when non-empty, contents to Archive, Cmd+Z restores all |
 | FD-11 | Auto-updating folders | P2 | – | – | – |  |
 
 ## Spaces and Profiles (prefixes SP, PR)
@@ -214,12 +214,12 @@ Spec: `spec/split-view.md`
 | SV-16 | Keyboard navigation between panes | P1 | ✅ | ✅ e2e | – | Ctrl+Shift+1-4, Ctrl+Shift+[ / ], Ctrl+Shift+- |
 | SV-17 | Close one pane | P0 | ✅ | ✅ e2e+unit | – | strip close, Ctrl+Shift+-, Cmd/Ctrl+W (pinned and Favorite splits too) close one pane in one update; the others keep their arrangement; reopening restores its exact spot |
 | SV-18 | Separate a split into tabs | P0 | ✅ | ✅ e2e | – | Separate Tabs from the split menu, pane menu and Alt-click |
-| SV-19 | Close the whole split | P0 | ✅ | ✅ e2e+unit | – | the row's close closes the split as one unit (pinned unloads); one reopen brings the whole split back (layout, sizes, name, place); Archive entries stay per tab |
+| SV-19 | Close the whole split | P0 | ✅ | ✅ e2e+unit | – | the row's close closes the split as one unit (pinned unloads); one reopen brings the whole split back (layout, sizes, name, place). In the Archive each pane keeps its own row, marked as a split pane; restoring either brings the split back as one unit at the top of Today |
 | SV-20 | Swap and move panes | P2 | ✅ | ✅ e2e+unit | – | drag a pane by its strip grip: centre swaps, an edge moves it there (live preview); Move Pane Left/Right/Up/Down in the pane menu |
 | SV-21 | The split row in the sidebar | P0 | 🟡 partial | ✅ e2e | – | one row with a favicon+title segment per pane, segment click focuses; a custom name replaces the segments; command bar split result and custom icon not built |
 | SV-22 | The split as one unit: context menu | P1 | 🟡 partial | ✅ e2e | – | split menu: rename, per-pane submenus, flip, equalize, duplicate, pin/unpin, Add to Favorites, move to Space, separate, close; custom icon, archive below and share not built |
 | SV-23 | Pinned and Favorite splits | P1 | 🟡 partial | ✅ e2e+unit | – | pinning keeps panes/sizes/orientation; drops onto pinned tabs stay pinned; Favorite splits show a combined tile and drag like tiles; resetting every pane and Peek from pinned splits not built |
-| SV-24 | Splits persist | P0 | ✅ | ✅ e2e+unit | – | panes, order, orientation, sizes and focused pane survive relaunch |
+| SV-24 | Splits persist | P0 | ✅ | ✅ e2e+unit | – | panes, order, orientation, sizes and focused pane survive relaunch; a Today split closed or auto-archived as one unit restores from the Archive as one unit, with its layout and sizes |
 | SV-25 | Limits and edge cases | P1 | ✅ | ✅ e2e+unit | – | fifth pane refused with a toast on every route; no split from an empty window; HTML full screen (core) fills the window, hides the strip and returns to the split |
 | SV-26 | Feel: create, resize, close | P1 | 🟡 partial | ✅ e2e+unit | – | springs for create/close/flip, closing card fades, 1:1 resize, drop indicator fade/slide, frame colour until loaded, split row entrance; sidebar row-merge reflow belongs to the tabs lane's list animation |
 
@@ -329,17 +329,17 @@ Spec: `spec/archive.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| AR-01 | What goes into the Archive | P0 | – | – | – |  |
-| AR-02 | Where the Archive lives and how to open it | P0 | – | – | – |  |
-| AR-03 | Archive list layout | P0 | – | – | – |  |
-| AR-04 | Search the Archive | P0 | – | – | – |  |
-| AR-05 | Restore an archived tab | P0 | – | – | – |  |
-| AR-06 | Preview an archived item without restoring | P2 | – | – | – |  |
-| AR-07 | Clear the Archive | P1 | – | – | – |  |
-| AR-08 | Retention of archived entries | P1 | – | – | – |  |
-| AR-09 | Reopen recently closed tabs | P0 | – | – | – |  |
-| AR-10 | Browsing history view | P1 | – | – | – |  |
-| AR-11 | Sidebar backups and "Restore Data" | P2 | – | – | – |  |
+| AR-01 | What goes into the Archive | P0 | ✅ | ✅ e2e+unit | – | close, auto-archive, Clear, archive-below, pinned/folder/Space delete, Mini Window and Peek pages; entries carry tab, Space name, section, reason; back/forward history kept outside OrbitState (userData/archive, page state in memory only); private and empty tabs never archived; state keeps the newest ~200-300, the rest lives in the Archive store |
+| AR-02 | Where the Archive lives and how to open it | P0 | ✅ | ✅ e2e | – | Library view over the page area (its own view above the tabs, below the command bar and Peek) from the bottom-bar button, ⌘⇧L (Open Library), ⌘T View Archive / Open Library and the macOS Archive menu; reopens to the last section; Esc, ⌘W or selecting another tab closes it and the page gets the keys back; section registry (*.library-section.tsx) for other lanes |
+| AR-03 | Archive list layout | P0 | ✅ | ✅ e2e+unit | – | newest first under Today / Yesterday / date headings; favicon, title, host, time and origin-Space badge; filters by source (all, sidebar, Mini Window), Space and how it closed; per profile (PR-05); virtualised and paged, fast at 10k entries. A row click previews (AR-06); ⌘-click and ⇧-click select |
+| AR-04 | Search the Archive | P0 | ✅ | ✅ e2e+unit | – | search field filters on each keystroke (title and URL, case-insensitive, partial words, every word) using the Archive store's keys (history queryTerms/urlKeyOf); typing on narrows the last answer; Enter restores and shows the top or highlighted match; ⌘F focuses it. The command bar's Archived results search the whole Archive store of the profile, not only the recent entries kept in state |
+| AR-05 | Restore an archived tab | P0 | ✅ | ✅ e2e+unit | – | Restore (hover button, Enter, row menu, several selected) puts tabs at the top of their Space's Today in order, with their tab id and back/forward history when the profile matches (never across profiles); routing rule > origin Space > current Space; toast with Go to Space when it lands elsewhere; command bar restores without a jump. A row click previews (AR-06) instead of restoring. Undoing Delete Folder after the Space changed profile also follows the new profile (W3) |
+| AR-06 | Preview an archived item without restoring | P2 | 🟡 partial | ✅ e2e+unit | – | a row click opens its page in a Peek over the Library (the Peek component, its open and close motion); the entry stays archived. ⌘W and Esc close only the Peek and the Library takes the keys back (Enter then restores that row); Open as Tab (⌘O) opens it as a tab and keeps the entry; closing a preview, or a reopen of it, archives no second entry. Missing: a Restore button in the Peek card (peek lane). The Peek carries overlay.archiveEntry and archive.restorePreview restores and closes it. With no tab to preview over (an empty Space), a click opens the page in a new tab |
+| AR-07 | Clear the Archive | P1 | ✅ | ✅ e2e+unit | – | Clear Archive… from the Archive entry’s right-click menu in the Library, Archive → Clear Archive… (macOS app menu) and the command bar; always asks in the Library first (Cancel has the focus, Esc cancels), says it can’t be undone and that browsing history is kept; clears the profile shown, and the cleared pages leave the disk at once (the log is rewritten). Delete (a row’s menu, or Delete for the selected rows) shows a toast whose Undo puts the entries back with their history for a minute |
+| AR-08 | Retention of archived entries | P1 | ✅ | ✅ e2e+unit | – | settings.archiveKeepDays, default 30; 30 Days / 90 Days / 1 Year / Forever from the Archive entry’s menu in the Library and Archive → Keep Archived Tabs For (macOS) until Settings exist. A shorter time that would delete entries asks first, in the Library, saying how many (Cancel keeps them all and the time as it was). Purged once the Archive is read at launch, hourly, and at once when a shorter time is confirmed; browsing history is not touched |
+| AR-09 | Reopen recently closed tabs | P0 | ✅ | ✅ e2e+unit | – | ⌘⇧T and ⌘Z walk back through closes with full history (TB-07, TB-18); ⌘Z also shows the tab again when it was the one shown; a closed Peek comes back through the same key (PK-10, peek lane). A page closed in the last 10 minutes keeps its history rank in the command bar (as the archived row). macOS File menu: Reopen Closed Tab and a Recently Closed submenu of the last 10; on every platform the Archive toolbar has a Recently Closed menu. Neither list shows a tab of a private or deleted profile |
+| AR-10 | Browsing history view | P1 | 🟡 partial | ✅ e2e+unit | – | History stays a Library section until Orbit has internal pages (D39), not a page in a tab. ⌘Y (Ctrl+H), Archive → View History (macOS) and the command bar open it next to the Archive: every visit of the current profile from the history store, newest first by day, virtualised and paged, with search (all words, title or address). A row opens its page in a new tab (⌘-click or middle-click: behind the Library); its × or its menu (Open in New Tab, Open in Background, Copy Link, Remove from History) removes every visit to the page. Clearing the Archive leaves it alone |
+| AR-11 | Sidebar backups and "Restore Data" | P2 | ✅ | ✅ e2e+unit | – | Backups of the whole sidebar (Spaces, each profile’s Favorites, pinned and Today tabs, folders, split views; no private profiles) in userData/backups, one JSON file each: taken within 5 minutes of a sidebar change (only when it differs from the newest; browsing alone never makes one), once 30 s after launch, before every restore, and with Back Up Now. Kept: the newest 10 of today, then the newest of each of the 10 days before, of each week of the month before that and of each 30 days of the year before that; a deleted profile’s Favorites, Spaces and tabs are taken out of every backup. Help → Restore Data… (macOS) and the command bar open the Backups section of the Library: a dated list (day headings, time, Spaces and tabs; a file that can’t be read is listed as such, without Restore); Restore… asks first, then puts the sidebar back: tabs in both keep their page, tabs only in the backup come back asleep (with the page and history the Archive kept for them, leaving the Archive), tabs opened since go to the Archive, Spaces added since go; private windows and their tabs are left alone; Favorites over 12 go to Today (D33). When the sidebar can’t be backed up first, nothing changes. Each restore is one step on the sidebar’s undo stack (TB-18): the toast’s Undo or ⌘Z, also in the Library, puts back the sidebar it replaced, a second ⌘Z goes further back and ⌘⇧Z restores again; earlier steps stay. After an undo, a window moved off a removed Space stays where it went, and the pages come back asleep |
 
 ## Keyboard shortcuts and pointer bindings (prefix KS)
 
@@ -397,7 +397,7 @@ Spec: `spec/feel.md`
 | FL-21 | Sidebar scrolling and large-sidebar performance | P0 | – | ✅ e2e | – |  |
 | FL-22 | Toasts | P1 | – | – | – |  |
 | FL-23 | Page loading indicator | P1 | ✅ | ✅ e2e | – | after 150 ms, a 48x4 theme-accent pill sweeping on a 1.2 s cycle (a pulse with reduced motion); on load end it fills (80 ms) and fades (150 ms), gone 180 ms after; never moves page content |
-| FL-24 | Library and Archive motion | P2 | – | – | – |  |
+| FL-24 | Library and Archive motion | P2 | ✅ | ✅ e2e+unit | – | Library opens with a 220 ms fade and 0.98→1 scale (opacity only with reduced motion) and fades out; sections cross-fade in 90 ms; search answers within 50 ms; restored rows fade and the rows below rise; long lists virtualised; a previewed entry opens and closes with the Peek's motion (FL-19) |
 | FL-25 | Menus, popovers and tooltips | P1 | – | – | – |  |
 | FL-26 | Recent-tab switcher (Ctrl+Tab) | P1 | – | – | – |  |
 | FL-27 | Window-level motion | P1 | – | – | – |  |
@@ -519,7 +519,7 @@ Spec: `spec/downloads.md`
 | DL-06 | Drag a download out (and into web pages) | P1 | – | – | – |  |
 | DL-07 | Download location setting (per profile) | P1 | – | – | – |  |
 | DL-08 | Remove, clear and delete downloads | P1 | – | – | – |  |
-| DL-09 | The Library (container view) | P1 | – | – | – |  |
+| DL-09 | The Library (container view) | P1 | 🟡 partial | ✅ e2e+unit | – | Library container (archive lane): section list on the left with the Archive, History (AR-10) and Backups (AR-11) sections; other lanes add theirs (Media, Downloads, Canvases & Notes, Spaces, Site customizations) through the registry. Reopens to the last section; Esc/⌘W close and the previous tab comes back. Its view is made once Orbit is idle after launch, so even the first open is quick (about 70 ms at 10,000 entries; later opens 10–50 ms) |
 | DL-10 | Library → Downloads section | P1 | – | – | – |  |
 | DL-11 | Library → Media section | P2 | – | – | – |  |
 | DL-12 | Download safety | P1 | – | – | – |  |

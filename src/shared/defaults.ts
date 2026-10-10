@@ -41,6 +41,8 @@ export const DEFAULT_SETTINGS: Settings = {
   searchTopResult: false,
   countFavoritesInShortcuts: true,
   lastTabOnCmd9: true,
+  librarySection: 'archive',
+  archiveKeepDays: 30,
 }
 
 /** Favorites per profile (FV-02). */

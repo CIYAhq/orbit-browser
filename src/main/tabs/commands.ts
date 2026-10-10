@@ -239,6 +239,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
         title: r.tab.customTitle || r.tab.title,
         favicon: r.tab.favicon,
         spaceId: r.tab.spaceId,
+        profileId: r.tab.profileId,
         closedAt: r.closedAt ?? 0,
       })),
   )
