@@ -8,11 +8,6 @@ export const LOADING_SHOW_AFTER_MS = 150
 /** The indicator's finish (a short fill, then a fade; loading.css) before its view goes: within 200 ms (FL-23). */
 const LOADING_FINISH_MS = 180
 /**
- * Each window's indicator view is made this long after the window shows, out of the window, so its
- * page has loaded by the window's first slow load (fix check A, F1).
- */
-const LOADING_PREWARM_MS = 1000
-/**
  * The indicator's view: a small pill centred just inside the page card's top edge, with room for its
  * shadow. Kept small, as it sits over the page (a view takes the clicks under it).
  */
@@ -206,13 +201,12 @@ export function registerLoading(ctx: MainContext): { info: (windowId: WindowId) 
     })
   })
 
-  // Each window's view is made once the window has settled, so the first slow load finds it ready.
+  // Each window's view is made as the window shows, out of the window, so a load in its first second
+  // finds it ready and shows the indicator after the usual 150 ms (fix check A, F1 and round 2, F3).
   windows.onWindowCreated((windowId, win) => {
     win.once('ready-to-show', () => {
-      setTimeout(() => {
-        const s = stateOf(windowId)
-        if (s) viewFor(windowId, s)
-      }, LOADING_PREWARM_MS)
+      const s = stateOf(windowId)
+      if (s) viewFor(windowId, s)
     })
   })
 
