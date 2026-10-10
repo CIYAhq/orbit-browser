@@ -30,6 +30,10 @@ interface StripState {
 /** The strip fades out over this long before its view hides (SV-12). */
 const FADE_OUT_MS = 120
 
+/** The view still has its page. Once the page is destroyed, `view.webContents` is undefined. */
+const live = (view: WebContentsView | undefined): view is WebContentsView =>
+  !!view?.webContents && !view.webContents.isDestroyed()
+
 /**
  * The floating pane strip (SV-12): a small transparent view centred at the top of a split
  * pane with the pane's close button and its split-controls menu. Pages are native views
@@ -46,7 +50,7 @@ export class PaneStrip {
     // The strip follows its pane when the panes move (window resize, divider drag; review F7).
     ctx.events.on('layout.panes', ({ panes }, { windowId }) => {
       const s = windowId ? this.windows.get(windowId) : undefined
-      if (!windowId || !s?.tabId || !s.view || s.view.webContents.isDestroyed()) return
+      if (!windowId || !s?.tabId || !live(s.view)) return
       const pane = panes.find((p) => p.tabId === s.tabId)
       if (pane) s.view.setBounds(this.boundsOver(pane.rect))
       else this.hide(windowId, true)
@@ -75,7 +79,7 @@ export class PaneStrip {
     const view = s?.view
     return {
       tabId: s?.tabId ?? null,
-      visible: !!view && !view.webContents.isDestroyed() && view.getVisible(),
+      visible: live(view) && view.getVisible(),
       bounds: view?.getBounds(),
     }
   }
@@ -158,14 +162,14 @@ export class PaneStrip {
     s.hovered = false
     s.dragging = false
     const view = s.view
-    if (!view || view.webContents.isDestroyed()) return
+    if (!live(view)) return
     if (now || !wasShown) {
       view.setVisible(false)
       return
     }
     view.webContents.send('orbit:strip:hide', {})
     s.fadeTimer = setTimeout(() => {
-      if (!s.tabId && !view.webContents.isDestroyed()) view.setVisible(false)
+      if (!s.tabId && live(view)) view.setVisible(false)
     }, FADE_OUT_MS)
   }
 
@@ -208,6 +212,9 @@ export class PaneStrip {
     loadRenderer(contents, 'strip')
     const win = this.ctx.windows.get(windowId)
     win?.once('closed', () => {
+      // A timer left running would act on a view that is gone: a throw there kept Orbit from quitting (D28).
+      const s = this.windows.get(windowId)
+      if (s) for (const timer of [s.showTimer, s.hideTimer, s.fadeTimer]) clearTimeout(timer)
       this.windows.delete(windowId)
       if (!contents.isDestroyed()) contents.close()
     })

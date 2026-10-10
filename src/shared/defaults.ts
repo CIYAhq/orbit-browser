@@ -43,6 +43,9 @@ export const DEFAULT_SETTINGS: Settings = {
 /** Favorites per profile (FV-02). */
 export const MAX_FAVORITES = 12
 
+/** The toast when a change would pass the Favorites limit (FV-02). */
+export const FAVORITES_FULL_MESSAGE = `Favorites are full (${MAX_FAVORITES} max)`
+
 const preset = (...colors: string[]): SpaceTheme => ({ colors, intensity: DEFAULT_INTENSITY, grain: 0 })
 
 /**
