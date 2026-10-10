@@ -1338,6 +1338,34 @@ test('[SV-12][SV-22] the strip follows its pane when the panes move; Duplicate k
   expect((await state(orbit.app)).splits[copy]?.name).toBe('Pair')
 })
 
+test('[SV-12] a window that closes while its pane strip fades out closes cleanly (D28)', async () => {
+  const b = await openTab(orbit.app, 'Second')
+  const a = await openTab(orbit.app, 'First')
+  await run(orbit.app, 'split.create', { tabIds: [a, b] })
+  await expectViewsOverPanes(orbit, [a, b])
+  const windowIds = () =>
+    orbit.app.evaluate(() => (globalThis as unknown as { __orbit: { windowIds: () => string[] } }).__orbit.windowIds())
+  const [first] = await windowIds()
+  // A second window keeps Orbit running once the first one closes.
+  await action(orbit.app, 'window.new')
+  await expect.poll(async () => (await windowIds()).length).toBe(2)
+  await showStrip(orbit.app, a)
+  // The strip starts fading out, and its window closes before the fade ends. The fade's timer used to
+  // fire on a view that was gone and throw, and a throw nothing caught kept Orbit from quitting.
+  await orbit.app.evaluate((_e, id) => {
+    const g = globalThis as unknown as {
+      __orbitSplit: { strip: { hide: (w: string) => void } }
+      __orbit: { ctx: { windows: { get: (w: string) => { close: () => void } | undefined } } }
+    }
+    g.__orbitSplit.strip.hide(id)
+    g.__orbit.ctx.windows.get(id)?.close()
+  }, first as string)
+  await expect.poll(async () => (await windowIds()).includes(first as string)).toBe(false)
+  // Main-process timers fire in order: by the end of this one, the fade's has run.
+  await orbit.app.evaluate(() => new Promise((resolve) => setTimeout(resolve, 300)))
+  expect(orbit.takeUncaught()).toBe('')
+})
+
 test('[SV-08] a link opens in a new pane beside the page that holds it', async () => {
   const a = await openTab(orbit.app, 'Source')
   await expect.poll(async () => (await tabView(orbit.app, a))?.visible).toBe(true)
