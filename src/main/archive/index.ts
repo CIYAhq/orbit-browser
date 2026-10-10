@@ -1,7 +1,13 @@
 import { join } from 'node:path'
 import { app, clipboard, Menu, type MenuItemConstructorOptions } from 'electron'
 import { ACTIONS_BY_ID, shortcutsFor, toElectronAccelerator } from '../../shared/actions'
-import type { ArchiveQuery, ArchiveRestoreResult, LibraryOpenArgs } from '../../shared/commands/archive'
+import type {
+  ArchiveQuery,
+  ArchiveRestoreResult,
+  BackupInfo,
+  BackupRestoreResult,
+  LibraryOpenArgs,
+} from '../../shared/commands/archive'
 import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
 import type { ArchivedTab, ProfileId, WindowId } from '../../shared/state'
@@ -9,7 +15,9 @@ import type { MainContext } from '../context'
 import { installMenu } from '../menu'
 import type { CallContext } from '../registry'
 import { findMenuItem, menuLabels } from '../tabs/menus'
+import { BackupStore, scheduleBackups } from './backups'
 import { historyMenuItems, historyQuery, historyRows } from './history-view'
+import { sidebarRestored } from './inbox'
 import { LibraryHost } from './library'
 import { archiveSectionItems, setKeepDays } from './menus'
 import { ArchivePreviews } from './preview'
@@ -17,6 +25,7 @@ import { recentlyClosedItems, refreshRecentlyClosed, watchRecentlyClosed } from 
 import { restoreEntries } from './restore'
 import { keepDaysOf, scheduleRetention } from './retention'
 import { ArchiveSync } from './service'
+import { restoreSidebar } from './snapshot'
 import { ArchiveStore } from './store'
 
 /** How long after start-up the Archive log is read (off the cold-start path). */
@@ -49,8 +58,13 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
   // Entries past their time go once the log is read, then hourly (AR-08).
   const stopRetention = scheduleRetention(ctx, sync, store)
   setTimeout(() => void store.load(), LOAD_DELAY_MS)
+  // Sidebar backups (AR-11): a few minutes after the sidebar changes, and once after launch.
+  const backups = new BackupStore(join(ctx.paths.userData, 'backups'))
+  backups.onChange = () => windows.broadcast('orbit:backups.changed', {})
+  const stopBackups = scheduleBackups(ctx, backups)
   app.on('before-quit', () => {
     stopRetention()
+    stopBackups()
     store.close()
   })
 
@@ -125,6 +139,8 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
   ctx.actions.register('archive.clear', (c) => openLibrary(c, { section: 'archive', confirmClear: true }))
   // ⌘Y / Ctrl+H, Archive → View History and the command bar (AR-10).
   ctx.actions.register('app.history', (c) => openLibrary(c, { section: 'history' }))
+  // Help → Restore Data… and the command bar: the backups to choose from (AR-11).
+  ctx.actions.register('app.restoreData', (c) => openLibrary(c, { section: 'backups' }))
 
   // ---- Archive entries ----
 
@@ -296,6 +312,53 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
     if (win?.isDestroyed()) return
     Menu.buildFromTemplate(items).popup(win ? { window: win } : undefined)
   })
+
+  // ---- Sidebar backups and Restore Data (AR-11) ----
+
+  const info = (b: BackupInfo): BackupInfo => ({ id: b.id, at: b.at, spaces: b.spaces, tabs: b.tabs })
+  commands.register('backups.list', async () => (await backups.list()).map(info))
+  commands.register('backups.take', async () => {
+    try {
+      return info(await backups.take(state.state, Date.now()))
+    } catch (err) {
+      console.error('[backups] could not back up the sidebar', err)
+      return null
+    }
+  })
+  // One restore at a time: each one backs up the sidebar the one before it left.
+  let restoring: Promise<unknown> = Promise.resolve()
+  const restoreBackup = (id: unknown): Promise<BackupRestoreResult> => {
+    const run = restoring.then(() => restoreNow(id))
+    restoring = run.catch(() => undefined)
+    return run
+  }
+  const restoreNow = async (id: unknown): Promise<BackupRestoreResult> => {
+    const snap = await backups.read(id)
+    if (!snap) return { restored: false }
+    await store.load()
+    // The sidebar as it is now is backed up first: restoring that backup undoes this.
+    const before = await backups.take(state.state, Date.now()).catch((err) => {
+      console.error('[backups] could not back up the sidebar before a restore', err)
+      return undefined
+    })
+    const plan = restoreSidebar(ctx, store, snap)
+    const undoId = before && before.id !== id ? before.id : undefined
+    // ⌘Z takes it back too; the sidebar's earlier undo steps no longer apply.
+    sidebarRestored(
+      undoId
+        ? () => {
+            restoreBackup(undoId).catch((err) => console.error('[backups] could not undo a restore', err))
+          }
+        : undefined,
+    )
+    return {
+      restored: true,
+      ...(undoId ? { undoId } : {}),
+      added: plan.added.length,
+      archived: plan.removed.length,
+    }
+  }
+  commands.register('backups.restore', ({ id }) => restoreBackup(id))
 
   // ---- History (AR-10): the history store's visits, for the Library's History section ----
 

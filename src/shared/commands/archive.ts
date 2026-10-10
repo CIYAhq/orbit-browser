@@ -105,12 +105,25 @@ export interface LibraryHistoryQuery {
   limit?: number
 }
 
-/** A sidebar snapshot (AR-11), newest first in lists. */
+/** A sidebar backup (AR-11), newest first in lists. */
 export interface BackupInfo {
   id: string
+  /** When it was taken (ms). */
   at: number
+  /** How many Spaces and tabs it holds. */
   spaces: number
   tabs: number
+}
+
+/** What Restore Data did (AR-11). */
+export interface BackupRestoreResult {
+  /** The sidebar is back as the backup has it (false: no such backup, or it could not be read). */
+  restored: boolean
+  /** The backup of the sidebar taken just before: restoring it undoes this restore. */
+  undoId?: string
+  /** Tabs that came back, and tabs that went to the Archive. */
+  added?: number
+  archived?: number
 }
 
 /** Owned by the archive lane: the Archive, the Library container, history view and backups. */
@@ -195,10 +208,17 @@ export interface ArchiveCommands {
     }
   }
 
-  /** Sidebar snapshots, newest first (AR-11). */
+  /** Sidebar backups, newest first (AR-11). */
   'backups.list': { args: Record<string, never>; result: BackupInfo[] }
-  /** Puts the sidebar back as it was in a snapshot (AR-11). Takes a snapshot of the current one first. */
-  'backups.restore': { args: { id: string }; result: boolean }
-  /** Takes a snapshot now (Restore Data takes one before restoring; also used by tests). */
+  /**
+   * Puts the sidebar back as it was in a backup (AR-11): Spaces, Favorites, pinned and Today tabs,
+   * folders and split views. Backs up the sidebar as it is first (`undoId`). Tabs opened since go
+   * to the Archive; tabs that come back leave it.
+   */
+  'backups.restore': { args: { id: string }; result: BackupRestoreResult }
+  /**
+   * Backs up the sidebar now, unless the newest backup holds the same sidebar: returns the new
+   * backup or that one (null when backups cannot be written).
+   */
   'backups.take': { args: Record<string, never>; result: BackupInfo | null }
 }

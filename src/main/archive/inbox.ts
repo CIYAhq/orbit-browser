@@ -32,3 +32,18 @@ export function takeArchiveHistory(archiveId: string): ArchiveHistory | undefine
 export function onArchiveHistory(fn: ((archiveId: string) => void) | undefined): void {
   listener = fn
 }
+
+let restoredListener: ((undo?: () => void) => void) | undefined
+
+/**
+ * The tabs code hears when Restore Data replaced the whole sidebar (AR-11): its undo steps were
+ * about a sidebar that is gone, and `undo` (when given) takes the restore back.
+ */
+export function onSidebarRestored(fn: ((undo?: () => void) => void) | undefined): void {
+  restoredListener = fn
+}
+
+/** Called by the Archive code right after it restored the sidebar from a backup. */
+export function sidebarRestored(undo?: () => void): void {
+  restoredListener?.(undo)
+}

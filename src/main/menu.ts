@@ -119,7 +119,8 @@ export function installMenu(ctx: MainContext): void {
       ],
     },
     { role: 'windowMenu' },
-    { role: 'help', submenu: [] },
+    // Help → Restore Data… (AR-11).
+    { role: 'help', submenu: [item('app.restoreData')] },
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }

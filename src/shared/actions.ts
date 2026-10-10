@@ -253,6 +253,13 @@ export const ACTIONS: ActionDef[] = [
     other: ['Ctrl+H'],
     keywords: ['history', 'browsing history', 'visited pages'],
   },
+  // Help → Restore Data… and the command bar: sidebar backups in the Library (AR-11).
+  {
+    id: 'app.restoreData',
+    title: 'Restore Data…',
+    category: 'App',
+    keywords: ['backup', 'backups', 'snapshot', 'restore sidebar', 'recover tabs', 'lost tab'],
+  },
   // Asks first; browsing history is kept (AR-07).
   {
     id: 'archive.clear',

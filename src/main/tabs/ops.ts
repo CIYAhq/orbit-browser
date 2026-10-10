@@ -36,7 +36,7 @@ import {
   splitOfTab,
   tabsInItem,
 } from '../../shared/tree'
-import { noteArchiveHistory } from '../archive/inbox'
+import { noteArchiveHistory, onSidebarRestored } from '../archive/inbox'
 import type { MainContext } from '../context'
 import {
   addPaneInDraft,
@@ -93,7 +93,13 @@ export class TabOps {
   constructor(
     private ctx: MainContext,
     private now: () => number = Date.now,
-  ) {}
+  ) {
+    // Restore Data replaced the sidebar (AR-11): earlier steps no longer apply; ⌘Z takes the restore back.
+    onSidebarRestored((undo) => {
+      this.undo.clear()
+      if (undo) this.undo.push('Restore Data', undo, this.now())
+    })
+  }
 
   private get state(): OrbitState {
     return this.ctx.store.state
