@@ -5,18 +5,27 @@ import { IMPORT_UNDO_LABEL, ImportJobs } from '../../src/main/import/jobs'
 import { Store } from '../../src/main/store'
 import { makeTab } from '../../src/main/tabs/model'
 import { UndoStack } from '../../src/main/tabs/undo'
-import type { BookmarkNode, ImportJob, ImportPlan, ImportProgressItem } from '../../src/shared/commands/import'
+import {
+  type BookmarkNode,
+  type ImportJob,
+  type ImportPlan,
+  type ImportProgressItem,
+  STOPPED_BY_RESTORE,
+} from '../../src/shared/commands/import'
 import { createInitialState, createProfile, createSpace } from '../../src/shared/defaults'
 import type { ContainerRef, OrbitState } from '../../src/shared/state'
 import { insertItem, removeItem } from '../../src/shared/tree'
 
-/** Imports as ImportJobs runs them, against a real store and no windows. */
-function world() {
+/**
+ * Imports as ImportJobs runs them, against a real store and no windows. `sent` sees each status sent to them; `run`
+ * answers the commands the import runs (none by default).
+ */
+function world({ sent, run }: { sent?: (status: ImportJob) => void; run?: (name: string) => Promise<unknown> } = {}) {
   const store = new Store(createInitialState(0))
   const ctx = {
     store,
-    windows: { broadcast: () => {} },
-    commands: { run: async () => undefined },
+    windows: { broadcast: (_channel: string, status: ImportJob) => sent?.(status) },
+    commands: { run: run ?? (async () => undefined) },
     tabs: { destroy: () => {} },
   } as unknown as MainContext
   const jobs = new ImportJobs(ctx)
@@ -82,6 +91,79 @@ describe('[IM-14] imports, run', () => {
     expect(jobs.status(id)).toBe(status)
     expect(jobs.status()).toBe(status)
     expect(status.folders).toHaveLength(1)
+  })
+
+  it('[IM-14] an import is done only once its numbers are in: no window and no poll sees it done without them (fix check 2 N7)', async () => {
+    // What the windows are sent, as they get it (a copy: the status object goes on changing).
+    const sent: string[] = []
+    const { jobs, spaceId } = world({ sent: (s) => sent.push(`${s.phase}${s.stats ? ' with numbers' : ''}`) })
+    const id = startFile(jobs, spaceId, bookmarks(500))
+    // Asked at every turn of the event loop, as often as a window's poll of import.status could.
+    const seen = new Set<string>()
+    let status = jobs.status(id)
+    const until = Date.now() + 10_000
+    while (Date.now() < until && !(status?.stats && status.phase !== 'reading' && status.phase !== 'adding')) {
+      if (status) seen.add(`${status.phase}${status.stats ? ' with numbers' : ''}`)
+      await new Promise((resolve) => setImmediate(resolve))
+      status = jobs.status(id)
+    }
+    expect(status?.phase).toBe('done')
+    expect(status?.stats).toEqual({ ms: expect.any(Number), longestTaskMs: expect.any(Number) })
+    expect([...seen].filter((s) => s.startsWith('done'))).toEqual([])
+    expect(sent.filter((s) => s.startsWith('done'))).toEqual(['done with numbers'])
+  })
+
+  it('[IM-14][D65] Restore Data part-way stops an import: its unfinished tabs go at once, it adds nothing more, and it says why', async () => {
+    const { jobs, spaceId, store } = world()
+    // Held once 200 of its 1,000 bookmarks are made.
+    let resume = () => {}
+    const hold = new Promise<void>((resolve) => {
+      resume = resolve
+    })
+    jobs.testPause = (made) => (made >= 200 ? hold : undefined)
+    const id = startFile(jobs, spaceId, bookmarks(1000))
+    for (let i = 0; i < 2000 && (jobs.status(id)?.items[0]?.done ?? 0) < 200; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    expect(importedTabs(store.state).length).toBeGreaterThanOrEqual(200)
+    jobs.stopForRestore()
+    expect(importedTabs(store.state)).toEqual([])
+    expect(jobs.status(id)).toMatchObject({ phase: 'failed', error: STOPPED_BY_RESTORE })
+    resume()
+    const status = await ended(jobs, id)
+    expect(status).toMatchObject({ phase: 'failed', error: STOPPED_BY_RESTORE, folders: [] })
+    expect(importedTabs(store.state)).toEqual([])
+    expect(Object.keys(store.state.folders)).toEqual([])
+  })
+
+  it('[IM-16][D65] an import stopped by Restore Data while it adds the starter suggestions stays stopped: never done', async () => {
+    // The first starter tab takes a while to make: the restore comes meanwhile.
+    const made: string[] = []
+    let next = () => {}
+    const { jobs, spaceId } = world({
+      run: (name) => {
+        made.push(name)
+        if (made.length > 1) return Promise.resolve()
+        return new Promise<void>((resolve) => {
+          next = resolve
+        })
+      },
+    })
+    const id = startFile(jobs, spaceId, bookmarks(10))
+    const job = jobs.get(id) as NonNullable<ReturnType<ImportJobs['get']>>
+    job.status.suggestions = ['One', 'Two'].map((title) => ({
+      url: `https://example.org/${title}`,
+      title,
+      kind: 'pinned' as const,
+      accepted: true,
+    }))
+    for (let i = 0; i < 2000 && made.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(made).toEqual(['tabs.create'])
+    jobs.stopForRestore()
+    next()
+    const status = await ended(jobs, id)
+    expect(status).toMatchObject({ phase: 'failed', error: STOPPED_BY_RESTORE })
+    expect(made).toEqual(['tabs.create'])
   })
 
   it('[F6][D62] an import that fails part-way leaves nothing of its own and every tab of the user’s, moved in or not', async () => {

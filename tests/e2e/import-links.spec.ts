@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
-import { expect, type Page, test } from '@playwright/test'
+import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 import { PASTE_DEFAULT_NAME } from '../../src/renderer/src/import/copy'
-import type { ImportJob } from '../../src/shared/commands/import'
+import { type ImportJob, MAX_FILE_BYTES, TOO_LARGE } from '../../src/shared/commands/import'
 import { MOD, type Orbit, run, state } from './helpers'
 import {
   clickDone,
@@ -56,6 +56,41 @@ async function folderTabs(orbit: Orbit, folderId: string): Promise<string[]> {
 /** Puts text on the system clipboard (main process), as copying in another app would. */
 async function copyText(orbit: Orbit, text: string): Promise<void> {
   await orbit.app.evaluate(({ clipboard }, t) => clipboard.writeText(t), text)
+}
+
+/** The list of links main holds for the import window, as its id and size; null when it holds none (an e2e hook). */
+function heldList(app: ElectronApplication): Promise<{ id: string; bytes: number } | null> {
+  return app.evaluate(() =>
+    (
+      globalThis as unknown as { __orbitImport: { heldList: () => { id: string; bytes: number } | null } }
+    ).__orbitImport.heldList(),
+  )
+}
+
+/**
+ * From now on, main notes each list or file a window sends it (wrapping the commands' handlers): the command and the
+ * bytes it got. `sentToMain` reads the notes.
+ */
+async function noteBytesSent(app: ElectronApplication): Promise<void> {
+  await app.evaluate(() => {
+    type Handler = (args: Record<string, unknown>, c: unknown) => unknown
+    const g = globalThis as unknown as { __orbit: { ctx: { commands: unknown } }; __sentToMain: string[] }
+    const { handlers } = g.__orbit.ctx.commands as { handlers: Map<string, Handler> }
+    g.__sentToMain = []
+    const size = (v: unknown) => (ArrayBuffer.isView(v) || v instanceof ArrayBuffer ? v.byteLength : undefined)
+    for (const name of ['import.open', 'import.holdLinks', 'import.parseFile']) {
+      const handler = handlers.get(name) as Handler
+      handlers.set(name, (args, c) => {
+        const start = args.start as { bytes?: unknown } | undefined
+        g.__sentToMain.push(`${name}: ${size(args.bytes) ?? size(start?.bytes) ?? 0} bytes`)
+        return handler(args, c)
+      })
+    }
+  })
+}
+
+function sentToMain(app: ElectronApplication): Promise<string[]> {
+  return app.evaluate(() => (globalThis as unknown as { __sentToMain: string[] }).__sentToMain)
 }
 
 /** Presses ⌘V (Ctrl+V) in the sidebar; resolves whether Orbit took the paste. */
@@ -202,11 +237,16 @@ test('[IM-12] a list too long to edit, pasted in the import window, shows its co
   // Read-only: the first eight lines, never the field (main holds the list).
   await expect(page.getByTestId('import-links-text')).toHaveCount(0)
   expect(await page.getByTestId('import-links-held').locator('pre').textContent()).toBe(urls.slice(0, 8).join('\n'))
-  // Clear brings back the empty field; the list pasted again is held again.
+  const bytes = Buffer.byteLength(urls.join('\n'))
+  expect((await heldList(app))?.bytes).toBe(bytes)
+  // Clear brings back the empty field, and main lets go of its copy (fix check 2 N5); the list pasted again is held
+  // again.
   await page.getByTestId('import-links-clear').click()
   await expect(page.getByTestId('import-links-text')).toHaveValue('')
   await expect(page.getByTestId('import-links-count')).toHaveText('No links yet')
+  await expect.poll(() => heldList(app), { message: 'the list main holds after Clear' }).toBeNull()
   await paste()
+  expect((await heldList(app))?.bytes).toBe(bytes)
   await page.getByTestId('import-folder-name').fill('Long list')
   const job = await importLinks(page)
   expect(job.items[0]?.done).toBe(10_001)
@@ -214,6 +254,57 @@ test('[IM-12] a list too long to edit, pasted in the import window, shows its co
   const tabs = tabsUnder(await state(app), folderId)
   expect([tabs.length, tabs[0]?.pinnedUrl, tabs.at(-1)?.pinnedUrl]).toEqual([10_001, urls[0], urls.at(-1)])
   expect((await state(app)).folders[folderId]?.name).toBe('Long list')
+})
+
+test('[IM-12] a list over 64 MB as UTF-8, pasted on the sidebar or in the import window, never reaches main, ASCII or not (D62 (5), fix check 2 N3)', async () => {
+  test.setTimeout(300_000)
+  orbit = await launchImport()
+  const { app, shell } = orbit
+  await noteBytesSent(app)
+  const head = 'https://example.com/a\nhttps://example.com/b\n'
+  /** Copied in main, as another app would: two links, then `unit` `count` times. */
+  const copyList = (unit: string, count: number) =>
+    app.evaluate(({ clipboard }, l) => clipboard.writeText(l.head + l.unit.repeat(l.count)), { head, unit, count })
+  const tooLarge = `Pasted list: ${TOO_LARGE}`
+  // Under the cap, the list goes to main: from the sidebar, and from the import window, where a million CJK characters
+  // (3 MB as UTF-8) make it too long to edit, so main holds it. Each counted in bytes.
+  await copyList('', 0)
+  expect(await pasteInSidebar(shell)).toBe(true)
+  const page = await importPage(app)
+  await expect(page.getByTestId('import-links-count')).toHaveText('2 links')
+  const field = page.getByTestId('import-links-text')
+  await field.fill('')
+  await copyList('中', 1_000_000)
+  await field.focus()
+  await page.keyboard.press(`${MOD}+V`)
+  await expect(page.getByTestId('import-links-held')).toBeVisible()
+  await expect(page.getByTestId('import-links-count')).toHaveText('2 links')
+  const sent = [`import.open: ${head.length} bytes`, `import.holdLinks: ${head.length + 3_000_000} bytes`]
+  expect(await sentToMain(app)).toEqual(sent)
+  await page.getByTestId('import-links-clear').click()
+  await expect(field).toHaveValue('')
+
+  // Over it: 65 MiB of ASCII, and 22.5 million CJK characters, 67.5 MB as UTF-8 in fewer than 64 MiB characters. On
+  // both routes the window says it's too large, and main gets none of it: the sidebar sends only why.
+  for (const [unit, count] of [
+    ['x', 65 * 1024 * 1024],
+    ['中', 22_500_000],
+  ] as const) {
+    expect(head.length + Buffer.byteLength(unit) * count).toBeGreaterThan(MAX_FILE_BYTES)
+    await copyList(unit, count)
+    expect(await pasteInSidebar(shell)).toBe(true)
+    sent.push('import.open: 0 bytes')
+    await expect.poll(() => sentToMain(app), { timeout: 60_000 }).toEqual(sent)
+    await expect(page.getByTestId('import-file-error')).toHaveText(tooLarge)
+    await page.getByTestId('import-paste').click()
+    await expect(page.getByTestId('import-file-error')).toHaveCount(0)
+    await field.focus()
+    await page.keyboard.press(`${MOD}+V`)
+    await expect(page.getByTestId('import-file-error')).toHaveText(tooLarge, { timeout: 60_000 })
+    await expect(page.getByTestId('import-step-source')).toBeVisible()
+  }
+  console.log(`[N3] what main got from the windows: ${JSON.stringify(await sentToMain(app))}`)
+  expect(await sentToMain(app)).toEqual(sent)
 })
 
 /** A list of 16 MB (D62 (5)): two links, then one address per line. */

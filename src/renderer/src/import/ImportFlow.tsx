@@ -12,6 +12,7 @@ import {
   type ImportTarget,
   type Inspection,
   isLongList,
+  listBytes,
   MAX_FILE_BYTES,
   PASTED_LIST,
   type ParsedFile,
@@ -254,11 +255,11 @@ export function ImportFlow({
   const holdLinks = async (text: string) => {
     let parsed: ParsedFile
     try {
-      // Over the cap, it says so as a file over it does (D62 (5)).
-      parsed =
-        text.length > MAX_FILE_BYTES
-          ? { kind: 'error', name: PASTED_LIST, message: TOO_LARGE }
-          : await invoke('import.holdLinks', { bytes: new TextEncoder().encode(text) })
+      // Over the cap, in bytes as main counts it, it says so as a file over it does, and main gets none of it (D62 (5)).
+      const bytes = listBytes(text)
+      parsed = bytes
+        ? await invoke('import.holdLinks', { bytes })
+        : { kind: 'error', name: PASTED_LIST, message: TOO_LARGE }
     } catch {
       parsed = { kind: 'error', name: PASTED_LIST, message: UNREADABLE }
     }
@@ -509,7 +510,11 @@ export function ImportFlow({
             text={linksText}
             held={held}
             onText={editLinks}
-            onClear={() => editLinks('')}
+            onClear={() => {
+              // Main lets go of its copy too (fix check 2 N5).
+              if (held) void invoke('import.letGo', { id: held.id })
+              editLinks('')
+            }}
             name={folderName}
             onName={setFolderName}
             count={linkCount}

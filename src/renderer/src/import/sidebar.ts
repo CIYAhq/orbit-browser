@@ -1,6 +1,7 @@
 import type { ClipboardEvent as ReactClipboardEvent, DragEvent as ReactDragEvent } from 'react'
 import {
   type ImportOpening,
+  listBytes,
   MAX_FILE_BYTES,
   PASTED_LIST,
   type ParsedFile,
@@ -70,11 +71,12 @@ export function importPastedLinks(e: ReactClipboardEvent): boolean {
   // Read here, in the browser window: only the start, and only until two links are found (D58).
   if (!text || parseLinkList(text.slice(0, PASTE_LOOK), 2).links.length < 2) return false
   e.preventDefault()
-  // As UTF-8: main passes the bytes on to the reader, never making text of them (D62 (5)).
-  const start: ImportOpening =
-    text.length > MAX_FILE_BYTES
-      ? { kind: 'file', file: { kind: 'error', name: PASTED_LIST, message: TOO_LARGE } }
-      : { kind: 'links', bytes: new TextEncoder().encode(text) }
+  // As UTF-8: main passes the bytes on to the reader, never making text of them (D62 (5)). Over the cap, counted in
+  // bytes as main counts it, none of it goes.
+  const bytes = listBytes(text)
+  const start: ImportOpening = bytes
+    ? { kind: 'links', bytes }
+    : { kind: 'file', file: { kind: 'error', name: PASTED_LIST, message: TOO_LARGE } }
   void invoke('import.open', { start })
   return true
 }

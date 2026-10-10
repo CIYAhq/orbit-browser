@@ -167,6 +167,23 @@ export const MAX_FILE_BYTES = 64 * 1024 * 1024
 export const TOO_LARGE = 'This is too large to import (the limit is 64 MB)'
 /** A paste's name where the import window names a file. */
 export const PASTED_LIST = 'Pasted list'
+/** Why an import stopped part-way when Restore Data replaced the sidebar (D65 (3)): its window says so. */
+export const STOPPED_BY_RESTORE = 'data was restored from a backup'
+
+/**
+ * A pasted list as UTF-8, to send to main; undefined when that's over MAX_FILE_BYTES. The windows count bytes, as main
+ * does, and never encode past the cap (D62 (5), fix check 2 N3).
+ */
+export function listBytes(text: string): Uint8Array | undefined {
+  // Every UTF-16 unit takes one to three bytes: a text this long can't fit, and this much room holds any that does.
+  if (text.length > MAX_FILE_BYTES) return undefined
+  const room = new Uint8Array(Math.min(MAX_FILE_BYTES, text.length * 3))
+  // Stops when the room is full: a text that doesn't fit is never encoded whole.
+  const { read, written } = new TextEncoder().encodeInto(text, room)
+  if (read < text.length) return undefined
+  // Exactly its bytes: a view of the larger buffer would carry all of it to main.
+  return written === room.length ? room : room.slice(0, written)
+}
 
 /** A list of links longer than this (in characters, or lines) is never held as editable text (D62 (5)). */
 export const LONG_LIST_CHARS = 1_000_000
@@ -239,6 +256,8 @@ export interface ImportCommands {
   'import.parseFile': { args: { name: string; bytes: Uint8Array }; result: ParsedFile }
   /** Takes a list of links too long to edit, pasted in the import window, as UTF-8: main holds it (D62 (5)). */
   'import.holdLinks': { args: { bytes: Uint8Array }; result: ParsedFile }
+  /** The import window let a held list go (Clear): main does too (fix check 2 N5). */
+  'import.letGo': { args: { id: string }; result: void }
   /** "From a file…": the system's file picker, then the file read. Null when cancelled. */
   'import.chooseFile': { args: Record<string, never>; result: ParsedFile | null }
   /** Starts an import; returns its id. */

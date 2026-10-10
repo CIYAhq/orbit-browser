@@ -3,7 +3,9 @@ import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { type ElectronApplication, expect, type Page } from '@playwright/test'
 import { FIXTURE_ROOT } from '../../scripts/import-fixtures'
-import type { OrbitState } from '../../src/shared/state'
+import type { BookmarkNode, ImportJob } from '../../src/shared/commands/import'
+import type { ItemId, OrbitState } from '../../src/shared/state'
+import { splitLeaves } from '../../src/shared/tree'
 import { launchOrbit, listenInRange, type Orbit, run } from './helpers'
 import { pageOfView } from './settings-support'
 
@@ -234,6 +236,84 @@ export function tabsUnder(s: OrbitState, id: string): OrbitState['tabs'][string]
   const f = s.folders[id]
   if (!f) return s.tabs[id] ? [s.tabs[id]] : []
   return f.children.flatMap((c) => tabsUnder(s, c))
+}
+
+/** `folders` folders of `size` bookmarks each ("Folder 1" holds "Page 1"…), at addresses that are never loaded. */
+export function inFolders(folders: number, size: number): BookmarkNode[] {
+  return Array.from({ length: folders }, (_, f) => ({
+    id: `f${f}`,
+    title: `Folder ${f + 1}`,
+    children: Array.from({ length: size }, (_, i) => ({
+      id: `b${f}-${i}`,
+      title: `Page ${i + 1}`,
+      url: `https://example.com/page/f${f + 1}/p${i + 1}`,
+    })),
+  }))
+}
+
+/** The tabs of `inFolders`' bookmarks in a state, wherever they are. */
+export function importedTabs(s: OrbitState): OrbitState['tabs'][string][] {
+  return Object.values(s.tabs).filter((t) => t.pinnedUrl?.startsWith('https://example.com/page/'))
+}
+
+/** The next import stops adding once `at` bookmarks are made, until `resumeAdding` or the quit (an e2e hook). */
+export async function holdAddingAt(app: ElectronApplication, at: number): Promise<void> {
+  await app.evaluate((_electron, n) => {
+    const hooks = (globalThis as unknown as { __orbitImport: { holdAddingAt: (n: number) => void } }).__orbitImport
+    hooks.holdAddingAt(n)
+  }, at)
+}
+
+/** A held import goes on, to its end. */
+export async function resumeAdding(app: ElectronApplication): Promise<void> {
+  await app.evaluate(() =>
+    (globalThis as unknown as { __orbitImport: { resumeAdding: () => void } }).__orbitImport.resumeAdding(),
+  )
+}
+
+/** Waits until the latest import is adding and has made `n` bookmarks; returns how many it has. */
+export async function untilMade(app: ElectronApplication, n: number): Promise<number> {
+  let made = 0
+  await expect
+    .poll(
+      async () => {
+        const job = (await run(app, 'import.status', {})) as ImportJob
+        made = job.items[0]?.done ?? 0
+        return job.phase === 'adding' && made >= n
+      },
+      { intervals: [10], timeout: 60_000 },
+    )
+    .toBe(true)
+  return made
+}
+
+/** Every place in the sidebar that lists `id`: Favorites, a pinned or Today section, a folder, a split view. */
+export function placesOf(s: OrbitState, id: ItemId): string[] {
+  const places: string[] = []
+  for (const [profileId, p] of Object.entries(s.profiles)) {
+    if (p.favorites.includes(id)) places.push(`favorites ${profileId}`)
+  }
+  for (const sp of Object.values(s.spaces)) {
+    if (sp.pinned.includes(id)) places.push(`pinned ${sp.name}`)
+    if (sp.today.includes(id)) places.push(`today ${sp.name}`)
+  }
+  for (const f of Object.values(s.folders)) if (f.children.includes(id)) places.push(`folder ${f.name}`)
+  for (const [splitId, split] of Object.entries(s.splits)) {
+    if (splitLeaves(split.layout).includes(id)) places.push(`split ${splitId}`)
+  }
+  return places
+}
+
+/** Ids the sidebar lists that nothing is behind: in Favorites, the sections, folders and split views. */
+export function danglingIds(s: OrbitState): string[] {
+  const exists = (id: string) => !!(s.tabs[id] || s.folders[id] || s.splits[id])
+  const listed = [
+    ...Object.values(s.profiles).flatMap((p) => p.favorites),
+    ...Object.values(s.spaces).flatMap((sp) => [...sp.pinned, ...sp.today]),
+    ...Object.values(s.folders).flatMap((f) => f.children),
+    ...Object.values(s.splits).flatMap((split) => splitLeaves(split.layout)),
+  ]
+  return listed.filter((id) => !exists(id))
 }
 
 /** Starts measuring the main process's longest stall (event-loop delay), in ms. */

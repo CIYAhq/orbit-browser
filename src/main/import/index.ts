@@ -32,6 +32,7 @@ import { ImportJobs, type Task } from './jobs'
 import { countBookmarks, NO_BOOKMARKS, writeBookmarksHtml } from './netscape'
 import { importPlaces } from './places'
 import { readFileOffMain, readLinksOffMain, stopReaders, UNREADABLE } from './reader'
+import { provideImportStop } from './unplaced'
 import { IMPORT_WINDOW_ID, ImportWindow } from './window'
 
 export function registerImport(ctx: MainContext, history: HistoryService): void {
@@ -45,12 +46,28 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
     stopReaders()
     removeScratch()
   })
+  // Restore Data stops a running import before it replaces the sidebar (D65 (3)).
+  provideImportStop(() => jobs.stopForRestore())
   if (ctx.e2e) {
+    let resume: (() => void) | undefined
     const hooks = {
-      /** The next import stops adding once `at` bookmarks are made, until Orbit quits (D62's tests quit part-way). */
+      /**
+       * The next import stops adding once `at` bookmarks are made, until `resumeAdding` or the quit: D62's and D65's
+       * tests act part-way.
+       */
       holdAddingAt: (at: number) => {
-        jobs.testPause = (made) => (made >= at ? new Promise<void>(() => {}) : undefined)
+        const hold = new Promise<void>((resolve) => {
+          resume = resolve
+        })
+        jobs.testPause = (made) => (made >= at ? hold : undefined)
       },
+      /** A held import goes on, to its end. */
+      resumeAdding: () => {
+        jobs.testPause = undefined
+        resume?.()
+      },
+      /** The list of links main holds for the import window, as its id and size (fix check 2 N5). */
+      heldList: () => (held ? { id: held.id, bytes: held.bytes.byteLength } : null),
       /** Each copy of another browser's file is made, then its step never finishes: only the quit can remove it. */
       holdCopying: () => {
         setCopyStep(async (from, to) => {
@@ -62,8 +79,9 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
     ;(globalThis as unknown as { __orbitImport: typeof hooks }).__orbitImport = hooks
   }
   // A list of links too long to edit (D62 (5)): main holds its bytes for the import window, which shows only its count
-  // and first lines. One at a time: the newest replaces it; an import started from it, or the window closing, lets it go.
-  // Main's thread never makes text of it: the bytes come from the window and go to the reader, moved, not copied.
+  // and first lines. One at a time: the newest replaces it; an import started from it, the window's Clear, or the window
+  // closing lets it go. Main's thread never makes text of it: the bytes come from the window and go to the reader,
+  // moved, not copied.
   let held: { id: string; bytes: Uint8Array } | undefined
   /** A file or a list, read: a long list is held here, and the window gets its count and first lines (D62 (5)). */
   const present = (read: FileRead): ParsedFile => {
@@ -157,6 +175,9 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
     return present(await readFileOffMain({ op: 'file', name: file, bytes }))
   })
   commands.register('import.holdLinks', ({ bytes }) => checkedList(PASTED_LIST, bytes))
+  commands.register('import.letGo', ({ id }) => {
+    if (held?.id === id) held = undefined
+  })
   commands.register('import.chooseFile', async (_args, c): Promise<ParsedFile | null> => {
     const parent = (c.windowId === IMPORT_WINDOW_ID ? win.window : undefined) ?? BrowserWindow.getFocusedWindow()
     const options: Electron.OpenDialogOptions = {

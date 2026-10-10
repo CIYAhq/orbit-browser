@@ -35,6 +35,33 @@ function words(line: string): string[] {
 
 const names = (line: string) => words(line).some((w) => w.toLowerCase() === NAME)
 
+/**
+ * Ordinary words that hold the letters, where a binary file holds them, each with why. In a binary file the letters
+ * are looked for alone (`bare`), and a place where they stand inside one of these words is allowed: the word must be
+ * there around them, so its letters' place in it is checked, not just the word somewhere on the line.
+ */
+const ORDINARY: { word: string; why: string }[] = [
+  { word: 'search', why: 'the history fixtures hold search pages: their addresses and titles' },
+  { word: 'varchar', why: "SQLite's column type LONGVARCHAR, in the history and places fixtures' schemas" },
+]
+
+/**
+ * Whether a line of a binary file holds the letters alone, in any case, other than inside an ordinary word. A binary
+ * file's text values can sit side by side with nothing between them (two of a SQLite row's columns, say), so the name
+ * may be glued to another word, where `words` would read the pair as one (fix check 2 N6).
+ */
+function bare(line: string): boolean {
+  const lower = line.toLowerCase()
+  for (let at = lower.indexOf(NAME); at >= 0; at = lower.indexOf(NAME, at + 1)) {
+    const ordinary = ORDINARY.some(({ word }) => {
+      const start = at - word.indexOf(NAME)
+      return start >= 0 && lower.slice(start, start + word.length) === word
+    })
+    if (!ordinary) return true
+  }
+  return false
+}
+
 /** Every file and folder under `dir`, binary files included (a fixture's SQLite or plist file holds text too). */
 function entriesUnder(dir: string): { path: string; folder: boolean }[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -62,15 +89,21 @@ function textsOf(bytes: Buffer): { how: string; text: string }[] {
   return texts
 }
 
-/** Each file or folder whose name names it, and each line that does and isn't allowed, as `file:line`. */
+/**
+ * Each file or folder whose name names it, and each line that does and isn't allowed, as `file:line`. In a binary file
+ * (one holding a NUL byte), a line that holds the letters alone outside an ordinary word does too.
+ */
 function namings(entries: { path: string; folder: boolean }[]): string[] {
   return entries.flatMap(({ path, folder }) => {
     const found = names(basename(path)) ? [`${path} (its name)`] : []
     if (folder) return found
-    for (const { how, text } of textsOf(readFileSync(path))) {
+    const bytes = readFileSync(path)
+    const binary = bytes.includes(0)
+    for (const { how, text } of textsOf(bytes)) {
       text.split(/\r?\n|\r/).forEach((line, i) => {
         if (names(line) && !ALLOWED.some((a) => a.file.test(path) && a.line.test(line)))
           found.push(`${path}:${i + 1}${how}`)
+        else if (binary && bare(line)) found.push(`${path}:${i + 1}${how}`)
       })
     }
     return [...new Set(found)]
@@ -150,6 +183,38 @@ describe('clean room', () => {
         `${NAME}-notes.txt (its name)`,
         'utf16.txt:2 (UTF-16)',
       ])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('finds it glued to another word in a binary file, in any case; not inside an ordinary word (fix check 2 N6)', () => {
+    const cap = `${NAME.charAt(0).toUpperCase()}${NAME.slice(1)}`
+    // As a SQLite row holds its text values: side by side, a record header before them.
+    const row = (...values: string[]) => Buffer.concat([Buffer.from([0, 0, 0x03, 0x17]), Buffer.from(values.join(''))])
+    const dir = mkdtempSync(join(tmpdir(), 'orbit-clean-room-'))
+    try {
+      const probes: Record<string, Buffer> = {
+        // Each read by words as one longer word, which isn't the name: only the bare letters find them.
+        'glued.db': row('Morning news', `${NAME}spaces`),
+        'address.db': row('https://example.com/x', NAME),
+        'start.db': row(`${cap}sidebar`, 'Notes'),
+        'upper.db': row(`LONG${NAME.toUpperCase()}TEXT`),
+        'utf16.db': Buffer.concat([Buffer.from([0, 0, 0, 0]), Buffer.from(`Notes${NAME}`, 'utf16le')]),
+        // The ordinary words, the letters where each holds them: allowed.
+        'ordinary.db': row('LONGVARCHAR', 'Search', 'Searchmoc', 'research', 'searchvarchar'),
+        // A text file (no NUL byte) is read by words, as code is: a longer word isn't the name.
+        'text.txt': Buffer.from(`const archived = research(${NAME}s)\n`),
+      }
+      for (const [name, bytes] of Object.entries(probes)) writeFileSync(join(dir, name), bytes)
+      expect(
+        namings(entriesUnder(dir))
+          .map((found) => found.slice(dir.length + 1))
+          .sort(),
+      ).toEqual(['address.db:1', 'glued.db:1', 'start.db:1', 'upper.db:1', 'utf16.db:1 (UTF-16)'])
+      // A word that only starts like an ordinary one is no cover: the letters must stand where that word holds them.
+      for (const line of [`se${NAME}`, `v${NAME}`, `${NAME}har`, `x${NAME}h`]) expect(bare(line), line).toBe(true)
+      for (const line of ['search', 'LONGVARCHAR', 'Searchmoc']) expect(bare(line), line).toBe(false)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

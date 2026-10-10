@@ -3,15 +3,20 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 import { manyBookmarks, netscapeHtml, sampleTree } from '../../scripts/import-fixtures'
-import type { BookmarkNode, ImportJob } from '../../src/shared/commands/import'
+import type { ImportJob } from '../../src/shared/commands/import'
+import type { OrbitState } from '../../src/shared/state'
 import { MOD, type Orbit, run, state } from './helpers'
 import {
   clickDone,
+  danglingIds,
   dropFile,
   dropLargeFile,
   dropMadeFile,
   fixturePath,
+  holdAddingAt,
+  importedTabs,
   importPage,
+  inFolders,
   launchImport,
   loggedServer,
   mainLagMs,
@@ -19,6 +24,7 @@ import {
   pagesLoaded,
   pickFileNext,
   pinnedShape,
+  placesOf,
   startMainLag,
   tabsUnder,
 } from './import-support'
@@ -388,20 +394,7 @@ test('[IM-05][IM-14] 2,000 bookmarks: one closed folder, nothing loaded, quick, 
     .toBe('commandbar')
 })
 
-/** `folders` folders of `size` bookmarks each, at addresses that are never loaded. */
-function inFolders(folders: number, size: number): BookmarkNode[] {
-  return Array.from({ length: folders }, (_, f) => ({
-    id: `f${f}`,
-    title: `Folder ${f + 1}`,
-    children: Array.from({ length: size }, (_, i) => ({
-      id: `b${f}-${i}`,
-      title: `Page ${i + 1}`,
-      url: `https://example.com/page/f${f + 1}/p${i + 1}`,
-    })),
-  }))
-}
-
-test('[IM-13][IM-14] a quit part-way leaves nothing of the import and every tab of the user’s, moved in or not (F6, D62)', async () => {
+test('[IM-13][IM-14] a quit part-way leaves nothing of the import, not even a tab of it the user placed, and every tab of the user’s (F6, D62, D65 (2))', async () => {
   test.setTimeout(180_000)
   const userData = mkdtempSync(join(tmpdir(), 'orbit-e2e-'))
   server = await loggedServer()
@@ -422,11 +415,7 @@ test('[IM-13][IM-14] a quit part-way leaves nothing of the import and every tab 
     // 20,000 bookmarks in 10 folders of 2,000. The import holds once 5,000 are made (an e2e hook), so the quit
     // comes part-way, with the folder being filled half full.
     const bookmarks = inFolders(10, 2000)
-    await app.evaluate(() =>
-      (globalThis as unknown as { __orbitImport: { holdAddingAt: (n: number) => void } }).__orbitImport.holdAddingAt(
-        5000,
-      ),
-    )
+    await holdAddingAt(app, 5000)
     await run(app, 'import.start', {
       plan: { kind: 'file', name: 'many.html', bookmarks, target: { kind: 'space', spaceId } },
     })
@@ -455,13 +444,29 @@ test('[IM-13][IM-14] a quit part-way leaves nothing of the import and every tab 
         `[D62] the sidebar showed the import's folder: moved in 2 tabs of the user's, and moved out "${moved.folders[subs.at(-1) as string]?.name}" holding ${tabsUnder(moved, subs.at(-1) as string).length} tabs`,
       )
     }
+    // A tab of the import the user reached anyway (a test hook: nothing lists one, D65 (1)) and put in a split view with
+    // their second pinned tab: the quit takes it back too (D65 (2)), and the split goes with it.
+    const placed = importedTabs(during)[0]?.id as string
+    const split = (await run(app, 'tabs.splitWith', { tabId: placed, target: mine[1], side: 'right' })) as string
+    expect(placesOf(await state(app), placed)).toEqual([`split ${split}`])
     await app.close()
     console.log(`[D62] quit with ${added.toLocaleString('en-US')} of 20,000 bookmarks made`)
+    // The state written at the quit holds none of the import, before any repair at the next start (N4): not the tab
+    // the user placed, and no id of one left behind.
+    const written = JSON.parse(readFileSync(join(userData, 'orbit-state.json'), 'utf8')) as OrbitState
+    console.log(
+      `[D62] the state written at the quit: ${importedTabs(written).length} imported tabs; the placed one in ${JSON.stringify(placesOf(written, placed))}`,
+    )
+    expect(importedTabs(written)).toHaveLength(0)
+    expect(placesOf(written, placed)).toEqual([])
+    expect(written.splits[split]).toBeUndefined()
+    expect(danglingIds(written)).toEqual([])
+    expect(placesOf(written, mine[1] as string)).toEqual([`pinned ${s.spaces[spaceId]?.name}`])
 
     orbit = await launchImport({ userData })
     const after = await state(orbit.app)
     const pinned = (after.spaces[spaceId]?.pinned ?? []).flatMap((id) => [id, ...tabsUnder(after, id).map((t) => t.id)])
-    const left = Object.values(after.tabs).filter((t) => t.pinnedUrl?.startsWith('https://example.com/page/'))
+    const left = importedTabs(after)
     const folders = Object.values(after.folders).map((f) => `${f.name} (${tabsUnder(after, f.id).length} tabs)`)
     console.log(`[D62] after the relaunch: ${left.length} imported tabs; folders: ${JSON.stringify(folders)}`)
     // Every tab of the user's is there, pinned in its Space.
@@ -499,11 +504,7 @@ test('[IM-14] a crash part-way leaves nothing of the import: its tabs sit in no 
       activate: false,
     })) as string
     // 20,000 bookmarks, held once 5,000 are made (an e2e hook).
-    await app.evaluate(() =>
-      (globalThis as unknown as { __orbitImport: { holdAddingAt: (n: number) => void } }).__orbitImport.holdAddingAt(
-        5000,
-      ),
-    )
+    await holdAddingAt(app, 5000)
     await run(app, 'import.start', {
       plan: { kind: 'file', name: 'many.html', bookmarks: inFolders(10, 2000), target: { kind: 'space', spaceId } },
     })
@@ -579,6 +580,8 @@ test('[IM-14] while 20,000 bookmarks are added, the browser window never freezes
       )
       .toBe('done')
     expect(job?.items[0]?.done).toBe(20_000)
+    // Done comes with main's numbers (fix check 2 N7).
+    expect(job?.stats).toEqual({ ms: expect.any(Number), longestTaskMs: expect.any(Number) })
     await expect(shell.locator(`[data-testid="folder"][data-folder-id="${job?.folders[0]?.folderId}"]`)).toBeVisible()
     // A last stretch, so a freeze still going on shows.
     await shell.evaluate(() => new Promise((resolve) => setTimeout(resolve, 100)))

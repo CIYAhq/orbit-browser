@@ -101,9 +101,11 @@ export function planPlacement(name: string, nodes: readonly BookmarkNode[]): Pla
 /**
  * One Space's folder of an import, made out of sight (D62 (3)). `build` makes the plan's steps a part at a time, and
  * each part's tabs go into the state where no section shows them (`addUnplacedTabs`); `attachFolders` then adds the
- * folders and shows the whole folder at once. Until then the sidebar shows none of it, so nothing can be moved into or
- * out of it, and a quit or a failure takes back exactly the tabs added. Tabs are asleep, have no favicon (it comes when
- * the page first loads) and count as never used.
+ * folders and shows the whole folder at once. Until then the sidebar shows none of it and no list of open tabs lists
+ * its tabs (D65 (1)), so nothing can be moved into its folders. A tab the user reached anyway and placed stays where
+ * they put it: `keepOnly` leaves it out of the folder at the attach (D65 (2)). A quit or a failure takes back exactly
+ * the tabs added, wherever they are. Tabs are asleep, have no favicon (it comes when the page first loads) and count
+ * as never used.
  */
 export class DetachedFolder {
   /** The top folder first, then its folders in the plan's order. */
@@ -173,9 +175,12 @@ export class DetachedFolder {
     return out
   }
 
-  /** Leaves out tabs no longer in the state (Restore Data while it was made, say); returns how many are left. */
-  keepOnly(present: (id: TabId) => boolean): number {
-    const gone = new Set(this.tabs.filter((t) => !present(t.id)).map((t) => t.id))
+  /**
+   * Keeps only the tabs `keep` accepts, leaving the others out of its folders: at the attach, those gone from the state
+   * and those the user placed somewhere meanwhile (D65 (2)). Returns how many are left.
+   */
+  keepOnly(keep: (id: TabId) => boolean): number {
+    const gone = new Set(this.tabs.filter((t) => !keep(t.id)).map((t) => t.id))
     if (gone.size > 0) {
       for (const f of this.folders) f.children = f.children.filter((id) => !gone.has(id))
       this.tabs.splice(0, this.tabs.length, ...this.tabs.filter((t) => !gone.has(t.id)))

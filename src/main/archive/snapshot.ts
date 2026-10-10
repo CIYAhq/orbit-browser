@@ -19,6 +19,7 @@ import type {
 import { tabTitle } from '../../shared/tabs'
 import { sectionOf, sidebarTabOrder, splitLeaves } from '../../shared/tree'
 import type { MainContext } from '../context'
+import { stopImportsForRestore } from '../import/unplaced'
 import { normalizeState } from '../persist'
 import { dedupeDisplayed, mostRecentTab, shownElsewhere } from '../tabs/model'
 import type { SavedHistory } from '../tabs/runtime'
@@ -614,7 +615,8 @@ function historyOf(ctx: Pick<MainContext, 'tabs'>, tabId: TabId): SavedHistory |
  * Puts the sidebar back as a backup has it (AR-11): one state update (`planRestore`,
  * `applyRestore`), then what follows outside the state. Returning tabs get their history before
  * they can wake; tabs that left hand theirs to the Archive and close their page; tabs now in
- * another profile start again in its session.
+ * another profile start again in its session. A running import stops first: the tabs it made out
+ * of sight go, and never reach the Archive (D65 (3)).
  */
 export function restoreSidebar(
   ctx: Pick<MainContext, 'store' | 'tabs'>,
@@ -622,6 +624,7 @@ export function restoreSidebar(
   snap: SidebarSnapshot,
   now = Date.now(),
 ): RestorePlan {
+  stopImportsForRestore()
   const state = ctx.store.state
   const hot = new Map<TabId, ArchivedTab[]>()
   for (const a of state.archive) if (a.tabId) hot.set(a.tabId, [...(hot.get(a.tabId) ?? []), a])
