@@ -475,9 +475,22 @@ export function isRuntimeOnlyPatch(patch: Patch): boolean {
   return RUNTIME_ONLY[String(root)]?.has(String(field)) ?? false
 }
 
-/** Runtime-only fields are written too (they are small) and reset on load. */
+/**
+ * Runtime-only fields are written too (they are small) and reset on load. A private session's
+ * downloads never are (DL-16).
+ */
 function serialize(state: OrbitState): string {
-  return JSON.stringify(state)
+  return JSON.stringify(withoutPrivateDownloads(state))
+}
+
+/**
+ * The state without the sidebar's rows of private sessions' downloads (DL-16): they live in memory
+ * only. Returns `state` itself when it has none.
+ */
+export function withoutPrivateDownloads(state: OrbitState): OrbitState {
+  const rows = Object.entries(state.downloads)
+  if (!rows.some(([, d]) => d.private)) return state
+  return { ...state, downloads: Object.fromEntries(rows.filter(([, d]) => !d.private)) }
 }
 
 export const backupOf = (file: string): string => `${file}.bak`

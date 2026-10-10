@@ -807,22 +807,63 @@ test("[DL-16] a private session's downloads are in no saved list, and leave when
   await expect.poll(async () => (await list(priv)).map((d) => [d.filename, d.private])).toEqual([['big.bin', true]])
   // Its row shows beside its own profile only.
   await expect(row('big.bin')).toBeVisible()
+  // The state file is written while it runs, then again (the first write becomes the backup): neither has it.
+  await saveStateWhen('progressing')
   await run(orbit.app, 'spaces.switch', { spaceId: normal })
   await expect(rows()).toHaveCount(0)
+  await saveState()
+  expect(stateFilesMention('big.bin')).toEqual([false, false])
   await run(orbit.app, 'spaces.switch', { spaceId })
   await expect(row('big.bin')).toBeVisible()
   server.release('big.bin')
+  // Nor once it has finished.
+  await saveStateWhen('completed')
   await expect.poll(async () => (await list(priv))[0]?.state).toBe('completed')
   // Saved to disk like any other, but in no list on disk.
   expect(statSync(join(folder(), 'big.bin')).size).toBe(4 * MB)
   await hooks((h) => h.settle())
   const saved = join(orbit.userData, 'downloads.json')
   expect(existsSync(saved) ? readFileSync(saved, 'utf8') : '').not.toContain('big.bin')
+  await run(orbit.app, 'spaces.switch', { spaceId: normal })
+  await saveState()
+  expect(stateFilesMention('big.bin')).toEqual([false, false])
   // Its pages close: its list empties; the file stays.
   await run(orbit.app, 'tabs.close', { tabId })
   await expect.poll(async () => list(priv)).toEqual([])
   expect(existsSync(join(folder(), 'big.bin'))).toBe(true)
 })
+
+type StateHandle = { __orbit: { flush: () => void; state: () => OrbitState } }
+
+/** Writes Orbit's state file now; the file it replaces becomes its backup. */
+const saveState = () => orbit.app.evaluate(() => (globalThis as unknown as StateHandle).__orbit.flush())
+
+/**
+ * Writes Orbit's state file as soon as a private session's download is in `downloadState` (DL-16),
+ * in the same task: its row is in the state written.
+ */
+async function saveStateWhen(downloadState: Download['state']): Promise<void> {
+  await expect
+    .poll(() =>
+      orbit.app.evaluate((_e, wanted) => {
+        const main = (globalThis as unknown as StateHandle).__orbit
+        if (!Object.values(main.state().downloads).some((d) => d.private && d.state === wanted)) return false
+        main.flush()
+        return true
+      }, downloadState),
+    )
+    .toBe(true)
+}
+
+/** Whether Orbit's state file and its backup mention a file name, or a private session's download. */
+function stateFilesMention(filename: string): [boolean, boolean] {
+  const file = join(orbit.userData, 'orbit-state.json')
+  return [file, `${file}.bak`].map((path) => {
+    expect(existsSync(path), path).toBe(true)
+    const text = readFileSync(path, 'utf8')
+    return text.includes(filename) || text.includes('"private":true')
+  }) as [boolean, boolean]
+}
 
 // ---- DL-07: where downloads go ----
 

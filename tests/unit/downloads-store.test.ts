@@ -11,7 +11,8 @@ import {
   splitName,
 } from '../../src/main/downloads/names'
 import { type DownloadRecord, DownloadStore } from '../../src/main/downloads/store'
-import { isRuntimeOnlyPatch, normalizeState } from '../../src/main/persist'
+import { backupOf, isRuntimeOnlyPatch, normalizeState, Persistence } from '../../src/main/persist'
+import { Store } from '../../src/main/store'
 import { createInitialState } from '../../src/shared/defaults'
 import type { Download, OrbitState } from '../../src/shared/state'
 
@@ -159,6 +160,30 @@ describe('downloads in saved state', () => {
     expect(state.downloads['d-1']?.speed).toBeUndefined()
     expect(state.downloads['d-2']?.state).toBe('interrupted')
     expect(state.downloads['d-6']?.profileId).toBe('p-default')
+  })
+
+  it("[DL-16] a private session's download is never written to the state file or its backup", async () => {
+    const file = join(tmp(), 'orbit-state.json')
+    const store = new Store(createInitialState(0))
+    const saver = new Persistence(store, file, 5)
+    store.update((d) => {
+      d.downloads['d-1'] = { ...record('d-1', { filename: 'shared.bin' }), state: 'progressing' }
+      d.downloads['d-2'] = { ...record('d-2', { filename: 'secret.bin' }), state: 'progressing', private: true }
+    })
+    await saver.save()
+    store.update((d) => {
+      const row = d.downloads['d-2']
+      if (row) row.state = 'completed'
+    })
+    await saver.save()
+    for (const saved of [file, backupOf(file)]) {
+      const text = readFileSync(saved, 'utf8')
+      expect(text, saved).toContain('shared.bin')
+      expect(text, saved).not.toContain('secret.bin')
+    }
+    // The running app still shows it.
+    expect(store.state.downloads['d-2']?.private).toBe(true)
+    saver.dispose()
   })
 
   it('[DL-01] progress alone does not rewrite the state file', () => {
