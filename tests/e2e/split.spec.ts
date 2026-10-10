@@ -563,6 +563,8 @@ test('[SV-25][SV-05] a full split row shows no drop target: a tab resting on it 
   await expect(orbit.shell.locator('html')).toHaveClass(/\bis-dragging-tab\b/)
   // Well past the rest that makes a split on a row with room (400 ms).
   await orbit.shell.waitForTimeout(900)
+  // Still live at the count, so a drag that ended during the wait can't pass it (PR #19 review F9).
+  expect(await orbit.shell.locator('html').getAttribute('class')).toMatch(/\bis-dragging-tab\b/)
   expect(await orbit.shell.locator('.row-slot.is-split-target').count()).toBe(0)
   await orbit.shell.mouse.up()
   await settled(orbit.shell)
@@ -789,10 +791,11 @@ test('[SV-26] a new pane grows in with a spring and a closed one fades out', asy
   const a = await openTab(orbit.app, 'Grow1')
   await expect.poll(async () => (await tabView(orbit.app, a))?.visible).toBe(true)
   // The spring runs on the clock, so a frame that comes late already shows more of it: the shape is
-  // checked on frames that came in time (at 100 ms it is about half grown). A starved renderer can
-  // miss them; then that pane is closed and a new one grows in, up to three rounds (as for timing
-  // budgets, D46), so the test never passes without seeing the shape (PR #10 review F6). On the
-  // macOS CI VM a frame can take 100–200 ms (D17), so there only the end state is checked.
+  // checked on frames that came in time (at 100 ms it is about half grown), which needs a frame by
+  // 100 ms and a few while it grows. A starved renderer can miss them; then that pane is closed and a
+  // new one grows in, up to three rounds (as for timing budgets, D46), so the test never passes
+  // without seeing the shape (PR #10 review F6). On the macOS CI VM a frame can take 100–200 ms
+  // (D17), so there only the end state is checked.
   let grown: { tabId: string; samples: GrowProbe['samples'] } | undefined
   const rounds: string[] = []
   for (let round = 1; round <= 3 && !grown; round++) {
@@ -803,10 +806,17 @@ test('[SV-26] a new pane grows in with a spring and a closed one fades out', asy
     const { samples } = await growIn(b, a)
     const early = samples.filter((s) => s.t <= 100).length
     const by300 = samples.filter((s) => s.t <= 300).length
-    if (FRAME_SLACK !== 1 || (early > 0 && by300 >= 8)) grown = { tabId: b, samples }
+    // The checks below need a frame by 100 ms and two while it grows (PR #19 review M2).
+    if (FRAME_SLACK !== 1 || (early > 0 && by300 >= 3)) grown = { tabId: b, samples }
     else {
       rounds.push(`round ${round}: ${early} frames by 100 ms, ${by300} by 300 ms`)
       await run(orbit.app, 'split.closePane', { tabId: b })
+      // The next pane grows from the neighbour that overlaps it, so wait for the close to finish: the
+      // shell has drawn it (its ghost exists from here) and the ghost has faded. Until then the
+      // neighbour may not reach the next pane's edge yet, and that pane appears at full size
+      // (PR #19 review M1).
+      await expect(orbit.shell.locator(`[data-testid="split-pane"][data-tab-id="${b}"]`)).toHaveCount(0)
+      await expect(orbit.shell.locator('[data-testid="split-ghost"]')).toHaveCount(0)
     }
   }
   if (!grown) throw new Error(`frames never came in time to show the grow-in (${rounds.join('; ')})`)
