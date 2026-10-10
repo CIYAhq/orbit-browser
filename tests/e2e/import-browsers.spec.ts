@@ -85,7 +85,7 @@ const WORK_BOOKMARKS = {
   ],
 }
 
-test('[IM-02][IM-03][IM-04][IM-05][IM-14] a Chrome profile’s bookmarks become “Imported from Chrome”, as pinned tabs that don’t load', async () => {
+test('[IM-02][IM-03][IM-04][IM-05][IM-09][IM-14] a Chrome profile’s bookmarks become “Imported from Chrome”, as pinned tabs that don’t load', async () => {
   orbit = await launchImport({ places: FIXTURE_PLACES })
   const { app } = orbit
   const page = await openImport(app)
@@ -100,6 +100,13 @@ test('[IM-02][IM-03][IM-04][IM-05][IM-14] a Chrome profile’s bookmarks become 
   await expect(page.getByTestId('import-type-history')).toContainText('6 pages visited')
   await expect(page.getByTestId('import-type-history').getByRole('checkbox')).toBeChecked()
   await expect(page.getByText('Passwords and cards are never imported.')).toBeVisible()
+  // IM-09: its extensions, pinned ones first, listed but not importable yet; the browser's own left out.
+  const extensions = page.getByTestId('import-type-extensions')
+  await expect(extensions).toContainText('Example Blocker, Notes Helper, Another Ad Blocker, My Unpacked Tool')
+  await expect(extensions).toContainText('Not importable yet: Orbit can’t install extensions yet.')
+  await expect(extensions).toContainText('Unpacked ones never come over.')
+  await expect(extensions.getByRole('checkbox')).toBeDisabled()
+  await expect(extensions.getByRole('checkbox')).not.toBeChecked()
   // Nothing chosen, nothing to go on with.
   for (const type of ['bookmarks', 'history'])
     await page.getByTestId(`import-type-${type}`).getByRole('checkbox').uncheck()

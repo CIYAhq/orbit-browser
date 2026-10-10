@@ -9,6 +9,7 @@ import type {
 } from '../../shared/commands/import'
 import { chromiumBookmarks, chromiumProfiles } from './chromium'
 import { LockedError, type Scratch, withDatabase } from './copy'
+import { chromiumExtensions } from './extensions'
 import { firefoxProfiles, readFirefoxBookmarks } from './firefox'
 import { countHistory, historySql } from './history'
 import { countBookmarks } from './netscape'
@@ -183,6 +184,11 @@ export async function inspectProfile(
     await part(out, source, ['bookmarks'], async () => {
       const copy = await scratch.take(file('Bookmarks'))
       if (copy) setBookmarks(chromiumBookmarks(await readFile(copy, 'utf8')))
+    })
+    // Listed, not yet importable (IM-09).
+    await part(out, source, ['extensions'], async () => {
+      const items = await chromiumExtensions(scratch, profile.dir)
+      if (items.length) out.extensions = { items }
     })
   }
   await part(out, source, ['history'], () =>

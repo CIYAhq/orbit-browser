@@ -1,5 +1,11 @@
 import { Lock, RotateCw } from 'lucide-react'
-import type { BrowserKind, ImportDataType, ImportSource, Inspection } from '../../../shared/commands/import'
+import type {
+  BrowserKind,
+  ImportDataType,
+  ImportSource,
+  Inspection,
+  SourceExtension,
+} from '../../../shared/commands/import'
 
 /** A browser's letter tile colour (no logos: Orbit doesn't ship other browsers' marks). */
 const TILE: Record<BrowserKind, string> = {
@@ -125,7 +131,7 @@ export function TypesPicker({
   let hasBookmarks = false
   let hasHistory = false
   let hasCookies = false
-  const extensions = new Map<string, string>()
+  const extensions = new Map<string, SourceExtension>()
   const locked = new Set<ImportDataType>()
   for (const p of inspection.profiles) {
     if (p.bookmarks) {
@@ -141,7 +147,7 @@ export function TypesPicker({
       cookies += p.cookies.count
       cookiesUnavailable ??= p.cookies.unavailable
     }
-    for (const x of p.extensions?.items ?? []) extensions.set(x.id, x.name)
+    for (const x of p.extensions?.items ?? []) extensions.set(x.id, x)
     for (const t of p.locked) locked.add(t)
   }
   const toggle = (t: ImportDataType, on: boolean) =>
@@ -178,12 +184,18 @@ export function TypesPicker({
         {/* A profile whose file is held offers nothing of that type; the others' still come over. */}
         {hasBookmarks && row('bookmarks', `${plural(bookmarks, 'bookmark', 'bookmarks')}, as pinned tabs`)}
         {hasHistory && row('history', plural(history, 'page visited', 'pages visited'))}
+        {/* Listed, not installed: Orbit has no install path yet (IM-09). */}
         {extensions.size > 0 &&
           row(
             'extensions',
-            [...extensions.values()].slice(0, 4).join(', ') + (extensions.size > 4 ? `, +${extensions.size - 4}` : ''),
+            [...extensions.values()]
+              .slice(0, 4)
+              .map((x) => x.name)
+              .join(', ') + (extensions.size > 4 ? `, +${extensions.size - 4}` : ''),
             true,
-            'Not importable yet: install them again from their store.',
+            `Not importable yet: Orbit can’t install extensions yet.${
+              [...extensions.values()].some((x) => !x.fromStore) ? ' Unpacked ones never come over.' : ''
+            }`,
           )}
         {hasCookies &&
           row(

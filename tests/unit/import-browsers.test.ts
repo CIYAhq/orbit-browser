@@ -1,4 +1,4 @@
-import { chmodSync, cpSync, mkdtempSync, rmSync } from 'node:fs'
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { copyFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -142,6 +142,56 @@ describe('[IM-02] the browsers on this computer', () => {
   })
 })
 
+describe('[IM-09] a Chromium profile’s extensions, listed', () => {
+  it('those it installed, pinned first, with where they came from; the browser’s own left out', async () => {
+    const [work, personal] = await contents(await source('chrome'))
+    const x = (id: string, name: string, pinned: boolean, fromStore: boolean, blocker: boolean) => ({
+      id: id.repeat(32),
+      name,
+      pinned,
+      fromStore,
+      blocker,
+    })
+    expect(work?.extensions?.items).toEqual([
+      x('a', 'Example Blocker', true, true, true),
+      x('c', 'Notes Helper', true, true, false),
+      x('b', 'Another Ad Blocker', false, true, true),
+      x('d', 'My Unpacked Tool', false, false, false),
+    ])
+    expect(personal?.extensions).toBeUndefined()
+  })
+
+  it('a name kept only in the extension’s manifest, in its own language; a broken one left out, alone', async () => {
+    const dir = scratchDir()
+    const marks = { bar: [{ title: 'One', url: 'https://example.com/1' }], other: [], mobile: [] }
+    writeChromium(join(dir, 'chrome'), [{ folder: 'Default', name: 'Me', bookmarks: marks }])
+    const profile = join(dir, 'chrome', 'Default')
+    const id = 'f'.repeat(32)
+    const broken = 'h'.repeat(32)
+    // Its settings in Secure Preferences, its pin in Preferences; the browser's own one left out.
+    const settings = {
+      [id]: { location: 1, path: `${id}/2.0_0` },
+      ['g'.repeat(32)]: { location: 5, path: 'x' },
+      [broken]: { location: 1, path: `${broken}/1.0_0` },
+      'not-an-id': { location: 1, manifest: { name: 'Odd' } },
+    }
+    writeFileSync(join(profile, 'Secure Preferences'), JSON.stringify({ extensions: { settings } }))
+    writeFileSync(join(profile, 'Preferences'), JSON.stringify({ extensions: { pinned_extensions: [id] } }))
+    const folder = join(profile, 'Extensions', id, '2.0_0')
+    mkdirSync(join(folder, '_locales', 'fr'), { recursive: true })
+    // A byte-order mark, as some manifests have.
+    writeFileSync(
+      join(folder, 'manifest.json'),
+      `\uFEFF${JSON.stringify({ name: '__MSG_appName__', default_locale: 'fr' })}`,
+    )
+    mkdirSync(join(profile, 'Extensions', broken, '1.0_0'), { recursive: true })
+    writeFileSync(join(profile, 'Extensions', broken, '1.0_0', 'manifest.json'), '{ "name": ')
+    writeFileSync(join(folder, '_locales', 'fr', 'messages.json'), JSON.stringify({ AppName: { message: 'Bloqueur' } }))
+    const [me] = await contents(await source('chrome', join(dir, 'chrome')))
+    expect(me?.extensions?.items).toEqual([{ id, name: 'Bloqueur', pinned: true, fromStore: true, blocker: false }])
+  })
+})
+
 describe('[IM-03][IM-04] what a profile holds', () => {
   it('Chromium: the bookmarks bar and other bookmarks as folders, nesting and order kept; an empty root left out', async () => {
     const [work, personal] = await contents(await source('chrome'))
@@ -220,7 +270,8 @@ describe('[IM-03][IM-04] what a profile holds', () => {
         await copyFile(from, to)
       }
     const [work] = await contents(chrome, holding('Bookmarks'))
-    expect(work).toEqual({ profileId: 'Default', name: 'Work', locked: ['bookmarks'], history: { count: 6 } })
+    expect(work).toMatchObject({ profileId: 'Default', name: 'Work', locked: ['bookmarks'], history: { count: 6 } })
+    expect(work?.bookmarks).toBeUndefined()
     const [busyHistory] = await contents(chrome, holding('History'))
     expect(busyHistory?.locked).toEqual(['history'])
     expect(busyHistory?.bookmarks?.count).toBe(6)
