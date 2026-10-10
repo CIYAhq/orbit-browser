@@ -5,6 +5,7 @@ import {
   closeWindow,
   cmd,
   cmdIn,
+  focusedUrl,
   type NavFixtures,
   openTab,
   shellRoundTrip,
@@ -541,14 +542,12 @@ test('[NV-15] with the sidebar hidden the prompt shows over the page’s top-lef
   const { id, p } = await open(app, page('Corner'))
   await action(app, 'sidebar.toggle')
   await expect.poll(async () => (await windowState(app)).sidebar.visible).toBe(false)
-  const shown = await settledPage(app, id)
+  await settledPage(app, id)
   await ask(p, 'notifications')
   await expect.poll(async () => (await promptView(app)).placed).toBe(true)
-  const bounds = (await promptView(app)).bounds
-  if (!bounds) throw new Error('no bounds')
-  // The card sits 10 px in from the page's corner (its view has a 12 px margin for the shadow).
-  expect(bounds.x).toBe(shown.x - 2)
-  expect(bounds.y).toBe(shown.y - 2)
+  // The card sits 10 px in from the page's corner (its view has a 12 px margin for the shadow). Both
+  // are read at once: the page may still be sliding when the view's page is in and it is placed.
+  await expect.poll(() => promptFromCorner(app, id)).toEqual({ x: -2, y: -2 })
   const view = await promptPage(app)
   const card = view.getByTestId('permission-prompt')
   await expect(card).toBeVisible()
@@ -609,6 +608,48 @@ const clickAllowAsItShows = (app: ElectronApplication, count: number, every: num
     },
     [count, every] as const,
   )
+
+test('[NV-15] the window’s first prompt over a page leaves the keyboard with the page (fix check A, F1)', async () => {
+  const { app } = orbit
+  const { id, p } = await open(app, page('Typing'))
+  await action(app, 'sidebar.toggle')
+  await expect.poll(async () => (await windowState(app)).sidebar.visible).toBe(false)
+  await settledPage(app, id)
+  // The page has the keyboard, as while someone types in it.
+  await app.evaluate((_e, tabId) => {
+    const g = globalThis as unknown as {
+      __orbit: { ctx: { tabs: { contents: (id: string) => Electron.WebContents | undefined } } }
+    }
+    g.__orbit.ctx.tabs.contents(tabId)?.focus()
+  }, id)
+  await expect.poll(() => focusedUrl(app)).toBe(page('Typing'))
+  // Each web contents that takes the keyboard from here on, as it does (a view's own page may not be in yet).
+  await app.evaluate(({ app: electronApp, webContents }) => {
+    const g = globalThis as unknown as { __tookKeyboard: number[] }
+    g.__tookKeyboard = []
+    const watch = (contents: Electron.WebContents) => contents.on('focus', () => g.__tookKeyboard.push(contents.id))
+    for (const contents of webContents.getAllWebContents()) watch(contents)
+    electronApp.on('web-contents-created', (_e, contents) => watch(contents))
+  })
+  await ask(p, 'notifications')
+  await expect.poll(async () => (await promptView(app)).placed).toBe(true)
+  // Its view's page is in too: a view placed before then took the keyboard as its page arrived.
+  await expect
+    .poll(() =>
+      app.evaluate(({ webContents }) =>
+        webContents.getAllWebContents().some((c) => c.getURL().includes('view=prompt') && !c.isLoading()),
+      ),
+    )
+    .toBe(true)
+  await expect((await promptPage(app)).getByTestId('permission-prompt')).toBeVisible()
+  const tookKeyboard = await app.evaluate(({ webContents }) =>
+    (globalThis as unknown as { __tookKeyboard: number[] }).__tookKeyboard.map(
+      (contentsId) => webContents.fromId(contentsId)?.getURL() ?? '',
+    ),
+  )
+  expect(tookKeyboard.filter((url) => url.includes('view=prompt'))).toEqual([])
+  expect(await focusedUrl(app)).toBe(page('Typing'))
+})
 
 test('[NV-15] a prompt takes no clicks as it shows, nor while they keep coming; a click after a pause answers', async () => {
   const { app } = orbit

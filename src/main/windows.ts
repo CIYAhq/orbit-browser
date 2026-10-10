@@ -76,7 +76,13 @@ interface WindowRecord {
    * with the sidebar showing, the prompt is part of it). Started when first needed.
    */
   prompt?: WebContentsView
+  /** The prompt is wanted on screen: from showPrompt() to hidePrompt(). */
   promptShown: boolean
+  /**
+   * The prompt view's page has loaded. Only then does the view go into the window: a view placed
+   * while its page loads takes the keyboard from the page (fix check A, F1).
+   */
+  promptReady: boolean
   /**
    * What the prompt view's page was last told (`prompt:placed`): whether the view is on screen,
    * placed and not under a page cover. Unset for a new page, which asks when it loads.
@@ -395,6 +401,7 @@ export class WindowManager {
       floatingShown: false,
       toolsShown: false,
       promptShown: false,
+      promptReady: false,
       uiViews: new Set(),
     }
     this.records.set(id, rec)
@@ -731,6 +738,11 @@ export class WindowManager {
       view.setBounds(next)
     }
     rec.promptShown = true
+    // Not before its page has loaded (fix check A, F1): ensurePrompt() places it then.
+    if (rec.promptReady) this.placePrompt(rec, view)
+  }
+
+  private placePrompt(rec: WindowRecord, view: WebContentsView): void {
     this.placeAbovePages(rec, view)
     view.setVisible(true)
     this.tellPrompt(rec)
@@ -763,7 +775,7 @@ export class WindowManager {
    */
   promptOnScreen(windowId: WindowId): boolean {
     const rec = this.records.get(windowId)
-    return !!rec && rec.promptShown && !rec.cover
+    return !!rec && rec.promptShown && rec.promptReady && !rec.cover
   }
 
   /**
@@ -772,7 +784,7 @@ export class WindowManager {
    * wait a moment again once the cover has gone (fix check B, M1).
    */
   private tellPrompt(rec: WindowRecord): void {
-    const onScreen = rec.promptShown && !rec.cover
+    const onScreen = rec.promptShown && rec.promptReady && !rec.cover
     if (rec.promptSaid === onScreen) return
     rec.promptSaid = onScreen
     viewContents(rec.prompt)?.send('orbit:prompt:placed', onScreen)
@@ -1402,7 +1414,14 @@ export class WindowManager {
     loadRenderer(view.webContents, 'prompt')
     rec.prompt = view
     rec.promptShown = false
+    rec.promptReady = false
     rec.promptSaid = undefined
+    // Into the window once its page has loaded, if it is still wanted then (fix check A, F1).
+    view.webContents.once('did-finish-load', () => {
+      if (rec.prompt !== view || rec.win.isDestroyed()) return
+      rec.promptReady = true
+      if (rec.promptShown) this.placePrompt(rec, view)
+    })
     return view
   }
 
