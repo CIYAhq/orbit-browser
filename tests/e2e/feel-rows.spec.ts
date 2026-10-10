@@ -389,6 +389,7 @@ test('[FL-10][FL-29] dragging the fifth row up three slots: lift in a frame, 1:1
   }
   const sorted = offsets.map((o) => o.d).sort((x, y) => x - y)
   const grab = sorted[Math.floor(sorted.length / 2)] ?? 0
+  // The press was at the row's centre, so that is where the pointer holds it: 0 px off.
   const lagging = offsets
     .filter((o) => Math.abs(o.d - grab) > 1.5)
     .map((o) => `${Math.round(o.t)} ms: ${(o.d - grab).toFixed(1)} px off`)
@@ -422,10 +423,12 @@ test('[FL-10][FL-29] dragging the fifth row up three slots: lift in a frame, 1:1
   note('FL-10', 'threshold → lift visible', lift?.ms, '1 frame (16.7 ms)')
   note('FL-10', 'frames from the threshold to the lift', lift?.frames, '1', 'frames')
   note('FL-10', 'frames where the row lagged the pointer', lagging.length, '0', 'frames')
+  note('FL-10', 'row centre to the pointer while held', Math.abs(grab), '0 (pressed at its centre)', 'px')
   note('FL-10', 'Escape → back in its slot', returned, '≤ 300 ms')
   note('FL-10', 'frame p99 while dragging', pacing(r).p99, `≤ ${FRAME.toFixed(1)} ms`)
   expect(lift?.frames ?? Number.POSITIVE_INFINITY, 'frames to the lift').toBeLessThanOrEqual(1)
   expect(lagging, 'frames where the dragged row was not under the pointer').toEqual([])
+  expect(Math.abs(grab), 'the dragged row is held where it was pressed').toBeLessThanOrEqual(1.5)
   expect(flicker, 'gaps that flickered').toEqual([])
   expect(returned).toBeLessThanOrEqual(300 * FRAME_SLACK)
 })

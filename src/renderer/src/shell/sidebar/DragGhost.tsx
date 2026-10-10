@@ -1,5 +1,6 @@
 import { Folder } from 'lucide-react'
 import { motion } from 'motion/react'
+import { createPortal } from 'react-dom'
 import { isFolderId, isTabId } from '../../../../shared/ids'
 import { rowTitle } from '../../../../shared/tabs'
 import { tween } from '../../motion'
@@ -26,7 +27,12 @@ export function DragGhost() {
   const first = ghost.ids[0] as string
   const asTile = ghost.source === 'favorites' || overFavorites
   const settling = phase === 'landing' || phase === 'cancelling'
-  return (
+  // Drawn in the shell's root, which carries the Space theme, rather than here in the Space strip:
+  // the strip's track is a containing block for fixed elements (it is composited for swipes), so a
+  // ghost in it sat lower than the pointer by the strip's offset and slid with the Space pages
+  // (FL-10: the row stays exactly under the pointer, also while the Spaces slide).
+  const host = document.querySelector<HTMLElement>('.shell') ?? document.body
+  return createPortal(
     <motion.div
       className={`drag-ghost${asTile ? ' drag-ghost--tile' : ''}${outside ? ' drag-ghost--outside' : ''}${ghost.ids.length > 1 ? ' drag-ghost--stack' : ''}${settling ? ' is-settling' : ''}`}
       data-testid="drag-ghost"
@@ -45,7 +51,8 @@ export function DragGhost() {
     >
       <GhostContent id={first} tile={asTile} />
       {ghost.ids.length > 1 && <span className="drag-ghost__count">{ghost.ids.length}</span>}
-    </motion.div>
+    </motion.div>,
+    host,
   )
 }
 
