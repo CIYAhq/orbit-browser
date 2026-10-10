@@ -1,7 +1,7 @@
 import { X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { LibraryShow } from '../../../shared/commands/archive'
-import { invoke, perfMark } from '../api'
+import { invoke, isMac, perfMark } from '../api'
 import { useWindow } from '../store'
 import { paletteVars, prefersReducedMotion, usePalette } from '../theme'
 import { LibraryToasts } from './LibraryToasts'
@@ -16,7 +16,7 @@ const EASE_OUT = 'cubic-bezier(0.2, 0.8, 0.2, 1)'
 /**
  * The Library (AR-02, DL-09): a full view over the page area, with the section list on the left and
  * the chosen section on the right. Main shows and hides this view (`library:show`, `library:hide`);
- * Esc and ⌘W close it, and the page underneath comes back.
+ * Esc and ⌘W close it, and the page underneath comes back. ⌘Z / ⌘⇧Z undo and redo sidebar changes.
  */
 export function LibraryApp() {
   const win = useWindow()
@@ -85,13 +85,24 @@ export function LibraryApp() {
     }
   }, [open, show?.nonce])
 
-  // Esc closes the Library when nothing inside used it (a search field clears first).
+  // Esc closes the Library when nothing inside used it (a search field clears first). Outside text
+  // fields, ⌘Z / ⌘⇧Z (Ctrl on Windows and Linux) undo and redo sidebar changes, as from the sidebar
+  // or a page (TB-18): a Restore Data just done here, say.
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return
+      if (e.defaultPrevented || e.isComposing) return
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        void invoke('library.close', {})
+        return
+      }
+      const mod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
+      if (!mod || e.altKey || e.key.toLowerCase() !== 'z') return
+      const target = e.target as HTMLElement | null
+      if (target?.closest('input, textarea, [contenteditable="true"]')) return
       e.preventDefault()
-      void invoke('library.close', {})
+      void invoke(e.shiftKey ? 'tabs.redo' : 'tabs.undo', {})
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

@@ -1,5 +1,5 @@
 import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react'
-import type { BackupInfo } from '../../../shared/commands/archive'
+import type { BackupInfo, BackupUndoResult } from '../../../shared/commands/archive'
 import { invoke } from '../api'
 import { ConfirmDialog } from './ConfirmDialog'
 import { dayLabel } from './geometry'
@@ -32,6 +32,13 @@ function ago(at: number, now: number): string {
   return hours < 24 ? relative.format(-hours, 'hour') : ''
 }
 
+/** What the toast's Undo says it did. */
+const UNDO_MESSAGES: Record<BackupUndoResult, string> = {
+  undone: 'Restore undone',
+  later: 'Undo the changes made since first',
+  gone: 'The restore was undone already',
+}
+
 function counts(b: BackupInfo): string {
   const spaces = `${b.spaces} ${b.spaces === 1 ? 'Space' : 'Spaces'}`
   const tabs = `${b.tabs.toLocaleString()} ${b.tabs === 1 ? 'tab' : 'tabs'}`
@@ -41,7 +48,7 @@ function counts(b: BackupInfo): string {
 /**
  * Backups (AR-11), the Library section Help → Restore Data… opens: the sidebar backups Orbit keeps,
  * newest first by day. Restore… (or Enter on the highlighted row) asks first, then puts the
- * sidebar back as it was; the toast's Undo (or ⌘Z) restores the backup taken just before.
+ * sidebar back as it was; the toast's Undo (or ⌘Z) takes the restore back, ⌘⇧Z restores again.
  */
 export function BackupsSection({ show }: LibrarySectionProps) {
   const [list, setList] = useState<BackupInfo[] | null>(null)
@@ -77,16 +84,16 @@ export function BackupsSection({ show }: LibrarySectionProps) {
         )
         return
       }
-      const undoId = result.undoId
+      const step = result.undoStep
       libraryToast(
         `Sidebar restored from ${momentLabel(b.at, Date.now())}`,
-        undoId
+        step !== undefined
           ? {
               label: 'Undo',
               run: () => {
-                invoke('backups.restore', { id: undoId })
-                  .then((r) => libraryToast(r.restored ? 'Restore undone' : 'The restore can’t be undone'))
-                  .catch(() => libraryToast('The restore can’t be undone'))
+                invoke('backups.undoRestore', { step })
+                  .then((r) => libraryToast(UNDO_MESSAGES[r]))
+                  .catch(() => libraryToast(UNDO_MESSAGES.gone))
               },
             }
           : undefined,

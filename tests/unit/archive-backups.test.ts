@@ -10,7 +10,6 @@ import {
   parseBackupId,
   scheduleBackups,
 } from '../../src/main/archive/backups'
-import { sidebarRestored } from '../../src/main/archive/inbox'
 import { RestoreData } from '../../src/main/archive/restore-data'
 import { ArchiveSync } from '../../src/main/archive/service'
 import { buildSnapshot, restoreSidebar, sidebarHash } from '../../src/main/archive/snapshot'
@@ -218,15 +217,8 @@ describe('Sidebar backups (AR-11)', () => {
     // The window still shows the tab it showed.
     expect(s.windows[w.w1]?.activeTab[w.a]).toBe(w.keep)
 
-    // The sidebar's earlier undo steps are gone; ⌘Z now takes the restore back.
+    // The sidebar's earlier undo steps stay (Restore Data adds its own step above them, below).
     expect(w.ops.undo.peek()?.label).toBe('Delete Folder')
-    let undone = 0
-    sidebarRestored(() => {
-      undone++
-    })
-    expect(w.ops.undo.size).toBe(1)
-    expect(w.ops.undo.undo()).toBe('Restore Data')
-    expect(undone).toBe(1)
   })
 
   it('[AR-11] a window whose tab left shows a tab that was there before, not one that just came back', async () => {
@@ -436,5 +428,71 @@ describe('Restore Data (AR-11)', () => {
     expect(w.store.state).toBe(before)
     expect(w.destroyed).toEqual([])
     expect(w.ops.undo.size).toBe(steps)
+  })
+
+  it('[AR-11] Restore Data is one undo step: ⌘Z takes it back, the next ⌘Z goes further back, ⌘⇧Z redoes; no backup file is needed (review F2, F3)', async () => {
+    const w = await world()
+    const dir = backupsDir()
+    const backups = new BackupStore(dir)
+    const restore = new RestoreData(w.ctx, w.archive, backups)
+    const earlier = await backups.take(w.store.state, Date.now() - 5 * MIN)
+    // Since then: a Space with a tab, and a tab closed (an undo step of its own).
+    const added = createSpace('Added', DEFAULT_PROFILE_ID)
+    w.store.update((d) => {
+      d.spaces[added.id] = added
+      d.spaceOrder.push(added.id)
+    })
+    const late = w.tab(added.id, 'https://late.test/')
+    const gone = w.tab(w.a, 'https://gone.test/')
+    w.ops.closeTabs([gone], 'closed')
+    expect(w.ops.undo.peek()?.label).toBe('Close Tab')
+
+    const result = await restore.restore(earlier.id)
+    expect(result).toMatchObject({ restored: true, archived: 1 })
+    expect(w.store.state.spaces[added.id]).toBeUndefined()
+    // The step from before stays, under the restore's.
+    expect(w.ops.undo.size).toBe(2)
+    expect(w.ops.undo.peek()?.label).toBe('Restore Data')
+    // Backups pruned since (or deleted) don't matter: the undo needs no file.
+    for (const name of readdirSync(dir)) rmSync(join(dir, name))
+    // ⌘Z: the sidebar is as it was before the restore, the late tab back in its Space.
+    expect(w.ops.undo.undo()).toBe('Restore Data')
+    expect(w.store.state.spaceOrder).toContain(added.id)
+    expect(w.store.state.tabs[late]).toMatchObject({ spaceId: added.id, url: 'https://late.test/' })
+    // ⌘Z again goes further back: the closed tab returns, and the restore is not applied again.
+    expect(w.ops.undo.undo()).toBe('Close Tab')
+    expect(w.store.state.tabs[gone]).toBeDefined()
+    expect(w.store.state.spaces[added.id]).toBeDefined()
+    // ⌘⇧Z redoes, the last undone first: the close, then the restore.
+    expect(w.ops.undo.redo()).toBe('Close Tab')
+    expect(w.store.state.tabs[gone]).toBeUndefined()
+    expect(w.ops.undo.redo()).toBe('Restore Data')
+    expect(w.store.state.spaces[added.id]).toBeUndefined()
+    expect(w.store.state.tabs[late]).toBeUndefined()
+    // ⌘Z takes it back again; neither undo nor redo wrote a backup.
+    expect(w.ops.undo.undo()).toBe('Restore Data')
+    expect(w.store.state.tabs[late]).toBeDefined()
+    expect(readdirSync(dir)).toEqual([])
+  })
+
+  it('[AR-11] the toast’s Undo takes the restore back while it is the newest change, and only then (review F2)', async () => {
+    const w = await world()
+    const backups = new BackupStore(backupsDir())
+    const restore = new RestoreData(w.ctx, w.archive, backups)
+    const earlier = await backups.take(w.store.state, Date.now() - 5 * MIN)
+    const late = w.tab(w.a, 'https://late.test/')
+    const first = await restore.restore(earlier.id)
+    expect(w.store.state.tabs[late]).toBeUndefined()
+    expect(first.undoStep).toEqual(expect.any(Number))
+    expect(restore.undo(first.undoStep)).toBe('undone')
+    expect(w.store.state.tabs[late]).toBeDefined()
+    expect(restore.undo(first.undoStep)).toBe('gone')
+    // Restored again, then a change made after it: the toast leaves both alone.
+    const second = await restore.restore(earlier.id)
+    const other = w.tab(w.a, 'https://other.test/')
+    w.ops.closeTabs([other], 'closed')
+    expect(restore.undo(second.undoStep)).toBe('later')
+    expect(w.store.state.tabs[late]).toBeUndefined()
+    expect(w.ops.undo.peek()?.label).toBe('Close Tab')
   })
 })

@@ -61,9 +61,7 @@ export class UndoStack {
     return this.entries.length
   }
 
-  /** Forgets every step, to undo and to redo. */
   clear(): void {
     this.entries = []
-    this.redos = []
   }
 }

@@ -323,6 +323,7 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
   })
   const restoreData = new RestoreData(ctx, store, backups)
   commands.register('backups.restore', ({ id }) => restoreData.restore(id))
+  commands.register('backups.undoRestore', ({ step }) => restoreData.undo(step))
 
   // ---- History (AR-10): the history store's visits, for the Library's History section ----
 

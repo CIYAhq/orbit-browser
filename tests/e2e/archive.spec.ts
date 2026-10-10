@@ -709,7 +709,7 @@ test('[AR-06] from a preview, Open as Tab opens the page and keeps the entry; Re
   expect(await ids('expanded')).toEqual([expanded])
 })
 
-test('[AR-11] Restore Data lists sidebar backups; the one from before a folder was deleted brings the folder back, and Undo takes the restore back', async () => {
+test('[AR-11] Restore Data lists sidebar backups; the one from before a folder was deleted brings the folder back; Undo, ⌘Z and ⌘⇧Z in the Library take it back and redo it', async () => {
   const { app } = orbit
   const sp = await space(app)
   const stay = await newTab(app, fx.url('/page/Stay'))
@@ -778,11 +778,20 @@ test('[AR-11] Restore Data lists sidebar backups; the one from before a folder w
   await expect.poll(async () => ((await run(app, 'backups.list')) as BackupInfo[]).length).toBeGreaterThanOrEqual(2)
   await expect(lib.getByTestId('backup-row').first()).not.toHaveAttribute('data-id', backup.id)
 
-  // Undo restores that one: the folder goes again and the late tab comes back, same tab.
+  // Undo takes the restore back: the folder goes again and the late tab comes back, same tab.
   await toast.getByTestId('library-toast-action').click()
   await expect(lib.getByTestId('library-toast').filter({ hasText: 'Restore undone' })).toBeVisible()
   await expect.poll(async () => (await state(app)).folders[folderId]).toBeUndefined()
   await expect.poll(async () => (await state(app)).tabs[late]?.url).toBe(fx.url('/page/Late'))
   await expect.poll(urls).toEqual(expect.arrayContaining([fx.url('/page/One'), fx.url('/page/Two')]))
   expect(await urls()).not.toContain(fx.url('/page/Late'))
+
+  // With the keys still in the Library, ⌘⇧Z restores again and ⌘Z takes it back (TB-18).
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
+  await lib.keyboard.press(`${mod}+Shift+Z`)
+  await expect.poll(async () => (await state(app)).folders[folderId]?.children.length).toBe(2)
+  await expect.poll(async () => (await state(app)).tabs[late]).toBeUndefined()
+  await lib.keyboard.press(`${mod}+Z`)
+  await expect.poll(async () => (await state(app)).folders[folderId]).toBeUndefined()
+  await expect.poll(async () => (await state(app)).tabs[late]?.url).toBe(fx.url('/page/Late'))
 })

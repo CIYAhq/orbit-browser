@@ -1,4 +1,5 @@
 import type { ArchivedTab, ProfileId } from '../../shared/state'
+import type { UndoStack } from '../tabs/undo'
 import type { ArchiveHistory } from './store'
 
 /**
@@ -34,19 +35,19 @@ export function onArchiveHistory(fn: ((archiveId: string) => void) | undefined):
   listener = fn
 }
 
-let restoredListener: ((undo?: () => void) => void) | undefined
+/** The sidebar's undo stack (TB-18), which the tabs code owns. */
+export type SidebarUndo = Pick<UndoStack, 'push' | 'peek' | 'undo'>
 
-/**
- * The tabs code hears when Restore Data replaced the whole sidebar (AR-11): its undo steps were
- * about a sidebar that is gone, and `undo` (when given) takes the restore back.
- */
-export function onSidebarRestored(fn: ((undo?: () => void) => void) | undefined): void {
-  restoredListener = fn
+let sidebarUndoRef: SidebarUndo | undefined
+
+/** Set by the tabs code: Restore Data records itself as a step on the sidebar's undo stack (AR-11). */
+export function provideSidebarUndo(stack: SidebarUndo | undefined): void {
+  sidebarUndoRef = stack
 }
 
-/** Called by the Archive code right after it restored the sidebar from a backup. */
-export function sidebarRestored(undo?: () => void): void {
-  restoredListener?.(undo)
+/** The sidebar's undo stack (undefined before the tabs code started). */
+export function sidebarUndo(): SidebarUndo | undefined {
+  return sidebarUndoRef
 }
 
 /** What the command bar searches for archived tabs (AR-04): the whole Archive, beyond `state.archive`. */

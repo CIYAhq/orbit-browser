@@ -124,12 +124,21 @@ export interface BackupRestoreResult {
    * as it is couldn't be backed up first (`backup-failed`).
    */
   reason?: 'unreadable' | 'backup-failed'
-  /** The backup of the sidebar taken just before: restoring it undoes this restore. */
-  undoId?: string
+  /**
+   * The restore's step on the sidebar's undo stack (⌘Z takes it back), for the toast's Undo
+   * (`backups.undoRestore`). None when the restore changed nothing.
+   */
+  undoStep?: number
   /** Tabs that came back, and tabs that went to the Archive. */
   added?: number
   archived?: number
 }
+
+/**
+ * What the restore toast's Undo did: took the restore back (`undone`), or left it because changes
+ * were made since (`later`) or it was undone already (`gone`).
+ */
+export type BackupUndoResult = 'undone' | 'later' | 'gone'
 
 /** Owned by the archive lane: the Archive, the Library container, history view and backups. */
 export interface ArchiveCommands {
@@ -217,10 +226,13 @@ export interface ArchiveCommands {
   'backups.list': { args: Record<string, never>; result: BackupInfo[] }
   /**
    * Puts the sidebar back as it was in a backup (AR-11): Spaces, Favorites, pinned and Today tabs,
-   * folders and split views. Backs up the sidebar as it is first (`undoId`). Tabs opened since go
-   * to the Archive; tabs that come back leave it.
+   * folders and split views. Backs up the sidebar as it is first, and changes nothing when that
+   * fails. Tabs opened since go to the Archive; tabs that come back leave it. One step on the
+   * sidebar's undo stack: ⌘Z takes it back, ⌘⇧Z restores again.
    */
   'backups.restore': { args: { id: string }; result: BackupRestoreResult }
+  /** The restore toast's Undo: takes restore `step` back while it is the sidebar's newest change. */
+  'backups.undoRestore': { args: { step: number }; result: BackupUndoResult }
   /**
    * Backs up the sidebar now, unless the newest backup holds the same sidebar: returns the new
    * backup or that one (null when backups cannot be written).
