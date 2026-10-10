@@ -69,6 +69,24 @@ export async function dropFile(
   )
 }
 
+/** Drops a file of `bytes` bytes, made in the page (too large to send from the test), on an element. */
+export async function dropLargeFile(page: Page, selector: string, name: string, bytes: number): Promise<void> {
+  await page.locator(selector).first().waitFor()
+  await page.evaluate(
+    ({ selector, name, bytes }) => {
+      const target = document.querySelector(selector) as HTMLElement
+      const data = new DataTransfer()
+      data.items.add(new File([new Uint8Array(bytes).fill(0x61)], name, { type: 'text/html' }))
+      const rect = target.getBoundingClientRect()
+      const at = { clientX: rect.left + rect.width / 2, clientY: rect.top + Math.min(rect.height / 2, 40) }
+      for (const type of ['dragenter', 'dragover', 'drop']) {
+        target.dispatchEvent(new DragEvent(type, { dataTransfer: data, bubbles: true, cancelable: true, ...at }))
+      }
+    },
+    { selector, name, bytes },
+  )
+}
+
 /**
  * The pages loaded in any web contents: every address that isn't Orbit's own UI (its views are
  * created as they're first needed, so their number changes on its own).
@@ -102,7 +120,8 @@ export async function loggedServer(): Promise<{
     res.writeHead(200, { 'content-type': 'text/html' })
     res.end(`<!doctype html><title>${req.url}</title><h1>${req.url}</h1>`)
   })
-  const port = await listenInRange(server, 3380 + (Number(process.env.TEST_PARALLEL_INDEX ?? 0) % 10))
+  // This lane's ports: 3350 to 3369, one per parallel worker.
+  const port = await listenInRange(server, 3350 + (Number(process.env.TEST_PARALLEL_INDEX ?? 0) % 20))
   return {
     url: (path) => `http://127.0.0.1:${port}${path}`,
     requests,

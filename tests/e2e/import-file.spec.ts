@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
@@ -8,6 +8,7 @@ import { MOD, type Orbit, run, state } from './helpers'
 import {
   clickDone,
   dropFile,
+  dropLargeFile,
   fixturePath,
   importPage,
   launchImport,
@@ -423,4 +424,86 @@ test('[IM-14] the summary counts every skipped bookmark, also those in a folder 
   expect(pinnedShape(await state(app), [job.folders[0]?.folderId as string])).toEqual([
     { 'Imported bookmarks': ['A page <https://example.com/page/A>'] },
   ])
+})
+
+/** A bookmarks file with a bookmark at the top and one under `levels` nested folders. */
+function nestedFile(levels: number): string {
+  return [
+    '<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<TITLE>Bookmarks</TITLE>\n<DL><p>\n',
+    '<DT><A HREF="https://example.com/page/Top">Top</A>\n',
+    '<DT><H3>Level</H3>\n<DL><p>\n'.repeat(levels),
+    '<DT><A HREF="https://example.com/page/Bottom">Bottom</A>\n',
+    '</DL><p>\n'.repeat(levels),
+    '</DL><p>\n',
+  ].join('')
+}
+
+/** How many folders deep the deepest one under `id` is (the folder itself is 1). */
+function depthUnder(s: Awaited<ReturnType<typeof state>>, id: string): number {
+  let deepest = 0
+  const stack: [string, number][] = [[id, 1]]
+  for (let at = stack.pop(); at; at = stack.pop()) {
+    const f = s.folders[at[0]]
+    if (!f) continue
+    deepest = Math.max(deepest, at[1])
+    for (const c of f.children) stack.push([c, at[1] + 1])
+  }
+  return deepest
+}
+
+test('[IM-13] a file nested 2,000 or 50,000 folders deep is read, its folders kept to 64 levels; a read that fails says so (F1)', async () => {
+  test.setTimeout(180_000)
+  orbit = await launchImport()
+  const { app, shell } = orbit
+  for (const levels of [2000, 50_000]) {
+    const page = await openImport(app)
+    await dropFile(page, '[data-testid="import-flow"]', { name: `deep-${levels}.html`, text: nestedFile(levels) })
+    await expect(page.getByTestId('import-count')).toHaveText('2 of 2 bookmarks selected')
+    const job = await importToCurrentSpace(page)
+    expect(job.items[0]?.done).toBe(2)
+    expect(job.skipped).toEqual([])
+    // The import's own folder, then 64 levels of the file's.
+    const s = await state(app)
+    const folderId = job.folders[0]?.folderId as string
+    expect(depthUnder(s, folderId)).toBe(65)
+    expect(tabsUnder(s, folderId).map((t) => t.pinnedTitle)).toEqual(['Top', 'Bottom'])
+    await clickDone(page)
+  }
+  // Dropped on the sidebar, it opens the import window at its bookmarks.
+  await dropFile(shell, '[data-testid="sidebar-scroll"]', { name: 'deep.html', text: nestedFile(50_000) })
+  const page = await importPage(app)
+  await expect(page.getByTestId('import-count')).toHaveText('2 of 2 bookmarks selected')
+  // A read that fails part-way (main's reader stands in) says so, here and on the sidebar.
+  await app.evaluate(() => {
+    const { commands } = (globalThis as unknown as { __orbit: { ctx: { commands: unknown } } }).__orbit.ctx
+    ;(commands as { handlers: Map<string, unknown> }).handlers.set('import.parseFile', async () => {
+      throw new Error('The reader stopped')
+    })
+  })
+  await dropFile(page, '[data-testid="import-flow"]', { name: 'any.html', text: nestedFile(1) })
+  await expect(page.getByTestId('import-file-error')).toHaveText('any.html: Orbit couldn’t read this file')
+  await dropFile(shell, '[data-testid="sidebar-scroll"]', { name: 'other.html', text: nestedFile(1) })
+  await expect(page.getByTestId('import-file-error')).toHaveText('other.html: Orbit couldn’t read this file')
+})
+
+test('[IM-13] a file over 64 MB is said to be too large, by every route, and isn’t read (F2)', async () => {
+  test.setTimeout(120_000)
+  const TOO_LARGE = 'This file is too large to be a bookmarks file (the limit is 64 MB)'
+  const dir = mkdtempSync(join(tmpdir(), 'orbit-import-e2e-'))
+  try {
+    const big = join(dir, 'huge.html')
+    writeFileSync(big, Buffer.alloc(65 * 1024 * 1024, 0x61))
+    orbit = await launchImport()
+    const { app, shell } = orbit
+    const page = await openImport(app)
+    await dropLargeFile(page, '[data-testid="import-flow"]', 'big.html', 65 * 1024 * 1024)
+    await expect(page.getByTestId('import-file-error')).toHaveText(`big.html: ${TOO_LARGE}`)
+    await pickFileNext(app, big)
+    await page.getByTestId('import-from-file').click()
+    await expect(page.getByTestId('import-file-error')).toHaveText(`huge.html: ${TOO_LARGE}`)
+    await dropLargeFile(shell, '[data-testid="sidebar-scroll"]', 'sidebar.html', 65 * 1024 * 1024)
+    await expect(page.getByTestId('import-file-error')).toHaveText(`sidebar.html: ${TOO_LARGE}`)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
