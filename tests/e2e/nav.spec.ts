@@ -461,6 +461,48 @@ test('[NV-06][PK-11] zoom in a Peek takes the tab steps and says the new zoom; t
   expect(await zoomOf(app, '/page/Under')).toBeCloseTo(1.25, 3)
 })
 
+/** The zoom Orbit has saved for a host in a profile (NV-06), once its file has it; undefined is 100%. */
+function savedZoom(userData: string, profileId: string, host: string): number | undefined {
+  try {
+    const saved = JSON.parse(readFileSync(join(userData, 'orbit-site-prefs.json'), 'utf8')) as {
+      zoom?: Record<string, Record<string, number>>
+    }
+    return saved.zoom?.[profileId]?.[host]
+  } catch {
+    return undefined
+  }
+}
+
+test('[NV-06] zoom in a Mini Window takes the tab steps; the site’s tabs follow, and the site keeps it until ⌘0 (fix check A, F3)', async () => {
+  const { app, userData } = orbit
+  await openTab(app, page('BesideMini'))
+  const url = page('MiniZoom')
+  await cmd<string>(app, 'mini.open', { url })
+  let miniTab = ''
+  await expect
+    .poll(async () => {
+      miniTab = Object.values((await state(app)).tabs).find((t) => t.url === url)?.id ?? ''
+      return miniTab
+    })
+    .not.toBe('')
+  await waitLoaded(app, miniTab, url)
+  const profileId = (await state(app)).tabs[miniTab]?.profileId ?? ''
+  const host = new URL(url).hostname
+  // Chromium's steps, as in a tab: 110%, then 125%.
+  await pressInPage(app, '/page/MiniZoom', '=', [mod])
+  await expect.poll(() => zoomOf(app, '/page/MiniZoom')).toBeCloseTo(1.1, 3)
+  await pressInPage(app, '/page/MiniZoom', '=', [mod])
+  await expect.poll(() => zoomOf(app, '/page/MiniZoom')).toBeCloseTo(1.25, 3)
+  // The site's tab in the main window follows, and Orbit keeps the zoom for the site.
+  expect(await zoomOf(app, '/page/BesideMini')).toBeCloseTo(1.25, 3)
+  await expect.poll(() => savedZoom(userData, profileId, host)).toBeCloseTo(1.25, 3)
+  // ⌘0 in the Mini Window resets the site in all its tabs, and Orbit forgets it.
+  await pressInPage(app, '/page/MiniZoom', '0', [mod])
+  await expect.poll(() => zoomOf(app, '/page/MiniZoom')).toBeCloseTo(1, 3)
+  await expect.poll(() => zoomOf(app, '/page/BesideMini')).toBeCloseTo(1, 3)
+  await expect.poll(() => savedZoom(userData, profileId, host)).toBeUndefined()
+})
+
 test('[NV-06][KS-08] ⌘+ and ⌘− step through the zoom levels with an indicator; the site’s other tabs follow; ⌘0 resets', async () => {
   const { app } = orbit
   const first = await openTab(app, page('ZoomA'))
