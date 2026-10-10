@@ -3,6 +3,7 @@ import {
   type FindState,
   findTextFromSelection,
   PAGE_TOOLS,
+  peekShown,
   sameZoom,
   type ZoomIndicator,
   zoomPercent,
@@ -211,11 +212,18 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
     windows.toolsContents(windowId)?.focus()
   }
 
+  /**
+   * Find acts on the window's page, not on one a Peek covers: while a Peek is open, ⌘F and ⌘G do
+   * nothing and the keyboard stays in the Peek (review A-M3; finding in the Peek is PK-11's).
+   */
+  const findable = (windowId: WindowId | undefined): windowId is WindowId =>
+    !!windowId && !peekShown(store.state, windowId)
+
   /** ⌘F: the bar opens (or its text is selected again), starting from the page's selection or the tab's last search. */
   const openFind = (windowId: WindowId | undefined) => {
     const tabId = activeOf(windowId)
     const contents = pageOf(tabId)
-    if (!windowId || !tabId || !contents) return
+    if (!findable(windowId) || !tabId || !contents) return
     const s = sessionOf(tabId)
     if (s.open) {
       focusBar(windowId, s)
@@ -242,7 +250,7 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
   const step = (windowId: WindowId | undefined, forward: boolean) => {
     const tabId = activeOf(windowId)
     const contents = pageOf(tabId)
-    if (!windowId || !tabId || !contents) return
+    if (!findable(windowId) || !tabId || !contents) return
     const s = finds.get(tabId)
     if (!s?.query) {
       openFind(windowId)
