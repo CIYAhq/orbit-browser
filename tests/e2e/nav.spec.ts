@@ -878,7 +878,7 @@ test('[NV-05] keys typed right after ⌘F in a new window’s first moments reac
   expect(await fieldValue(fresh.tabId)).toBe('')
 })
 
-// ---- Held keys (round 3 fix check, F2) ----
+// ---- Held keys and the page tools' page (round 3 fix check, F2 and F6) ----
 
 /** The value of a window's find field, as its page has it. */
 function findInput(windowId: string): Promise<string | null> {
@@ -1073,4 +1073,40 @@ test('[NV-05] a find bar whose page tools load after its keys were let go still 
   await expect.poll(() => findInput(fresh.windowId)).toBe('orb')
   await expect.poll(async () => (await toolsIn(fresh.windowId)).find).toMatchObject({ query: 'orb', matches: 3 })
   expect(await fieldValue(fresh.tabId)).toBe('')
+})
+
+test('[NV-05] page tools whose page crashed leave the window until it has loaded again; the find bar comes back with its search (round 3 fix check, F6)', async () => {
+  const { app } = orbit
+  await openTab(app, findPage('Crash'))
+  const tools = await openFind('/page/Crash')
+  await tools.getByTestId('find-input').pressSequentially('orbit')
+  await expect.poll(async () => (await toolsInfo(app)).find).toMatchObject({ query: 'orbit', matches: 3 })
+  const windowId = await firstWindow()
+  // Right after the crash: out of the window and not ready, and the page has the keyboard.
+  const after = await app.evaluate(async (_e, w) => {
+    type Windows = {
+      toolsContents: (w: string) => Electron.WebContents
+      toolsInfo: (w: string) => { ready: boolean; placed: boolean }
+    }
+    const windows = (globalThis as unknown as { __orbit: { ctx: { windows: Windows } } }).__orbit.ctx.windows
+    const contents = windows.toolsContents(w)
+    const gone = new Promise<{ ready: boolean; placed: boolean }>((resolve) =>
+      contents.once('render-process-gone', () => resolve(windows.toolsInfo(w))),
+    )
+    contents.forcefullyCrashRenderer()
+    return gone
+  }, windowId)
+  expect(after).toMatchObject({ ready: false, placed: false })
+  await expect.poll(() => focusedUrl(app)).toContain('/page/Crash')
+  // Back once their page has loaded again: the bar, with its search.
+  await expect
+    .poll(
+      async () => {
+        const info = await toolsIn(windowId)
+        return { ready: info.ready, placed: info.placed, query: info.find.query }
+      },
+      { timeout: 15_000 },
+    )
+    .toEqual({ ready: true, placed: true, query: 'orbit' })
+  await expect.poll(() => findInput(windowId)).toBe('orbit')
 })
