@@ -1,11 +1,18 @@
+import { readFileSync, writeFileSync } from 'node:fs'
+import { createServer, type IncomingHttpHeaders } from 'node:http'
+import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
+import { ISSUES_URL, PROJECT_URL, RELEASES_URL } from '../../src/shared/project'
 import type { SpaceTheme } from '../../src/shared/state'
 import { paletteFor } from '../../src/shared/theme'
 import {
+  action,
+  activeTabId,
   type Fixtures,
   FRAME_SLACK,
   launchOrbit,
+  listenInRange,
   MOD,
   type Orbit,
   run,
@@ -655,4 +662,216 @@ test('[ST-12][KS-12] Clear browsing data: ⌘⇧⌫ opens it; history and site d
   await page.getByTestId('settings-tab-privacy').click()
   await expect(page.getByTestId('setting-clear-data')).toBeVisible()
   await expect(dialog).toHaveCount(0)
+})
+
+// ---- Updates (UP-*, ST-03, ST-17) and help (OB-13) ----
+
+/** A release feed on this computer (test runs only take one here), counting what reaches it. */
+interface Feed {
+  url: string
+  /** A page of the feed's site, standing in for a release's download page. */
+  page: (path: string) => string
+  /** What the feed answers from now on. */
+  answer: (status: number, body?: unknown) => void
+  requests: IncomingHttpHeaders[]
+  close: () => Promise<void>
+}
+
+async function startFeed(): Promise<Feed> {
+  let reply = { status: 200, body: '{}' }
+  const requests: IncomingHttpHeaders[] = []
+  const server = createServer((req, res) => {
+    if (req.url === '/feed.json') {
+      requests.push(req.headers)
+      // A cookie the feed tries to set must never come back (UP-01: no personal data).
+      res.writeHead(reply.status, { 'content-type': 'application/json', 'set-cookie': 'seen=1; Path=/' })
+      res.end(reply.body)
+      return
+    }
+    res.writeHead(200, { 'content-type': 'text/html' })
+    res.end('<!doctype html><title>Release</title><h1>Release</h1>')
+  })
+  const base = `http://127.0.0.1:${await listenInRange(server, 3330)}`
+  return {
+    url: `${base}/feed.json`,
+    page: (path) => `${base}${path}`,
+    answer: (status, body = {}) => {
+      reply = { status, body: JSON.stringify(body) }
+    },
+    requests,
+    close: () =>
+      new Promise((r) => {
+        server.closeAllConnections()
+        server.close(() => r())
+      }),
+  }
+}
+
+/** Orbit's version, as About shows it. */
+const appVersion = async () => ((await run(orbit.app, 'settings.buildInfo')) as { version: string }).version
+const newerThan = (version: string) => `${Number(version.split('.')[0]) + 1}.0.0`
+const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+async function activeUrl(): Promise<string | undefined> {
+  const id = await activeTabId(orbit.app)
+  return id ? (await state(orbit.app)).tabs[id]?.url : undefined
+}
+
+test('[UP-01][ST-03] General → Updates: no feed, no checks; a feed set there is checked at once and told only the version and system', async () => {
+  const feed = await startFeed()
+  try {
+    const version = await appVersion()
+    feed.answer(200, { version, url: feed.page('/release') })
+    const page = await openSettings(orbit.app, { section: 'general', item: 'update-feed' })
+    const status = page.getByTestId('updates-status')
+    await expect(status).toHaveText("Orbit doesn't check: no update feed is set.")
+    await expect(page.getByTestId('updates-check')).toBeDisabled()
+    await expect(page.getByTestId('updates-auto')).toHaveAttribute('aria-checked', 'true')
+
+    // Test runs and development builds take a feed on this computer only.
+    const field = page.getByTestId('update-feed')
+    await field.fill('https://example.com/orbit.json')
+    await field.press('Enter')
+    await expect(page.getByTestId('setting-update-feed').getByRole('alert')).toHaveText(
+      'Test and development builds only check this computer.',
+    )
+    expect((await state(orbit.app)).settings.updateFeedUrl).toBe('')
+
+    await field.fill(feed.url)
+    await field.press('Enter')
+    await expect(status).toHaveAttribute('data-state', 'current')
+    await expect(status).toHaveText(`Orbit ${version} is up to date. Checked just now.`)
+    expect((await state(orbit.app)).settings.updateFeedUrl).toBe(feed.url)
+    expect(feed.requests).toHaveLength(1)
+    expect(feed.requests[0]?.['user-agent']).toMatch(
+      new RegExp(`^Orbit/${escaped(version)} \\((macOS|Linux|Windows); \\w+\\)$`),
+    )
+    expect(feed.requests[0]?.accept).toContain('application/json')
+
+    // Automatic checks can be turned off; Check Now still checks, and sends no cookie back.
+    await page.getByTestId('updates-auto').click()
+    await expect.poll(async () => (await state(orbit.app)).settings.updateChecks).toBe(false)
+    await page.getByTestId('updates-check').click()
+    await expect.poll(() => feed.requests.length).toBe(2)
+    expect(feed.requests[1]).not.toHaveProperty('cookie')
+  } finally {
+    await feed.close()
+  }
+})
+
+test('[UP-03][UP-07][ST-17] Check for Updates opens About and checks; a failure says so; Download opens the new release', async () => {
+  const feed = await startFeed()
+  try {
+    const version = await appVersion()
+    const next = newerThan(version)
+    feed.answer(500)
+    await run(orbit.app, 'updates.setFeed', { url: feed.url })
+    await action(orbit.app, 'app.checkForUpdates')
+    const page = await pageOfView(orbit.app, 'settings')
+    await expect(page.getByTestId('settings-content')).toHaveAttribute('data-section', 'about')
+    await expect(page.locator('[data-setting="check-updates"]')).toBeInViewport()
+    const status = page.getByTestId('updates-status')
+    await expect(status).toHaveText("Couldn't check: The feed answered 500. Orbit tries again later.")
+
+    // About: the version (a click copies it), the build date and the engine.
+    await orbit.app.evaluate(({ clipboard }) => clipboard.clear())
+    await expect(page.getByTestId('about-version')).toHaveText(version)
+    await page.getByTestId('about-version').click()
+    await expect(page.getByTestId('about-version')).toHaveText('Copied')
+    expect(await orbit.app.evaluate(({ clipboard }) => clipboard.readText())).toBe(version)
+    await expect(page.getByTestId('about-built')).toHaveText(/^Built \d{4}-\d{2}-\d{2}$/)
+    await expect(page.getByTestId('about-engine')).toContainText('Chromium')
+
+    feed.answer(200, { version: next, url: feed.page(`/release/${next}`) })
+    await page.getByTestId('updates-check').click()
+    await expect(status).toHaveText(`Orbit ${next} is available (you have ${version}).`)
+    // Orbit's builds are unsigned: Download opens the release's page in a tab (UP-10).
+    await page.getByTestId('updates-download').click()
+    await expect.poll(activeUrl).toBe(feed.page(`/release/${next}`))
+    await expect.poll(() => browserFocused(orbit.app)).toBe(true)
+  } finally {
+    await feed.close()
+  }
+})
+
+test('[UP-02][UP-10][UP-12] a newer version shows above the Spaces as a pill that opens on hover; ✕ puts it off; a security fix says so', async () => {
+  const feed = await startFeed()
+  try {
+    const next = newerThan(await appVersion())
+    feed.answer(200, { version: next, url: feed.page(`/release/${next}`), summary: 'Calmer colours' })
+    await run(orbit.app, 'updates.setFeed', { url: feed.url })
+    const banner = orbit.shell.getByTestId('update-banner')
+    await expect(banner).toHaveAttribute('data-kind', 'update')
+    await expect(banner).toContainText('New version available')
+    const more = banner.locator('.upd__more')
+    expect((await more.boundingBox())?.height).toBeLessThan(1)
+    await banner.hover()
+    await expect.poll(async () => (await more.boundingBox())?.height ?? 0).toBeGreaterThan(20)
+    await expect(more).toContainText(`Calmer colours`)
+    await expect(more).toContainText(`Get Orbit ${next}`)
+
+    await orbit.shell.getByTestId('update-banner-open').click()
+    await expect.poll(activeUrl).toBe(feed.page(`/release/${next}`))
+    await banner.hover()
+    await orbit.shell.getByTestId('update-banner-dismiss').click()
+    await expect(banner).toHaveCount(0)
+    expect((await state(orbit.app)).updates?.dismissed?.version).toBe(next)
+
+    // A later release, a security fix, shows at once and says so.
+    const fix = newerThan(next)
+    feed.answer(200, { version: fix, url: feed.page(`/release/${fix}`), security: true })
+    await run(orbit.app, 'updates.check')
+    await expect(banner).toHaveAttribute('data-kind', 'security')
+    await expect(banner).toContainText('Important security update')
+  } finally {
+    await feed.close()
+  }
+})
+
+test("[UP-06] after an update the sidebar says so until What's new is opened, which opens that version's notes", async () => {
+  const { userData } = orbit
+  const version = await appVersion()
+  await orbit.app.close()
+  const file = join(userData, 'orbit-state.json')
+  const saved = JSON.parse(readFileSync(file, 'utf8'))
+  saved.settings.lastRunVersion = '0.0.0'
+  writeFileSync(file, JSON.stringify(saved))
+
+  orbit = await launchOrbit({ userData })
+  const banner = orbit.shell.getByTestId('update-banner')
+  await expect(banner).toHaveAttribute('data-kind', 'whats-new')
+  await expect(banner).toContainText(`Updated to Orbit ${version}`)
+  await expect(banner).toContainText("See what's new")
+  await orbit.shell.getByTestId('update-banner-open').click()
+  await expect.poll(activeUrl).toBe(`${RELEASES_URL}/tag/v${version}`)
+  await expect(banner).toHaveCount(0)
+
+  // Opened once, it's done: the next start shows nothing.
+  await orbit.app.close()
+  orbit = await launchOrbit({ userData })
+  const s = await state(orbit.app)
+  expect(s.settings.whatsNew).toBeUndefined()
+  expect(s.settings.lastRunVersion).toBe(version)
+  await expect(orbit.shell.getByTestId('update-banner')).toHaveCount(0)
+})
+
+test("[OB-13][UP-07] Report a Bug, Help and What's New open the project's pages in a tab; Copy Build Info copies it", async () => {
+  const version = await appVersion()
+  await orbit.app.evaluate(({ clipboard }) => clipboard.clear())
+  await runFromCommandBar('Report a Bug')
+  await expect.poll(activeUrl).toMatch(new RegExp(`^${escaped(ISSUES_URL)}/new\\?body=`))
+  const body = new URL((await activeUrl()) as string).searchParams.get('body') ?? ''
+  expect(body).toContain('Steps to make it happen again')
+  expect(body).toContain(`Orbit ${version}`)
+
+  await action(orbit.app, 'help.open')
+  await expect.poll(activeUrl).toBe(`${PROJECT_URL}#readme`)
+  await action(orbit.app, 'help.releaseNotes')
+  await expect.poll(activeUrl).toBe(RELEASES_URL)
+
+  await action(orbit.app, 'help.copyBuildInfo')
+  await expect(orbit.shell.getByTestId('toast').last()).toContainText('Copied build info')
+  const copied = await orbit.app.evaluate(({ clipboard }) => clipboard.readText())
+  expect(copied.split('\n')[0]).toMatch(new RegExp(`^Orbit ${escaped(version)} \\(built \\d{4}-\\d{2}-\\d{2}\\)$`))
+  expect(copied).toContain('Chromium')
 })

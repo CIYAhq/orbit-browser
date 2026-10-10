@@ -7,6 +7,8 @@
  * s- space, p- profile, w- window. Sidebar containers hold ordered ItemId lists.
  */
 
+import type { UpdateStatus, WhatsNew } from './updates'
+
 export type TabId = string
 export type FolderId = string
 export type SplitId = string
@@ -248,6 +250,14 @@ export interface Settings {
   hardwareAcceleration: boolean
   /** Secure DNS (ST-12): the engine's automatic upgrade, off, or always one DNS-over-HTTPS provider. */
   secureDns: SecureDnsChoice
+  /** Where update checks look (UP-01, UP-10; see src/shared/updates.ts). Empty (the default): Orbit never checks. */
+  updateFeedUrl: string
+  /** Check for updates on launch and every few hours, when a feed is set (UP-01). */
+  updateChecks: boolean
+  /** The version that ran last: a newer one at launch shows What's new (UP-06). */
+  lastRunVersion?: string
+  /** The What's new banner (UP-06), until it is opened, dismissed or a few days old. */
+  whatsNew?: WhatsNew
 }
 
 /** Secure DNS choices (ST-12): providers are src/main/settings/dns.ts's DOH_SERVERS. */
@@ -315,6 +325,8 @@ export interface OrbitState {
   settings: Settings
   downloads: Record<string, Download>
   tweaks: Record<string, Tweak>
+  /** Update checks (UP-01): runtime only, dropped on load and never a reason to save (persist.ts). */
+  updates?: UpdateStatus
 }
 
 export const STATE_SCHEMA = 1

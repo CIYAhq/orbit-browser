@@ -47,7 +47,8 @@ function PrivacyPage() {
         <ShieldCheck size={18} aria-hidden="true" />
         <p>
           Orbit has no servers and no accounts. Nothing about your browsing is sent to Orbit, or to anyone else for it.
-          The sites you visit and your search engine see only what you send them.
+          The sites you visit and your search engine see only what you send them. Update checks, off until you set an
+          update feed, tell it only Orbit's version, your system and its processor type.
         </p>
       </div>
       <SettingGroup title="Browsing data">

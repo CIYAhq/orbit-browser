@@ -1,7 +1,8 @@
 import { SECURE_DNS_CHOICES } from '../../shared/commands/settings'
 import { DEFAULT_SETTINGS } from '../../shared/defaults'
 import { isOnboardingStep } from '../../shared/onboarding'
-import type { OrbitState } from '../../shared/state'
+import type { OrbitState, Settings } from '../../shared/state'
+import { cleanVersion, feedUrlProblem } from '../../shared/updates'
 import { engineById, isBuiltInEngine } from '../../shared/url'
 
 /** A Settings section id: a short word from the section registry, never a path or markup. */
@@ -28,6 +29,7 @@ export function normalizeSettingsPrefs(state: OrbitState): void {
   }
   if (typeof s.hardwareAcceleration !== 'boolean') s.hardwareAcceleration = DEFAULT_SETTINGS.hardwareAcceleration
   if (!SECURE_DNS_CHOICES.includes(s.secureDns)) s.secureDns = DEFAULT_SETTINGS.secureDns
+  normalizeUpdatePrefs(s)
   const size: unknown = s.settingsWindowSize
   if (isRecord(size) && saneSize(size.width) && saneSize(size.height)) {
     s.settingsWindowSize = { width: Math.round(size.width), height: Math.round(size.height) }
@@ -41,5 +43,23 @@ export function normalizeSettingsPrefs(state: OrbitState): void {
     const engine: unknown = profile.searchEngine
     if (engine === undefined) continue
     if (typeof engine !== 'string' || !engineById(state, engine)) delete profile.searchEngine
+  }
+}
+
+/** Update settings (UP-01, UP-06): a feed address that isn't usable turns checks off. */
+function normalizeUpdatePrefs(s: Settings): void {
+  if (typeof s.updateFeedUrl !== 'string' || feedUrlProblem(s.updateFeedUrl) !== '') {
+    s.updateFeedUrl = DEFAULT_SETTINGS.updateFeedUrl
+  } else {
+    s.updateFeedUrl = s.updateFeedUrl.trim()
+  }
+  if (typeof s.updateChecks !== 'boolean') s.updateChecks = DEFAULT_SETTINGS.updateChecks
+  if (s.lastRunVersion !== undefined && cleanVersion(s.lastRunVersion) !== s.lastRunVersion) delete s.lastRunVersion
+  const news: unknown = s.whatsNew
+  if (
+    news !== undefined &&
+    !(isRecord(news) && cleanVersion(news.version) === news.version && Number.isFinite(news.since))
+  ) {
+    delete s.whatsNew
   }
 }

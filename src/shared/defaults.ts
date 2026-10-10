@@ -41,6 +41,8 @@ export const DEFAULT_SETTINGS: Settings = {
   lastTabOnCmd9: true,
   hardwareAcceleration: true,
   secureDns: 'automatic',
+  updateFeedUrl: '',
+  updateChecks: true,
 }
 
 /** Favorites per profile (FV-02). */

@@ -886,3 +886,61 @@ html[data-platform="darwin"] .settings__page {
 .st-rule .st-key {
   overflow-wrap: anywhere;
 }
+
+/* A spinner inside a button ("Checking…", UP-03). */
+.st-spin {
+  animation: st-spin 900ms linear infinite;
+}
+
+@keyframes st-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .st-spin {
+    animation: none;
+  }
+}
+
+/* About (ST-17, UP-07): Orbit's logo over the version. */
+.st-about {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 0 0 22px;
+}
+
+.st-about__name {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.st-about__line {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+}
+
+.st-version {
+  padding: 1px 6px;
+  margin: 0 -6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: copy;
+}
+
+.st-version:hover {
+  background: var(--hover);
+}
+
+.st-version:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

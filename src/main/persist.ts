@@ -419,6 +419,8 @@ const RUNTIME_ONLY: Record<string, ReadonlySet<string>> = {
 /** True when a patch only changes runtime-only fields, so the saved file stays the same. */
 export function isRuntimeOnlyPatch(patch: Patch): boolean {
   const [root, , field, sub] = patch.path
+  // Update check status (UP-01) is runtime only: normalizeState drops it on load.
+  if (root === 'updates') return true
   if (patch.path.length < 3) return false
   if (root === 'windows' && field === 'sidebar') return sub === 'peeking'
   return RUNTIME_ONLY[String(root)]?.has(String(field)) ?? false

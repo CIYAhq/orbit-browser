@@ -25,3 +25,13 @@ export function withCurrent(options: readonly Option<number>[], value: number): 
     a.value === 0 ? 1 : b.value === 0 ? -1 : a.value - b.value,
   )
 }
+
+/** "just now", "5 minutes ago", "3 hours ago", "2 days ago": how long ago `then` was. */
+export function ago(then: number, now = Date.now()): string {
+  const ms = Math.max(0, now - then)
+  const unit = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'} ago`
+  if (ms < MINUTE) return 'just now'
+  if (ms < HOUR) return unit(Math.floor(ms / MINUTE), 'minute')
+  if (ms < DAY) return unit(Math.floor(ms / HOUR), 'hour')
+  return unit(Math.floor(ms / DAY), 'day')
+}

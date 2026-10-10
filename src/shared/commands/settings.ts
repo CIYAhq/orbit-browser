@@ -1,6 +1,7 @@
 import type { ActionDef } from '../actions'
 import type { OnboardingInfo, OnboardingStep } from '../onboarding'
 import type { LinkRule, ProfileId, SearchEngineId, SecureDnsChoice, Settings, SpaceId, WindowId } from '../state'
+import type { UpdateStatus } from '../updates'
 
 /**
  * Owned by the settings lane: the Settings window (ST-*), the global appearance (AP-01),
@@ -126,6 +127,35 @@ export const SETTINGS_ACTIONS: SettingsActionDef[] = [
 export const SETTINGS_LANE_ACTIONS: ActionDef[] = [
   // Runs the first-run flow again over the open windows, keeping all data (OB-14).
   { id: 'onboarding.reset', title: 'Reset Onboarding', category: 'App', keywords: ['welcome', 'first run', 'setup'] },
+  // Help and feedback (OB-13): the project's public pages, in a tab. Orbit has no support server.
+  { id: 'help.open', title: 'Help', category: 'App', keywords: ['documentation', 'user guide', 'support', 'readme'] },
+  {
+    id: 'help.reportBug',
+    title: 'Report a Bug',
+    category: 'App',
+    keywords: ['send feedback', 'feedback', 'bug report', 'issue', 'problem'],
+  },
+  // Release notes (UP-06).
+  {
+    id: 'help.releaseNotes',
+    title: "What's New",
+    category: 'App',
+    keywords: ['release notes', 'changelog', 'changes'],
+  },
+  // Help → Troubleshooting → Copy Build Info (UP-07, ST-17).
+  {
+    id: 'help.copyBuildInfo',
+    title: 'Copy Build Info',
+    category: 'App',
+    keywords: ['version', 'troubleshooting', 'bug report'],
+  },
+  // Opens About in Settings with a check running (UP-03).
+  {
+    id: 'app.checkForUpdates',
+    title: 'Check for Updates',
+    category: 'App',
+    keywords: ['update', 'upgrade', 'new version', 'software update'],
+  },
 ]
 
 /** The built-in search engines, in the order Settings and onboarding list them (ST-06, OB-08). */
@@ -167,6 +197,7 @@ export type SettingsPatch = Partial<
     | 'sleepAfterMs'
     | 'hardwareAcceleration'
     | 'secureDns'
+    | 'updateChecks'
   >
 >
 
@@ -242,6 +273,8 @@ export interface BuildInfo {
   /** e.g. "macOS 15.1", "Linux 6.8.0". */
   os: string
   arch: string
+  /** The day this build was made, "2026-10-10" (UP-07); missing in unit tests. */
+  built?: string
 }
 
 export interface SettingsCommands {
@@ -293,4 +326,19 @@ export interface SettingsCommands {
    * ids) and opens the first browser window, or returns to the one already open.
    */
   'onboarding.finish': { args: { favorites: string[] }; result: void }
+  /** Copies Orbit's version (UP-03: clicking the version copies it) and returns it. */
+  'settings.copyVersion': { args: Record<string, never>; result: string }
+  /**
+   * Checks the update feed now (UP-03) and returns what it found; with no feed set, does nothing.
+   * One check at a time: a second call while one runs gets that one's result.
+   */
+  'updates.check': { args: Record<string, never>; result: UpdateStatus }
+  /** Sets the update feed address (UP-01); returns why it can't be used, or '' once set. */
+  'updates.setFeed': { args: { url: string }; result: string }
+  /** Opens the newer release's page in a tab of the window it came from (UP-10). */
+  'updates.open': { args: Record<string, never>; result: void }
+  /** The sidebar banner's ✕ (UP-02, UP-06). */
+  'updates.dismiss': { args: { banner: 'update' | 'whatsNew' }; result: void }
+  /** Opens this version's release notes in a tab and ends the What's new banner (UP-06). */
+  'updates.whatsNew': { args: Record<string, never>; result: void }
 }

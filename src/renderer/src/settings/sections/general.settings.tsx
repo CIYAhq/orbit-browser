@@ -7,6 +7,7 @@ import { Button, type Option, Select, SettingGroup, SettingRow } from '../contro
 import { HOUR, withCurrent } from '../format'
 import { useMainValue } from '../hooks'
 import type { SettingsSection } from '../registry'
+import { UpdateCheckRow, UpdateSettingsRows } from '../updates'
 
 /** Mini Windows left alone close after this long (MW-09, ST-03); "Never" is an option. */
 const MINI_WINDOW_ARCHIVE: Option<number>[] = [
@@ -62,6 +63,11 @@ function GeneralPage() {
       <SettingGroup title="Default browser">
         <DefaultBrowserRow />
       </SettingGroup>
+      {/* Updates (ST-03, UP-01, UP-03, UP-10). */}
+      <SettingGroup title="Updates">
+        <UpdateCheckRow id="updates" feedHere />
+        <UpdateSettingsRows />
+      </SettingGroup>
       {capabilities?.importer && (
         <SettingGroup title="Import">
           <SettingRow
@@ -100,5 +106,5 @@ export default {
   icon: SlidersHorizontal,
   order: 10,
   component: GeneralPage,
-  keywords: ['default browser', 'updates', 'import', 'mini window'],
+  keywords: ['default browser', 'updates', 'check for updates', 'update feed', 'import', 'mini window'],
 } satisfies SettingsSection

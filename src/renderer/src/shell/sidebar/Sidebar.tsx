@@ -1,6 +1,7 @@
 import { type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, useRef } from 'react'
 import type { WindowState } from '../../../../shared/state'
 import { invoke } from '../../api'
+import { UpdateBanner } from '../../settings/UpdateBanner'
 import { useOrbit } from '../../store'
 import { SpaceStrip } from '../spaces/SpaceStrip'
 import { UndoToast } from '../spaces/UndoToast'
@@ -26,6 +27,8 @@ export function Sidebar({ win }: { win: WindowState }) {
       <TopBar win={win} />
       <SpaceStrip windowId={win.id} spaceId={win.spaceId} />
       <UndoToast />
+      {/* Settings lane: the update and What's new banner above the Space switcher (UP-02, UP-06). */}
+      <UpdateBanner />
       <SpaceBar win={win} />
       <ResizeHandle width={win.sidebar.width} />
     </aside>

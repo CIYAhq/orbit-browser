@@ -32,9 +32,12 @@ export function installMenu(ctx: MainContext): void {
     {
       label: app.name,
       submenu: [
-        { role: 'about', label: 'About Orbit' },
+        // About opens Settings → About (ST-17, UP-07), with the update check (UP-03); ST-03's default browser.
+        item('settings.about', 'About Orbit'),
+        item('app.checkForUpdates', 'Check for Updates…'),
         { type: 'separator' },
         item('app.settings', 'Settings…'),
+        item('settings.defaultBrowser', 'Set as Default Browser…'),
         { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
@@ -102,7 +105,17 @@ export function installMenu(ctx: MainContext): void {
       submenu: [item('space.new'), { type: 'separator' }, item('space.next'), item('space.previous')],
     },
     { role: 'windowMenu' },
-    { role: 'help', submenu: [] },
+    {
+      role: 'help',
+      // Help and feedback (OB-13), release notes (UP-06) and build info (UP-07).
+      submenu: [
+        item('help.open', 'Orbit Help'),
+        item('help.reportBug', 'Report a Bug…'),
+        item('help.releaseNotes', 'Release Notes'),
+        { type: 'separator' },
+        { label: 'Troubleshooting', submenu: [item('help.copyBuildInfo')] },
+      ],
+    },
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }

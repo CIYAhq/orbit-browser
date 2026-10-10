@@ -1,9 +1,11 @@
 import { app, clipboard } from 'electron'
 import { ACTIONS_BY_ID } from '../../shared/actions'
 import { type BuildInfo, SETTINGS_ACTIONS } from '../../shared/commands/settings'
+import { PROJECT_URL, RELEASES_URL } from '../../shared/project'
 import type { WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
+import { BUILD_DATE, BUILT_VERSION, bugReportUrl, buildInfoText } from './build-info'
 import { stubDefaultBrowser, systemDefaultBrowser } from './default-browser'
 import { registerLinkSettings } from './links'
 import { registerOnboarding } from './onboarding'
@@ -41,13 +43,18 @@ export function registerSettings(ctx: MainContext): void {
   registerSystemSettings(ctx)
   registerOnboarding(ctx)
 
-  commands.register('settings.openUrl', async ({ url }) => {
+  // A page opens in a new tab of the browser window it was asked from; from Settings, onboarding or
+  // a Mini Window, in the one Settings belongs to (or the last used, or a new one).
+  commands.register('settings.openUrl', async ({ url }, c) => {
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return
-    const windowId = settings.browserWindow() ?? windows.open()
+    const from = c.windowId && store.state.windows[c.windowId]?.kind === 'main' ? c.windowId : undefined
+    const windowId = (from && windows.get(from) ? from : undefined) ?? settings.browserWindow() ?? windows.open()
     await commands.run('tabs.create', { url }, { windowId })
     const win = windows.get(windowId)
     if (win && !win.isDestroyed()) win.focus()
   })
+  const openPage = (url: string, windowId: WindowId | undefined) =>
+    commands.run('settings.openUrl', { url }, { windowId })
   // Default browser (ST-03). Test runs never change the OS setting.
   const defaultBrowser = ctx.e2e ? stubDefaultBrowser() : systemDefaultBrowser()
   commands.register('settings.defaultBrowser', () => defaultBrowser.status())
@@ -69,6 +76,26 @@ export function registerSettings(ctx: MainContext): void {
     const text = buildInfoText(buildInfo())
     clipboard.writeText(text)
     return text
+  })
+  commands.register('settings.copyVersion', () => {
+    const version = BUILT_VERSION ?? app.getVersion()
+    clipboard.writeText(version)
+    return version
+  })
+
+  // Help and feedback (OB-13), release notes (UP-06) and build info (UP-07): the project's public
+  // pages in a tab. Orbit has no support server; a bug report is written on the issue tracker.
+  actions.register('help.open', (c) => openPage(`${PROJECT_URL}#readme`, c.windowId))
+  actions.register('help.reportBug', (c) => openPage(bugReportUrl(buildInfo()), c.windowId))
+  actions.register('help.releaseNotes', (c) => openPage(RELEASES_URL, c.windowId))
+  actions.register('help.copyBuildInfo', (c) => {
+    clipboard.writeText(buildInfoText(buildInfo()))
+    ctx.toast(c.windowId, 'Copied build info')
+  })
+  // Check for Updates… (UP-03): About, with the version, engine and the check's progress.
+  actions.register('app.checkForUpdates', (c) => {
+    settings.open({ section: 'about', item: 'check-updates' }, c.windowId ?? windows.focusedWindowId())
+    if (commands.has('updates.check')) void commands.run('updates.check', {}, {})
   })
 
   // ⌘, (ST-01): replaces the core placeholder.
@@ -111,21 +138,13 @@ function buildInfo(): BuildInfo {
         ? `Windows ${version}`
         : `${process.platform === 'linux' ? 'Linux' : process.platform} ${version}`
   return {
-    version: app.getVersion(),
+    version: BUILT_VERSION ?? app.getVersion(),
     electron: process.versions.electron,
     chrome: process.versions.chrome,
     node: process.versions.node,
     v8: process.versions.v8,
     os,
     arch: process.arch,
+    ...(BUILD_DATE ? { built: BUILD_DATE } : {}),
   }
-}
-
-/** The text "Copy build info" puts on the clipboard (ST-17). */
-export function buildInfoText(info: BuildInfo): string {
-  return [
-    `Orbit ${info.version}`,
-    `Chromium ${info.chrome} (Electron ${info.electron}, Node ${info.node}, V8 ${info.v8})`,
-    `${info.os} (${info.arch})`,
-  ].join('\n')
 }
