@@ -2,6 +2,7 @@ import { type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEv
 import type { WindowState } from '../../../../shared/state'
 import { invoke } from '../../api'
 import { useOrbit } from '../../store'
+import { MediaTray } from '../media/MediaTray'
 import { SpaceStrip } from '../spaces/SpaceStrip'
 import { UndoToast } from '../spaces/UndoToast'
 import { SpaceBar } from './SpaceBar'
@@ -26,6 +27,8 @@ export function Sidebar({ win }: { win: WindowState }) {
       <TopBar win={win} />
       <SpaceStrip windowId={win.id} spaceId={win.spaceId} />
       <UndoToast />
+      {/* Media lane: transient media tray above the bottom bar (SB-10, MD-09). */}
+      <MediaTray />
       <SpaceBar win={win} />
       <ResizeHandle width={win.sidebar.width} />
     </aside>
