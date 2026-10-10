@@ -6,7 +6,15 @@ import { manyPages, sampleHistory, writeChromium } from '../../scripts/import-fi
 import type { HistoryEntry, HistoryVisit } from '../../src/shared/commands/history'
 import type { ImportJob } from '../../src/shared/commands/import'
 import { MOD, type Orbit, run, state, viewPage } from './helpers'
-import { clickDone, fixturePath, launchImport, mainLagMs, openImport, startMainLag } from './import-support'
+import {
+  clickDone,
+  fixturePath,
+  launchImport,
+  mainLagMs,
+  openImport,
+  pagesLoaded,
+  startMainLag,
+} from './import-support'
 
 /** History from another browser (IM-07, IM-15): into the profile's History and the command bar, never tabs. */
 
@@ -54,7 +62,6 @@ test('[IM-07][IM-03][IM-15] Chrome’s history goes into History and the command
   const page = await importHistory(app, 'chrome')
   await expect(page.getByTestId('import-target')).toContainText('History goes to its profile.')
   const tabsBefore = Object.keys((await state(app)).tabs)
-  const contentsBefore = await app.evaluate(({ webContents }) => webContents.getAllWebContents().length)
   await page.getByTestId('import-next').click()
   await expect(page.getByTestId('import-progress')).toHaveAttribute('data-phase', 'done')
   await expect(page.getByTestId('import-item-history')).toHaveAttribute('data-done', '6')
@@ -69,7 +76,7 @@ test('[IM-07][IM-03][IM-15] Chrome’s history goes into History and the command
   expect(await visits(app)).toEqual(expected)
   // Not one tab, not one page loaded.
   expect(Object.keys((await state(app)).tabs)).toEqual(tabsBefore)
-  expect(await app.evaluate(({ webContents }) => webContents.getAllWebContents().length)).toBe(contentsBefore)
+  expect(await pagesLoaded(app)).toEqual([])
   await clickDone(page)
 
   // History (⌘Y, Ctrl+H) lists them, newest first.

@@ -13,6 +13,7 @@ import {
   loggedServer,
   mainLagMs,
   openImport,
+  pagesLoaded,
   pickFileNext,
   pinnedShape,
   startMainLag,
@@ -193,12 +194,32 @@ test('[IM-13] a bookmarks file dropped on the sidebar opens the import window at
   expect(Object.values((await state(app)).tabs).filter((t) => !t.pinnedUrl && t.url.startsWith('file:'))).toEqual([])
 })
 
+test('[IM-13] a file with no bookmarks dropped with a local address opens no tab: the address is checked as a dropped link is (D49, D58)', async () => {
+  orbit = await launchImport()
+  const { app, shell } = orbit
+  const localTabs = async () => Object.values((await state(app)).tabs).filter((t) => /^file:/i.test(t.url))
+  // A page's drag that carries a file of its own and a local address.
+  await dropFile(
+    shell,
+    '[data-testid="sidebar-scroll"]',
+    { name: 'notes.txt', text: 'Nothing here is a link.', type: 'text/plain' },
+    { 'text/uri-list': `file://${fixturePath('files', 'bookmarks.htm')}` },
+  )
+  // The drop is handled once a tab opens or the import window says why it can't read the file.
+  await expect
+    .poll(async () => (await localTabs()).length > 0 || app.windows().some((w) => w.url().includes('view=import')))
+    .toBe(true)
+  expect(await localTabs()).toEqual([])
+  const page = await importPage(app)
+  await expect(page.getByTestId('import-file-error')).toHaveText('notes.txt: No bookmarks found in this file')
+  expect(await localTabs()).toEqual([])
+})
+
 test('[IM-05][IM-14] 2,000 bookmarks: one closed folder, nothing loaded, quick, and the window stays responsive', async () => {
   server = await loggedServer()
   const html = netscapeHtml(manyBookmarks(2000, server.url('')))
   orbit = await launchImport()
   const { app, shell } = orbit
-  const contentsBefore = await app.evaluate(({ webContents }) => webContents.getAllWebContents().length)
   // Best of three rounds, each against the whole budget (D46). Main's longest stall is measured from
   // the click on Import until the state file holds the folder; the shell's from the drop to Done.
   // Adding the tabs in parts keeps both near 30 ms on a quiet machine (one update of 2,000 took 80–110).
@@ -255,7 +276,7 @@ test('[IM-05][IM-14] 2,000 bookmarks: one closed folder, nothing loaded, quick, 
     expect(tabs.every((t) => t.asleep && !t.favicon)).toBe(true)
   }
   // Not one page was opened: no new web contents, no request.
-  expect(await app.evaluate(({ webContents }) => webContents.getAllWebContents().length)).toBe(contentsBefore)
+  expect(await pagesLoaded(app)).toEqual([])
   expect(server.requests).toEqual([])
   // The browser window still answers at once.
   await shell.keyboard.press(`${MOD}+T`)

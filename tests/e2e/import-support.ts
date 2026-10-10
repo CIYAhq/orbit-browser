@@ -69,6 +69,19 @@ export async function dropFile(
   )
 }
 
+/**
+ * The pages loaded in any web contents: every address that isn't Orbit's own UI (its views are
+ * created as they're first needed, so their number changes on its own).
+ */
+export function pagesLoaded(app: ElectronApplication): Promise<string[]> {
+  return app.evaluate(({ webContents }) =>
+    webContents
+      .getAllWebContents()
+      .map((w) => w.getURL())
+      .filter((url) => url !== '' && !/\/renderer\/index\.html\?view=/.test(url)),
+  )
+}
+
 /** Makes the next "From a file…" pick `path` instead of showing the system's dialog. */
 export async function pickFileNext(app: ElectronApplication, path: string | null): Promise<void> {
   await app.evaluate(({ dialog }, picked) => {
