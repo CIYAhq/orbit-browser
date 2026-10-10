@@ -171,10 +171,10 @@ describe('[DL-04][DL-08][DL-15] a download menu fits its state', () => {
 
 describe('[DL-04] files', () => {
   it('opens PDFs, images, text, audio and video in a tab; anything else in its app', () => {
-    for (const name of ['a.pdf', 'b.PNG', 'c.jpeg', 'd.svg', 'e.txt', 'f.json', 'g.mp4', 'h.mp3', 'i.webm']) {
+    for (const name of ['a.pdf', 'b.PNG', 'c.jpeg', 'd.gif', 'e.txt', 'f.json', 'g.mp4', 'h.mp3', 'i.webm']) {
       expect(showsInline(`/tmp/${name}`), name).toBe(true)
     }
-    for (const name of ['a.zip', 'b.dmg', 'c.exe', 'd.docx', 'e', 'f.html']) {
+    for (const name of ['a.zip', 'b.dmg', 'c.exe', 'd.docx', 'e', 'f.html', 'g.svg']) {
       expect(showsInline(`/tmp/${name}`), name).toBe(false)
     }
   })

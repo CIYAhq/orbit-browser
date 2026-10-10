@@ -45,6 +45,18 @@ describe('[DL-10][DL-11] what a file is, from its name', () => {
     expect(isMedia('a.mp3')).toBe(false)
     expect(showsInline('a.mp3')).toBe(true)
     expect(showsInline('a.csv')).toBe(false)
+    // A picture runs no script: an SVG is a tile and a thumbnail.
+    expect(isMedia('a.svg')).toBe(true)
+  })
+
+  it('[DL-04][DL-13] only files that run no script open in a tab: PDF, raster images, plain text, audio, video', () => {
+    for (const name of ['a.pdf', 'a.png', 'a.JPG', 'a.gif', 'a.webp', 'a.txt', 'a.md', 'a.json', 'a.mp3', 'a.mp4']) {
+      expect(showsInline(name), name).toBe(true)
+    }
+    // A file: page with a script could read the user's other files (D53).
+    for (const name of ['a.svg', 'a.SVG', 'a.svgz', 'a.html', 'a.htm', 'a.xhtml', 'a.xml', 'a.mht', 'a.mhtml']) {
+      expect(showsInline(name), name).toBe(false)
+    }
   })
 })
 

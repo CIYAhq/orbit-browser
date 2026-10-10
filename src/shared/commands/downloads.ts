@@ -177,14 +177,19 @@ kinds('document', 'doc docx xls xlsx ppt pptx odt ods odp rtf csv pages numbers 
 kinds('code', 'json xml yaml yml js ts css html htm py sh')
 
 /**
- * Files Orbit shows in a tab itself instead of handing them to another app (DL-04, DL-13): PDFs
- * (the engine's viewer), images, plain text, audio and video.
+ * Files Orbit shows in a tab itself instead of handing them to another app (DL-04, DL-13): only types
+ * that run no script there (D53): PDFs (the engine's viewer), raster images, plain text, audio and
+ * video. A file opens as a `file:` page, and a script there could read the user's other files: an
+ * SVG, HTML or XML file can carry one, so it opens in its app.
  */
 const INLINE = new Set(
-  'pdf png jpg jpeg gif webp avif bmp ico svg txt text log md json mp4 m4v webm ogv mp3 m4a ogg oga opus wav flac'.split(
+  'pdf png jpg jpeg gif webp avif bmp ico txt text log md json mp4 m4v webm ogv mp3 m4a ogg oga opus wav flac'.split(
     ' ',
   ),
 )
+
+/** Images Orbit draws as pictures (thumbnails, Media tiles): an SVG too, as a picture runs none of its script. */
+const PICTURES = new Set('png jpg jpeg gif webp avif bmp ico svg'.split(' '))
 
 /** A file name's extension, lowercased, without the dot ('' when it has none). */
 export function extensionOf(name: string): string {
@@ -205,5 +210,6 @@ export function showsInline(name: string): boolean {
 /** An image or a video Orbit can show: a tile of the Media section (DL-11). */
 export function isMedia(name: string): boolean {
   const kind = fileKind(name)
-  return (kind === 'image' || kind === 'video') && showsInline(name)
+  if (kind === 'image') return PICTURES.has(extensionOf(name))
+  return kind === 'video' && showsInline(name)
 }
