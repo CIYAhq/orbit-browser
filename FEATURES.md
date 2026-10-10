@@ -4,11 +4,11 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 475 spec’d · 201 built (71 partial) · 280 tested · 0 feel right. 10 more are out of scope and not counted.
+**Totals:** 475 spec’d · 201 built (72 partial) · 281 tested · 0 feel right. 10 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
-| P0 | 174 | 131 | 158 |
+| P0 | 174 | 131 | 159 |
 | P1 | 221 | 61 | 111 |
 | P2 | 80 | 9 | 11 |
 
@@ -361,7 +361,7 @@ Spec: `spec/shortcuts.md`
 | KS-13 | Developer tools | P1 | – | – | – |  |
 | KS-14 | Canvases, notes, capture and Tweaks | P2 | – | – | – |  |
 | KS-15 | Standard app and window keys | P1 | – | – | – |  |
-| KS-16 | Text-editing keys keep their meaning | P0 | – | – | – |  |
+| KS-16 | Text-editing keys keep their meaning | P0 | 🟡 partial | ✅ e2e | – | typed keys never go astray: a page or Orbit view that loads (a slow page, a background tab, a reload) no longer takes the keyboard from the command bar, a sidebar field or the page in front (focus-on-navigation off for every web contents Orbit makes); ⌘←/⌘→ act outside text fields only; the full text-editing and IME audit is still to do |
 | KS-17 | Mouse, trackpad and modifier-click bindings | P0 | – | – | – |  |
 | KS-18 | Shortcut hints everywhere | P1 | – | – | – |  |
 | KS-19 | Keys inside overlays | P0 | 🟡 partial | ✅ e2e | – | command bar: ⌘T/⌘L/⌘W/Esc handled by the bar first (ActionRegistry.intercept); other overlays belong to their lanes |

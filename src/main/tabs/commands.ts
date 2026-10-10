@@ -24,6 +24,7 @@ import {
 } from '../../shared/tree'
 import { engineForWindow, parseInput } from '../../shared/url'
 import type { MainContext } from '../context'
+import { KEEP_KEYBOARD } from '../keys/focus'
 import type { CallContext } from '../registry'
 import { tabSplitMenuItems } from '../split/menu'
 import { TabMaintenance } from './maintenance'
@@ -465,6 +466,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
       return {
         action: 'allow',
         outlivesOpener: true,
+        overrideBrowserWindowOptions: { webPreferences: KEEP_KEYBOARD },
         createWindow: (options) => {
           const windowId = windows.windowOfTab(openerTabId) ?? windows.focusedWindowId()
           const spaceId = windowId ? ops.spaceOfWindow(windowId) : opener.spaceId

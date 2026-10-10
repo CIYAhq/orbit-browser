@@ -17,6 +17,7 @@ import type {
 import { paletteFor } from '../shared/theme'
 import { splitLeaves, splitOfTab } from '../shared/tree'
 import type { MainContext } from './context'
+import { KEEP_KEYBOARD } from './keys/focus'
 import { focusIsEditable } from './nav/focus'
 import { fastSwitchPanes } from './split/layout'
 
@@ -168,6 +169,8 @@ export function uiWebPreferences(windowId: WindowId, view: RendererView): Electr
     nodeIntegration: false,
     spellcheck: false,
     additionalArguments: [`--orbit-window-id=${windowId}`, `--orbit-view=${view}`],
+    // A view that (re)loads never takes the keyboard (KS-16).
+    ...KEEP_KEYBOARD,
   }
 }
 

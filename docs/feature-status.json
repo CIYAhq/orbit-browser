@@ -136,6 +136,7 @@
   "KS-04": {"built": "yes", "note": "⌘T/⌘L/Alt+D, Esc, ⌘T/⌘L again, ↑/↓ (⌃N/⌃P), Enter, Tab, ⌫, ⇧Enter (option), ⌘⌥⌫ / Shift+Delete, ⌘⌥V"},
   "KS-07": {"built": "yes", "note": "Space shortcuts wired through the action table"},
   "KS-19": {"built": "partial", "note": "command bar: ⌘T/⌘L/⌘W/Esc handled by the bar first (ActionRegistry.intercept); other overlays belong to their lanes"},
+  "KS-16": {"built": "partial", "note": "typed keys never go astray: a page or Orbit view that loads (a slow page, a background tab, a reload) no longer takes the keyboard from the command bar, a sidebar field or the page in front (focus-on-navigation off for every web contents Orbit makes); ⌘←/⌘→ act outside text fields only; the full text-editing and IME audit is still to do"},
   "FL-13": {"built": "yes", "note": "strip of pages, 1:1 tracking, commit thresholds, settle/rubber-band springs, one-page slides for clicks and keys, reduced motion cross-fade"},
   "FL-14": {"built": "yes", "note": "theme blends with the gesture/spring in OKLab; 200 ms preset blends; light/dark cross-fade"},
   "FL-16": {"built": "yes", "note": "motion spring (0.97→1, 4 px drop), 100 ms exit (80 ms after choosing a row) while focus returns at once; fade only with reduced motion; centred in the window"},
