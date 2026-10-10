@@ -25,6 +25,7 @@ import {
 import { engineForWindow, parseInput } from '../../shared/url'
 import type { MainContext } from '../context'
 import { KEEP_KEYBOARD } from '../keys/focus'
+import { TAB_MENU_KEYS, withKeyHints } from '../keys/menu-hints'
 import type { CallContext } from '../registry'
 import { tabSplitMenuItems } from '../split/menu'
 import { TabMaintenance } from './maintenance'
@@ -373,7 +374,9 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     const windowId = windowOf(c)
     const state = store.state
     const mo = menuOps(windowId)
-    const all = isFolderId(id) ? folderMenu(state, id, mo) : isTabId(id) ? tabMenu(state, id, selection, mo) : []
+    // Keys lane: an item that a key also does shows the key (KS-18).
+    const forTab = (tabId: TabId) => withKeyHints(tabMenu(state, tabId, selection, mo), TAB_MENU_KEYS)
+    const all = isFolderId(id) ? folderMenu(state, id, mo) : isTabId(id) ? forTab(id) : []
     // Private windows have no pinned tabs, Favorites, folders or other Spaces (NV-11, SB-25).
     const items = isTabId(id) && isPrivateTab(state, id) ? privateTabMenu(all) : all
     if (items.length === 0) return

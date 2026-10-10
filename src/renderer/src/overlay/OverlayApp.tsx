@@ -1,6 +1,8 @@
 import { AnimatePresence, domAnimation, LazyMotion, MotionConfig } from 'motion/react'
 import { type CSSProperties, useEffect, useState } from 'react'
+import { SHORTCUT_SHEET } from '../../../shared/commands/keys'
 import { invoke } from '../api'
+import { ShortcutSheet } from '../keys/ShortcutSheet'
 import { isSpacePanel, SpacePanels } from '../shell/spaces/SpacePanels'
 import { useWindow } from '../store'
 import { paletteVars, usePalette } from '../theme'
@@ -58,6 +60,9 @@ export function OverlayApp() {
           )}
           {overlay?.kind === 'panel' && overlay.panel === 'site-controls' && (
             <SiteControls key={overlay.nonce} overlay={overlay} dark={palette?.dark} />
+          )}
+          {overlay?.kind === 'panel' && overlay.panel === SHORTCUT_SHEET && (
+            <ShortcutSheet key={overlay.nonce} dark={palette?.dark} />
           )}
           {overlay?.kind === 'peek' && <PeekLayer key={overlay.nonce} overlay={overlay} />}
         </div>

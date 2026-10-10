@@ -4,7 +4,9 @@ import { onKeymapChange, setCustomBindings } from '../../shared/keymap'
 import type { MainContext } from '../context'
 import { installMenu } from '../menu'
 import { bind, reset, setPriority, unbind } from './bindings'
+import { lastMenuHints } from './menu-hints'
 import { keyRouter } from './router'
+import { registerShortcutSheet } from './sheet'
 import { setSystemClashesForTest, systemClashes } from './system'
 import { registerTabKeys } from './tab-keys'
 import { registerWindowKeys } from './window-keys'
@@ -78,10 +80,14 @@ export function registerKeys(ctx: MainContext): void {
   commands.register('keys.systemClashes', () => systemClashes())
   registerWindowKeys(ctx)
   registerTabKeys(ctx)
+  registerShortcutSheet(ctx)
   keyRouter.init(ctx)
   commands.register('keys.record', ({ on }, c) => keyRouter.setRecording(on ? c.windowId : undefined))
-  // Tests say which keys the system keeps instead of asking it.
+  // Tests say which keys the system keeps instead of asking it, and read the keys a menu showed.
   if (ctx.e2e) {
-    ;(globalThis as unknown as { __orbitKeys: unknown }).__orbitKeys = { setSystemClashes: setSystemClashesForTest }
+    ;(globalThis as unknown as { __orbitKeys: unknown }).__orbitKeys = {
+      setSystemClashes: setSystemClashesForTest,
+      lastMenuHints,
+    }
   }
 }

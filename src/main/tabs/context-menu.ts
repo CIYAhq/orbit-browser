@@ -3,6 +3,7 @@ import { pageMayOpen } from '../../shared/link-routing'
 import type { TabId } from '../../shared/state'
 import { engineFor, searchUrl } from '../../shared/url'
 import type { MainContext } from '../context'
+import { PAGE_MENU_KEYS, withKeyHints } from '../keys/menu-hints'
 import {
   dictionaryItems,
   keepPageMenu,
@@ -134,6 +135,8 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
     )
   }
   items.push({ label: 'Inspect', click: () => contents.inspectElement(params.x, params.y) })
-  if (keepPageMenu(ctx, tabId, items)) return
-  Menu.buildFromTemplate(items).popup()
+  // Keys lane: shortcut hints (KS-18).
+  const hinted = withKeyHints(items, PAGE_MENU_KEYS)
+  if (keepPageMenu(ctx, tabId, hinted)) return
+  Menu.buildFromTemplate(hinted).popup()
 }

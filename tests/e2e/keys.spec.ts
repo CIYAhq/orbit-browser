@@ -837,3 +837,88 @@ test('[ST-08][KS-03][ST-02] keys the system keeps are marked until the action ge
   await expect(results.getByTestId('setting-shortcut-space.goto.2')).toBeHidden()
   await expect(results.getByTestId('shortcuts-search')).toBeHidden()
 })
+
+// ---------- Shortcut hints in right-click menus (KS-18) ----------
+
+/** The keys the right-click menu built last showed, as "Label=Accelerator". */
+const menuHints = () =>
+  orbit.app.evaluate(() =>
+    (globalThis as unknown as { __orbitKeys: { lastMenuHints: () => string[] } }).__orbitKeys.lastMenuHints(),
+  )
+
+/** A binding as a menu writes it. */
+const menuKey = (key: string) => `${isMac ? 'Command' : 'Control'}+${key}`
+
+test('[KS-18] remap Pin to ⌘⇧P: the command bar’s row and the tab’s right-click menu show it; the page menu shows the keys it has as it opens', async () => {
+  const { app } = orbit
+  const pin = `${PRIMARY}+Shift+P`
+  expect(await run(app, 'keys.bind', { actionId: 'tab.togglePin', accel: pin, replace: `${PRIMARY}+D` })).toEqual({
+    ok: true,
+  })
+  const id = await openTab(app, fx.url('/page/Hints'))
+  const { overlay, top } = await actionRow('pin tab', 'Pin / Unpin Tab')
+  await expect(top.getByTestId('command-shortcut')).toHaveText(isMac ? '⇧⌘P' : 'Ctrl+Shift+P')
+  await overlay.keyboard.press('Escape')
+  await cmd(app, 'tabs.contextMenu', { id })
+  expect(await menuHints()).toEqual(
+    expect.arrayContaining([`Pin Tab=${menuKey('Shift+P')}`, `Close Tab=${menuKey('W')}`]),
+  )
+
+  // The page's own menu: Reload shows its keys, and another key once remapped.
+  const page = await tabPage(app, '/page/Hints')
+  await page.mouse.click(12, 12, { button: 'right' })
+  await expect.poll(menuHints).toContain(`Reload=${menuKey('R')}`)
+  expect(await run(app, 'keys.bind', { actionId: 'nav.reload', accel: 'F9', replace: `${PRIMARY}+R` })).toEqual({
+    ok: true,
+  })
+  await page.mouse.click(12, 12, { button: 'right' })
+  await expect.poll(menuHints).toContain('Reload=F9')
+})
+
+// ---------- Help → Keyboard Shortcuts (OB-12) ----------
+
+test('[OB-12][KS-18][KS-12] Help → Keyboard Shortcuts shows the essential keys as they are now; Esc or Close Tab’s keys close it; its link opens Settings → Shortcuts', async () => {
+  const { app } = orbit
+  expect(await run(app, 'keys.bind', { actionId: 'sidebar.toggle', accel: `${PRIMARY}+Shift+B` })).toEqual({ ok: true })
+  await run(app, 'keys.unbind', { actionId: 'sidebar.toggle', accel: `${PRIMARY}+S` })
+  const tab = await openTab(app, fx.url('/page/Sheet'))
+  if (isMac) {
+    const help = await app.evaluate(({ Menu }) =>
+      Menu.getApplicationMenu()
+        ?.items.find((i) => i.role === 'help')
+        ?.submenu?.items.map((i) => i.label),
+    )
+    expect(help).toContain('Keyboard Shortcuts')
+  }
+  await action(app, 'help.shortcuts')
+  const overlay = await viewPage(app, 'overlay')
+  const sheet = overlay.getByTestId('shortcut-sheet')
+  await expect(sheet.getByTestId('shortcut-sheet-group').locator('h3')).toHaveText([
+    'Everyday',
+    'Navigation',
+    'Spaces',
+    'Split View',
+  ])
+  const row = (title: string) => sheet.getByTestId('shortcut-sheet-row').filter({ hasText: title })
+  await expect(row('Toggle Sidebar').getByTestId('shortcut-sheet-keys')).toHaveText(SHIFT_B)
+  await expect(row('Go to Tab 1–8')).toContainText(isMac ? '⌘1–⌘8' : 'Ctrl+1–Ctrl+8')
+  await expect(sheet).toBeFocused()
+  await pressAnywhere('Escape')
+  await expect(sheet).toHaveCount(0)
+  await expect.poll(async () => Object.values((await state(app)).windows)[0]?.overlay.kind).toBe('none')
+
+  // From the command bar too; Close Tab's keys close the sheet, and the tab under it stays.
+  const { top } = await actionRow('keyboard shortcuts', 'Keyboard Shortcuts')
+  await top.click()
+  await expect(sheet).toBeVisible()
+  await pressAnywhere('W', PRIMARY_MOD)
+  await expect(sheet).toHaveCount(0)
+  expect((await state(app)).tabs[tab]).toBeDefined()
+
+  // The link at the bottom: the full, editable list.
+  await action(app, 'help.shortcuts')
+  await sheet.getByTestId('shortcut-sheet-settings').click()
+  const settings = await pageOfView(app, 'settings')
+  await expect(settings.getByTestId('settings-tab-shortcuts')).toHaveAttribute('aria-selected', 'true')
+  await expect.poll(async () => Object.values((await state(app)).windows)[0]?.overlay.kind).toBe('none')
+})

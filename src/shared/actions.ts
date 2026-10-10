@@ -392,6 +392,13 @@ export const ACTIONS: ActionDef[] = [
     category: 'App',
     keywords: ['clear archive', 'delete archived tabs', 'empty archive'],
   },
+  // Help → Keyboard Shortcuts: the essential shortcuts (OB-12); the full list is Settings → Shortcuts.
+  {
+    id: 'help.shortcuts',
+    title: 'Keyboard Shortcuts',
+    category: 'App',
+    keywords: ['shortcut sheet', 'cheat sheet', 'essential shortcuts', 'keys', 'hotkeys', 'help'],
+  },
 
   // Spaces
   { id: 'space.new', title: 'New Space', category: 'Spaces', keywords: ['create space'] },

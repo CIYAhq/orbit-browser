@@ -22,6 +22,7 @@ import type { ContainerRef, OrbitState, SplitId, SplitLayout, TabId, WindowId } 
 import { paletteFor } from '../../shared/theme'
 import { insertItem, locate, sectionOf, splitOfTab } from '../../shared/tree'
 import type { MainContext } from '../context'
+import { SPLIT_PANE_MENU_KEYS, withKeyHints } from '../keys/menu-hints'
 import type { CallContext } from '../registry'
 import { makeTab } from '../tabs/model'
 import { activeTabOf } from '../windows'
@@ -616,7 +617,8 @@ export function registerSplit(ctx: MainContext): void {
 
   commands.register('split.paneMenu', ({ tabId }, c) => {
     const windowId = windowOf(c)
-    const items = paneControls(tabId, windowId)
+    // Keys lane: an item that a key also does shows the key (KS-18).
+    const items = withKeyHints(paneControls(tabId, windowId), SPLIT_PANE_MENU_KEYS)
     const win = windowId ? windows.get(windowId) : undefined
     if (items.length > 0) Menu.buildFromTemplate(items).popup(win ? { window: win } : {})
   })

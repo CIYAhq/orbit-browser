@@ -49,6 +49,9 @@ export interface SystemClash {
   owner: string
 }
 
+/** The overlay panel of Help → Keyboard Shortcuts (OB-12): `{ kind: 'panel', panel: SHORTCUT_SHEET }`. */
+export const SHORTCUT_SHEET = 'shortcuts'
+
 /** The Go to Tab options (TB-04, FV-10, ST-08). */
 export interface TabNumberOptions {
   /** ⌘1–⌘8 count Favorites first. */

@@ -161,6 +161,8 @@ export function installMenu(ctx: MainContext): void {
       // Help and feedback (OB-13), release notes (UP-06), Restore Data… (AR-11) and build info (UP-07).
       submenu: [
         item('help.open', 'Orbit Help'),
+        // The essential shortcuts (OB-12).
+        item('help.shortcuts'),
         item('help.reportBug', 'Report a Bug…'),
         item('help.releaseNotes', 'Release Notes'),
         { type: 'separator' },
