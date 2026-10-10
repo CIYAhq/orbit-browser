@@ -79,6 +79,8 @@ export type RendererView =
   | 'library'
   /** Media lane: the picture-in-picture window. */
   | 'pip'
+  /** Settings lane: the first-run onboarding window (OB-01). */
+  | 'onboarding'
 
 /** The API the preload exposes on `window.orbit` to Orbit's own UI renderers. */
 export interface OrbitBridge {

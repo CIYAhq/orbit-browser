@@ -1,11 +1,14 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { perfMark } from './api'
+import { bootSettingsLaneView, isSettingsLaneView } from './settings/boot'
 import { installShortcutFallback } from './shortcuts'
 import { initStore } from './store'
 import './styles/global.css'
 
 async function boot(): Promise<void> {
+  // Settings (settings lane): a window of its own, without the browser shell's code.
+  if (isSettingsLaneView(window.orbit.view)) return bootSettingsLaneView()
   const view = window.orbit.view
   // The floating player's controls (media lane): a small view of its own, without the app's shortcuts.
   if (view === 'pip') {

@@ -3,7 +3,7 @@ import type { SearchQueryArgs, SearchResult } from '../../shared/commands/comman
 import type { CommandName } from '../../shared/rpc'
 import type { OrbitState, WindowId } from '../../shared/state'
 import { splitOfTab } from '../../shared/tree'
-import { fillSearchTemplate, parseInput, SEARCH_ENGINES, topResultUrl } from '../../shared/url'
+import { engineFor, engineForWindow, fillSearchTemplate, parseInput, topResultUrl } from '../../shared/url'
 import type { MainContext } from '../context'
 import type { HistoryService } from '../history'
 import type { CallContext } from '../registry'
@@ -60,7 +60,8 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
     const active = activeTabId ? state.tabs[activeTabId] : undefined
     // Private windows: only their own tabs, never history or the archive (CB-23).
     const hs = profile && !isPrivate ? history.store(profile.id) : undefined
-    const engine = SEARCH_ENGINES[state.settings.searchEngine] ?? SEARCH_ENGINES.google
+    // The default engine of this Space's profile (ST-06).
+    const engine = engineFor(state, profile?.id)
     const siteSearches = state.settings.siteSearch ?? []
     const allTabs = sources.tabs(state)
     // F1: tabs, folders and Spaces of private (non-persistent) profiles only show in their own windows.
@@ -119,13 +120,13 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
   }, 1500)
 
   // CB-15: engine suggestions, only when the user turned them on (they send keystrokes to the engine).
-  commands.register('search.suggest', async ({ query }) => {
+  commands.register('search.suggest', async ({ query }, c) => {
     const state = store.state
     const q = query.trim()
     if (!state.settings.searchSuggestions || !q || q.length > 200) return []
     // M3: never send an address (paths and query strings can carry secrets) to the engine.
     if (q.includes('://') || parseInput(q).kind === 'url') return []
-    const engine = SEARCH_ENGINES[state.settings.searchEngine] ?? SEARCH_ENGINES.google
+    const engine = engineForWindow(state, windowOf(c))
     // Tests point this at a local fixture; it is never read outside the e2e harness.
     const template = (ctx.e2e && process.env.ORBIT_SUGGEST_URL) || engine.suggest
     if (!template) return []
@@ -231,7 +232,7 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
         // CB-16: ⇧Enter jumps to the first result when the option is on and the engine can.
         const lucky =
           topResult && state.settings.searchTopResult && result.query && !result.siteSearchId
-            ? topResultUrl(state.settings.searchEngine, result.query)
+            ? topResultUrl(engineForWindow(state, windowId).id, result.query)
             : undefined
         return openUrl(lucky ?? result.url, false)
       }

@@ -8,6 +8,7 @@
  */
 
 import type { PermissionPrompt } from './site'
+import type { UpdateStatus, WhatsNew } from './updates'
 
 export type TabId = string
 export type FolderId = string
@@ -209,6 +210,11 @@ export interface Profile {
   createdAt: number
   /** Per-profile auto-archive period for Today tabs (TD-03); falls back to settings.archiveAfterMs. */
   archiveAfterMs?: number
+  /**
+   * Default search engine (ST-06): a built-in engine id, or "site:<id>" for one of the site searches.
+   * Unset: the Default profile's choice, then settings.searchEngine (`engineFor` in src/shared/url.ts).
+   */
+  searchEngine?: string
 }
 
 export type CommandBarMode = 'new-tab' | 'edit-url' | 'search-tabs'
@@ -260,7 +266,7 @@ export interface WindowState {
   fullscreen: boolean
 }
 
-export type SearchEngineId = 'google' | 'duckduckgo' | 'bing' | 'brave' | 'ecosia' | 'kagi'
+export type SearchEngineId = 'google' | 'duckduckgo' | 'bing' | 'brave' | 'ecosia' | 'kagi' | 'startpage' | 'perplexity'
 
 /** Site search (CB-11, ST-06): type the keyword in the command bar, press Tab, then the query. */
 export interface SiteSearchEngine {
@@ -302,7 +308,21 @@ export interface Settings {
   miniWindowProfiles: Record<string, ProfileId>
   /** Size and position of the last Mini Window the user moved or resized (MW-04). */
   miniWindowBounds?: { x: number; y: number; width: number; height: number }
+  /** First-run onboarding is done or skipped (OB-01): later starts open the browser at once. */
   onboarded: boolean
+  /** The onboarding step a quit left off at, resumed on the next start (OB-14); see ONBOARDING_STEPS. */
+  onboardingStep?: string
+  /** Favorites picked so far in onboarding (STARTER_APPS ids): a quit resumes with them (OB-14). */
+  onboardingFavorites?: string[]
+  /**
+   * The first Space's colours and the appearance before onboarding's theme step first changed them:
+   * Skip setup puts them back (OB-14, D44). Kept until onboarding ends, across a quit.
+   */
+  onboardingThemeBefore?: { spaceId: SpaceId; theme: SpaceTheme; appearance: ColorMode }
+  /** The Settings window's section shown last: Settings reopens there (ST-01). */
+  settingsSection: string
+  /** The Settings window's size when last resized (ST-01). */
+  settingsWindowSize?: { width: number; height: number }
   /** Command bar site searches (CB-11); edited in Settings (ST-06). */
   siteSearch: SiteSearchEngine[]
   /** Ask the search engine for suggestions while typing in the command bar (CB-15). Off by default: it sends keystrokes to the engine. */
@@ -313,11 +333,26 @@ export interface Settings {
   countFavoritesInShortcuts: boolean
   /** ⌘9 selects the last tab (true) or the 9th item (false) (TB-04). */
   lastTabOnCmd9: boolean
+  /** Use graphics acceleration when available (ST-12). Takes effect at the next start. */
+  hardwareAcceleration: boolean
+  /** Secure DNS (ST-12): the engine's automatic upgrade, off, or always one DNS-over-HTTPS provider. */
+  secureDns: SecureDnsChoice
+  /** Where update checks look (UP-01, UP-10; see src/shared/updates.ts). Empty (the default): Orbit never checks. */
+  updateFeedUrl: string
+  /** Check for updates on launch and every few hours, when a feed is set (UP-01). */
+  updateChecks: boolean
+  /** The version that ran last: a newer one at launch shows What's new (UP-06). */
+  lastRunVersion?: string
+  /** The What's new banner (UP-06), until it is opened, dismissed or a few days old. */
+  whatsNew?: WhatsNew
   /** The Library section used last: the Library reopens there (AR-02, DL-09). */
   librarySection: string
   /** Archive entries older than this many days are deleted (AR-08). 0 = kept forever. */
   archiveKeepDays: number
 }
+
+/** Secure DNS choices (ST-12): providers are src/main/settings/dns.ts's DOH_SERVERS. */
+export type SecureDnsChoice = 'automatic' | 'off' | 'cloudflare' | 'google' | 'quad9'
 
 /** "URL contains …" or "URL is exactly …" → a Space (ST-09 link routing). */
 export interface LinkRule {
@@ -395,6 +430,8 @@ export interface OrbitState {
   settings: Settings
   downloads: Record<string, Download>
   tweaks: Record<string, Tweak>
+  /** Update checks (UP-01): runtime only, dropped on load and never a reason to save (persist.ts). */
+  updates?: UpdateStatus
 }
 
 export const STATE_SCHEMA = 1

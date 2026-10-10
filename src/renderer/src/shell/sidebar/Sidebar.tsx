@@ -7,6 +7,7 @@ import {
 import { DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH } from '../../../../shared/defaults'
 import type { WindowState } from '../../../../shared/state'
 import { invoke } from '../../api'
+import { UpdateBanner } from '../../settings/UpdateBanner'
 import { useOrbit } from '../../store'
 import { PrivateSidebar } from '../chrome/PrivateSidebar'
 import { MediaTray } from '../media/MediaTray'
@@ -41,6 +42,8 @@ export function Sidebar({ win, floating = false }: { win: WindowState; floating?
         <>
           <SpaceStrip windowId={win.id} spaceId={win.spaceId} />
           <UndoToast />
+          {/* Settings lane: the update and What's new banner above the Space switcher (UP-02, UP-06). */}
+          <UpdateBanner />
           {/* Media lane: transient media tray above the bottom bar (SB-10, MD-09). */}
           <MediaTray windowId={win.id} />
           <SpaceBar win={win} />

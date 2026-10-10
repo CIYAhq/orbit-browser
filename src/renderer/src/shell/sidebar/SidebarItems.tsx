@@ -14,7 +14,7 @@ import {
 import { isFolderId, isTabId } from '../../../../shared/ids'
 import type { Space, SpaceId } from '../../../../shared/state'
 import { containerKey, locate, sectionOf, splitOfTab } from '../../../../shared/tree'
-import { parseInput } from '../../../../shared/url'
+import { engineForSpace, parseInput } from '../../../../shared/url'
 import { invoke, isMac, runAction } from '../../api'
 import { activeTabId } from '../../selectors'
 import { getOrbitState, useOrbit } from '../../store'
@@ -282,7 +282,7 @@ function onLinkDrop(e: ReactDragEvent, spaceId: string) {
   const text = uri?.trim() || e.dataTransfer.getData('text/plain').trim()
   if (!text) return
   e.preventDefault()
-  const parsed = parseInput(text, getOrbitState().settings.searchEngine)
+  const parsed = parseInput(text, engineForSpace(getOrbitState(), spaceId))
   void invoke('tabs.create', { url: parsed.url, spaceId })
 }
 
