@@ -171,7 +171,10 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
   const allowedNow = (profileId: ProfileId, origin: string, kind: PermissionKind) =>
     prefs.permission(profileId, origin, kind) === 'allow' || hasOnce(profileId, origin, kind)
 
-  /** The site a request belongs to: the top page's, as in Chromium (a frame uses what its page was given). */
+  /**
+   * The site a request belongs to: the top page's, as in Chromium (a frame uses what its page was
+   * given), except that a frame from another site can't ask for notifications (see `request`).
+   */
   const requestOrigin = (contents: WebContents, details: { isMainFrame?: boolean; requestingUrl?: string }) => {
     const top = contents.isDestroyed() ? '' : contents.getURL()
     return permissionOrigin(
@@ -333,7 +336,10 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
   const handler: PermissionHandler = {
     check: (profileId, _contents, permission, requestingOrigin, details) => {
       if (ALWAYS_ALLOW.has(permission)) return true
-      const origin = permissionOrigin(details.embeddingOrigin || requestingOrigin)
+      // A frame uses what its page was given, except notifications: those are each frame's own.
+      const origin = permissionOrigin(
+        permission === 'notifications' ? requestingOrigin : details.embeddingOrigin || requestingOrigin,
+      )
       if (!origin) return false
       if (DEVICE_APIS.has(permission)) return true
       const kinds = kindsOf(permission, details.mediaType ? [details.mediaType] : undefined)
@@ -347,6 +353,10 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
       const kinds = kindsOf(permission, media)
       const origin = requestOrigin(contents, details)
       if (!kinds || !origin) return callback(false)
+      // A frame from another site can't ask for notifications in the page's name: Chromium refuses
+      // it (they aren't delegated; the other permissions pass Permissions Policy first).
+      const ownSite = details.isMainFrame || permissionOrigin(details.requestingUrl) === origin
+      if (permission === 'notifications' && !ownSite) return callback(false)
       noteAsked(profileId, origin, kinds)
       if (kinds.some((k) => prefs.permission(profileId, origin, k) === 'block')) return callback(false)
       const undecided = sortKinds(kinds.filter((k) => !allowedNow(profileId, origin, k)))

@@ -1,4 +1,4 @@
-import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
+import { type ElectronApplication, expect, type Frame, type Page, test } from '@playwright/test'
 import { action, launchOrbit, type Orbit, state, tabPage } from './helpers'
 import {
   closeWindow,
@@ -48,7 +48,7 @@ type Answers = { __answers?: Record<string, string> }
  * Starts a permission request in a page without waiting for it: its outcome lands in
  * `window.__answers[what]` ('granted', 'denied', 'default' or 'error:<code or name>').
  */
-async function ask(p: Page, what: Ask): Promise<void> {
+async function ask(p: Page | Frame, what: Ask): Promise<void> {
   await p.evaluate((w) => {
     const win = window as unknown as Answers
     win.__answers ??= {}
@@ -76,10 +76,11 @@ async function ask(p: Page, what: Ask): Promise<void> {
   }, what)
 }
 
-const answerOf = (p: Page, what: Ask) => p.evaluate((w) => (window as unknown as Answers).__answers?.[w] ?? null, what)
+const answerOf = (p: Page | Frame, what: Ask) =>
+  p.evaluate((w) => (window as unknown as Answers).__answers?.[w] ?? null, what)
 
 /** What the page sees for a permission without asking (the permission check). */
-const permissionState = (p: Page, name: 'geolocation' | 'notifications' | 'camera') =>
+const permissionState = (p: Page | Frame, name: 'geolocation' | 'notifications' | 'camera') =>
   p.evaluate(async (n) => (await navigator.permissions.query({ name: n as PermissionName })).state, name)
 
 /** The shown page of a tab: the view's bounds in the window. */
@@ -225,6 +226,37 @@ test('[NV-15] notifications ask with Block and Allow; Esc dismisses and the site
   await prompt.getByTestId('permission-allow').click()
   await expect.poll(() => answerOf(p, 'notifications')).toBe('granted')
   expect(await p.evaluate(() => Notification.permission)).toBe('granted')
+})
+
+test('[NV-15] a frame from another site can’t ask for notifications in the page’s name, nor use the page’s', async () => {
+  const { app, shell } = orbit
+  const { p } = await open(app, page('Host'))
+  const widget = elsewhere('Widget')
+  await p.evaluate(
+    (src) =>
+      new Promise<void>((resolve) => {
+        const frame = document.createElement('iframe')
+        frame.src = src
+        frame.addEventListener('load', () => resolve())
+        document.body.prepend(frame)
+      }),
+    widget,
+  )
+  const frame = p.frames().find((f) => f.url() === widget)
+  if (!frame) throw new Error('no frame')
+  const prompt = shell.getByTestId('permission-prompt')
+  // Chromium refuses a cross-origin frame's request, and doesn't hand it the page's grant.
+  await ask(frame, 'notifications')
+  await expect.poll(() => answerOf(frame, 'notifications')).toBe('denied')
+  await expect(prompt).toBeHidden()
+  expect(await p.evaluate(() => Notification.permission)).toBe('default')
+  // The page itself asks, in its own name, and is allowed.
+  await ask(p, 'notifications')
+  await expect(prompt.getByTestId('permission-site')).toHaveText(host())
+  await prompt.getByTestId('permission-allow').click()
+  await expect.poll(() => answerOf(p, 'notifications')).toBe('granted')
+  expect(await frame.evaluate(() => Notification.permission)).toBe('denied')
+  expect(await permissionState(frame, 'notifications')).toBe('denied')
 })
 
 test('[NV-15] a prompt belongs to its tab: hidden on another tab, back with it, gone when the page is left', async () => {
