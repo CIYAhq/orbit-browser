@@ -257,7 +257,7 @@ export function ImportFlow({
         sourceId,
         profiles: inspection.profiles.map((p) => ({
           profileId: p.profileId,
-          types: types.filter((ty) => ty !== 'bookmarks' || !!p.bookmarks),
+          types: types.filter((ty) => (ty !== 'bookmarks' || !!p.bookmarks) && (ty !== 'history' || !!p.history)),
           ...(types.includes('bookmarks') && p.bookmarks
             ? { bookmarks: filterTree(p.bookmarks.tree, p.profileId, selected) }
             : {}),

@@ -5,6 +5,7 @@ import { manyBookmarks, netscapeHtml, sampleTree } from '../../scripts/import-fi
 import type { ImportJob } from '../../src/shared/commands/import'
 import { MOD, type Orbit, run, state } from './helpers'
 import {
+  clickDone,
   dropFile,
   fixturePath,
   importPage,
@@ -112,8 +113,7 @@ test('[IM-13][IM-05][IM-04][IM-14] a bookmarks file dropped on the import window
   expect(s.spaces[spaceId]?.today).toEqual(before.spaces[spaceId]?.today)
 
   // Done shows the folder in the browser window's sidebar.
-  await page.getByTestId('import-done').click()
-  await expect.poll(() => page.isClosed()).toBe(true)
+  await clickDone(page)
   const row = shell.locator(`[data-folder-id="${folderId}"] [data-testid="folder-row"]`).first()
   await expect(row).toBeInViewport()
   await expect(row).toHaveClass(/is-focused/)
@@ -235,8 +235,7 @@ test('[IM-05][IM-14] 2,000 bookmarks: one closed folder, nothing loaded, quick, 
     const mainLongestMs = await mainLagMs(app)
     const shellLongestMs = await shell.evaluate(() => (window as unknown as { __longest: number }).__longest)
     rounds.push({ ms: job.stats?.ms ?? Number.POSITIVE_INFINITY, mainLongestMs, shellLongestMs })
-    await page.getByTestId('import-done').click()
-    await expect.poll(() => page.isClosed()).toBe(true)
+    await clickDone(page)
     if (meets(rounds.at(-1)!)) break
   }
   console.log(`[IM-05] 2,000 bookmarks: ${JSON.stringify(rounds)}`)

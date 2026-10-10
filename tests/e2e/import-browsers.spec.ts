@@ -6,7 +6,7 @@ import { SAFARI_BLOCKED } from '../../src/main/import/browsers'
 import type { ImportJob } from '../../src/shared/commands/import'
 import type { OrbitState } from '../../src/shared/state'
 import { MOD, type Orbit, run, state, viewPage } from './helpers'
-import { fixturePath, importPage, launchImport, openImport, pinnedShape, tabsUnder } from './import-support'
+import { clickDone, fixturePath, importPage, launchImport, openImport, pinnedShape, tabsUnder } from './import-support'
 import { openSettings } from './settings-support'
 
 /** Importing from browsers on this computer (IM-01 to IM-06, IM-14): made-up profiles under tests/fixtures. */
@@ -97,21 +97,32 @@ test('[IM-02][IM-03][IM-04][IM-05][IM-14] a Chrome profile’s bookmarks become 
   // What the profile offers, all chosen; never passwords.
   await expect(page.getByTestId('import-type-bookmarks')).toContainText('6 bookmarks')
   await expect(page.getByTestId('import-type-bookmarks').getByRole('checkbox')).toBeChecked()
+  await expect(page.getByTestId('import-type-history')).toContainText('6 pages visited')
+  await expect(page.getByTestId('import-type-history').getByRole('checkbox')).toBeChecked()
   await expect(page.getByText('Passwords and cards are never imported.')).toBeVisible()
+  // Nothing chosen, nothing to go on with.
+  for (const type of ['bookmarks', 'history'])
+    await page.getByTestId(`import-type-${type}`).getByRole('checkbox').uncheck()
+  await expect(page.getByTestId('import-next')).toBeDisabled()
+  for (const type of ['bookmarks', 'history'])
+    await page.getByTestId(`import-type-${type}`).getByRole('checkbox').check()
   await page.getByTestId('import-next').click()
 
   // The profile's tree, everything chosen; Select none and all.
   await expect(page.getByTestId('import-count')).toHaveText('6 of 6 bookmarks selected')
   await page.getByRole('checkbox', { name: 'Import News' }).uncheck()
   await expect(page.getByTestId('import-count')).toHaveText('4 of 6 bookmarks selected')
+  // No bookmarks still leaves the history to import.
   await page.getByTestId('import-select-none').click()
-  await expect(page.getByTestId('import-next')).toBeDisabled()
+  await expect(page.getByTestId('import-count')).toHaveText('0 of 6 bookmarks selected')
+  await expect(page.getByTestId('import-next')).toBeEnabled()
   await page.getByTestId('import-select-all').click()
   await expect(page.getByTestId('import-count')).toHaveText('6 of 6 bookmarks selected')
   const job = await importFromBookmarks(page)
 
   expect(job.source).toBe('Chrome')
   await expect(page.getByTestId('import-item-bookmarks')).toHaveAttribute('data-done', '6')
+  await expect(page.getByTestId('import-item-history')).toHaveAttribute('data-done', '6')
   await expect(page.getByTestId('import-skipped')).toContainText('1 bookmark: Bookmarklet (a script, not a page)')
   await expect(page.getByTestId('import-skipped')).toContainText('1 bookmark: A page only that browser can open')
   const s = await state(app)
@@ -121,8 +132,7 @@ test('[IM-02][IM-03][IM-04][IM-05][IM-14] a Chrome profile’s bookmarks become 
   expect(pinnedShape(s, [folder?.folderId as string])).toEqual([WORK_BOOKMARKS])
   expect(tabsUnder(s, folder?.folderId as string).every((t) => t.asleep && !t.favicon)).toBe(true)
   // Done shows the folder in the browser window.
-  await page.getByTestId('import-done').click()
-  await expect.poll(() => page.isClosed()).toBe(true)
+  await clickDone(page)
 })
 
 test('[IM-02][IM-06] several profiles at once: each gets a matching Orbit profile and Space', async () => {
@@ -164,6 +174,23 @@ test('[IM-02][IM-06] several profiles at once: each gets a matching Orbit profil
   ])
   // Nothing went to the Spaces that were there.
   for (const id of before.spaceOrder) expect(s.spaces[id]?.pinned).toEqual(before.spaces[id]?.pinned)
+  // Each profile's history went to its own profile.
+  const titles = async (spaceName: string) => {
+    const profileId = added.find((sp) => sp?.name === spaceName)?.profileId
+    const visits = (await run(app, 'history.visits', { profileId, limit: 100 })) as { title: string }[]
+    return [...new Set(visits.map((v) => v.title))]
+  }
+  expect(await titles('Work')).toEqual([
+    'Inbox',
+    'Example News',
+    'Team calendar',
+    'Plan for the spring',
+    'sourdough - Search',
+    'Cart',
+  ])
+  expect(await titles('Personal')).toEqual(['Weather'])
+  const firstProfile = before.spaces[before.spaceOrder[0] as string]?.profileId
+  expect(await run(app, 'history.visits', { profileId: firstProfile, limit: 100 })).toEqual([])
 })
 
 test('[IM-02][IM-06] Firefox’s one profile goes straight to its types; “New Space…” takes the folder; Safari without access says why', async () => {
@@ -228,7 +255,9 @@ test('[IM-14] a browser holding its files: Orbit asks to quit it and try again',
     'Chrome is using some of its files. Quit Chrome and try again',
   )
   await expect(page.getByTestId('import-type-bookmarks')).toHaveCount(0)
-  await expect(page.getByTestId('import-next')).toBeDisabled()
+  // The rest can still come over.
+  await expect(page.getByTestId('import-type-history').getByRole('checkbox')).toBeChecked()
+  await expect(page.getByTestId('import-next')).toBeEnabled()
   // Quit (here: the file is let go of) and try again.
   chmodSync(held, 0o644)
   await page.getByTestId('import-retry').click()

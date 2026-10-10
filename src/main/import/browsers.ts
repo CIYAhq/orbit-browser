@@ -10,6 +10,7 @@ import type {
 import { chromiumBookmarks, chromiumProfiles } from './chromium'
 import { LockedError, type Scratch, withDatabase } from './copy'
 import { firefoxProfiles, readFirefoxBookmarks } from './firefox'
+import { countHistory, historySql } from './history'
 import { countBookmarks } from './netscape'
 import type { Place } from './places'
 import { parseBplist, safariBookmarks } from './safari'
@@ -123,13 +124,27 @@ export async function findSources(places: readonly Place[]): Promise<FoundSource
   return out
 }
 
-/** Reads one type of a profile: a held file marks it locked (IM-14); a broken one leaves it out. */
-async function part(out: ProfileContents, source: FoundSource, type: ImportDataType, read: () => Promise<void>) {
+/** Reads types of a profile from one file: a held file marks them locked (IM-14); a broken one leaves them out. */
+async function part(
+  out: ProfileContents,
+  source: FoundSource,
+  types: ImportDataType[],
+  read: () => Promise<unknown>,
+): Promise<void> {
   try {
     await read()
   } catch (err) {
-    if (err instanceof LockedError) out.locked.push(type)
-    else console.warn(`[import] couldn’t read ${source.name}’s ${type}:`, (err as Error).message)
+    if (err instanceof LockedError) out.locked.push(...types)
+    else console.warn(`[import] couldn’t read ${source.name}’s ${types.join(' and ')}:`, (err as Error).message)
+  }
+}
+
+/** One type read from a file that was copied: if it's broken, the file's other types are still read. */
+async function quietly(source: FoundSource, type: ImportDataType, read: () => unknown): Promise<void> {
+  try {
+    await read()
+  } catch (err) {
+    console.warn(`[import] couldn’t read ${source.name}’s ${type}:`, (err as Error).message)
   }
 }
 
@@ -144,21 +159,34 @@ export async function inspectProfile(
     const count = tree ? countBookmarks(tree) : 0
     if (tree && count > 0) out.bookmarks = { count, tree }
   }
+  const setHistory = (count: number) => {
+    if (count > 0) out.history = { count }
+  }
   const file = (name: string) => join(profile.dir, name)
+  const history = historySql(source.browser)
   if (source.browser === 'firefox') {
-    await part(out, source, 'bookmarks', async () =>
-      setBookmarks(await withDatabase(scratch, file('places.sqlite'), readFirefoxBookmarks)),
+    // Bookmarks and history share one file: one copy serves both.
+    await part(out, source, ['bookmarks', 'history'], () =>
+      withDatabase(scratch, file(history.file), async (db) => {
+        await quietly(source, 'bookmarks', () => setBookmarks(readFirefoxBookmarks(db)))
+        await quietly(source, 'history', async () => setHistory(await countHistory(db, history)))
+      }),
     )
-  } else if (source.browser === 'safari') {
-    await part(out, source, 'bookmarks', async () => {
+    return out
+  }
+  if (source.browser === 'safari') {
+    await part(out, source, ['bookmarks'], async () => {
       const copy = await scratch.take(file('Bookmarks.plist'))
       if (copy) setBookmarks(safariBookmarks(parseBplist(await readFile(copy))))
     })
   } else {
-    await part(out, source, 'bookmarks', async () => {
+    await part(out, source, ['bookmarks'], async () => {
       const copy = await scratch.take(file('Bookmarks'))
       if (copy) setBookmarks(chromiumBookmarks(await readFile(copy, 'utf8')))
     })
   }
+  await part(out, source, ['history'], () =>
+    withDatabase(scratch, file(history.file), async (db) => setHistory(await countHistory(db, history))),
+  )
   return out
 }

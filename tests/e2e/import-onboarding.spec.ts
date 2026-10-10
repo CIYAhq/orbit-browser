@@ -155,6 +155,7 @@ test('[OB-03][IM-02][IM-06] onboarding offers the browsers on this computer: sev
   await page.getByTestId('import-profiles').getByRole('checkbox').nth(1).check()
   await page.getByTestId('import-next').click()
   await expect(page.getByTestId('import-type-bookmarks')).toContainText('9 bookmarks')
+  await expect(page.getByTestId('import-type-history')).toContainText('7 pages visited')
   await page.getByTestId('import-next').click()
   await expect(page.getByTestId('import-count')).toHaveText('9 of 9 bookmarks selected')
   await page.getByTestId('import-next').click()
@@ -164,7 +165,13 @@ test('[OB-03][IM-02][IM-06] onboarding offers the browsers on this computer: sev
   await page.getByTestId('onboarding-next').click()
   await page.getByTestId('onboarding-next').click()
   await page.getByTestId('onboarding-browser-later').click()
-  await expect(page.getByTestId('onboarding-summary-import')).toHaveText('9 bookmarks from Chrome')
+  await expect(page.getByTestId('onboarding-summary-import')).toHaveText('9 bookmarks · 7 history items from Chrome')
+  // The history, too, waits for Start browsing (D44).
+  const before = await state(app)
+  const profileId = before.spaces[before.spaceOrder[0] as string]?.profileId
+  const titles = async () =>
+    ((await run(app, 'history.visits', { profileId, limit: 100 })) as { title: string }[]).map((v) => v.title)
+  expect(await titles()).toEqual([])
   await closing(page, () => page.getByTestId('onboarding-start').click())
 
   await expect.poll(async () => importedFolders(await state(app)).map((f) => f.name)).toEqual(['Imported from Chrome'])
@@ -172,6 +179,8 @@ test('[OB-03][IM-02][IM-06] onboarding offers the browsers on this computer: sev
   const folderId = s.spaces[s.spaceOrder[0] as string]?.pinned.at(-1) as string
   expect(s.folders[folderId]?.children.map((id) => s.folders[id]?.name)).toEqual(['Work', 'Personal'])
   expect(tabsUnder(s, folderId)).toHaveLength(9)
+  // Both profiles' history, in the first Space's profile.
+  await expect.poll(async () => (await titles()).slice(0, 3)).toEqual(['Inbox', 'Weather', 'Example News'])
 })
 
 test('[OB-09] Do this later: the Done screen says nothing was imported and where to find it', async () => {

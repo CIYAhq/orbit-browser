@@ -175,9 +175,9 @@ export function TypesPicker({
         </div>
       )}
       <div className="im-types">
-        {hasBookmarks &&
-          row('bookmarks', `${plural(bookmarks, 'bookmark', 'bookmarks')}, as pinned tabs`, locked.has('bookmarks'))}
-        {hasHistory && row('history', plural(history, 'page visited', 'pages visited'), locked.has('history'))}
+        {/* A profile whose file is held offers nothing of that type; the others' still come over. */}
+        {hasBookmarks && row('bookmarks', `${plural(bookmarks, 'bookmark', 'bookmarks')}, as pinned tabs`)}
+        {hasHistory && row('history', plural(history, 'page visited', 'pages visited'))}
         {extensions.size > 0 &&
           row(
             'extensions',

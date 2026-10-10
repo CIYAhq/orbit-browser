@@ -32,6 +32,7 @@ export function Progress({ job }: { job: ImportJob }) {
   const folderName = useOrbit((s) => (folder ? s.folders[folder.folderId]?.name : undefined))
   const spaceName = useOrbit((s) => (folder ? s.spaces[folder.spaceId]?.name : undefined))
   const done = job.phase === 'done'
+  const history = job.items.find((i) => i.type === 'history' && i.state === 'done' && i.done > 0)
   return (
     <div className="im-progress" data-testid="import-progress" data-phase={job.phase}>
       <p className="im-lead" aria-live="polite">
@@ -41,7 +42,9 @@ export function Progress({ job }: { job: ImportJob }) {
         {done &&
           (folderName
             ? `Done. The ${job.items[0]?.type === 'links' ? 'links' : 'bookmarks'} are in the pinned folder “${folderName}”${spaceName ? ` in ${spaceName}` : ''}.`
-            : 'Done.')}
+            : history
+              ? 'Done. The pages are in History, and the command bar suggests them.'
+              : 'Done.')}
         {job.phase === 'failed' &&
           `The import stopped: ${job.error ?? 'something went wrong'}. Nothing more was added.`}
         {job.phase === 'cancelled' && 'Cancelled. Nothing was imported.'}

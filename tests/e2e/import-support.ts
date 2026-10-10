@@ -33,6 +33,18 @@ export async function openImport(app: ElectronApplication, start?: unknown): Pro
   return importPage(app)
 }
 
+/** Clicks Done, which closes the import window: the click can still be finishing as the window goes. */
+export async function clickDone(page: Page): Promise<void> {
+  const closed = page.waitForEvent('close')
+  await page
+    .getByTestId('import-done')
+    .click()
+    .catch((err: unknown) => {
+      if (!page.isClosed()) throw err
+    })
+  await closed
+}
+
 /** Drops a file on an element the way the OS does (a DataTransfer with the file in it). */
 export async function dropFile(
   page: Page,

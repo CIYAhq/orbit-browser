@@ -17,12 +17,13 @@ import type { CallContext } from '../registry'
 import { type FoundSource, findSources, inspectProfile, publicSource } from './browsers'
 import { withScratch } from './copy'
 import { cleanTree, FILE_FOLDER_NAME, LINKS_FOLDER_NAME, linkNodes, MAX_FILE_BYTES, parseFile } from './files'
+import { historyTask } from './history'
 import { ImportJobs, type Task } from './jobs'
 import { countBookmarks, NO_BOOKMARKS } from './netscape'
 import { importPlaces } from './places'
 import { IMPORT_WINDOW_ID, ImportWindow } from './window'
 
-export function registerImport(ctx: MainContext, _history: HistoryService): void {
+export function registerImport(ctx: MainContext, history: HistoryService): void {
   const { commands, actions, store, windows } = ctx
   const jobs = new ImportJobs(ctx)
   const win = new ImportWindow(ctx, () => {
@@ -167,6 +168,12 @@ export function registerImport(ctx: MainContext, _history: HistoryService): void
           },
           add: async (job) => jobs.addBookmarks(job, bookmarks),
         })
+      }
+      // IM-07: history to each destination's profile (one that keeps history: never a private one).
+      const withHistory = chosen.filter((x) => x.types.has('history')).map((x) => x.profile)
+      if (withHistory.length > 0) {
+        const keeps = (profileId: string) => !!store.state.profiles[profileId]?.partition.startsWith('persist:')
+        tasks.push(historyTask(jobs, history, source, withHistory, keeps))
       }
       if (tasks.length === 0) throw new Error('Nothing to import')
       const names = new Map(chosen.map((x) => [x.profile.id, x.profile.name]))

@@ -3,7 +3,16 @@ import { expect, type Page, test } from '@playwright/test'
 import { PASTE_DEFAULT_NAME } from '../../src/renderer/src/import/copy'
 import type { ImportJob } from '../../src/shared/commands/import'
 import { MOD, type Orbit, run, state } from './helpers'
-import { dropFile, fixturePath, importPage, launchImport, loggedServer, openImport, tabsUnder } from './import-support'
+import {
+  clickDone,
+  dropFile,
+  fixturePath,
+  importPage,
+  launchImport,
+  loggedServer,
+  openImport,
+  tabsUnder,
+} from './import-support'
 
 /** A list of links, pasted or from a .txt file (IM-12, IM-13): one pinned folder of pinned tabs. */
 
@@ -104,8 +113,7 @@ test('[IM-12] Paste a list of links: one pinned folder named by the user, a pinn
     `Five <${base}/page/Five>`,
   ])
   expect(tabsUnder(s, folderId).every((t) => t.asleep && !t.favicon)).toBe(true)
-  await page.getByTestId('import-done').click()
-  await expect.poll(() => page.isClosed()).toBe(true)
+  await clickDone(page)
   expect(server.requests).toEqual([])
 })
 
@@ -132,7 +140,7 @@ test('[IM-12] ⌘V on the sidebar with links on the clipboard offers the same im
     'example.com <https://example.com/page/Three>',
   ])
   // Pasting the same list again makes a second folder, " (2)" (IM-15).
-  await page.getByTestId('import-done').click()
+  await clickDone(page)
   expect(await pasteInSidebar(shell)).toBe(true)
   const again = await importLinks(await importPage(app))
   expect((await state(app)).folders[again.folders[0]?.folderId as string]?.name).toBe(`${PASTE_DEFAULT_NAME} (2)`)

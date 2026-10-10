@@ -1,4 +1,5 @@
 import { chmodSync, cpSync, mkdtempSync, rmSync } from 'node:fs'
+import { copyFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -145,6 +146,9 @@ describe('[IM-03][IM-04] what a profile holds', () => {
   it('Chromium: the bookmarks bar and other bookmarks as folders, nesting and order kept; an empty root left out', async () => {
     const [work, personal] = await contents(await source('chrome'))
     expect(work?.bookmarks?.count).toBe(6)
+    // IM-07: the pages it can import (not the browser's own pages or hidden ones).
+    expect(work?.history).toEqual({ count: 6 })
+    expect(personal?.history).toEqual({ count: 1 })
     expect(shape(work?.bookmarks?.tree ?? [])).toEqual([
       {
         'Bookmarks bar': [
@@ -171,6 +175,7 @@ describe('[IM-03][IM-04] what a profile holds', () => {
   it('Firefox: toolbar, menu and other bookmarks from places.sqlite; saved searches skipped, tags and separators left out', async () => {
     const [profile] = await contents(await source('firefox'))
     expect(profile?.bookmarks?.count).toBe(7)
+    expect(profile?.history).toEqual({ count: 6 })
     expect(shape(profile?.bookmarks?.tree ?? [])).toEqual([
       {
         'Bookmarks Toolbar': [
@@ -203,15 +208,29 @@ describe('[IM-03][IM-04] what a profile holds', () => {
       { 'Reading List': ['A long read'] },
     ])
     expect(profile?.bookmarks?.count).toBe(7)
+    expect(profile?.history).toEqual({ count: 6 })
   })
 
   it('[IM-14] a file the browser holds is marked locked, and the profile’s other files are still read', async () => {
     const chrome = await source('chrome')
-    const busy: CopyFile = async (from) => {
-      if (from.endsWith('Bookmarks')) throw Object.assign(new Error('busy'), { code: 'EBUSY' })
-    }
-    const [work] = await contents(chrome, busy)
-    expect(work).toEqual({ profileId: 'Default', name: 'Work', locked: ['bookmarks'] })
+    const holding =
+      (...names: string[]): CopyFile =>
+      async (from, to) => {
+        if (names.some((n) => from.endsWith(n))) throw Object.assign(new Error('busy'), { code: 'EBUSY' })
+        await copyFile(from, to)
+      }
+    const [work] = await contents(chrome, holding('Bookmarks'))
+    expect(work).toEqual({ profileId: 'Default', name: 'Work', locked: ['bookmarks'], history: { count: 6 } })
+    const [busyHistory] = await contents(chrome, holding('History'))
+    expect(busyHistory?.locked).toEqual(['history'])
+    expect(busyHistory?.bookmarks?.count).toBe(6)
+    // Firefox keeps both in one file.
+    const [firefox] = await contents(await source('firefox'), holding('places.sqlite'))
+    expect(firefox).toEqual({
+      profileId: 'abcd1234.default-release',
+      name: 'default-release',
+      locked: ['bookmarks', 'history'],
+    })
     // A file that is missing or broken is simply not offered.
     const dir = scratchDir()
     writeChromium(join(dir, 'chrome'), [{ folder: 'Default', name: 'Me', history: [] }])
