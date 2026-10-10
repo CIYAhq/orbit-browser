@@ -6,7 +6,7 @@
   "SB-05": {"built": "partial", "note": "scaffold"},
   "SB-06": {"built": "yes", "note": "title row: inline rename, hover profile badge and … menu (pinned caret is PN-09)"},
   "SB-07": {"built": "yes", "note": "+ New Tab row with press animation opens the command bar"},
-  "SB-09": {"built": "partial", "note": "switcher and + menu done; Library button arrives with the archive lane"},
+  "SB-09": {"built": "partial", "note": "switcher, + menu and the Library button (opens the Library); the recent-files hover popover belongs to the downloads lane"},
   "SB-11": {"built": "partial", "note": "scaffold"},
   "SB-14": {"built": "partial", "note": "scaffold"},
   "SB-19": {"built": "partial", "note": "scaffold"},
@@ -49,6 +49,10 @@
   "TD-05": {"built": "yes", "note": "menu Archive Tabs Below, undoable"},
   "TD-06": {"built": "yes", "note": "Clear/archive-below/auto-archive per Space"},
   "AR-01": {"built": "yes", "note": "close, auto-archive, Clear, archive-below, pinned/folder/Space delete, Mini Window and Peek pages; entries carry tab, Space name, section, reason; back/forward history kept outside OrbitState (userData/archive, page state in memory only); private and empty tabs never archived; state keeps the newest ~200-300, the rest lives in the Archive store"},
+  "AR-02": {"built": "yes", "note": "Library view over the page area (its own view above the tabs, below the command bar and Peek) from the bottom-bar button, ⌘⇧L (Open Library), ⌘T View Archive / Open Library and the macOS Archive menu; reopens to the last section; Esc, ⌘W or selecting another tab closes it and the page gets the keys back; section registry (*.library-section.tsx) for other lanes"},
+  "AR-03": {"built": "yes", "note": "newest first under Today / Yesterday / date headings; favicon, title, host, time and origin-Space badge; filters by source (all, sidebar, Mini Window), Space and how it closed; per profile (PR-05); virtualised and paged, fast at 10k entries. Row click previews with AR-06 (until then a click selects)"},
+  "AR-04": {"built": "yes", "note": "search field filters on each keystroke (title and URL, case-insensitive, partial words, every word) using the Archive store's keys (history queryTerms/urlKeyOf); typing on narrows the last answer; Enter restores and shows the top or highlighted match; ⌘F focuses it. Command bar results still come from the recent window in state"},
+  "AR-05": {"built": "partial", "note": "Restore (hover button, Enter, double-click, row menu, several selected) puts tabs at the top of their Space's Today in order, with their tab id and back/forward history when the profile matches (never across profiles); routing rule > origin Space > current Space; toast with Go to Space when it lands elsewhere; command bar restores without a jump. Delete Folder undo review (W3) still to do"},
   "FD-01": {"built": "yes", "note": "folders only in the pinned area (tree.canMoveTo)"},
   "FD-02": {"built": "yes", "note": "New Folder at end of pinned in rename mode; New Folder with selected tabs"},
   "FD-03": {"built": "yes", "note": "menu or double-click; Enter/blur saves, Escape cancels, empty keeps name"},
@@ -171,6 +175,7 @@
   "PK-15": {"built": "yes", "note": "no hover-to-Peek trigger: hovering links or pinned rows never opens a Peek (hover cards are TB-21)"},
   "PK-16": {"built": "yes", "note": "Mini Window links never Peek; target=_blank stays in the Mini Window"},
   "FL-19": {"built": "yes", "note": "open spring done in ~280 ms with no overshoot, 18% dim; expand meets the frame in ~250 ms, then the row enters; split slides to the right half; close 160 ms to 0.96 + fade; drag/swipe dismiss; ⌘Z/⌘⇧T replay the open"},
+  "FL-24": {"built": "partial", "note": "Library opens with a 220 ms fade and 0.98→1 scale (opacity only with reduced motion) and fades out; sections cross-fade in 90 ms; search answers within 50 ms; restored rows fade and the rows below rise; long lists virtualised. Preview motion comes with AR-06"},
   "MW-01": {"built": "yes", "note": "separate small window, one floating tab, main window untouched"},
   "MW-02": {"built": "yes", "note": "open-url / second-instance / argv links open a Mini Window; same URL resurfaces it; routing rules first"},
   "MW-03": {"built": "yes", "note": "slim top bar: controls, favicon+host (click/⌘L edits), Open in…, profile pill; inset page card; neutral theme"},
@@ -184,5 +189,6 @@
   "MW-11": {"built": "yes", "note": "settings.miniWindowForExternalLinks off: tabs in the most recent or chosen Space (externalLinksSpace)"},
   "MW-12": {"built": "partial", "note": "fullscreen video fills the window, copy URL, devtools, downloads via the session; no captures"},
   "MW-14": {"built": "partial", "note": "all platforms with Ctrl+Alt+N / Ctrl+O / Ctrl+Alt+O; Windows jump list: New Mini Window, Show/Hide All; no Linux tray (MW-13) or launcher actions"},
-  "MW-15": {"built": "yes", "note": "warm spare window takes keys at once, page loads before the window shows; Open in… shrinks to 92% and fades (140 ms, macOS/Windows) as the row enters Today"}
+  "MW-15": {"built": "yes", "note": "warm spare window takes keys at once, page loads before the window shows; Open in… shrinks to 92% and fades (140 ms, macOS/Windows) as the row enters Today"},
+  "DL-09": {"built": "partial", "note": "Library container (archive lane): section list on the left, reopens to the last section, Esc/⌘W close, quick to open with thousands of entries; only the Archive section so far (other lanes add sections through the registry)"}
 }

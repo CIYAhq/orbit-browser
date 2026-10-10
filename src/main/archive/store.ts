@@ -149,6 +149,9 @@ function toRow(e: StoredEntry, favicon?: (url: string) => string | undefined): A
 
 interface Match {
   key: string
+  /** The filters other than the text (and the Archive version) this answers. */
+  base: string
+  terms: string[]
   items: Item[]
   days: [number, number][]
 }
@@ -162,6 +165,7 @@ export class ArchiveStore {
   private pending: string[] = []
   private timer: ReturnType<typeof setTimeout> | undefined
   private match: Match | undefined
+  private profileItems: { version: number; profileId: ProfileId; items: Item[] } | undefined
   /** Lines logged while a snapshot is being built; appended to it before it replaces the log. */
   private tail: string[] | undefined
   private deadRecords = 0
@@ -228,6 +232,19 @@ export class ArchiveStore {
     }
   }
 
+  /** A profile's entries, newest first (kept until the Archive changes). */
+  private profileList(profileId: ProfileId): readonly Item[] {
+    const cached = this.profileItems
+    if (cached && cached.version === this.version && cached.profileId === profileId) return cached.items
+    const items: Item[] = []
+    for (let i = this.items.length - 1; i >= 0; i--) {
+      const item = this.items[i] as Item
+      if (item.e.profileId === profileId) items.push(item)
+    }
+    this.profileItems = { version: this.version, profileId, items }
+    return items
+  }
+
   /** Entries for a tab id (a tab that came back by other means leaves the Archive). */
   idsOfTab(tabId: string): string[] {
     return [...(this.byTab.get(tabId) ?? [])]
@@ -236,29 +253,38 @@ export class ArchiveStore {
   /**
    * Matching entries, newest first, one page at a time (AR-03, AR-04). `favicon` looks up each
    * returned row's icon.
+   *
+   * The last answer is kept: its other pages come from it, and typing on (each term before is part
+   * of a term now) only looks through the entries it matched.
    */
   query(q: ArchiveQuery & { profileId: ProfileId }, favicon?: (url: string) => string | undefined): ArchivePage {
     const terms = queryTerms(q.text ?? '')
     const source = q.source ?? 'all'
-    const key = JSON.stringify([this.version, q.profileId, terms, q.spaceId ?? '', source])
+    const closedBy = q.closedBy ?? 'any'
+    const base = JSON.stringify([this.version, q.profileId, q.spaceId ?? '', source, closedBy])
+    const key = JSON.stringify([base, terms])
     let match = this.match
     if (match?.key !== key) {
+      const last = match
+      const narrows = !!last && last.base === base && last.terms.every((p) => terms.some((t) => t.includes(p)))
+      const pool: readonly Item[] = narrows && last ? last.items : this.profileList(q.profileId)
       const items: Item[] = []
       const days: [number, number][] = []
-      for (let i = this.items.length - 1; i >= 0; i--) {
-        const item = this.items[i] as Item
+      for (const item of pool) {
         const e = item.e
-        if (e.profileId !== q.profileId) continue
-        if (q.spaceId && e.spaceId !== q.spaceId) continue
-        if (source === 'mini' && e.from !== 'mini') continue
-        if (source === 'sidebar' && e.from) continue
+        if (!narrows) {
+          if (q.spaceId && e.spaceId !== q.spaceId) continue
+          if (source === 'mini' && e.from !== 'mini') continue
+          if (source === 'sidebar' && e.from) continue
+          if (closedBy !== 'any' && (e.reason === 'auto') !== (closedBy === 'auto')) continue
+        }
         if (terms.length && !terms.every((t) => item.titleLower.includes(t) || item.urlKey.includes(t))) continue
         items.push(item)
-        const last = days[days.length - 1]
-        if (last && last[0] === item.day) last[1]++
+        const day = days[days.length - 1]
+        if (day && day[0] === item.day) day[1]++
         else days.push([item.day, 1])
       }
-      match = { key, items, days }
+      match = { key, base, terms, items, days }
       this.match = match
     }
     const limit = Math.min(MAX_LIMIT, Math.max(0, Math.trunc(q.limit ?? DEFAULT_LIMIT)))

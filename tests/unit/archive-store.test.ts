@@ -113,6 +113,56 @@ describe('ArchiveStore search (AR-04)', () => {
     // Median well under the 50 ms keystroke budget (FL-24), with room for slow CI machines.
     expect(times[Math.floor(times.length / 2)]).toBeLessThan(25)
   })
+
+  it('[AR-04] typing on, deleting and changing filters give the same answers as a fresh search', () => {
+    const words = ['alpha', 'budget', 'cinema', 'delta', 'garden']
+    const list: ArchivedTab[] = []
+    for (let i = 0; i < 400; i++) {
+      const w = words[i % words.length]
+      list.push(
+        entry({
+          title: `Seeded ${w} ${i}`,
+          url: `https://${w}${i % 7}.test/p/${i}`,
+          archivedAt: NOW - i * 3600_000,
+          reason: i % 3 ? 'closed' : 'auto',
+          spaceId: i % 2 ? 's-1' : 's-2',
+          ...(i % 10 === 9 ? { from: 'mini' as const } : {}),
+        }),
+      )
+    }
+    const typed = new ArchiveStore(null)
+    typed.add(list)
+    const answer = (store: ArchiveStore, q: Parameters<ArchiveStore['query']>[0]) => {
+      const page = store.query({ ...q, limit: 500 })
+      return { total: page.total, days: page.days, ids: page.rows.map((r) => r.id) }
+    }
+    const steps: Parameters<ArchiveStore['query']>[0][] = [
+      { profileId: 'p-default', text: 'b' },
+      { profileId: 'p-default', text: 'bu' },
+      { profileId: 'p-default', text: 'budget' },
+      { profileId: 'p-default', text: 'budget 1' },
+      { profileId: 'p-default', text: 'budget 1 budget3' },
+      { profileId: 'p-default', text: 'budget 1' },
+      { profileId: 'p-default', text: 'budget 1', spaceId: 's-1' },
+      { profileId: 'p-default', text: 'budget 11', spaceId: 's-1' },
+      { profileId: 'p-default', text: 'budget 11' },
+      { profileId: 'p-default', text: 'budget 11', closedBy: 'auto' },
+      { profileId: 'p-default', text: 'Budget 11 .test', closedBy: 'auto' },
+      { profileId: 'p-default', text: 'a', source: 'mini' },
+      { profileId: 'p-default', text: 'al', source: 'mini' },
+      { profileId: 'p-work', text: 'al' },
+    ]
+    for (const q of steps) {
+      const fresh = new ArchiveStore(null)
+      fresh.add(list)
+      expect(answer(typed, q)).toEqual(answer(fresh, q))
+    }
+    // A change to the Archive is seen by the next keystroke.
+    typed.query({ profileId: 'p-default', text: 'cinema' })
+    const added = entry({ title: 'Seeded cinema new', archivedAt: NOW })
+    typed.add([added])
+    expect(typed.query({ profileId: 'p-default', text: 'cinema new' }).rows.map((r) => r.id)).toEqual([added.id])
+  })
 })
 
 describe('ArchiveStore persistence (AR-01)', () => {

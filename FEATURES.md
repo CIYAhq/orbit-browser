@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 141 built (45 partial) · 193 tested · 0 feel right.
+**Totals:** 485 spec’d · 144 built (48 partial) · 196 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 98 | 121 |
-| P1 | 221 | 39 | 66 |
+| P0 | 174 | 101 | 123 |
+| P1 | 221 | 39 | 67 |
 | P2 | 83 | 4 | 6 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -29,7 +29,7 @@ Spec: `spec/sidebar.md`
 | SB-06 | Space title row placement | P0 | ✅ | ✅ e2e | – | title row: inline rename, hover profile badge and … menu (pinned caret is PN-09) |
 | SB-07 | "+ New Tab" row | P0 | ✅ | ✅ e2e | – | + New Tab row with press animation opens the command bar |
 | SB-08 | Empty sidebar area: double-click, drag, right-click | P1 | – | – | – |  |
-| SB-09 | Bottom bar: Library, Space switcher, "+" menu | P0 | 🟡 partial | ✅ e2e | – | switcher and + menu done; Library button arrives with the archive lane |
+| SB-09 | Bottom bar: Library, Space switcher, "+" menu | P0 | 🟡 partial | ✅ e2e | – | switcher, + menu and the Library button (opens the Library); the recent-files hover popover belongs to the downloads lane |
 | SB-10 | Transient trays above the bottom bar | P1 | – | – | – |  |
 | SB-11 | Show / hide the sidebar | P0 | 🟡 partial | – | – | scaffold |
 | SB-12 | Hover to reveal the hidden sidebar | P0 | – | – | – |  |
@@ -330,10 +330,10 @@ Spec: `spec/archive.md`
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
 | AR-01 | What goes into the Archive | P0 | ✅ | ✅ e2e+unit | – | close, auto-archive, Clear, archive-below, pinned/folder/Space delete, Mini Window and Peek pages; entries carry tab, Space name, section, reason; back/forward history kept outside OrbitState (userData/archive, page state in memory only); private and empty tabs never archived; state keeps the newest ~200-300, the rest lives in the Archive store |
-| AR-02 | Where the Archive lives and how to open it | P0 | – | – | – |  |
-| AR-03 | Archive list layout | P0 | – | ✅ unit | – |  |
-| AR-04 | Search the Archive | P0 | – | ✅ unit | – |  |
-| AR-05 | Restore an archived tab | P0 | – | – | – |  |
+| AR-02 | Where the Archive lives and how to open it | P0 | ✅ | ✅ e2e | – | Library view over the page area (its own view above the tabs, below the command bar and Peek) from the bottom-bar button, ⌘⇧L (Open Library), ⌘T View Archive / Open Library and the macOS Archive menu; reopens to the last section; Esc, ⌘W or selecting another tab closes it and the page gets the keys back; section registry (*.library-section.tsx) for other lanes |
+| AR-03 | Archive list layout | P0 | ✅ | ✅ e2e+unit | – | newest first under Today / Yesterday / date headings; favicon, title, host, time and origin-Space badge; filters by source (all, sidebar, Mini Window), Space and how it closed; per profile (PR-05); virtualised and paged, fast at 10k entries. Row click previews with AR-06 (until then a click selects) |
+| AR-04 | Search the Archive | P0 | ✅ | ✅ e2e+unit | – | search field filters on each keystroke (title and URL, case-insensitive, partial words, every word) using the Archive store's keys (history queryTerms/urlKeyOf); typing on narrows the last answer; Enter restores and shows the top or highlighted match; ⌘F focuses it. Command bar results still come from the recent window in state |
+| AR-05 | Restore an archived tab | P0 | 🟡 partial | ✅ e2e+unit | – | Restore (hover button, Enter, double-click, row menu, several selected) puts tabs at the top of their Space's Today in order, with their tab id and back/forward history when the profile matches (never across profiles); routing rule > origin Space > current Space; toast with Go to Space when it lands elsewhere; command bar restores without a jump. Delete Folder undo review (W3) still to do |
 | AR-06 | Preview an archived item without restoring | P2 | – | – | – |  |
 | AR-07 | Clear the Archive | P1 | – | – | – |  |
 | AR-08 | Retention of archived entries | P1 | – | – | – |  |
@@ -397,7 +397,7 @@ Spec: `spec/feel.md`
 | FL-21 | Sidebar scrolling and large-sidebar performance | P0 | – | ✅ e2e | – |  |
 | FL-22 | Toasts | P1 | – | – | – |  |
 | FL-23 | Page loading indicator | P1 | – | – | – |  |
-| FL-24 | Library and Archive motion | P2 | – | ✅ unit | – |  |
+| FL-24 | Library and Archive motion | P2 | 🟡 partial | ✅ e2e+unit | – | Library opens with a 220 ms fade and 0.98→1 scale (opacity only with reduced motion) and fades out; sections cross-fade in 90 ms; search answers within 50 ms; restored rows fade and the rows below rise; long lists virtualised. Preview motion comes with AR-06 |
 | FL-25 | Menus, popovers and tooltips | P1 | – | – | – |  |
 | FL-26 | Recent-tab switcher (Ctrl+Tab) | P1 | – | – | – |  |
 | FL-27 | Window-level motion | P1 | – | – | – |  |
@@ -519,7 +519,7 @@ Spec: `spec/downloads.md`
 | DL-06 | Drag a download out (and into web pages) | P1 | – | – | – |  |
 | DL-07 | Download location setting (per profile) | P1 | – | – | – |  |
 | DL-08 | Remove, clear and delete downloads | P1 | – | – | – |  |
-| DL-09 | The Library (container view) | P1 | – | – | – |  |
+| DL-09 | The Library (container view) | P1 | 🟡 partial | ✅ e2e | – | Library container (archive lane): section list on the left, reopens to the last section, Esc/⌘W close, quick to open with thousands of entries; only the Archive section so far (other lanes add sections through the registry) |
 | DL-10 | Library → Downloads section | P1 | – | – | – |  |
 | DL-11 | Library → Media section | P2 | – | – | – |  |
 | DL-12 | Download safety | P1 | – | – | – |  |

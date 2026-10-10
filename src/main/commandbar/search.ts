@@ -251,13 +251,15 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
     await commands.run('tabs.moveToSpace', { ids: [item], spaceId, section: pin ? 'pinned' : 'today' }, { windowId })
   }
 
-  /** Restores an archived tab as a new Today tab in the current Space (no forced Space jump, CB-19). */
+  /**
+   * Restores an archived tab into Today of its Space with its history (archive lane, AR-05). It is
+   * selected when that is the current Space; else a toast offers to go there (no forced jump, CB-19).
+   */
   const restoreArchived = async (result: SearchResult, windowId: WindowId | undefined) => {
     const id = result.archiveId
-    // The archive lane's restore keeps back/forward history; use it once it exists.
     const restore = 'archive.restore' as CommandName
     if (id && commands.has(restore)) {
-      await commands.run(restore, { id } as never, { windowId })
+      await commands.run(restore, { id, open: true, stay: true } as never, { windowId })
       return
     }
     const entry = store.state.archive.find((a) => a.id === id)

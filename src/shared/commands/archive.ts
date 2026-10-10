@@ -6,6 +6,9 @@ import type { ArchivedTab, ProfileId, SpaceId, TabId } from '../state'
  */
 export type ArchiveSource = 'all' | 'sidebar' | 'mini'
 
+/** How the tabs left (DL-09): any way, closed or cleared by the user, or archived automatically. */
+export type ArchiveClosedBy = 'any' | 'manual' | 'auto'
+
 /** One Archive row as the Library lists it (AR-03). */
 export interface ArchiveRow {
   id: string
@@ -29,6 +32,7 @@ export interface ArchiveQuery {
   text?: string
   spaceId?: SpaceId
   source?: ArchiveSource
+  closedBy?: ArchiveClosedBy
   /** Defaults to the profile of the calling window's current Space (PR-05). */
   profileId?: ProfileId
   /** Rows to skip (newest first) and how many to return (default 100, at most 500). */
@@ -50,10 +54,23 @@ export interface ArchivePage {
 }
 
 export interface ArchiveRestoreResult {
-  /** Tabs put back into the sidebar, in the order given. */
+  /** Entries restored, in the order given (entries restored already or deleted are left out). */
+  ids: string[]
+  /** The tabs put back into the sidebar, in the same order. */
   tabIds: TabId[]
-  /** The Space the last of them went to. */
-  spaceId?: SpaceId
+  /** The Space each went to, in the same order. */
+  spaceIds: SpaceId[]
+}
+
+export interface ArchiveRestoreArgs {
+  id?: string
+  ids?: string[]
+  /** Also select the (first) tab in the calling window, switching to its Space when needed… */
+  open?: boolean
+  /** …unless `stay`: then only when it lands in the current Space; else a toast offers to go there (CB-19). */
+  stay?: boolean
+  /** Into the calling window's current Space instead of the Space each came from (the command bar, CB-19). */
+  here?: boolean
 }
 
 /** Why the Library opens: the shortcut, menu or command bar route (AR-02, AR-07, AR-10). */
@@ -62,6 +79,17 @@ export interface LibraryOpenArgs {
   section?: string
   /** Ask to clear the Archive as soon as it shows (AR-07 from the menu or the command bar). */
   confirmClear?: boolean
+}
+
+/** What the Library shows; sent to its view on each open (`library:show`) and returned by `library.status`. */
+export interface LibraryShow {
+  section: string
+  /** Changes with every open, so the view can tell a new open from a repeated message. */
+  nonce: number
+  /** Ask to clear the Archive right away (AR-07 from the menu or the command bar). */
+  confirmClear?: boolean
+  /** The Library was closed before this open: play the entrance (FL-24). */
+  entering?: boolean
 }
 
 /** A sidebar snapshot (AR-11), newest first in lists. */
@@ -77,17 +105,19 @@ export interface ArchiveCommands {
   /** Archived tabs of one profile, filtered, newest first, a page at a time (AR-03, AR-04). */
   'archive.query': { args: ArchiveQuery; result: ArchivePage }
   /**
-   * Puts archived tabs back at the top of the Space they came from, with their history when the
-   * profile still matches (AR-05, PR-05). `open` also selects the (last) tab in the calling window.
-   * Entries already restored are skipped, so repeated clicks never restore twice.
+   * Puts archived tabs back at the top of Today in the Space they came from (a link-routing rule
+   * wins; the current Space when theirs is gone), with their history when the profile still
+   * matches (AR-05, PR-05). Entries already restored are skipped, so repeated clicks never restore twice.
    */
-  'archive.restore': { args: { id?: string; ids?: string[]; open?: boolean }; result: ArchiveRestoreResult }
+  'archive.restore': { args: ArchiveRestoreArgs; result: ArchiveRestoreResult }
   /** Removes entries without restoring them (AR-07, row menu). Returns how many went. */
   'archive.delete': { args: { ids: string[] }; result: number }
   /** Removes every entry of a profile (default: the calling window's) (AR-07). Returns how many went. */
   'archive.clear': { args: { profileId?: ProfileId }; result: number }
   /** Shows the row's context menu (Restore, Open in New Tab, Copy URL, Delete) at a point of the Library. */
   'archive.contextMenu': { args: { ids: string[]; x: number; y: number }; result: void }
+  /** Test-only (ORBIT_E2E=1): the labels of the last Archive menu; `click` runs an item ("Delete"). */
+  'archive.testMenu': { args: { click?: string }; result: string[] }
   /** Test-only (ORBIT_E2E=1): adds `count` entries spread over `days` days for one profile. */
   'archive.testSeed': {
     args: { count: number; days?: number; profileId?: ProfileId; spaceId?: SpaceId; prefix?: string }
@@ -100,10 +130,23 @@ export interface ArchiveCommands {
   'library.close': { args: Record<string, never>; result: void }
   /** The Library button: opens or closes it (SB-09). */
   'library.toggle': { args: Record<string, never>; result: void }
-  /** Is the Library open in the calling window, and on which section. */
-  'library.status': { args: Record<string, never>; result: { open: boolean; section: string } }
+  /** Loads the calling window's Library view ahead of an open (the pointer is on the Library button). */
+  'library.prepare': { args: Record<string, never>; result: void }
+  /** Is the Library open in the calling window, and what it shows (a view that loads late asks this). */
+  'library.status': { args: Record<string, never>; result: LibraryShow & { open: boolean } }
   /** Remembers the section shown, so the Library reopens there (AR-02). */
   'library.setSection': { args: { section: string }; result: void }
+  /** Test-only (ORBIT_E2E=1): where the calling window's Library view is and whether it has focus. */
+  'library.testInfo': {
+    args: Record<string, never>
+    result: {
+      open: boolean
+      visible: boolean
+      bounds?: { x: number; y: number; width: number; height: number }
+      aboveTabs: boolean
+      focused: boolean
+    }
+  }
 
   /** Sidebar snapshots, newest first (AR-11). */
   'backups.list': { args: Record<string, never>; result: BackupInfo[] }

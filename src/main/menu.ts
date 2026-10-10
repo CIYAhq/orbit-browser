@@ -101,6 +101,8 @@ export function installMenu(ctx: MainContext): void {
       label: 'Spaces',
       submenu: [item('space.new'), { type: 'separator' }, item('space.next'), item('space.previous')],
     },
+    // Archive → View Archive, and the Library it lives in (archive lane, AR-02).
+    { label: 'Archive', submenu: [item('app.archive'), item('app.library')] },
     { role: 'windowMenu' },
     { role: 'help', submenu: [] },
   ]

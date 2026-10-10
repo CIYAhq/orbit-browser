@@ -231,7 +231,19 @@ export const ACTIONS: ActionDef[] = [
     other: ['Ctrl+,'],
     keywords: ['preferences'],
   },
-  { id: 'app.archive', title: 'Show Archive', category: 'App', keywords: ['history', 'closed tabs'] },
+  {
+    id: 'app.archive',
+    title: 'View Archive',
+    category: 'App',
+    keywords: ['archive', 'archived tabs', 'closed tabs', 'library'],
+  },
+  {
+    id: 'app.library',
+    title: 'Open Library',
+    category: 'App',
+    mac: ['Cmd+Shift+L'],
+    keywords: ['library', 'archive', 'downloads', 'media'],
+  },
 
   // Spaces
   { id: 'space.new', title: 'New Space', category: 'Spaces', keywords: ['create space'] },

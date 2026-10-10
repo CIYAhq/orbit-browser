@@ -1,11 +1,14 @@
 import { join } from 'node:path'
-import { app } from 'electron'
-import type { ArchiveQuery } from '../../shared/commands/archive'
+import { app, clipboard, Menu, type MenuItemConstructorOptions } from 'electron'
+import type { ArchiveQuery, ArchiveRestoreResult, LibraryOpenArgs } from '../../shared/commands/archive'
 import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
 import type { ArchivedTab, ProfileId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
+import { findMenuItem, menuLabels } from '../tabs/menus'
+import { LibraryHost } from './library'
+import { restoreEntries } from './restore'
 import { ArchiveSync } from './service'
 import { ArchiveStore } from './store'
 
@@ -14,9 +17,13 @@ const LOAD_DELAY_MS = 300
 /** Renderers hear about Archive changes at most this often. */
 const CHANGED_DEBOUNCE_MS = 40
 
+/** Section ids are short slugs (`archive`, `downloads`…). */
+const SECTION_ID = /^[\w.-]{1,64}$/
+
 export interface ArchiveApi {
   store: ArchiveStore
   sync: ArchiveSync
+  library: LibraryHost
 }
 
 /**
@@ -45,6 +52,18 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
   }
 
   const windowOf = (c: CallContext): WindowId | undefined => c.windowId ?? windows.focusedWindowId()
+  /** The Library shows in main windows: from a Mini Window it opens in the most recent main window. */
+  const mainWindowOf = (c: CallContext): WindowId | undefined => {
+    const s = state.state
+    const id = windowOf(c)
+    if (id && s.windows[id]?.kind === 'main') return id
+    const focused = windows.focusedWindowId()
+    if (focused && s.windows[focused]?.kind === 'main') return focused
+    const main = windows.ids().filter((w) => s.windows[w]?.kind === 'main')
+    const target = main[main.length - 1]
+    if (target) windows.get(target)?.focus()
+    return target
+  }
   /** The profile a call is about: given, or the calling window's current Space's (PR-05). */
   const profileOf = (profileId: ProfileId | undefined, c: CallContext): ProfileId => {
     if (profileId) return profileId
@@ -54,6 +73,44 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
     const space = win ? s.spaces[win.spaceId] : undefined
     return space?.profileId ?? Object.keys(s.profiles)[0] ?? DEFAULT_PROFILE_ID
   }
+
+  // ---- The Library (AR-02, DL-09) ----
+
+  const library = new LibraryHost(ctx, {
+    last: () => state.state.settings.librarySection || 'archive',
+    remember: (section) => {
+      if (state.state.settings.librarySection === section) return
+      state.update((d) => {
+        d.settings.librarySection = section
+      })
+    },
+  })
+  library.onChange = (windowId, open, section) => windows.sendToWindow(windowId, 'library.state', { open, section })
+  ctx.actions.intercept((id, c) => library.intercept(id, c.windowId))
+
+  const openLibrary = (c: CallContext, args: LibraryOpenArgs = {}) => {
+    const section = typeof args.section === 'string' && SECTION_ID.test(args.section) ? args.section : undefined
+    library.open(mainWindowOf(c), {
+      ...(section ? { section } : {}),
+      ...(args.confirmClear ? { confirmClear: true } : {}),
+    })
+  }
+  commands.register('library.open', (args, c) => openLibrary(c, args ?? {}))
+  commands.register('library.close', (_args, c) => library.close(windowOf(c)))
+  commands.register('library.toggle', (_args, c) => {
+    const windowId = windowOf(c)
+    if (library.isOpen(windowId)) library.close(windowId)
+    else openLibrary(c)
+  })
+  commands.register('library.status', (_args, c) => library.status(windowOf(c)))
+  commands.register('library.prepare', (_args, c) => library.prepare(windowOf(c)))
+  commands.register('library.setSection', ({ section }, c) => {
+    if (typeof section === 'string' && SECTION_ID.test(section)) library.setSection(windowOf(c), section)
+  })
+  ctx.actions.register('app.library', (c) => openLibrary(c))
+  ctx.actions.register('app.archive', (c) => openLibrary(c, { section: 'archive' }))
+
+  // ---- Archive entries ----
 
   commands.register('archive.query', async (args: ArchiveQuery, c) => {
     await store.load()
@@ -65,7 +122,106 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
     return sync.remove(Array.isArray(ids) ? ids : []).length
   })
 
+  /**
+   * Restores entries for a window. A tab that went to a Space the window isn't showing gets a toast
+   * that says where and offers to go there (AR-05): in the Library when it is open, else the window's.
+   */
+  const restore = (
+    ids: readonly string[],
+    windowId: WindowId | undefined,
+    opts: { open?: boolean; here?: boolean; stay?: boolean },
+  ): ArchiveRestoreResult => {
+    const result = restoreEntries(ctx, store, ids, { windowId, ...opts })
+    if (result.ids.length === 0 || !windowId) return result
+    if (library.isOpen(windowId)) {
+      library.send(windowId, 'archive:restored', result)
+      return result
+    }
+    const s = state.state
+    const current = s.windows[windowId]?.spaceId
+    const away = result.spaceIds
+      .map((spaceId, i) => ({ spaceId, tabId: result.tabIds[i] }))
+      .filter((r) => r.spaceId !== current)
+    const spaces = [...new Set(away.map((r) => r.spaceId))]
+    const target = spaces[0]
+    if (!target) return result
+    if (spaces.length > 1) {
+      windows.sendToWindow(windowId, 'toast', { message: `${away.length} tabs restored to ${spaces.length} Spaces` })
+      return result
+    }
+    const name = s.spaces[target]?.name ?? 'another Space'
+    const tabId = away.length === 1 ? away[0]?.tabId : undefined
+    windows.sendToWindow(windowId, 'toast', {
+      message: away.length > 1 ? `${away.length} tabs restored to ${name}` : `Restored to ${name}`,
+      action: tabId
+        ? { label: 'Go to Space', command: 'tabs.activate', args: { tabId } }
+        : { label: 'Go to Space', command: 'spaces.switch', args: { spaceId: target } },
+    })
+    return result
+  }
+
+  commands.register('archive.restore', async ({ id, ids, open, here, stay }, c) => {
+    await store.load()
+    const list = [...(Array.isArray(ids) ? ids : []), ...(typeof id === 'string' ? [id] : [])]
+    return restore(list, windowOf(c), { open: open === true, here: here === true, stay: stay === true })
+  })
+
+  // ---- Row menu (AR-05, AR-07) ----
+
+  let lastMenu: MenuItemConstructorOptions[] = []
+  commands.register('archive.contextMenu', async ({ ids }, c) => {
+    await store.load()
+    const windowId = windowOf(c)
+    const entries = (Array.isArray(ids) ? ids : []).map((id) => store.get(id)).filter((e) => !!e)
+    if (entries.length === 0) return
+    const many = entries.length > 1
+    const first = entries[0] as (typeof entries)[number]
+    const items: MenuItemConstructorOptions[] = [
+      {
+        label: many ? `Restore ${entries.length} Tabs` : 'Restore',
+        click: () =>
+          restore(
+            entries.map((e) => e.id),
+            windowId,
+            {},
+          ),
+      },
+    ]
+    if (!many) {
+      items.push({
+        label: 'Open in New Tab',
+        click: () => void commands.run('tabs.create', { url: first.url }, { windowId }),
+      })
+    }
+    items.push(
+      {
+        label: many ? `Copy ${entries.length} URLs` : 'Copy URL',
+        click: () => {
+          clipboard.writeText(entries.map((e) => e.url).join('\n'))
+          library.send(windowId, 'library:toast', { message: many ? 'Copied URLs' : 'Copied URL' })
+        },
+      },
+      { type: 'separator' },
+      {
+        label: many ? `Delete ${entries.length} from Archive` : 'Delete from Archive',
+        click: () => sync.remove(entries.map((e) => e.id)),
+      },
+    )
+    lastMenu = items
+    if (ctx.e2e) return
+    const win = windowId ? windows.get(windowId) : undefined
+    Menu.buildFromTemplate(items).popup(win ? { window: win } : undefined)
+  })
+
   if (ctx.e2e) {
+    commands.register('library.testInfo', (_args, c) => library.info(windowOf(c)))
+    commands.register('archive.testMenu', ({ click }) => {
+      if (click) {
+        const item = findMenuItem(lastMenu, click)
+        if (item?.click && item.enabled !== false) (item.click as () => void)()
+      }
+      return menuLabels(lastMenu)
+    })
     // Fills the Archive for tests (lists, search at scale) without growing OrbitState.
     commands.register('archive.testSeed', async ({ count, days = 30, profileId, spaceId, prefix = 'Seeded' }, c) => {
       await store.load()
@@ -99,11 +255,13 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
           archivedAt: now - 60_000 - Math.round(((count - 1 - i) / Math.max(1, count)) * span),
           reason: i % 3 === 0 ? 'auto' : 'closed',
           section: 'today',
+          // Every tenth (the "lantern" pages) closed in a Mini Window (AR-03's source filter).
+          ...(i % 10 === 9 ? { from: 'mini' as const } : {}),
         })
       }
       return store.add(entries).length
     })
   }
 
-  return { store, sync }
+  return { store, sync, library }
 }

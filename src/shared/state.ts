@@ -232,6 +232,8 @@ export interface Settings {
   countFavoritesInShortcuts: boolean
   /** ⌘9 selects the last tab (true) or the 9th item (false) (TB-04). */
   lastTabOnCmd9: boolean
+  /** The Library section used last: the Library reopens there (AR-02, DL-09). */
+  librarySection: string
 }
 
 /** "URL contains …" or "URL is exactly …" → a Space (ST-09 link routing). */
