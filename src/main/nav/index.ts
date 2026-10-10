@@ -54,6 +54,11 @@ export interface NavTestHooks extends LinksTestHooks, PageMenuTestHooks {
     bounds?: { x: number; y: number; width: number; height: number }
     hold: RevealHoldInfo | null
   }
+  /**
+   * The pointer Orbit reads for the sidebar's edge, at `x`, `y` of a window's content (default: the
+   * first), inside it or not: a real pointer where no view hears it (SB-12, fix check A M1).
+   */
+  pointerAt: (x: number, y: number, windowId?: WindowId) => void
   /** A window's page loading indicator (default: the first) (SB-28). */
   loading: (windowId?: WindowId) => LoadingInfo
   /** A window's link status pill (default: the first) (SB-27). */
@@ -384,6 +389,7 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
         const id = windowId ?? windows.ids()[0] ?? ''
         return { ...windows.floatingInfo(id), hold: reveal.hold(id) ?? null }
       },
+      pointerAt: (x, y, windowId) => reveal.pointerAt(windowId ?? windows.ids()[0] ?? '', x, y),
       loading: (windowId) => loading.info(windowId ?? windows.ids()[0] ?? ''),
       linkPill: (windowId) => linkPill.info(windowId ?? windows.ids()[0] ?? ''),
     }

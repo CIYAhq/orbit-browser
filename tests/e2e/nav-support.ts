@@ -297,6 +297,7 @@ type Hooks = {
     menu: () => { windowId: string; direction: 'back' | 'forward'; labels: string[]; icons: boolean[] } | null
     chooseMenu: (label: string, newTab?: boolean) => boolean
     floating: (windowId?: string) => FloatingInfo
+    pointerAt: (x: number, y: number, windowId?: string) => void
     corner: (tabId: string) => number | null
     tools: (windowId?: string) => ToolsInfo
     blockedMenu: () => string[] | null
@@ -593,6 +594,14 @@ export async function floatingPage(app: ElectronApplication): Promise<Page> {
     await new Promise((r) => setTimeout(r, 100))
   }
   throw new Error('No floating sidebar page')
+}
+
+/**
+ * The pointer Orbit reads for the sidebar's edge at `x`, `y` of the first window's content, inside
+ * it or not, as a real pointer no view in the window hears (fix check A, M1).
+ */
+export async function pointerAt(app: ElectronApplication, x: number, y: number): Promise<void> {
+  await app.evaluate((_e, [px, py]) => (globalThis as unknown as Hooks).__orbitNav.pointerAt(px, py), [x, y] as const)
 }
 
 /** The first window's floating sidebar. */

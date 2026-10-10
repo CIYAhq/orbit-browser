@@ -12,7 +12,7 @@ export const HIDE_GRACE_MS = 400
  * edge, where nothing in the window may hear it (review A-M2).
  */
 export const EDGE_WATCH_MS = 300
-/** How often the pointer is read meanwhile. */
+/** How often the pointer is read meanwhile, and while the card is out for a pointer nothing heard. */
 const EDGE_WATCH_EVERY_MS = 20
 
 interface Point {
@@ -57,9 +57,13 @@ const buttonDown = (mouse: MouseInputEvent) => (mouse.modifiers ?? []).some((m) 
  * a pointer coming off the page has no movement. On Linux a frameless window keeps its left 5 px
  * for resizing and nothing in the window hears the pointer there: when the pointer leaves a page or
  * the shell, main reads it for a moment and brings the card in if it is at the edge (review A-M2).
+ * The card that comes for it has heard nothing either, so main reads the pointer on until the card
+ * or a page hears it, and lets the card go when the pointer has left the window (fix check A, M1).
  */
 export function registerSidebarReveal(ctx: MainContext): {
   hold: (windowId: WindowId) => RevealHoldInfo | undefined
+  /** Under ORBIT_E2E: the pointer at `x`, `y` of a window's content, inside it or not, where no view hears it. */
+  pointerAt: (windowId: WindowId, x: number, y: number) => void
 } {
   const { store, commands, windows } = ctx
   const holds = new Map<WindowId, Hold>()
@@ -68,6 +72,10 @@ export function registerSidebarReveal(ctx: MainContext): {
   const restAt = new Map<WindowId, Point>()
   /** Per window: the look for the pointer at the left edge after it left a page or the shell. */
   const edgeWatches = new Map<WindowId, NodeJS.Timeout>()
+  /** Per window: the look for the pointer while the card is out and nothing has heard it (fix check A, M1). */
+  const outWatches = new Map<WindowId, NodeJS.Timeout>()
+  /** Per window: a mouse button was down at the last event the shell or a page heard. */
+  const pressed = new Map<WindowId, boolean>()
 
   /**
    * The pointer on screen. Input a test sends never moves the system's pointer, so under ORBIT_E2E
@@ -105,6 +113,7 @@ export function registerSidebarReveal(ctx: MainContext): {
       const hold = holdOf(windowId)
       hold.over = true
       settle(windowId)
+      watchOut(windowId)
       return
     }
     // Nothing summons it while something else floats over the window (the command bar, the site
@@ -113,6 +122,7 @@ export function registerSidebarReveal(ctx: MainContext): {
     clearTimeout(holds.get(windowId)?.timer)
     holds.set(windowId, { over: true, editing: false, overlay: false })
     setPeeking(windowId, true)
+    watchOut(windowId)
   }
 
   /**
@@ -126,6 +136,20 @@ export function registerSidebarReveal(ctx: MainContext): {
     restAt.delete(windowId)
     reveal(windowId)
     return true
+  }
+
+  /** The pointer within the window's content area (a resize border included). */
+  const inWindow = (windowId: WindowId): boolean => {
+    const win = windows.get(windowId)
+    if (!win || win.isDestroyed()) return false
+    const content = win.getContentBounds()
+    const now = pointer()
+    return (
+      now.x >= content.x &&
+      now.x < content.x + content.width &&
+      now.y >= content.y &&
+      now.y < content.y + content.height
+    )
   }
 
   /** The pointer within the window's left edge band (its content area, a resize border included). */
@@ -161,6 +185,29 @@ export function registerSidebarReveal(ctx: MainContext): {
     look()
   }
 
+  const stopOutWatch = (windowId: WindowId) => {
+    clearInterval(outWatches.get(windowId))
+    outWatches.delete(windowId)
+  }
+
+  /**
+   * The card is out for a pointer that may be where nothing hears it (the window's very edge): until
+   * the card or a page hears it, main reads it. Gone out of the window with no button down, the
+   * pointer has left the card's side, and the card goes as it would when left (fix check A, M1).
+   */
+  const watchOut = (windowId: WindowId) => {
+    stopOutWatch(windowId)
+    const look = () => {
+      const hold = holds.get(windowId)
+      if (!store.state.windows[windowId]?.sidebar.peeking || !hold?.over) return stopOutWatch(windowId)
+      if (pressed.get(windowId) || inWindow(windowId)) return
+      stopOutWatch(windowId)
+      hold.over = false
+      settle(windowId)
+    }
+    outWatches.set(windowId, setInterval(look, EDGE_WATCH_EVERY_MS))
+  }
+
   const hideNow = (windowId: WindowId) => {
     clearTimeout(holds.get(windowId)?.timer)
     holds.delete(windowId)
@@ -190,6 +237,7 @@ export function registerSidebarReveal(ctx: MainContext): {
           clearTimeout(hold.timer)
           holds.delete(windowId)
         }
+        stopOutWatch(windowId)
         continue
       }
       // Opening the command bar or a panel from the card keeps it out until that closes (SB-12).
@@ -207,7 +255,9 @@ export function registerSidebarReveal(ctx: MainContext): {
       holds.delete(windowId)
     }
     for (const windowId of edgeWatches.keys()) if (!next.windows[windowId]) stopEdgeWatch(windowId)
+    for (const windowId of outWatches.keys()) if (!next.windows[windowId]) stopOutWatch(windowId)
     for (const windowId of restAt.keys()) if (!next.windows[windowId]) restAt.delete(windowId)
+    for (const windowId of pressed.keys()) if (!next.windows[windowId]) pressed.delete(windowId)
   })
 
   /**
@@ -215,8 +265,9 @@ export function registerSidebarReveal(ctx: MainContext): {
    * edge, or left the page, perhaps for the window's edge.
    */
   const onPageMouse = (tabId: TabId, mouse: MouseInputEvent) => {
-    if (mouse.type !== 'mouseMove' && mouse.type !== 'mouseDown' && mouse.type !== 'mouseLeave') return
     const windowId = windows.windowOfTab(tabId)
+    if (windowId) pressed.set(windowId, buttonDown(mouse))
+    if (mouse.type !== 'mouseMove' && mouse.type !== 'mouseDown' && mouse.type !== 'mouseLeave') return
     const win = windowId ? store.state.windows[windowId] : undefined
     if (!windowId || !win) return
     const bounds = windows.tabViewBounds(tabId)
@@ -227,6 +278,8 @@ export function registerSidebarReveal(ctx: MainContext): {
       return
     }
     if (win.sidebar.peeking) {
+      // A page heard the pointer: where it is is known again.
+      stopOutWatch(windowId)
       if (mouse.type === 'mouseDown') {
         hideNow(windowId)
         return
@@ -249,9 +302,13 @@ export function registerSidebarReveal(ctx: MainContext): {
   windows.onWindowCreated((windowId, win) => {
     win.webContents.on('before-mouse-event', (_event, mouse) => {
       if (ctx.e2e) follow(windowId, mouse.x, mouse.y)
+      pressed.set(windowId, buttonDown(mouse))
       if (mouse.type === 'mouseLeave') watchEdge(windowId)
     })
-    win.once('closed', () => stopEdgeWatch(windowId))
+    win.once('closed', () => {
+      stopEdgeWatch(windowId)
+      stopOutWatch(windowId)
+    })
   })
 
   commands.register('sidebar.reveal', (_args, c) => {
@@ -262,7 +319,11 @@ export function registerSidebarReveal(ctx: MainContext): {
     const windowId = windowOf(c)
     if (!windowId || !store.state.windows[windowId]?.sidebar.peeking) return
     const hold = holdOf(windowId)
-    if (typeof over === 'boolean') hold.over = over
+    if (typeof over === 'boolean') {
+      // The card heard the pointer: it says when the pointer leaves.
+      stopOutWatch(windowId)
+      hold.over = over
+    }
     if (typeof editing === 'boolean') hold.editing = editing
     settle(windowId)
   })
@@ -280,6 +341,7 @@ export function registerSidebarReveal(ctx: MainContext): {
   })
 
   return {
+    pointerAt: follow,
     hold: (windowId) => {
       const hold = holds.get(windowId)
       return hold

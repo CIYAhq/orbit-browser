@@ -18,6 +18,7 @@ import {
   openTab,
   pageCorner,
   pageMouse,
+  pointerAt,
   setNativeFullScreen,
   shellMouseMove,
   shellRoundTrip,
@@ -866,6 +867,31 @@ test('[SB-12][FL-03] a pointer that leaves the page for the window’s very edge
   await pageMouse(app, '/page/Leaving', 'mouseLeave', card.width + 3, 300)
   await shellRoundTrip(orbit.shell)
   expect((await sidebarState()).peeking).toBe(false)
+})
+
+test('[SB-12][FL-03] the card the window’s very edge brought in goes again when the pointer leaves the window there, where nothing hears it (fix check A, M1)', async () => {
+  const { app } = orbit
+  const id = await openTab(app, page('Outward'))
+  await hideSidebar()
+  await pageMouse(app, '/page/Outward', 'mouseMove', 300, 300)
+  const card = (await tabView(app, id))?.bounds
+  if (!card) throw new Error('no page view')
+  await pageMouse(app, '/page/Outward', 'mouseLeave', 2 - card.x, 300)
+  await expect.poll(async () => (await sidebarState()).peeking).toBe(true)
+  expect((await floatingInfo(app)).hold?.over).toBe(true)
+  // On out of the window through its left edge: neither the card nor a page hears that.
+  const left = Date.now()
+  await pointerAt(app, -40, 300)
+  await expect.poll(async () => (await sidebarState()).peeking, { timeout: 1000 * FRAME_SLACK }).toBe(false)
+  expect(Date.now() - left).toBeLessThan(1000 * FRAME_SLACK)
+  // A pointer still at the very edge keeps it out: main reads it every 20 ms, and it is in the window.
+  await pageMouse(app, '/page/Outward', 'mouseMove', 300, 300)
+  await pageMouse(app, '/page/Outward', 'mouseLeave', 2 - card.x, 300)
+  await expect.poll(async () => (await sidebarState()).peeking).toBe(true)
+  await pointerAt(app, 1, 320)
+  await new Promise((r) => setTimeout(r, 300))
+  expect((await floatingInfo(app)).hold).toMatchObject({ over: true, hiding: false })
+  expect((await sidebarState()).peeking).toBe(true)
 })
 
 test('[SB-14] dragging the edge sets the width 1:1 within limits; double-click resets; far left hides', async () => {
