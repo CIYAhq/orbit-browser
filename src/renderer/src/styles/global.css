@@ -939,6 +939,28 @@ html[data-view="strip"] body {
   }
 }
 
+/* A toast with a button (AR-05 "Go to Space") takes clicks. */
+.toast.has-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  pointer-events: auto;
+}
+
+.toast__action {
+  flex: none;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.toast__action:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+
 /* ---------- Sidebar items: tabs, pinned, Favorites, Today, folders (tabs lane) ---------- */
 
 .sidebar-items {
