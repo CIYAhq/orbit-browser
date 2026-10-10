@@ -349,6 +349,33 @@ test('[AP-01][ST-11] Light, Dark or Match system, chosen in Settings, turns ever
   await expect.poll(looks).toEqual(everywhere(os))
 })
 
+test('[AP-01] Match system takes the system mode at once in the closed command bar, drawing few frames or none', async () => {
+  await run(orbit.app, 'spaces.setAppearance', { appearance: 'system' })
+  const os = await orbit.app.evaluate(({ nativeTheme }) => nativeTheme.shouldUseDarkColors)
+  const overlay = await viewPage(orbit.app, 'overlay')
+  await overlay.emulateMedia({ colorScheme: null })
+  const scheme = () =>
+    overlay.evaluate(() => {
+      const el = document.querySelector('[data-testid="overlay"]')
+      return el ? getComputedStyle(el).colorScheme : ''
+    })
+  // The command bar is open, and drawing, when the other mode is forced…
+  await focusBrowserWindow(orbit.app)
+  await orbit.shell.keyboard.press(`${MOD}+T`)
+  await expect(overlay.getByTestId('command-input')).toBeFocused()
+  await run(orbit.app, 'spaces.setAppearance', { appearance: os ? 'light' : 'dark' })
+  await expect.poll(scheme).toBe(os ? 'light' : 'dark')
+  // (two frames: it has had the prefers-color-scheme change event by now)
+  await overlay.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
+  // …and closed when Match system comes in. Chromium fires that event again only with a frame,
+  // and a closed command bar may draw one a second or none.
+  await overlay.keyboard.press('Escape')
+  const [windowId] = await browserWindowIds()
+  await expect.poll(async () => (await state(orbit.app)).windows[windowId as string]?.overlay.kind).toBe('none')
+  await run(orbit.app, 'spaces.setAppearance', { appearance: 'system' })
+  await expect.poll(scheme, { timeout: 3000 }).toBe(os ? 'dark' : 'light')
+})
+
 test('[ST-01][AP-02] Settings takes the theme colours of the Space it was opened from', async () => {
   const s = await state(orbit.app)
   const windowId = (await browserWindowIds())[0] as string
