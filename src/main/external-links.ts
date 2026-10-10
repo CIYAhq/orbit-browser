@@ -5,6 +5,7 @@ import { app } from 'electron'
 import type { MainContext } from './context'
 import { routeExternalLink } from './miniwindow'
 import { miniSwitchIn } from './miniwindow/switches'
+import { focusOnboarding } from './settings/onboarding'
 
 /**
  * Links and files other apps ask Orbit to open once it is the default browser (NV-18):
@@ -72,6 +73,9 @@ export function captureExternalLinks(): void {
     for (const url of links) open(url)
     // A jump-list launch acts on Mini Windows only (the Mini Window module handles it, MW-14).
     if (links.length > 0 || !target || miniSwitchIn(argv)) return
+    // Onboarding is open (a first run, or Reset Onboarding): it comes forward, and it opens the
+    // first browser window itself when done (OB-01).
+    if (focusOnboarding()) return
     // Launched again without a link: bring Orbit forward (a window opens if none is).
     const windowId = target.windows.focusedWindowId() ?? target.windows.ids()[0] ?? target.windows.open()
     const win = target.windows.get(windowId)

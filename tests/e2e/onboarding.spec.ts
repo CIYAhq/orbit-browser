@@ -264,6 +264,28 @@ test('[OB-14][OB-01] onboarding resumes where a quit left it; Skip setup opens a
   expect(await browserWindowIds(app)).toHaveLength(1)
 })
 
+test('[OB-01] launching Orbit again while onboarding is open brings onboarding forward, with no browser window beside it', async () => {
+  orbit = await launchWithOnboarding()
+  const { app } = orbit
+  await onboardingPage(app, 'welcome')
+  const focusedTitle = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getFocusedWindow()?.getTitle())
+  // Another app's window has focus (a plain window stands in for it)…
+  await app.evaluate(({ BrowserWindow }) => {
+    new BrowserWindow({ width: 320, height: 240, title: 'Elsewhere' }).focus()
+  })
+  await expect.poll(focusedTitle).toBe('Elsewhere')
+  // …when Orbit is launched again, with no link (Linux and Windows: a second instance).
+  await app.evaluate(({ app: electronApp }) => {
+    electronApp.emit('second-instance', {}, [process.execPath], process.cwd())
+  })
+  expect(await browserWindowIds(app)).toEqual([])
+  await expect.poll(focusedTitle).toBe('Welcome to Orbit')
+  expect((await state(app)).settings.onboarded).toBe(false)
+  await app.evaluate(({ BrowserWindow }) => {
+    for (const w of BrowserWindow.getAllWindows()) if (w.getTitle() === 'Elsewhere') w.destroy()
+  })
+})
+
 test('[OB-01] an existing install never gets onboarding: its window comes back at launch and when reopened with none open', async () => {
   // A state file as Orbit wrote it before onboarding existed: onboarded false, no step, one window.
   orbit = await launchFirstRun()

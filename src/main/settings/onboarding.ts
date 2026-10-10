@@ -26,6 +26,14 @@ export function startOnboarding(): boolean {
   return current?.startIfDue() ?? false
 }
 
+/** Brings the onboarding window forward if it is open (a second launch, say). Returns whether it is. */
+export function focusOnboarding(): boolean {
+  const win = current?.window
+  if (!win) return false
+  current?.focus()
+  return true
+}
+
 /** The first-run flow's window (OB-01…OB-09, OB-14). */
 class Onboarding {
   private win: BrowserWindow | undefined
