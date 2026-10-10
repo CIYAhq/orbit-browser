@@ -266,11 +266,17 @@ test('[NV-08][NV-09][NV-12] links Orbit opens for a page (its menu, ⌥-click, a
   await fromMenu('Open Link in New Window')
   await expect.poll(() => fx.hits('/page/Opened-2')).toBe(1)
   expect(fx.sentFrom('/page/Opened-2')?.referer).toBe(referer)
-  // ⌥-click: split view.
-  await away(3)
+  // ⌥-click: split view. The link is requested twice, for the split's page and for the engine's own
+  // ⌥-click download (Orbit cancels it once it has begun), so the requests aren't counted: once the
+  // split shows the page, each request so far had the page as Referer.
+  const url3 = await away(3)
   await clickInPage(app, src, '#away', ['alt'])
-  await expect.poll(() => fx.hits('/page/Opened-3')).toBe(1)
-  expect(fx.sentFrom('/page/Opened-3')?.referer).toBe(referer)
+  await expect.poll(() => splitTabs(app, srcTab)).toHaveLength(2)
+  const [, split] = await splitTabs(app, srcTab)
+  await waitLoaded(app, split as string, url3)
+  const sent = fx.sentFromEach('/page/Opened-3')
+  expect(sent.length).toBeGreaterThan(0)
+  for (const request of sent) expect(request.referer).toBe(referer)
   // A pop-up blocked as the page loaded, opened from the address display.
   const blocked = fx.urlOn('127.0.0.1', '/page/Opened-4')
   await openTab(app, fx.url(`/page/Eager?open=${encodeURIComponent(blocked)}`))
