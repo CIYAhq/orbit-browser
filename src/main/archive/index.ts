@@ -9,6 +9,7 @@ import type { MainContext } from '../context'
 import { installMenu } from '../menu'
 import type { CallContext } from '../registry'
 import { findMenuItem, menuLabels } from '../tabs/menus'
+import { historyMenuItems, historyQuery, historyRows } from './history-view'
 import { LibraryHost } from './library'
 import { archiveSectionItems, setKeepDays } from './menus'
 import { recentlyClosedItems, refreshRecentlyClosed, watchRecentlyClosed } from './recently-closed'
@@ -121,6 +122,8 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
   ctx.actions.register('app.archive', (c) => openLibrary(c, { section: 'archive' }))
   // The menu and the command bar ask in the Library before anything goes (AR-07).
   ctx.actions.register('archive.clear', (c) => openLibrary(c, { section: 'archive', confirmClear: true }))
+  // ⌘Y / Ctrl+H, Archive → View History and the command bar (AR-10).
+  ctx.actions.register('app.history', (c) => openLibrary(c, { section: 'history' }))
 
   // ---- Archive entries ----
 
@@ -226,7 +229,11 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
     if (!many) {
       items.push({
         label: 'Open in New Tab',
-        click: () => void commands.run('tabs.create', { url: first.url }, { windowId }),
+        click: () => {
+          commands
+            .run('tabs.create', { url: first.url }, { windowId })
+            .catch((err) => console.error('[archive] could not open an archived page', err))
+        },
       })
     }
     items.push(
@@ -248,6 +255,28 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
     const win = windowId ? windows.get(windowId) : undefined
     if (win?.isDestroyed()) return
     Menu.buildFromTemplate(items).popup(win ? { window: win } : undefined)
+  })
+
+  // ---- History (AR-10): the history store's visits, for the Library's History section ----
+
+  commands.register('library.history', async (q, c) => {
+    const visits = await commands.run('history.visits', historyQuery(q ?? {}, profileOf(q?.profileId, c)))
+    return historyRows(visits, (url) => ctx.tabs.faviconFor(url))
+  })
+  commands.register('library.historyMenu', ({ url, profileId }, c) => {
+    if (typeof url !== 'string' || !url) return
+    const windowId = windowOf(c)
+    lastMenu = historyMenuItems(ctx, {
+      url,
+      profileId: profileOf(profileId, c),
+      windowId,
+      send: (channel, payload) => library.send(windowId, channel, payload),
+      copy: (text) => clipboard.writeText(text),
+    })
+    if (ctx.e2e) return
+    const win = windowId ? windows.get(windowId) : undefined
+    if (win?.isDestroyed()) return
+    Menu.buildFromTemplate(lastMenu).popup(win ? { window: win } : undefined)
   })
 
   // ---- Recently Closed (AR-09) ----

@@ -105,12 +105,13 @@ export function installMenu(ctx: MainContext): void {
       label: 'Spaces',
       submenu: [item('space.new'), { type: 'separator' }, item('space.next'), item('space.previous')],
     },
-    // Archive → View Archive, the Library it lives in, Clear Archive… and how long entries are
-    // kept (archive lane, AR-02, AR-07, AR-08).
+    // Archive → View Archive, View History, the Library they live in, Clear Archive… and how long
+    // entries are kept (archive lane, AR-02, AR-10, AR-07, AR-08).
     {
       label: 'Archive',
       submenu: [
         item('app.archive'),
+        item('app.history'),
         item('app.library'),
         { type: 'separator' },
         item('archive.clear'),

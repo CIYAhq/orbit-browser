@@ -724,3 +724,42 @@ html[data-view="library"] body {
     animation: none;
   }
 }
+
+/* ---- History (AR-10): the Archive's list, without the Space column; × removes on hover ---- */
+
+.history-row {
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+}
+
+.history-row .history-row__time {
+  grid-area: 1 / 3;
+}
+
+.history-row__remove {
+  grid-area: 1 / 3;
+  justify-self: end;
+  display: grid;
+  visibility: hidden;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.history-row:hover .history-row__remove,
+.history-row.is-highlighted .history-row__remove,
+.history-row__remove:focus-visible {
+  visibility: visible;
+}
+
+.history-row:hover .history-row__time,
+.history-row.is-highlighted .history-row__time {
+  visibility: hidden;
+}
+
+.history-row__remove:hover {
+  background: var(--hover);
+  color: var(--text);
+}

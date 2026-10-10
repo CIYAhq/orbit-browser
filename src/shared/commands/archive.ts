@@ -1,4 +1,5 @@
 import type { ArchivedTab, ProfileId, SpaceId, TabId } from '../state'
+import type { HistoryVisit } from './history'
 
 /**
  * Which archived pages a list shows (AR-03): everything, tabs that left the sidebar, or pages
@@ -92,6 +93,18 @@ export interface LibraryShow {
   entering?: boolean
 }
 
+/** Which visits the Library's History section asks for (AR-10): the `history.visits` query. */
+export interface LibraryHistoryQuery {
+  /** Default: the profile of the calling window's Space. */
+  profileId?: ProfileId
+  /** Words that must all be in the title or the address. */
+  text?: string
+  /** Visits before this time (ms), for the next page. */
+  before?: number
+  /** At most this many (1–500, default 100). */
+  limit?: number
+}
+
 /** A sidebar snapshot (AR-11), newest first in lists. */
 export interface BackupInfo {
   id: string
@@ -152,6 +165,16 @@ export interface ArchiveCommands {
    * button); choosing an entry reopens that tab.
    */
   'archive.recentlyClosedMenu': { args: { x?: number; y?: number }; result: void }
+  /**
+   * Browsing history for the Library's History section (AR-10): the history store's visits, newest
+   * first (one row per visit), each with its site's remembered icon when there is one.
+   */
+  'library.history': { args: LibraryHistoryQuery; result: HistoryVisit[] }
+  /**
+   * Shows a History row's menu (Open in New Tab, Open in Background, Copy Link, Remove from
+   * History). Removing tells the Library view (`library:history.removed`).
+   */
+  'library.historyMenu': { args: { url: string; profileId?: ProfileId; x?: number; y?: number }; result: void }
   /** Test-only (ORBIT_E2E=1): where the calling window's Library view is and whether it has focus. */
   'library.testInfo': {
     args: Record<string, never>

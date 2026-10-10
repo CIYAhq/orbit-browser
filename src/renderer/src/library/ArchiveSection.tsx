@@ -1,4 +1,4 @@
-import { ArchiveRestore, History, Search, X } from 'lucide-react'
+import { ArchiveRestore, RotateCcw, Search, X } from 'lucide-react'
 import {
   type CSSProperties,
   type KeyboardEvent,
@@ -544,7 +544,7 @@ export function ArchiveSection({ show }: LibrarySectionProps) {
               void invoke('archive.recentlyClosedMenu', { x: r.left, y: r.bottom + 4 })
             }}
           >
-            <History size={14} />
+            <RotateCcw size={14} />
             <span>Recently Closed</span>
           </button>
         </div>

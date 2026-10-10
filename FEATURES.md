@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 148 built (47 partial) · 200 tested · 0 feel right.
+**Totals:** 485 spec’d · 149 built (47 partial) · 200 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
 | P0 | 174 | 103 | 124 |
-| P1 | 221 | 41 | 70 |
+| P1 | 221 | 42 | 70 |
 | P2 | 83 | 4 | 6 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -338,7 +338,7 @@ Spec: `spec/archive.md`
 | AR-07 | Clear the Archive | P1 | ✅ | ✅ e2e+unit | – | Clear Archive… from the Archive entry’s right-click menu in the Library, Archive → Clear Archive… (macOS app menu) and the command bar; always asks in the Library first (Cancel has the focus, Esc cancels), says it can’t be undone and that browsing history is kept; clears the profile shown. Single entries: row menu Delete (AR-05) |
 | AR-08 | Retention of archived entries | P1 | ✅ | ✅ e2e+unit | – | settings.archiveKeepDays, default 30; 30 Days / 90 Days / 1 Year / Forever from the Archive entry’s menu in the Library and Archive → Keep Archived Tabs For (macOS) until Settings exist. Purged once the Archive is read at launch, hourly, and at once when a shorter time is chosen; browsing history is not touched |
 | AR-09 | Reopen recently closed tabs | P0 | ✅ | ✅ e2e+unit | – | ⌘⇧T and ⌘Z walk back through closes with full history (TB-07, TB-18); ⌘Z also shows the tab again when it was the one shown; a closed Peek comes back through the same key (PK-10, peek lane). A page closed in the last 10 minutes keeps its history rank in the command bar (as the archived row). macOS File menu: Reopen Closed Tab and a Recently Closed submenu of the last 10; on every platform the Archive toolbar has a Recently Closed menu |
-| AR-10 | Browsing history view | P1 | – | ✅ e2e | – |  |
+| AR-10 | Browsing history view | P1 | ✅ | ✅ e2e+unit | – | ⌘Y (Ctrl+H), Archive → View History (macOS) and the command bar open History, a Library section next to the Archive (not a page in a tab): every visit of the current profile from the history store, newest first by day, virtualised and paged, with search (all words, title or address). A row opens its page in a new tab (⌘-click or middle-click: behind the Library); its × or its menu (Open in New Tab, Open in Background, Copy Link, Remove from History) removes every visit to the page. Clearing the Archive leaves it alone |
 | AR-11 | Sidebar backups and "Restore Data" | P2 | – | – | – |  |
 
 ## Keyboard shortcuts and pointer bindings (prefix KS)

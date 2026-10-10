@@ -523,3 +523,67 @@ test('[AR-08] the Archive keeps 30 days by default: older entries go at launch, 
   await expect.poll(() => countOf(lib)).toBe(6)
   expect((await state(orbit.app)).settings.archiveKeepDays).toBe(30)
 })
+
+/** View History (AR-10): ⌘Y on macOS, Ctrl+H elsewhere. */
+const HISTORY_KEY = process.platform === 'darwin' ? 'Meta+Y' : 'Control+H'
+
+test('[AR-10] ⌘Y / Ctrl+H lists the profile’s visits newest first in the Library, with search; a row opens its page, its menu or × removes it', async () => {
+  const { app, shell } = orbit
+  const t = await newTab(app, fx.url('/page/HistOne'))
+  await waitTab(app, t, '/page/HistOne')
+  await (await tabPage(app, '/page/HistOne')).click('#next')
+  await waitTab(app, t, '/page/HistOne-next')
+  const u = await newTab(app, fx.url('/page/HistTwo'))
+  await waitTab(app, u, '/page/HistTwo')
+  const visited = async () =>
+    ((await run(app, 'history.visits', { limit: 50 })) as { title: string }[])
+      .map((v) => v.title)
+      .filter((title) => title.startsWith('Hist'))
+  await expect.poll(visited).toEqual(['HistTwo', 'HistOne-next', 'HistOne'])
+  await shell.keyboard.press(HISTORY_KEY)
+  const lib = await libraryPage(app)
+  await expect(lib.getByTestId('library-section')).toHaveAttribute('data-section-id', 'history')
+  await expect.poll(async () => (await info(orbit)).focused).toBe(true)
+  await expect(lib.getByTestId('history-search')).toBeFocused()
+  const titles = async () =>
+    (await lib.getByTestId('history-row-title').allTextContents()).filter((title) => title.startsWith('Hist'))
+  await expect.poll(titles).toEqual(['HistTwo', 'HistOne-next', 'HistOne'])
+  await expect(lib.getByTestId('history-day').first()).toHaveText('Today')
+  // Search: every word, in the title or the address.
+  await lib.getByTestId('history-search').fill('histone')
+  await expect.poll(titles).toEqual(['HistOne-next', 'HistOne'])
+  await lib.getByTestId('history-search').fill('histone next')
+  await expect.poll(titles).toEqual(['HistOne-next'])
+  // Enter opens the top match in a new tab, and the Library makes way for it.
+  const before = Object.keys((await state(app)).tabs)
+  await lib.keyboard.press('Enter')
+  await expect.poll(async () => (await info(orbit)).open).toBe(false)
+  const opened = Object.keys((await state(app)).tabs).find((id) => !before.includes(id))
+  expect(opened).toBeDefined()
+  await expect.poll(() => activeId(app)).toBe(opened)
+  await waitTab(app, opened as string, '/page/HistOne-next')
+  // From the command bar, with the search cleared. The row menu removes a page from history.
+  await openViaCommandBar(orbit, 'View History')
+  await expect(lib.getByTestId('history-search')).toHaveValue('')
+  const row = (title: string) => lib.getByTestId('history-row').filter({ hasText: title })
+  await row('HistTwo').click({ button: 'right' })
+  await expect
+    .poll(() => run(app, 'archive.testMenu', {}))
+    .toEqual(['Open in New Tab', 'Open in Background', 'Copy Link', 'Remove from History'])
+  await run(app, 'archive.testMenu', { click: 'Remove from History' })
+  await expect(row('HistTwo')).toHaveCount(0)
+  await expect.poll(visited).not.toContain('HistTwo')
+  // × on the row removes every visit to that page.
+  await row('HistOne-next').first().hover()
+  await row('HistOne-next').first().getByTestId('history-remove').click()
+  await expect(row('HistOne-next')).toHaveCount(0)
+  await expect.poll(visited).toEqual(['HistOne'])
+  // Another profile's Space shows that profile's history: none yet.
+  const work = (await run(app, 'profiles.create', { name: 'Work' })) as string
+  const w = (await run(app, 'spaces.create', { name: 'Workspace', profileId: work, activate: false })) as string
+  await run(app, 'spaces.switch', { spaceId: w })
+  await expect.poll(async () => (await info(orbit)).open).toBe(false)
+  await shell.keyboard.press(HISTORY_KEY)
+  await expect(lib.getByTestId('history-empty')).toContainText('No history yet')
+  await expect(lib.getByTestId('history-row')).toHaveCount(0)
+})

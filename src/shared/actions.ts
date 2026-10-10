@@ -244,6 +244,15 @@ export const ACTIONS: ActionDef[] = [
     mac: ['Cmd+Shift+L'],
     keywords: ['library', 'archive', 'downloads', 'media'],
   },
+  // Every page visit of the profile, in the Library (AR-10).
+  {
+    id: 'app.history',
+    title: 'View History',
+    category: 'App',
+    mac: ['Cmd+Y'],
+    other: ['Ctrl+H'],
+    keywords: ['history', 'browsing history', 'visited pages'],
+  },
   // Asks first; browsing history is kept (AR-07).
   {
     id: 'archive.clear',
