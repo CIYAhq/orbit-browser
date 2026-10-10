@@ -303,6 +303,22 @@ test('[TB-22] closing the last window keeps it for the next launch (review F1)',
   expect(win?.bounds).toMatchObject({ width: 900, height: 640 })
 })
 
+test('[TB-22] an exception nothing caught in the main process is logged; Orbit still quits and restores (D28)', async () => {
+  const userData = orbit.userData
+  const tabId = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/Kept') })) as string
+  // Electron's default shows the exception in a modal box that holds the main thread, so Orbit
+  // couldn't quit: app.close() waited until the harness killed it.
+  await orbit.app.evaluate(() => {
+    setTimeout(() => {
+      throw new Error('a bug nothing caught')
+    }, 0)
+  })
+  await expect.poll(() => orbit.takeUncaught()).toContain('a bug nothing caught')
+  await orbit.app.close()
+  orbit = await launchOrbit({ userData })
+  expect((await state(orbit.app)).tabs[tabId]).toBeDefined()
+})
+
 test('[TB-02] opening tabs keeps every UI mirror in step without resyncs (review M2, F4)', async () => {
   const errors: string[] = []
   orbit.shell.on('console', (m) => m.type() === 'error' && errors.push(m.text()))

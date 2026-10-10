@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -20,6 +20,11 @@ export interface Orbit {
   app: ElectronApplication
   shell: Page
   userData: string
+  /**
+   * Takes what the main process has logged about exceptions nothing caught. A test that throws one on
+   * purpose checks it here; `app.close()` then doesn't fail the test for it (D28).
+   */
+  takeUncaught: () => string
 }
 
 /**
@@ -40,10 +45,11 @@ export async function launchOrbit(opts: { userData?: string; env?: Record<string
     env: { ...process.env, ORBIT_E2E: '1', ORBIT_USER_DATA: userData, ...opts.env } as Record<string, string>,
   })
   evaluateBetweenTasks(app)
+  const takeUncaught = checkQuit(app)
   const shell = await viewPage(app, 'shell')
   await shell.getByTestId('sidebar').waitFor()
   await waitOffline(app)
-  return { app, shell, userData }
+  return { app, shell, userData, takeUncaught }
 }
 
 /**
@@ -84,6 +90,66 @@ function evaluateBetweenTasks(app: ElectronApplication): void {
       [fn.toString(), arg] as const,
     )
   }) as ElectronApplication['evaluate']
+}
+
+/** How Orbit's main process logs an exception nothing caught (src/main/index.ts). */
+const UNCAUGHT = '[orbit] uncaught exception:'
+
+/**
+ * `app.close()` checks the quit too. The test fails if Orbit's main process logged an exception
+ * nothing caught, even one thrown while quitting. If Orbit still hasn't quit 15 s after being asked,
+ * the test fails and Orbit is killed, so one stuck quit can't hang the rest of the run (D28).
+ */
+function checkQuit(app: ElectronApplication): () => string {
+  const proc = app.process()
+  let recent = ''
+  let thrown = ''
+  proc.stderr?.on('data', (chunk) => {
+    if (thrown) {
+      if (thrown.length < 4000) thrown += String(chunk)
+      return
+    }
+    recent = (recent + String(chunk)).slice(-4000)
+    const at = recent.indexOf(UNCAUGHT)
+    if (at >= 0) thrown = recent.slice(at)
+  })
+  const outputDone = new Promise((resolve) => (proc.stderr ? proc.stderr.once('close', resolve) : resolve(null)))
+  const close = app.close.bind(app)
+  let checked = false
+  app.close = async () => {
+    let timer: NodeJS.Timeout | undefined
+    const late = new Promise<true>((resolve) => {
+      timer = setTimeout(() => resolve(true), 15_000)
+    })
+    const closed = close()
+    const stuck = await Promise.race([closed.then(() => false), late])
+    clearTimeout(timer)
+    if (checked) return
+    checked = true
+    if (stuck) {
+      const waiting = mainThreadWait(proc.pid)
+      proc.kill('SIGKILL')
+      await closed
+      expect.soft(`still running (main thread: ${waiting})`, 'Orbit 15 s after app.close(); it was killed').toBe('quit')
+    }
+    await Promise.race([outputDone, new Promise((resolve) => setTimeout(resolve, 1000))])
+    expect.soft(thrown, "Orbit's main process threw an exception nothing caught").toBe('')
+  }
+  return () => {
+    const taken = thrown
+    thrown = ''
+    recent = ''
+    return taken
+  }
+}
+
+/** Where a process's main thread is waiting in the kernel (Linux only). */
+function mainThreadWait(pid: number | undefined): string {
+  try {
+    return readFileSync(`/proc/${pid}/wchan`, 'utf8')
+  } catch {
+    return 'unknown'
+  }
 }
 
 /** Finds an Orbit UI page (shell/overlay) by its ?view= query. */
