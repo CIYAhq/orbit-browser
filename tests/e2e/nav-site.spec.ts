@@ -277,6 +277,17 @@ test('[NV-15] pages read an undecided permission as not decided yet, as in Chrom
   expect(await p.evaluate(() => new Notification('Hello') instanceof Notification)).toBe(true)
 })
 
+/**
+ * The message a page's preload sends main when the user clicks one of its notifications, as main
+ * receives it from that page's main frame.
+ */
+const notificationClick = (app: ElectronApplication, url: string) =>
+  app.evaluate(({ ipcMain, webContents }, u) => {
+    const sender = webContents.getAllWebContents().find((c) => c.getURL() === u)
+    if (!sender) throw new Error(`no page at ${u}`)
+    ipcMain.emit('orbit-page:notification-click', { sender, senderFrame: sender.mainFrame })
+  }, url)
+
 test('[NV-15] clicking a notification brings its tab forward, on its Space; a click the page makes up does nothing', async () => {
   const { app, shell } = orbit
   const { id, p } = await open(app, page('Sender'))
@@ -286,6 +297,9 @@ test('[NV-15] clicking a notification brings its tab forward, on its Space; a cl
   await p.evaluate(() => {
     ;(window as unknown as { __note: Notification }).__note = new Notification('Ping', { body: 'From the sender' })
   })
+  // A site that never asked for notifications, in a background tab.
+  const quiet = elsewhere('Quiet')
+  const quietId = await openTab(app, quiet)
   // The user moves on: another tab, then another Space.
   const other = await openTab(app, page('Elsewhere'))
   const work = await cmd<string>(app, 'spaces.create', { name: 'Work' })
@@ -296,12 +310,51 @@ test('[NV-15] clicking a notification brings its tab forward, on its Space; a cl
   await shellRoundTrip(shell)
   expect((await windowState(app)).spaceId).toBe(work)
 
+  // Nor is a "trusted" click the page fakes with the listener Orbit adds to its notifications: the
+  // built-ins a page replaces (here while it makes one) never see that listener.
+  const leaked = await p.evaluate(() => {
+    type Fn = (...args: unknown[]) => unknown
+    const seen: Fn[] = []
+    const keep = (args: ArrayLike<unknown> | undefined) => {
+      for (const arg of Array.from(args ?? [])) if (typeof arg === 'function') seen.push(arg as Fn)
+    }
+    const fn = Function.prototype as unknown as Record<'call' | 'apply', unknown>
+    const reflect = Reflect as unknown as Record<'apply', unknown>
+    const { call, apply } = fn
+    const reflectApply = Reflect.apply
+    fn.call = function (this: Fn, ...args: unknown[]) {
+      keep(args)
+      return reflectApply(this, args[0], args.slice(1))
+    }
+    fn.apply = function (this: Fn, self: unknown, args?: ArrayLike<unknown>) {
+      keep(args)
+      return reflectApply(this, self, Array.from(args ?? []))
+    }
+    reflect.apply = (target: Fn, self: unknown, args: ArrayLike<unknown>) => {
+      keep(args)
+      return reflectApply(target, self, args)
+    }
+    try {
+      new Notification('Fake')
+    } finally {
+      fn.call = call
+      fn.apply = apply
+      reflect.apply = reflectApply
+    }
+    for (const listener of seen) listener({ isTrusted: true, type: 'click' })
+    return seen.length
+  })
+  // The page's next permission read reaches main after anything that call sent.
+  expect(await permissionState(p, 'geolocation')).toBe('prompt')
+  expect((await windowState(app)).spaceId).toBe(work)
+  expect(leaked).toBe(0)
+
+  // A click from a site without the notification permission (no real notification of its own).
+  await notificationClick(app, quiet)
+  expect((await windowState(app)).spaceId).toBe(work)
+
   // The user's click (the engine's trusted event reaches main as this message).
-  const url = page('Sender')
-  await app.evaluate(({ ipcMain, webContents }, u) => {
-    const sender = webContents.getAllWebContents().find((c) => c.getURL() === u)
-    ipcMain.emit('orbit-page:notification-click', { sender })
-  }, url)
+  await notificationClick(app, page('Sender'))
   await expect
     .poll(async () => {
       const win = await windowState(app)
@@ -309,6 +362,7 @@ test('[NV-15] clicking a notification brings its tab forward, on its Space; a cl
     })
     .toEqual({ space: 'first', tab: id })
   expect(other).not.toBe(id)
+  expect(quietId).not.toBe(id)
 })
 
 test('[NV-15] with the sidebar hidden the prompt shows over the page’s top-left corner', async () => {

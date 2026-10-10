@@ -175,9 +175,31 @@ export type PagePermissionState = 'granted' | 'denied' | 'prompt'
 export const PAGE_CHANNEL = {
   /** sendSync(name): the PagePermissionState for a permission name, or null for the engine's answer. */
   permission: 'orbit-page:permission',
-  /** send(): the user clicked one of the page's notifications (NV-15). */
+  /**
+   * send(): the user clicked one of the page's notifications (NV-15). Main acts on it only for a
+   * site with the notification permission, and at most once per NOTIFICATION_CLICK_GAP_MS per tab.
+   */
   notificationClick: 'orbit-page:notification-click',
 } as const
+
+/** A tab comes forward for its notifications' clicks at most this often (a flood can't stall the shell). */
+export const NOTIFICATION_CLICK_GAP_MS = 500
+
+/**
+ * Lets the first call for a key through, then drops that key's calls until `gapMs` has passed.
+ * Keys quiet for a gap are forgotten as others arrive.
+ */
+export function perKeyGate<K>(gapMs: number, now: () => number = Date.now): (key: K) => boolean {
+  const last = new Map<K, number>()
+  return (key) => {
+    const t = now()
+    const before = last.get(key)
+    if (before !== undefined && t - before < gapMs) return false
+    if (last.size >= 64) for (const [k, at] of last) if (t - at >= gapMs) last.delete(k)
+    last.set(key, t)
+    return true
+  }
+}
 
 /** Sorts permissions into PERMISSION_ORDER, without repeats. */
 export function sortKinds(kinds: Iterable<PermissionKind>): PermissionKind[] {

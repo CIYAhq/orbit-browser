@@ -11,11 +11,13 @@ import {
   deviceLabel,
   isPermissionKind,
   kindsOf,
+  NOTIFICATION_CLICK_GAP_MS,
   ONE_TIME_KINDS,
   PERMISSION_ASK,
   PERMISSION_NAME,
   PERMISSION_ORDER,
   pagePermissionKinds,
+  perKeyGate,
   permissionOrigin,
   siteLabel,
   sortKinds,
@@ -234,5 +236,36 @@ describe('the tab the top row is about (PK-11)', () => {
     win.overlay = { kind: 'peek', tabId: 't-gone', nonce: 1 }
     expect(shownTabId(state, win.id)).toBe(page.id)
     expect(peekShown(state, win.id)).toBe(false)
+  })
+})
+
+describe('notification clicks a page reports (NV-15)', () => {
+  it('bring a tab forward once per gap, however fast they come', () => {
+    let now = 1000
+    const pass = perKeyGate<string>(NOTIFICATION_CLICK_GAP_MS, () => now)
+    expect(pass('t1')).toBe(true)
+    // A flood from the same tab changes nothing until the gap has passed.
+    let through = 0
+    for (let i = 0; i < 10_000; i++) {
+      now += 0.01
+      if (pass('t1')) through++
+    }
+    expect(through).toBe(0)
+    // Another tab has its own gap.
+    expect(pass('t2')).toBe(true)
+    now = 1000 + NOTIFICATION_CLICK_GAP_MS
+    expect(pass('t1')).toBe(true)
+    expect(pass('t1')).toBe(false)
+  })
+
+  it('keeps a gap per tab as many tabs come and go', () => {
+    let now = 0
+    const pass = perKeyGate<number>(100, () => now)
+    for (let key = 0; key < 64; key++) expect(pass(key)).toBe(true)
+    now = 100
+    // Once the gap has passed (the 65th key drops the quiet ones), each may pass again, once.
+    expect(pass(64)).toBe(true)
+    expect(pass(0)).toBe(true)
+    expect(pass(0)).toBe(false)
   })
 })

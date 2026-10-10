@@ -33,11 +33,15 @@ const notificationClicked = () => {
  * Orbit's functions through them.
  */
 function patchPage(stateOf: StateOf, clicked: () => void) {
+  // Calls go through the captured `apply`, never a function's own `.call`: a page that replaces
+  // `Function.prototype.call` (or `Reflect.apply`) would otherwise receive Orbit's functions.
+  const apply = Reflect.apply
   const define = Object.defineProperty
   const describe = Object.getOwnPropertyDescriptor
   const construct = Reflect.construct
   const listen = EventTarget.prototype.addEventListener
   const then = Promise.prototype.then
+  const text = String
 
   const NativeNotification = window.Notification
   if (typeof NativeNotification === 'function') {
@@ -51,7 +55,7 @@ function patchPage(stateOf: StateOf, clicked: () => void) {
         configurable: true,
         enumerable: permission.enumerable,
         get() {
-          return undecided(read.call(NativeNotification))
+          return undecided(apply(read, NativeNotification, []))
         },
       })
     }
@@ -64,11 +68,13 @@ function patchPage(stateOf: StateOf, clicked: () => void) {
         enumerable: request.enumerable,
         writable: true,
         value: function requestPermission(callback?: (value: NotificationPermission) => void) {
-          return then.call(ask.call(NativeNotification), (value: NotificationPermission) => {
-            const answer = undecided(value)
-            if (typeof callback === 'function') callback(answer)
-            return answer
-          })
+          return apply(then, apply(ask, NativeNotification, []), [
+            (value: NotificationPermission) => {
+              const answer = undecided(value)
+              if (typeof callback === 'function') callback(answer)
+              return answer
+            },
+          ])
         },
       })
     }
@@ -79,7 +85,7 @@ function patchPage(stateOf: StateOf, clicked: () => void) {
     const Notification = new Proxy(NativeNotification, {
       construct(target, args, newTarget) {
         const notification = construct(target, args, newTarget)
-        listen.call(notification, 'click', onClick)
+        apply(listen, notification, ['click', onClick])
         return notification
       },
     })
@@ -106,8 +112,8 @@ function patchPage(stateOf: StateOf, clicked: () => void) {
         configurable: true,
         enumerable: state.enumerable,
         get() {
-          const value = readState.call(this)
-          return value === 'denied' && stateOf(String(readName.call(this))) === 'prompt' ? 'prompt' : value
+          const value = apply(readState, this, [])
+          return value === 'denied' && stateOf(text(apply(readName, this, []))) === 'prompt' ? 'prompt' : value
         },
       })
     }

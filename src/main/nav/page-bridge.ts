@@ -1,7 +1,14 @@
 import { join } from 'node:path'
 import { BrowserWindow, type IpcMainEvent, ipcMain, type Session, type WebContents } from 'electron'
 import { windowMayShow } from '../../shared/private'
-import { PAGE_CHANNEL, type PagePermissionState, pagePermissionKinds, permissionOrigin } from '../../shared/site'
+import {
+  NOTIFICATION_CLICK_GAP_MS,
+  PAGE_CHANNEL,
+  type PagePermissionState,
+  pagePermissionKinds,
+  perKeyGate,
+  permissionOrigin,
+} from '../../shared/site'
 import type { ProfileId, TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import type { Permissions } from './permissions'
@@ -17,6 +24,10 @@ export function pagePreloadPath(): string {
  * decides, which Electron's yes/no check can't say) and says when the user clicked one of the
  * page's notifications, which brings the tab that sent it forward: in the window that shows it, or
  * else selected in the last window the user worked in that may show it, on its Space.
+ *
+ * A page can't send anything else, and main checks what it is told (D40): a permission read
+ * answers only for the sending frame's own origin and profile, and a click counts only from a site
+ * allowed to show notifications, at most once per NOTIFICATION_CLICK_GAP_MS per tab.
  */
 export function registerPageBridge(ctx: MainContext, permissions: Permissions): void {
   const { store, sessions, tabs, windows, commands } = ctx
@@ -95,11 +106,25 @@ export function registerPageBridge(ctx: MainContext, permissions: Permissions): 
     raise(windows.get(windowId))
   }
 
+  /** One bring-forward per tab (or pop-up page) per gap: the clicks in between change nothing. */
+  const clickGate = perKeyGate<string>(NOTIFICATION_CLICK_GAP_MS)
+
   ipcMain.on(PAGE_CHANNEL.notificationClick, (event: IpcMainEvent) => {
-    const contents = event.sender
-    const tabId = tabs.tabIdFor(contents)
-    if (tabId) bringForward(tabId)
-    // A pop-up window's page: its window comes forward.
-    else raise(BrowserWindow.fromWebContents(contents) ?? undefined)
+    try {
+      const contents = event.sender
+      const frame = event.senderFrame
+      const origin = frame ? permissionOrigin(frame.url) : null
+      const profileId = profileOf(contents)
+      // Only a site that may show notifications has one to click.
+      if (!origin || !profileId) return
+      if (permissions.pageState(profileId, origin, ['notifications']) !== 'granted') return
+      const tabId = tabs.tabIdFor(contents)
+      if (!clickGate(tabId ?? `page:${contents.id}`)) return
+      if (tabId) bringForward(tabId)
+      // A pop-up window's page: its window comes forward.
+      else raise(BrowserWindow.fromWebContents(contents) ?? undefined)
+    } catch (err) {
+      console.error('[page-bridge] notification click', err)
+    }
   })
 }
