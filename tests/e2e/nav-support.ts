@@ -12,9 +12,17 @@ import { isMac, state } from './helpers'
 export const INSECURE_HOST = 'insecure.test'
 /** Chromium switch mapping INSECURE_HOST to the local fixture server (no network involved). */
 export const HOST_RULES = `--host-resolver-rules=MAP ${INSECURE_HOST} 127.0.0.1`
+/**
+ * Launch switches for tests that visit INSECURE_HOST: the mapping, and a way past the dead proxy the
+ * e2e apps may run behind (it only lets loopback names through, and this one isn't one).
+ */
+export const HOST_ARGS = [HOST_RULES, `--proxy-bypass-list=${INSECURE_HOST}`]
 
 /** ⌘ on macOS, Ctrl elsewhere: the modifier that sends a click to a new tab (SB-03, NV-08). */
 export const NEW_TAB_CLICK = isMac ? 'Meta' : 'Control'
+
+/** Where the nav fixture servers start looking for a free port (this lane's range is 3330–3349). */
+const NAV_PORT_BASE = 3330
 
 export interface NavFixtures {
   port: number
@@ -128,10 +136,15 @@ export async function startNavFixtures(): Promise<NavFixtures> {
     sockets.add(socket)
     socket.on('close', () => sockets.delete(socket))
   })
-  // Any free port the system gives: other agents' and suites' servers keep to fixed ranges.
+  // Everything the tests run stays within 3300–3399: the first free port from this suite's base.
+  const base = NAV_PORT_BASE + (Number(process.env.TEST_PARALLEL_INDEX ?? 0) % 10)
   await new Promise<void>((resolveListen, reject) => {
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', () => resolveListen())
+    let port = base
+    server.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE' && port < 3399) server.listen(++port, '127.0.0.1')
+      else reject(err)
+    })
+    server.listen(port, '127.0.0.1', () => resolveListen())
   })
   const { port } = server.address() as AddressInfo
   return {

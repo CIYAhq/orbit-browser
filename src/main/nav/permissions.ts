@@ -16,6 +16,7 @@ import {
   type EngineDevice,
   kindsOf,
   ONE_TIME_KINDS,
+  type PagePermissionState,
   PERMISSION_ASK,
   type PermissionKind,
   type PermissionPrompt,
@@ -78,6 +79,8 @@ export interface Permissions {
   set(profileId: ProfileId, origin: string, kind: PermissionKind, allowed: boolean): void
   /** Forgets every permission choice of a site (it asks again). */
   reset(profileId: ProfileId, origin: string): void
+  /** A permission's state as the site's pages should read it: "prompt" until the user decides. */
+  pageState(profileId: ProfileId, origin: string, kinds: PermissionKind[]): PagePermissionState
   /** Test hooks. */
   info(windowId: WindowId): { placed: boolean; bounds?: Rectangle }
 }
@@ -653,6 +656,10 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
         prefs.setPermission(profileId, origin, kind, undefined)
       }
       for (const grant of prefs.devicesFor(profileId, origin)) prefs.revokeDevice(profileId, origin, grant.key)
+    },
+    pageState: (profileId, origin, kinds) => {
+      if (kinds.some((k) => prefs.permission(profileId, origin, k) === 'block')) return 'denied'
+      return kinds.every((k) => allowedNow(profileId, origin, k)) ? 'granted' : 'prompt'
     },
     info: (windowId) => {
       const placed = windows.promptInfo(windowId)

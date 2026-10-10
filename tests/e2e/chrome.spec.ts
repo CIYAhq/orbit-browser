@@ -10,7 +10,7 @@ import {
   cmd,
   floatingInfo,
   floatingPage,
-  HOST_RULES,
+  HOST_ARGS,
   historyMenu,
   INSECURE_HOST,
   type NavFixtures,
@@ -38,7 +38,7 @@ test.afterAll(async () => {
   await fx.close()
 })
 test.beforeEach(async () => {
-  orbit = await launchOrbit({ args: [HOST_RULES] })
+  orbit = await launchOrbit({ args: HOST_ARGS })
   // macOS keeps the clipboard between tests (even after the app quits): start empty.
   await orbit.app.evaluate(({ clipboard }) => clipboard.clear())
 })
@@ -495,7 +495,7 @@ test('[SB-11] Toggle Sidebar is an action in the command bar (and the View menu 
 test('[SB-11][SB-14] each window keeps its own sidebar state and width, across a restart', async () => {
   const userData = mkdtempSync(join(tmpdir(), 'orbit-e2e-sidebar-'))
   await orbit.app.close()
-  orbit = await launchOrbit({ userData, args: [HOST_RULES] })
+  orbit = await launchOrbit({ userData, args: HOST_ARGS })
   await openTab(orbit.app, page('Kept'))
   await cmd(orbit.app, 'window.setSidebar', { width: 320 })
   await hideSidebar()
@@ -507,7 +507,7 @@ test('[SB-11][SB-14] each window keeps its own sidebar state and width, across a
   expect(second?.sidebar.visible).toBe(true)
   await orbit.app.close()
 
-  orbit = await launchOrbit({ userData, args: [HOST_RULES] })
+  orbit = await launchOrbit({ userData, args: HOST_ARGS })
   const windows = Object.values((await state(orbit.app)).windows)
   const first = windows.find((w) => !w.sidebar.visible)
   expect(first?.sidebar.width).toBe(320)

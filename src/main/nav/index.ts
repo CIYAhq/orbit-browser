@@ -10,6 +10,7 @@ import type { CallContext } from '../registry'
 import type { TabOps } from '../tabs/ops'
 import { type LinksTestHooks, registerLinks } from './links'
 import { openUrlInNewWindow } from './new-window'
+import { registerPageBridge } from './page-bridge'
 import { registerPageColor } from './page-color'
 import { type PageMenuTestHooks, pageMenuTestHooks, setLinkOpeners } from './page-menu'
 import { type PageToolsInfo, registerPageTools } from './page-tools'
@@ -291,6 +292,8 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
   // Permission prompts and the site controls panel (NV-15, NV-16).
   const permissions = registerPermissions(ctx, prefs)
   registerSiteControls(ctx, prefs, permissions)
+  // The web page preload: permission states as Chromium reads them, notification clicks (NV-15).
+  registerPageBridge(ctx, permissions)
 
   ctx.hooks.tabCreated.push((tabId, contents) => {
     // Esc stops a loading page (NV-04). The page still gets the key; an open overlay (command bar,

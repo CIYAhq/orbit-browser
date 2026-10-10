@@ -50,6 +50,11 @@ export function Address({ windowId }: { windowId: string }) {
     const r = field.current?.getBoundingClientRect()
     void invoke('site.openControls', r ? { x: r.left, y: r.bottom + SITE_PANEL.gap } : {})
   }
+  // The buttons toggle it (the overlay over them usually takes that click first and closes it).
+  const toggleControls = () => {
+    if (panelOpen) void invoke('overlay.close', {})
+    else openControls()
+  }
   const openRef = useRef(openControls)
   openRef.current = openControls
   // The Site Controls action (command bar, a shortcut) while this sidebar shows.
@@ -77,7 +82,7 @@ export function Address({ windowId }: { windowId: string }) {
           data-testid="insecure-button"
           aria-label="Not secure: site controls"
           title="Not secure. This connection is not encrypted."
-          onClick={openControls}
+          onClick={toggleControls}
         >
           <TriangleAlert size={13} data-testid="insecure-icon" />
         </button>
@@ -131,7 +136,7 @@ export function Address({ windowId }: { windowId: string }) {
           aria-label="Site controls"
           aria-expanded={panelOpen}
           title={withShortcut('Site controls', 'site.controls')}
-          onClick={openControls}
+          onClick={toggleControls}
         >
           <SlidersHorizontal size={13} />
         </button>

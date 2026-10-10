@@ -109,14 +109,22 @@ export function SiteControls({ overlay, dark = false }: { overlay: PanelOverlay;
     panel.current?.focus()
   }, [info])
 
-  const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') {
+  // Esc closes it (or backs out of clearing data) wherever focus is: a control that went away (Reset
+  // permissions once there is nothing left to reset) leaves it on the page's body.
+  const confirming = useRef(confirmClear)
+  confirming.current = confirmClear
+  useEffect(() => {
+    const onEscape = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
       e.preventDefault()
-      e.stopPropagation()
-      if (confirmClear) setConfirmClear(false)
+      if (confirming.current) setConfirmClear(false)
       else void close()
-      return
     }
+    window.addEventListener('keydown', onEscape)
+    return () => window.removeEventListener('keydown', onEscape)
+  }, [])
+
+  const onKeyDown = (e: KeyboardEvent) => {
     const step = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0
     if (!step || !panel.current) return
     const controls = [...panel.current.querySelectorAll<HTMLElement>('button:not(:disabled)')]

@@ -130,6 +130,55 @@ export function kindsOf(permission: string, mediaTypes?: readonly string[]): Per
   }
 }
 
+/**
+ * The permissions a page reads through `navigator.permissions.query()` (PermissionStatus.name) and
+ * `Notification.permission`, as Orbit's kinds; null for one Orbit doesn't ask about. Chromium names
+ * some differently on PermissionStatus ("video_capture" for the camera, underscores for hyphens).
+ */
+export function pagePermissionKinds(name: string): PermissionKind[] | null {
+  switch (name.replaceAll('_', '-')) {
+    case 'geolocation':
+      return ['location']
+    case 'notifications':
+    case 'push':
+      return ['notifications']
+    case 'camera':
+    case 'video-capture':
+      return ['camera']
+    case 'microphone':
+    case 'audio-capture':
+      return ['microphone']
+    case 'midi':
+    case 'midi-sysex':
+      return ['midi']
+    case 'clipboard-read':
+      return ['clipboard']
+    case 'idle-detection':
+      return ['idle']
+    case 'window-management':
+      return ['windows']
+    case 'local-fonts':
+      return ['fonts']
+    case 'local-network-access':
+    case 'local-network':
+    case 'loopback-network':
+      return ['network']
+    default:
+      return null
+  }
+}
+
+/** A permission's state as a page sees it: "prompt" until the user decides, as in Chromium. */
+export type PagePermissionState = 'granted' | 'denied' | 'prompt'
+
+/** Messages from the web page preload (src/preload/page.ts) to main (src/main/nav/page-bridge.ts). */
+export const PAGE_CHANNEL = {
+  /** sendSync(name): the PagePermissionState for a permission name, or null for the engine's answer. */
+  permission: 'orbit-page:permission',
+  /** send(): the user clicked one of the page's notifications (NV-15). */
+  notificationClick: 'orbit-page:notification-click',
+} as const
+
 /** Sorts permissions into PERMISSION_ORDER, without repeats. */
 export function sortKinds(kinds: Iterable<PermissionKind>): PermissionKind[] {
   const set = new Set(kinds)

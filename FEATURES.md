@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 159 built (45 partial) · 213 tested · 0 feel right.
+**Totals:** 485 spec’d · 162 built (45 partial) · 214 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 114 | 139 |
+| P0 | 174 | 117 | 140 |
 | P1 | 221 | 41 | 69 |
 | P2 | 83 | 4 | 5 |
 
@@ -24,7 +24,7 @@ Spec: `spec/sidebar.md`
 | SB-01 | Sidebar-first window layout | P0 | ✅ | ✅ e2e | – | sidebar on the left with controls, navigation, address and every tab; the page an inset rounded card beside it in the Space theme; no tab strip |
 | SB-02 | Sidebar anatomy (top to bottom) | P0 | ✅ | ✅ e2e | – | top row, address, Favorites, title row, pinned, divider, + New Tab, Today, empty area, bottom bar in that order; title row to empty area scroll together, the rest stays; trays come with SB-10, the Library button with SB-09 |
 | SB-03 | Top row: window controls and navigation buttons | P0 | ✅ | ✅ e2e | – | traffic lights (Linux: window controls), sidebar toggle, Back/Forward/Reload with disabled and Stop states; long-press/right-click history menu; Cmd/middle-click into a new tab; Esc or double-click stops; toggle gives way first when narrow |
-| SB-04 | Address display at the top of the sidebar | P0 | 🟡 partial | ✅ e2e+unit | – | host only (focused pane), click or Cmd+L edits the full URL, warning icon for plain http (no padlock), copy-link button; site-controls button shows a placeholder until NV-16 |
+| SB-04 | Address display at the top of the sidebar | P0 | ✅ | ✅ e2e+unit | – | host only (focused pane, or the Peek's page while one shows), click or Cmd+L edits the full URL, warning icon for plain http (no padlock), copy-link button, site controls button (NV-16) at the right end |
 | SB-05 | Favorites grid placement | P0 | ✅ | ✅ e2e | – | Favorites between the address and the title row, outside the scrolling list; same grid, same place across Spaces of one profile |
 | SB-06 | Space title row placement | P0 | ✅ | ✅ e2e | – | title row: inline rename, hover profile badge and … menu (pinned caret is PN-09) |
 | SB-07 | "+ New Tab" row | P0 | ✅ | ✅ e2e | – | + New Tab row with press animation opens the command bar |
@@ -243,10 +243,10 @@ Spec: `spec/navigation.md`
 | NV-12 | Page context menu | P0 | ✅ | ✅ e2e | – | native menu: page (Back, Forward, Reload, Save Page As, Print, View Page Source), link (New Tab, Split View, New Window, Private Window, Copy, Save Link As), selection (Copy, Search engine, Look Up on macOS), image, editable (suggestions, Add to Dictionary, edit roles, Paste and Match Style, Writing Direction), Inspect last; Peek, Mini Window and media items come from their lanes; P2 Translate and Share Quote not built |
 | NV-13 | Load-error pages | P1 | – | – | – |  |
 | NV-14 | Crashed or unresponsive tab | P1 | – | ✅ e2e | – |  |
-| NV-15 | Permission prompts | P0 | – | ✅ e2e | – |  |
-| NV-16 | Site controls panel | P0 | – | – | – |  |
+| NV-15 | Permission prompts | P0 | ✅ | ✅ e2e+unit | – | prompt under the address display, as wide as it (over the page's top-left while the sidebar is hidden): camera, mic, location, notifications, clipboard, MIDI, idle, windows, fonts, local network, serial/USB/HID choosers, screen share, file access; Allow while visiting / Allow this time / Never allow, or Block / Allow; Esc dismisses; kept per profile and site (private in memory); pages read undecided as default/prompt; a notification click brings its tab forward (page notifications, not service-worker ones); Peek, Mini Window and pop-ups ask in a dialog; toolbar anchor waits on SB-17, Site settings is ST-13 |
+| NV-16 | Site controls panel | P0 | 🟡 partial | ✅ e2e+unit | – | button at the address's right end and the Site Controls action (never shows the hidden sidebar): host and connection, switches for permissions the site used or asked for (pop-ups too), devices, zoom with reset, Reset permissions, Clear cookies and site data, Reload hint; Esc or a click outside closes; auto PiP, Peek, Developer mode, Tweaks, extensions, capture and the all-sites link wait on their features |
 | NV-17 | Copy the current URL | P0 | 🟡 partial | ✅ e2e | – | copy button = Cmd+Shift+C (clean URL, Copied toast); one-time shortcut tip when the URL is copied from the command bar; the Win/Linux page-first offer waits on KS-02 |
-| NV-18 | Links from other apps (Orbit as the default browser) | P0 | – | ✅ e2e | – |  |
+| NV-18 | Links from other apps (Orbit as the default browser) | P0 | ✅ | ✅ e2e | – | summary of MW-02/05/09/10/11: links from other apps open a Mini Window or follow routing rules, else a Today tab in the most recent Space; never in a private window (e2e); rules UI is ST-09, Archive restores AR-05 |
 | NV-19 | Links that open other apps (external protocols) | P1 | – | – | – |  |
 | NV-20 | Full screen | P1 | – | ✅ e2e | – |  |
 | NV-21 | Save page and view source | P2 | – | – | – |  |
@@ -271,7 +271,7 @@ Spec: `spec/peek.md`
 | PK-08 | Open a Peek in Split View | P1 | ✅ | ✅ e2e | – | the card slides to the right half, then split.addTab makes the source and the live Peek page one split in the source's place (a pinned source gives a pinned split), the page focused; from a full split the Peek stays open and the SV-25 toast shows |
 | PK-09 | Close a Peek | P0 | ✅ | ✅ e2e+unit | – | Esc (after fullscreen), ⌘W, ×, click outside; archived as from 'peek' |
 | PK-10 | Reopen a Peek closed by mistake | P1 | ✅ | ✅ e2e | – | ⌘Z right after closing, or ⌘⇧T, reopens on the same page with history |
-| PK-11 | Navigating and acting inside a Peek | P1 | 🟡 partial | ✅ e2e | – | links, back/forward, reload, zoom, copy URL, devtools act on the Peek; the sidebar address shows the Peek host; ⌘L makes it a tab and edits it; find in page waits for the find bar (core placeholder) |
+| PK-11 | Navigating and acting inside a Peek | P1 | 🟡 partial | ✅ e2e+unit | – | links, back/forward, reload, zoom, copy URL, devtools act on the Peek; the sidebar address shows the Peek host; ⌘L makes it a tab and edits it; find in page waits for the find bar (core placeholder) |
 | PK-12 | Peek settings | P1 | 🟡 partial | ✅ e2e+unit | – | settings.peekExternalLinks / peekShiftClick honoured; toggles UI belongs to the settings lane |
 | PK-13 | Peek and the sidebar | P0 | ✅ | ✅ e2e | – | no sidebar row; sidebar stays usable; selecting another tab, Space or window dismisses (reopenable) |
 | PK-14 | Canvases, notes and Library items open in Peek | P2 | – | – | – |  |
