@@ -325,9 +325,19 @@ test('[NV-12] right-clicking the page offers Back, Forward, Reload, Save Page As
   expect(menu?.enabled.Back).toBe(true)
   expect(menu?.enabled.Forward).toBe(false)
   expect(menu?.labels).not.toContain('Open Link in New Tab')
-  // View Page Source opens the source in a new tab.
+  // View Page Source opens the source in a new tab, which keeps its view-source: address once loaded.
+  const source = `view-source:${page('Plain-next')}`
   expect(await choosePageMenu(app, 'View Page Source')).toBe(true)
-  await expect.poll(async () => urlOf(app, await selectedTab(app))).toBe(`view-source:${page('Plain-next')}`)
+  await expect.poll(async () => urlOf(app, await selectedTab(app))).toBe(source)
+  await expect
+    .poll(() =>
+      app.evaluate(
+        ({ webContents }, url) => webContents.getAllWebContents().some((w) => w.getURL() === url && !w.isLoading()),
+        source,
+      ),
+    )
+    .toBe(true)
+  expect(await urlOf(app, await selectedTab(app))).toBe(source)
 })
 
 test('[NV-12] right-clicking a text field offers the editing items and Writing Direction', async () => {

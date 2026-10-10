@@ -6,9 +6,10 @@ const ERR_ABORTED = -3
 
 /** Addresses that load in the tab; others (mailto:, a custom app's scheme…) go to another app. */
 const LOADS_IN_TAB = /^(https?|file):/i
+const VIEW_SOURCE = /^view-source:/i
 
 /**
- * The address while a page is on its way (NV-04) or failed to load (NV-13).
+ * The address while a page is on its way (NV-04), failed to load (NV-13) or shows a page's source.
  *
  * Where a navigation Orbit started is going, before it commits (an address typed in the command
  * bar, Back or Forward, Reload, a link Orbit opened in a new tab): the address display shows it at
@@ -19,7 +20,8 @@ const LOADS_IN_TAB = /^(https?|file):/i
  * have over its own content.
  *
  * An error page commits without `did-navigate`; the address then shows the address that failed,
- * so Reload tries it again.
+ * so Reload tries it again. A page's source (View Page Source, NV-12) commits with the address of
+ * the page it shows; the tab keeps its `view-source:` address, so it shows and reopens as source.
  */
 export function registerPendingUrl(ctx: MainContext): { markStopped: (tabId: TabId) => void } {
   const { store } = ctx
@@ -63,6 +65,15 @@ export function registerPendingUrl(ctx: MainContext): { markStopped: (tabId: Tab
     contents.once('destroyed', () => {
       stopped.delete(tabId)
       setPending(tabId, undefined)
+    })
+  })
+
+  ctx.hooks.tabNavigated.push((tabId, contents) => {
+    const shown = contents.getURL()
+    if (!VIEW_SOURCE.test(shown) || store.state.tabs[tabId]?.url === shown) return
+    store.update((d) => {
+      const tab = d.tabs[tabId]
+      if (tab) tab.url = shown
     })
   })
 
