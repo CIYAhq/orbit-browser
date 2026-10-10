@@ -1,6 +1,6 @@
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { mkdir, open, rm } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { dirname, isAbsolute } from 'node:path'
 import type { Patch } from 'immer'
 import {
   createInitialState,
@@ -130,6 +130,16 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
   // Archive retention in days (AR-08): a whole number, 0 for forever; else the default.
   const keep = state.settings.archiveKeepDays
   if (!(Number.isInteger(keep) && keep >= 0 && keep <= 36_500)) state.settings.archiveKeepDays = 30
+  // What the Library button's popover and the Media section show (DL-05, DL-11).
+  const recent: Record<string, unknown> = isRecord(state.settings.recentFiles) ? state.settings.recentFiles : {}
+  state.settings.recentFiles = {
+    downloads: typeof recent.downloads === 'boolean' ? recent.downloads : DEFAULT_SETTINGS.recentFiles.downloads,
+    screenshots:
+      typeof recent.screenshots === 'boolean' ? recent.screenshots : DEFAULT_SETTINGS.recentFiles.screenshots,
+  }
+  if (typeof state.settings.libraryScreenshots !== 'boolean') {
+    state.settings.libraryScreenshots = DEFAULT_SETTINGS.libraryScreenshots
+  }
   // spaceOrder must list exactly the existing spaces.
   state.spaceOrder = [...new Set(state.spaceOrder)].filter((id) => state.spaces[id])
   for (const id of Object.keys(state.spaces)) if (!state.spaceOrder.includes(id)) state.spaceOrder.push(id)
@@ -156,12 +166,42 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
     win.sidebar = { ...win.sidebar, peeking: false }
     if (!state.spaces[win.spaceId]) win.spaceId = state.spaceOrder[0] as string
   }
-  for (const d of Object.values(state.downloads)) {
-    if (d.state === 'progressing' || d.state === 'paused') d.state = 'interrupted'
-  }
+  normalizeDownloads(state)
   normalizeSettingsPrefs(state)
   normalizeKeySettings(state.settings, process.platform)
   return state
+}
+
+/**
+ * Downloads the sidebar shows (DL-01, DL-03). One that was running or paused at quit comes back
+ * interrupted, so it can be resumed or retried; one held back as possibly harmful stays held (DL-12);
+ * finished, cancelled and private ones are dropped (the downloads list keeps the rest), and so are
+ * malformed entries.
+ */
+function normalizeDownloads(state: OrbitState): void {
+  // Download locations (DL-07): folders are absolute paths.
+  const isFolder = (value: unknown) => typeof value === 'string' && isAbsolute(value)
+  for (const profile of Object.values(state.profiles)) {
+    if (!isFolder(profile.downloadFolder)) delete profile.downloadFolder
+    if (profile.downloadAsk !== true) delete profile.downloadAsk
+    if (!isFolder(profile.downloadAskFolder)) delete profile.downloadAskFolder
+  }
+  for (const [id, d] of Object.entries(state.downloads)) {
+    const named = typeof d.url === 'string' && typeof d.filename === 'string' && typeof d.savePath === 'string'
+    // A complete download held back as possibly harmful (DL-12) waits for Keep or Discard.
+    const held = d.state === 'completed' && d.danger === 'file-type'
+    if (!named || d.private === true || (d.state === 'completed' && !held) || d.state === 'cancelled') {
+      delete state.downloads[id]
+      continue
+    }
+    d.id = id
+    if (!held) d.state = 'interrupted'
+    d.receivedBytes = time(d.receivedBytes)
+    d.totalBytes = time(d.totalBytes)
+    d.startedAt = time(d.startedAt)
+    if (!state.profiles[d.profileId]) d.profileId = DEFAULT_PROFILE_ID
+    delete d.speed
+  }
 }
 
 /**
@@ -441,7 +481,7 @@ const RUNTIME_ONLY: Record<string, ReadonlySet<string>> = {
     'media',
   ]),
   windows: new Set(['focused', 'fullscreen', 'overlay']),
-  downloads: new Set(['receivedBytes']),
+  downloads: new Set(['receivedBytes', 'speed']),
 }
 
 /** True when a patch only changes runtime-only fields, so the saved file stays the same. */
@@ -456,7 +496,7 @@ export function isRuntimeOnlyPatch(patch: Patch): boolean {
 
 /**
  * Runtime-only fields are written too (they are small) and reset on load. Private windows and
- * everything in them never are (NV-11).
+ * everything in them never are (NV-11), nor a private session's downloads (DL-16).
  */
 function serialize(state: OrbitState): string {
   return JSON.stringify(withoutPrivate(state))

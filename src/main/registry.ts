@@ -1,9 +1,12 @@
+import type { WebContents } from 'electron'
 import type { CommandArgs, CommandName, CommandResult, EventName, OrbitEvents } from '../shared/rpc'
 import type { WindowId } from '../shared/state'
 
 /** Who invoked a command: the window it came from (if any). */
 export interface CallContext {
   windowId?: WindowId
+  /** The Orbit UI page that called (renderer calls only), e.g. to start a drag from it (DL-06). */
+  sender?: WebContents
 }
 
 type Handler<K extends CommandName> = (
@@ -49,6 +52,8 @@ export class EventRegistry {
 
 export interface ActionContext {
   windowId?: WindowId
+  /** The key is held down (the keyboard's auto-repeat); set by the keyboard router. */
+  repeat?: boolean
 }
 
 /** Takes an action over before its handler runs (e.g. an open Peek handles Close Tab). True when handled. */

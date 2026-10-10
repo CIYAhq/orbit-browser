@@ -215,6 +215,15 @@ export interface Profile {
    * Unset: the Default profile's choice, then settings.searchEngine (`engineFor` in src/shared/url.ts).
    */
   searchEngine?: string
+  /**
+   * Where this profile's downloads are saved (DL-07). Unset: the OS Downloads folder. It stays while
+   * `downloadAsk` is on, for when that is turned off.
+   */
+  downloadFolder?: string
+  /** "Ask every time" (DL-07): each download shows the OS save dialog. */
+  downloadAsk?: boolean
+  /** Where that dialog opens: the folder the last download it asked about went to (DL-07). */
+  downloadAskFolder?: string
 }
 
 export type CommandBarMode = 'new-tab' | 'edit-url' | 'search-tabs'
@@ -357,6 +366,10 @@ export interface Settings {
   librarySection: string
   /** Archive entries older than this many days are deleted (AR-08). 0 = kept forever. */
   archiveKeepDays: number
+  /** What the Library button's popover of recent files lists (DL-05): downloads, OS screenshots. */
+  recentFiles: { downloads: boolean; screenshots: boolean }
+  /** The OS's screenshots show in the Library's Media section (DL-11). */
+  libraryScreenshots: boolean
 }
 
 /** Secure DNS choices (ST-12): providers are src/main/settings/dns.ts's DOH_SERVERS. */
@@ -410,6 +423,26 @@ export interface Download {
   receivedBytes: number
   totalBytes: number
   startedAt: number
+  /** The profile whose session downloaded it (downloads lane, DL-01). */
+  profileId: ProfileId
+  /** When it completed, failed or was cancelled. */
+  endedAt?: number
+  /** Why an interrupted download stopped, e.g. "Network error". */
+  error?: string
+  /** Bytes per second while it runs (runtime only). */
+  speed?: number
+  /** An interrupted download that can continue where it stopped (DL-15). */
+  canResume?: boolean
+  mimeType?: string
+  /** The page it was downloaded from. */
+  pageUrl?: string
+  /** Downloaded in a private window: never written to disk (DL-16). */
+  private?: boolean
+  /**
+   * Held back as a file that can harm the computer (DL-12): complete, but kept under its partial
+   * name until the user keeps it (it goes into place) or discards it.
+   */
+  danger?: 'file-type'
 }
 
 /** Per-site customisation ("Tweak"): CSS/JS applied to matching hosts. */

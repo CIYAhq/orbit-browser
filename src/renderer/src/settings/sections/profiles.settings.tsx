@@ -4,6 +4,7 @@ import { ARCHIVE_AFTER_CHOICES } from '../../../../shared/commands/settings'
 import { DEFAULT_PROFILE_ID } from '../../../../shared/defaults'
 import type { ProfileId } from '../../../../shared/state'
 import { invoke } from '../../api'
+import { DownloadLocationRow } from '../../downloads/DownloadLocationRow'
 import { useOrbit, useOrbitShallow } from '../../store'
 import { useSettingsContext } from '../context'
 import { Button, Dialog, LinkButton, type Option, Select, SettingGroup, SettingRow, TextField } from '../controls'
@@ -206,6 +207,8 @@ function ProfileSettings({ profileId }: { profileId: ProfileId }) {
         >
           <SearchEngineSelect profileId={profileId} testId={`profile-search-engine-${profileId}`} />
         </SettingRow>
+        {/* Downloads lane (DL-07). */}
+        <DownloadLocationRow profileId={profileId} name={name} />
       </SettingGroup>
       {!isDefault && (
         <SettingGroup>
@@ -291,5 +294,5 @@ export default {
   icon: Users,
   order: 20,
   component: ProfilesPage,
-  keywords: ['profile', 'rename', 'delete', 'new profile', 'archive', 'auto archive', 'today tabs'],
+  keywords: ['profile', 'rename', 'delete', 'new profile', 'archive', 'auto archive', 'today tabs', 'downloads folder'],
 } satisfies SettingsSection

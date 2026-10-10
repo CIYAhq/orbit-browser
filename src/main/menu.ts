@@ -120,8 +120,17 @@ export function installMenu(ctx: MainContext): void {
         { type: 'separator' },
         { role: 'togglefullscreen' },
         { type: 'separator' },
-        item('devtools.toggle'),
-        item('page.viewSource'),
+        // View → Developer (DT-01, DT-02, DT-04).
+        {
+          label: 'Developer',
+          submenu: [
+            item('devtools.toggle'),
+            item('devtools.console'),
+            item('devtools.inspect'),
+            { type: 'separator' },
+            item('page.viewSource'),
+          ],
+        },
       ],
     },
     {
