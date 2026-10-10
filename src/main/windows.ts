@@ -208,8 +208,11 @@ export class WindowManager {
   private records = new Map<WindowId, WindowRecord>()
   /** Orbit UI web contents (shell, overlay, settings…) → window. */
   private uiContents = new Map<number, WindowId>()
+  private broadcastListeners: ((channel: string, args: unknown[]) => void)[] = []
   /** Each tab's view that is placed in a window, and which window. Compared by view, not tab id. */
   private attached = new Map<TabId, Attachment>()
+  /** Where each tab's page sits in its view while DevTools are docked there (DT-03): as DevTools last laid it out. */
+  private devtoolsPages = new Map<TabId, Rect>()
   private layoutListeners: ((windowId: WindowId) => void)[] = []
   private createdListeners: ((windowId: WindowId, win: BrowserWindow) => void)[] = []
   private toolsReadyListeners: ((windowId: WindowId) => void)[] = []
@@ -557,6 +560,12 @@ export class WindowManager {
       const contents = webContentsFromId(contentsId)
       if (contents && !contents.isDestroyed()) contents.send(channel, ...args)
     }
+    for (const listener of this.broadcastListeners) listener(channel, args)
+  }
+
+  /** Hears every broadcast too: internal pages pass them on to their own renderers (DT-13). */
+  onBroadcast(listener: (channel: string, args: unknown[]) => void): void {
+    this.broadcastListeners.push(listener)
   }
 
   sendToWindow(windowId: WindowId, channel: string, payload: unknown): void {
@@ -595,11 +604,30 @@ export class WindowManager {
     return !!this.records.get(windowId)?.htmlFullscreen
   }
 
-  /** A tab view's place in its window (window coordinates), while attached. */
+  /**
+   * A tab's page in its window (window coordinates), while its view is shown: the view, less the
+   * DevTools docked in it (DT-03). What Orbit puts over a page goes here, so it stays off DevTools.
+   */
   tabViewBounds(tabId: TabId): Rect | undefined {
     const entry = this.attached.get(tabId)
     if (!entry || !this.records.get(entry.windowId)?.visible.has(tabId)) return undefined
-    return entry.view.getBounds()
+    const view = entry.view.getBounds()
+    const page = this.devtoolsPages.get(tabId)
+    return page ? pageInView(view, page) : view
+  }
+
+  /**
+   * Where a tab's page sits in its view while DevTools are docked there (view coordinates, as
+   * DevTools lay it out), or null when they aren't (DT-03). What goes over the page moves with it.
+   */
+  setDevtoolsPage(tabId: TabId, page: Rect | null): void {
+    const before = this.devtoolsPages.get(tabId)
+    if (page ? before && sameRect(before, page) : !before) return
+    if (page) this.devtoolsPages.set(tabId, page)
+    else this.devtoolsPages.delete(tabId)
+    const entry = this.attached.get(tabId)
+    if (!entry || !this.records.get(entry.windowId)?.visible.has(tabId)) return
+    for (const listener of this.layoutListeners) listener(entry.windowId)
   }
 
   /** The page under a point of a window (window coordinates), with the point in the page's coordinates. */
@@ -1065,7 +1093,7 @@ export class WindowManager {
         BrowserWindow.fromWebContents(contents)?.close()
         return
       }
-      void this.ctx.actions.run(action.id, { windowId })
+      void this.ctx.actions.run(action.id, { windowId, repeat: input.isAutoRepeat })
     })
   }
 
@@ -1572,6 +1600,25 @@ export function windowBackground(state: OrbitState, spaceId: SpaceId | undefined
 /** Identifies one opening of an overlay (its kind and nonce): updates to it keep the same key. */
 function overlayKey(overlay: OverlayState | undefined): string {
   return overlay && overlay.kind !== 'none' ? `${overlay.kind}:${overlay.nonce}` : 'none'
+}
+
+/**
+ * A page's place in its view, with DevTools docked there, as the engine lays it out: where DevTools
+ * put it, cut to the view (window coordinates).
+ */
+function pageInView(view: Rect, page: Rect): Rect {
+  const left = Math.min(page.x, view.width)
+  const top = Math.min(page.y, view.height)
+  return {
+    x: view.x + left,
+    y: view.y + top,
+    width: Math.max(1, Math.min(page.width, view.width - left)),
+    height: Math.max(1, Math.min(page.height, view.height - top)),
+  }
+}
+
+function sameRect(a: Rect, b: Rect): boolean {
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
 }
 
 function roundRect(r: Rect): Rect {

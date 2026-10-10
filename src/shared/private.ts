@@ -6,6 +6,7 @@
  */
 import type {
   ContainerRef,
+  Download,
   ItemId,
   OrbitState,
   Profile,
@@ -152,8 +153,8 @@ function layoutLeaves(layout: SplitLayout): TabId[] {
 
 /**
  * The state with every private window, Space, profile, tab, folder and split left out (and any
- * Archive entry that names a private profile): what may be written to disk. Returns `state` itself
- * when there is nothing private.
+ * Archive entry that names a private profile, and the downloads of a private session, DL-16): what
+ * may be written to disk. Returns `state` itself when there is nothing private.
  */
 export function withoutPrivate(state: OrbitState): OrbitState {
   const profiles = new Set(Object.keys(state.profiles).filter(isPrivateProfileId))
@@ -174,7 +175,10 @@ export function withoutPrivate(state: OrbitState): OrbitState {
       .map((w) => w.id),
   )
   const archive = state.archive.some((a) => isPrivate(a.profileId) || spaces.has(a.spaceId))
-  if (profiles.size + spaces.size + tabs.size + windows.size === 0 && !archive) return state
+  // A download from any session kept in memory, a private window's or another (DL-16).
+  const isPrivateDownload = (d: Download) => !!d.private || isPrivate(d.profileId)
+  const downloads = Object.values(state.downloads).some(isPrivateDownload)
+  if (profiles.size + spaces.size + tabs.size + windows.size === 0 && !archive && !downloads) return state
 
   // Folders and splits have no Space of their own: they go with the private Spaces holding them.
   const items = new Set<ItemId>()
@@ -210,6 +214,7 @@ export function withoutPrivate(state: OrbitState): OrbitState {
     ),
     windows: keep(state.windows, (id) => windows.has(id)),
     archive: archive ? state.archive.filter((a) => !isPrivate(a.profileId) && !spaces.has(a.spaceId)) : state.archive,
+    downloads: downloads ? keep(state.downloads, (_id, d) => isPrivateDownload(d)) : state.downloads,
   }
   // A normal window never shows a private tab, but its remembered tabs per Space must not name one.
   for (const [id, win] of Object.entries(out.windows)) {

@@ -8,9 +8,15 @@
  * - `Notification.permission` is "default", and a PermissionStatus's `state` "prompt", until the
  *   user decides;
  * - clicking one of the page's notifications brings its tab forward.
+ *
+ * Orbit's internal pages (`orbit://<page>/`, DT-13) are Orbit's UI in a tab, not web pages: in the
+ * main frame of one, and only there, this gives the bridge Orbit's UI has (D53), and patches
+ * nothing. See `exposeInternalPage`.
  */
 import { contextBridge, ipcRenderer } from 'electron'
+import type { OrbitBridge, StatePatch } from '../shared/rpc'
 import { PAGE_CHANNEL } from '../shared/site'
+import type { OrbitState } from '../shared/state'
 
 type StateOf = (name: string) => string | null
 
@@ -126,8 +132,75 @@ function patchPage(stateOf: StateOf, clicked: () => void) {
   }
 }
 
-try {
-  contextBridge.executeInMainWorld({ func: patchPage, args: [permissionState, notificationClicked] })
-} catch {
-  // A page without its own world to patch keeps the engine's answers.
+type PatchListener = (seq: number, patches: StatePatch[]) => void
+
+/**
+ * An internal page's bridge (DT-13): the one Orbit's UI has (src/preload/shell.ts), on this
+ * preload's own channels (D40, D53). Main answers it only from a tab's main frame showing an
+ * `orbit:` page, runs only the commands listed for that page, and takes no events from it
+ * (src/main/devtools/internal-pages.ts). `windowId` is the window the tab was in when it loaded.
+ */
+function exposeInternalPage(windowId: string): void {
+  // As in the shell's preload: the state is on its way, and changes are kept, before the page runs.
+  const patchListeners = new Set<PatchListener>()
+  const earlyPatches: [number, StatePatch[]][] = []
+  const listeners = new Map<string, Set<(payload: unknown) => void>>()
+  ipcRenderer.on(PAGE_CHANNEL.internalEvent, (_event, channel: string, ...args: unknown[]) => {
+    if (channel !== 'orbit:patches') {
+      for (const listener of listeners.get(channel) ?? []) listener(args[0])
+      return
+    }
+    const [seq, patches] = args as [number, StatePatch[]]
+    if (patchListeners.size === 0) {
+      if (earlyPatches.length < 2000) earlyPatches.push([seq, patches])
+      return
+    }
+    for (const listener of patchListeners) listener(seq, patches)
+  })
+  let prefetched: Promise<{ state: OrbitState; seq: number }> | undefined = ipcRenderer.invoke(
+    PAGE_CHANNEL.internalState,
+  )
+
+  const bridge: OrbitBridge = {
+    windowId,
+    view: 'internal',
+    platform: process.platform,
+    invoke: (name, args) => ipcRenderer.invoke(PAGE_CHANNEL.internalInvoke, name, args),
+    // Events are for Orbit's own UI (D53).
+    send: () => {},
+    getState: () => {
+      const pending = prefetched ?? ipcRenderer.invoke(PAGE_CHANNEL.internalState)
+      prefetched = undefined
+      return pending
+    },
+    onPatches: (listener) => {
+      patchListeners.add(listener)
+      for (const [seq, patches] of earlyPatches.splice(0)) listener(seq, patches)
+      return () => patchListeners.delete(listener)
+    },
+    on: (channel, listener) => {
+      const key = `orbit:${channel}`
+      const set = listeners.get(key) ?? new Set()
+      listeners.set(key, set)
+      const handler = (payload: unknown) => listener(payload)
+      set.add(handler)
+      return () => set.delete(handler)
+    },
+  }
+  contextBridge.exposeInMainWorld('orbit', bridge)
+}
+
+if (location.protocol === 'orbit:') {
+  // An internal page. Main says no (null) to anything but a tab's main frame showing one.
+  if (window.top === window) {
+    const hello: unknown = ipcRenderer.sendSync(PAGE_CHANNEL.internalHello)
+    const windowId = (hello as { windowId?: unknown } | null)?.windowId
+    if (typeof windowId === 'string') exposeInternalPage(windowId)
+  }
+} else {
+  try {
+    contextBridge.executeInMainWorld({ func: patchPage, args: [permissionState, notificationClicked] })
+  } catch {
+    // A page without its own world to patch keeps the engine's answers.
+  }
 }

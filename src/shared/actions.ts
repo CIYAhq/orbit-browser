@@ -243,9 +243,26 @@ export const ACTIONS: ActionDef[] = [
     id: 'devtools.toggle',
     title: 'Developer Tools',
     category: 'Developer',
-    mac: ['Cmd+Alt+I'],
+    mac: ['Cmd+Alt+I', 'F12'],
     other: ['Ctrl+Shift+I', 'F12'],
     keywords: ['inspect', 'console'],
+  },
+  {
+    id: 'devtools.console',
+    title: 'JavaScript Console',
+    category: 'Developer',
+    mac: ['Cmd+Alt+J'],
+    other: ['Ctrl+Shift+J'],
+    keywords: ['developer tools', 'devtools'],
+  },
+  // The element picker. ⇧⌘C / Ctrl+Shift+C stays Copy URL (DT-02); it can be remapped here.
+  {
+    id: 'devtools.inspect',
+    title: 'Inspect Element',
+    category: 'Developer',
+    mac: ['Cmd+Alt+C'],
+    other: [],
+    keywords: ['developer tools', 'devtools', 'select an element', 'picker'],
   },
 
   // Sidebar & window
@@ -295,6 +312,15 @@ export const ACTIONS: ActionDef[] = [
     category: 'App',
     mac: ['Cmd+Shift+L'],
     keywords: ['library', 'archive', 'downloads', 'media'],
+  },
+  // Downloads (DL-14, KS-12): the Library's Downloads section on macOS, the downloads flyout elsewhere.
+  {
+    id: 'app.downloads',
+    title: 'Downloads',
+    category: 'App',
+    mac: ['Cmd+Shift+J', 'Cmd+Alt+L'],
+    other: ['Ctrl+J'],
+    keywords: ['open downloads', 'downloaded files', 'library'],
   },
   // Every page visit of the profile, in the Library (AR-10).
   {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { MainContext } from '../../src/main/context'
-import { linkSplitMenuItem, newSplitMenuItems, tabSplitMenuItems } from '../../src/main/split/menu'
+import { linkSplitMenuItems, newSplitMenuItems, tabSplitMenuItems } from '../../src/main/split/menu'
 import { createSplitInDraft } from '../../src/main/split/model'
 import { makeTab } from '../../src/main/tabs/model'
 import { createInitialState, createWindowState, DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
@@ -57,13 +57,25 @@ describe('split menu items for other menus', () => {
   it('[SV-08] opens a link in a pane beside the page', () => {
     const { add, ctx, run, win } = setup()
     const a = add()
-    const item = linkSplitMenuItem(ctx, a, 'https://y.test/')
-    item.click?.({} as never, undefined, {} as never)
+    const [item] = linkSplitMenuItems(ctx, a, 'https://y.test/', 'https://x.test/')
+    item?.click?.({} as never, undefined, {} as never)
     expect(run).toHaveBeenCalledWith(
       'split.openUrl',
       { url: 'https://y.test/', target: a, side: 'right' },
       { windowId: win },
     )
+  })
+
+  it('[SV-08][DT-13] offers no pane for a link the page may not open: an internal page, or a local file from the web (D49, D53)', () => {
+    const { add, ctx } = setup()
+    const a = add()
+    expect(linkSplitMenuItems(ctx, a, 'orbit://version/', 'https://x.test/')).toEqual([])
+    expect(linkSplitMenuItems(ctx, a, 'ORBIT://pages/', 'https://x.test/')).toEqual([])
+    expect(linkSplitMenuItems(ctx, a, 'orbit://version/', undefined)).toEqual([])
+    expect(linkSplitMenuItems(ctx, a, 'file:///tmp/notes.txt', 'https://x.test/')).toEqual([])
+    // An internal page's own links, and a local page's local files, open beside it.
+    expect(linkSplitMenuItems(ctx, a, 'orbit://version/', 'orbit://pages/')).toHaveLength(1)
+    expect(linkSplitMenuItems(ctx, a, 'file:///tmp/notes.txt', 'file:///tmp/index.html')).toHaveLength(1)
   })
 
   it('[SV-07] gives the + menu or a title-bar button the four Add Split items', () => {

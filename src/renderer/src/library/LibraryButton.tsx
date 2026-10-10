@@ -1,7 +1,8 @@
 import { LibraryBig } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ACTIONS_BY_ID, formatAccelerator, shortcutsFor } from '../../../shared/actions'
 import { invoke } from '../api'
+import { useRecentFiles } from '../downloads/RecentFiles'
 import './library-button.css'
 
 const action = ACTIONS_BY_ID['app.library']
@@ -11,9 +12,13 @@ const TITLE = accel ? `Library (${formatAccelerator(accel, window.orbit.platform
 /**
  * The Library button at the left of the sidebar's bottom bar (SB-09, AR-02): opens the Library, or
  * closes it when it is open (shown pressed). A hover gets its view ready, so the first open is quick.
+ * Hovering a moment longer shows the recent files, and right-click chooses what they are (DL-05,
+ * downloads lane).
  */
 export function LibraryButton() {
   const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLButtonElement>(null)
+  const recent = useRecentFiles(() => ref.current)
   useEffect(() => {
     let heard = false
     const off = window.orbit.on('library.state', (payload) => {
@@ -26,17 +31,29 @@ export function LibraryButton() {
     return off
   }, [])
   return (
-    <button
-      type="button"
-      className={`icon-button spacebar__library${open ? ' is-open' : ''}`}
-      aria-label="Library"
-      aria-pressed={open}
-      title={TITLE}
-      data-testid="library-button"
-      onPointerEnter={() => void invoke('library.prepare', {})}
-      onClick={() => void invoke('library.toggle', {})}
-    >
-      <LibraryBig size={17} />
-    </button>
+    <>
+      <button
+        ref={ref}
+        type="button"
+        className={`icon-button spacebar__library${open ? ' is-open' : ''}`}
+        aria-label="Library"
+        aria-pressed={open}
+        title={TITLE}
+        data-testid="library-button"
+        onPointerEnter={() => {
+          void invoke('library.prepare', {})
+          recent.enter()
+        }}
+        onPointerLeave={recent.leave}
+        onContextMenu={recent.menu}
+        onClick={() => {
+          recent.close()
+          void invoke('library.toggle', {})
+        }}
+      >
+        <LibraryBig size={17} />
+      </button>
+      {recent.popover}
+    </>
   )
 }

@@ -3,6 +3,7 @@
  * clicks (MW-07) and link routing rules (ST-09). Pure, so it is unit-tested; the main process
  * describes the click (how, from where) and acts on the answer.
  */
+import { INTERNAL_SCHEME } from './commands/devtools'
 import type { LinkRule, SpaceId, TabSection } from './state'
 import { siteOf } from './url'
 
@@ -50,16 +51,28 @@ export function isLocalFileUrl(url: string): boolean {
   return /^(view-source:)?file:/i.test(url.trim())
 }
 
+const INTERNAL_PAGE = new RegExp(`^(view-source:)?${INTERNAL_SCHEME}:`, 'i')
+const INTERNAL_ORIGIN = new RegExp(`^${INTERNAL_SCHEME}:`, 'i')
+
+/** An internal page's address (DT-13): `orbit:`, or the source view of one. */
+export function isInternalPageUrl(url: string): boolean {
+  return INTERNAL_PAGE.test(url.trim())
+}
+
 /**
  * Whether Orbit may itself load or save `url` for the page at `from`: a local file only for a page
- * that is a local file too, as the engine allows a plain click (D49). `from` is empty when the page
- * isn't known. Other addresses are left to each route's own rules. The one check on every route where
- * Orbit loads what a page chose, whatever the engine allows: the page menu, ⌥-click and its frame's
- * download, a dropped link, and through `framesMayOpen` the windows, tabs and pop-ups a page asks
- * for, its blocked pop-ups and Save Page As… (round 2 fix check F1).
+ * that is a local file too, as the engine allows a plain click (D49), and an internal page
+ * (`orbit:`) only for an internal page (D53). `from` is empty when the page isn't known. Other
+ * addresses are left to each route's own rules. The one check on every route where Orbit loads what
+ * a page chose, whatever the engine allows: the page menu (Split View's item too), ⌥-click and its
+ * frame's download, a dropped link, and through `framesMayOpen` the windows, tabs and pop-ups a page
+ * asks for, its pop-ups' own, its blocked pop-ups and Save Page As… (round 2 fix check F1).
  */
 export function pageMayOpen(from: string | undefined, url: string): boolean {
-  return !isLocalFileUrl(url) || /^file:/i.test(from?.trim() ?? '')
+  const page = from?.trim() ?? ''
+  if (isLocalFileUrl(url)) return /^file:/i.test(page)
+  if (isInternalPageUrl(url)) return INTERNAL_ORIGIN.test(page)
+  return true
 }
 
 /** A page as the main process sees it: every frame in it, the top one too, each with its origin. */
@@ -70,11 +83,11 @@ export interface PageFrames {
 /**
  * `pageMayOpen` for a page that asked for `url` from a frame Orbit can't name: a new window, tab or
  * pop-up it requested (a modified click, a `target=_blank` link, `window.open`), a pop-up blocked on
- * it, or a save of it (D49; round 2 fix check M1, F1). A local file only when every frame may open
- * it, by each frame's origin: any frame whose origin isn't a local file's counts as a web page, a web
- * page's (F2) or an opaque one (a sandboxed or `data:` frame), even one the page made itself; an
- * about:blank or srcdoc frame a local page made has the page's origin and counts as local. A page
- * that went away opens no local file.
+ * it, or a save of it (D49; round 2 fix check M1, F1). A local file (or an internal page, D53) only
+ * when every frame may open it, by each frame's origin: any frame whose origin isn't a local file's
+ * counts as a web page, a web page's (F2) or an opaque one (a sandboxed or `data:` frame), even one
+ * the page made itself; an about:blank or srcdoc frame a local page made has the page's origin and
+ * counts as local. A page that went away opens no local file.
  */
 export function framesMayOpen(page: PageFrames, url: string): boolean {
   if (pageMayOpen(undefined, url)) return true
