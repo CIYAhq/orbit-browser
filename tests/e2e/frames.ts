@@ -5,9 +5,9 @@
  * whether it jumped, frame pacing).
  *
  * How times compare:
- * - `t` is the frame's `requestAnimationFrame` time, in ms since the recording started. What the DOM
- *   holds in that callback is what the frame paints, so "first frame that shows X" is the first
- *   frame whose sample shows it.
+ * - `t` is the frame's `requestAnimationFrame` time, in ms since the recording started. The frame is
+ *   read after every animation-frame callback and layout, just before paint, so what it holds is
+ *   what the frame paints: "first frame that shows X" is the first frame whose sample shows it.
  * - `wall` is the same instant on the wall clock (`performance.timeOrigin` + the frame time), which
  *   every process shares: compare it with `mainInputs()` (when main saw a key) or `Date.now()`.
  *
@@ -59,7 +59,7 @@ export interface Frame {
   i: number
   /** ms since the recording started (this frame's rAF time). */
   t: number
-  /** When the frame's callback ran (ms since the start): after any input handled before this frame. */
+  /** When the frame was read (ms since the start): after any input handled before this frame. */
   run: number
   /** The same instant on the wall clock (ms). */
   wall: number
@@ -193,17 +193,25 @@ export async function record(
       }
       const kinds = ['keydown', 'keyup', 'pointerdown', 'pointerup', 'pointermove', 'wheel'] as const
       for (const k of kinds) window.addEventListener(k, onInput, { capture: true, passive: true })
-      const tick = (now: number) => {
+      // The frame is read after every animation-frame callback has run, not in our own: a callback
+      // that runs after ours (an animation library's frame loop, a store applying patches once per
+      // frame) would otherwise show one frame late. A probe whose size changes each frame gets a
+      // ResizeObserver callback after layout and before paint, which is when the frame is final.
+      const probe = document.createElement('div')
+      probe.style.cssText =
+        'position:fixed;left:-8px;top:-8px;width:1px;height:1px;visibility:hidden;pointer-events:none;contain:strict'
+      document.documentElement.appendChild(probe)
+      let pending: { now: number; dt: number } | null = null
+      const sample = ({ now, dt }: { now: number; dt: number }) => {
         const frame: Frame = {
           i: rec.frames.length,
           t: now - t0,
           run: performance.now() - t0,
           wall: performance.timeOrigin + now,
-          dt: last < 0 ? 0 : now - last,
+          dt,
           els: {},
           lists: {},
         }
-        last = now
         memo = new Map()
         for (const [name, spec] of specs) {
           if (spec.key) {
@@ -220,12 +228,34 @@ export async function record(
           }
         }
         rec.frames.push(frame)
-        if (now - t0 >= maxMs) rec.stop()
+      }
+      let ending = false
+      const observer = new ResizeObserver(() => {
+        if (!pending) return
+        sample(pending)
+        pending = null
+        if (ending) rec.stop()
+      })
+      observer.observe(probe)
+      let flip = false
+      const tick = (now: number) => {
+        // No observer callback last frame (nothing laid out): read that frame now rather than lose it.
+        if (pending) sample(pending)
+        pending = { now, dt: last < 0 ? 0 : now - last }
+        last = now
+        flip = !flip
+        probe.style.width = flip ? '2px' : '1px'
+        if (now - t0 >= maxMs) ending = true
         else raf = requestAnimationFrame(tick)
       }
       rec.stop = () => {
         cancelAnimationFrame(raf)
         for (const k of kinds) window.removeEventListener(k, onInput, { capture: true })
+        // Stopped between a frame's callback and its observer callback (or it never came): read it now.
+        if (pending) sample(pending)
+        pending = null
+        observer.disconnect()
+        probe.remove()
         finish()
       }
       w.__feelRec = rec
