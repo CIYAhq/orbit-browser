@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { app, type ContextMenuParams, dialog, type MenuItemConstructorOptions, type WebContents } from 'electron'
+import { pageMayOpen } from '../../shared/link-routing'
 import { type PageReferrer, referrerPolicyName } from '../../shared/nav'
 import { isPrivateTab } from '../../shared/private'
 import type { TabId, WindowId } from '../../shared/state'
@@ -143,19 +144,55 @@ function fileName(title: string): string {
   return clean || 'Page'
 }
 
-/** Save Page As… (the page with its resources), Print… and View Page Source. */
+/** Any local file's address: what a complete save would read for a frame, asked of `pageMayOpen`. */
+const LOCAL_FILE = 'file:///'
+
+/**
+ * Whether Save Page As… may save the page complete, the resources its frames name copied beside it.
+ * Chromium reads each `file:` resource named from disk for that, though no web page could load one,
+ * so only a page whose frames are all local files saves complete (D49, round 2 fix check M1). By each
+ * frame's origin, so an about:blank frame a local page made counts as local.
+ */
+export function savesComplete(contents: WebContents): boolean {
+  try {
+    return contents.mainFrame.framesInSubtree.every((frame) => pageMayOpen(frame.origin, LOCAL_FILE))
+  } catch {
+    // The page went away.
+    return false
+  }
+}
+
+/**
+ * How Save Page As… saves to `filePath`. A page that may save complete does, unless the name asks for
+ * a single file (.mht, .mhtml). Any other page saves as a single file (MHTML: the page and what it
+ * loaded, nothing read from disk), or as its HTML alone when the name ends in .html or .htm (NV-21).
+ */
+export function saveFormat(complete: boolean, filePath: string): 'HTMLComplete' | 'HTMLOnly' | 'MHTML' {
+  if (/\.mht(ml)?$/i.test(filePath)) return 'MHTML'
+  if (complete) return 'HTMLComplete'
+  return /\.html?$/i.test(filePath) ? 'HTMLOnly' : 'MHTML'
+}
+
+/** Save Page As… (complete for a local page, else a single file; NV-21), Print… and View Page Source. */
 export function pageItems(ctx: MainContext, tabId: TabId, contents: WebContents): MenuItemConstructorOptions[] {
   return [
     {
       label: 'Save Page As…',
       click: () => {
         const win = ctx.windows.get(ctx.windows.windowOfTab(tabId) ?? '')
-        const defaultPath = join(app.getPath('downloads'), `${fileName(contents.getTitle())}.html`)
-        const options = { defaultPath, filters: [{ name: 'Web Page, Complete', extensions: ['html', 'htm'] }] }
+        const complete = savesComplete(contents)
+        const name = join(app.getPath('downloads'), fileName(contents.getTitle()))
+        const single = { name: 'Web Page, Single File', extensions: ['mhtml'] }
+        const html = { name: complete ? 'Web Page, Complete' : 'Web Page, HTML Only', extensions: ['html', 'htm'] }
+        const options = complete
+          ? { defaultPath: `${name}.html`, filters: [html, single] }
+          : { defaultPath: `${name}.mhtml`, filters: [single, html] }
         void (win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options)).then(
           ({ canceled, filePath }) => {
             if (canceled || !filePath || contents.isDestroyed()) return
-            contents.savePage(filePath, 'HTMLComplete').catch((err) => console.error('[nav] save page', err))
+            // Asked again: the page may have changed while the dialog was open.
+            const format = saveFormat(complete && savesComplete(contents), filePath)
+            contents.savePage(filePath, format).catch((err) => console.error('[nav] save page', err))
           },
         )
       },

@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -748,4 +748,171 @@ test('[TB-02] a local file’s address dropped on the sidebar opens nothing, as 
     expect.stringContaining('orbit-local'),
   )
   expect(await loads()).toEqual([])
+})
+
+// ---- Save Page As… (D49, round 2 fix check M1) ----
+
+/** A local style sheet, script and picture holding a marker no web page could know, in a new folder. */
+function markedFiles(tag: string): { folder: string; marker: string; css: string; js: string; png: string } {
+  const folder = mkdtempSync(join(tmpdir(), `orbit-e2e-${tag}-`))
+  const marker = `orbit-marker-${tag}-${Math.random().toString(36).slice(2)}`
+  writeFileSync(join(folder, `${tag}.css`), `/* ${marker} */ h1 { outline: 1px solid red }`)
+  writeFileSync(join(folder, `${tag}.js`), `/* ${marker} */ window.__ran = true`)
+  // A picture with the marker after its end, where readers ignore it.
+  writeFileSync(join(folder, `${tag}.png`), Buffer.concat([PNG, Buffer.from(marker)]))
+  const url = (name: string) => pathToFileURL(join(folder, name)).href
+  return { folder, marker, css: url(`${tag}.css`), js: url(`${tag}.js`), png: url(`${tag}.png`) }
+}
+
+/** HTML naming the files as a style sheet, a script, a picture and a frame's page. */
+const naming = (files: { css: string; js: string; png: string }) =>
+  `<link rel="stylesheet" href="${files.css}"><script src="${files.js}"></script>` +
+  `<img src="${files.png}" width="8" height="8" alt=""><iframe src="${files.css}" width="80" height="40"></iframe>`
+
+/** The saved files under `folder` (paths from it) that hold `marker`; an MHTML file's parts are each decoded. */
+function holding(folder: string, marker: string): string[] {
+  const files = (dir: string): string[] =>
+    readdirSync(dir).flatMap((name) => {
+      const path = join(dir, name)
+      return statSync(path).isDirectory() ? files(path) : [path]
+    })
+  return files(folder)
+    .filter((path) => mhtmlParts(readFileSync(path)).some((part) => part.includes(marker)))
+    .map((path) => path.slice(folder.length + 1))
+}
+
+/** An MHTML file's parts, decoded; any other file as it is. */
+function mhtmlParts(raw: Buffer): Buffer[] {
+  const text = raw.toString('latin1')
+  const boundary = /^MIME-Version:[\s\S]*?boundary="?([^";\r\n]+)"?/im.exec(text.slice(0, 2000))?.[1]
+  if (!boundary) return [raw]
+  return text
+    .split(`--${boundary}`)
+    .slice(1)
+    .map((part) => {
+      const end = part.indexOf('\r\n\r\n')
+      const body = part.slice(end + 4)
+      const encoding = /content-transfer-encoding:\s*([\w-]+)/i.exec(part.slice(0, end))?.[1]?.toLowerCase()
+      if (encoding === 'base64') return Buffer.from(body.replace(/\s+/g, ''), 'base64')
+      if (encoding !== 'quoted-printable') return Buffer.from(body, 'latin1')
+      const unwrapped = body.replace(/=\r?\n/g, '')
+      return Buffer.from(
+        unwrapped.replace(/=([0-9A-F]{2})/gi, (_m, hex: string) => String.fromCharCode(Number.parseInt(hex, 16))),
+        'latin1',
+      )
+    })
+}
+
+type TabsHook = { __orbit: { ctx: { tabs: { contents: (id: string) => Electron.WebContents | undefined } } } }
+type Saved = { path: string; format: string; done: boolean }
+
+/** Runs a script in the frame of a tab whose address contains `part` (the page's own too); null while there's none. */
+function inFrame<T>(app: ElectronApplication, tabId: string, part: string, code: string): Promise<T | null> {
+  return app.evaluate(
+    async (_e, [id, p, js]) => {
+      const contents = (globalThis as unknown as TabsHook).__orbit.ctx.tabs.contents(id)
+      const frame = contents?.mainFrame.framesInSubtree.find((f) => f.url.includes(p))
+      return frame ? await frame.executeJavaScript(js) : null
+    },
+    [tabId, part, code] as const,
+  ) as Promise<T | null>
+}
+
+/**
+ * Chooses Save Page As… on a tab's page, with the save dialog answering `target`, and waits until the
+ * page is saved. Returns the format it was saved as.
+ */
+async function savePageAs(app: ElectronApplication, url: string, tabId: string, target: string): Promise<string> {
+  await app.evaluate(
+    ({ dialog }, [id, path]) => {
+      const g = globalThis as unknown as TabsHook & { __saved?: Saved[] }
+      dialog.showSaveDialog = (async () => ({ canceled: false, filePath: path })) as typeof dialog.showSaveDialog
+      const contents = g.__orbit.ctx.tabs.contents(id) as (Electron.WebContents & { __watched?: true }) | undefined
+      if (!contents) throw new Error(`no tab ${id}`)
+      g.__saved = g.__saved ?? []
+      const saved = g.__saved
+      if (contents.__watched) return
+      contents.__watched = true
+      // Watched, not changed: what the page is saved as, and when that is done.
+      const savePage = contents.savePage.bind(contents)
+      contents.savePage = (path, format) => {
+        const save = { path, format, done: false }
+        saved.push(save)
+        return savePage(path, format).then(() => {
+          save.done = true
+        })
+      }
+    },
+    [tabId, target] as const,
+  )
+  await clickInPage(app, url, '#title', [], 'right')
+  await expect.poll(async () => (await pageMenu(app))?.tabId).toBe(tabId)
+  expect(await choosePageMenu(app, 'Save Page As…')).toBe(true)
+  const save = () =>
+    app.evaluate(
+      (_e, path) => (globalThis as unknown as { __saved?: Saved[] }).__saved?.find((s) => s.path === path),
+      target,
+    )
+  await expect.poll(async () => (await save())?.done).toBe(true)
+  return (await save())?.format ?? ''
+}
+
+test('[NV-12] Save Page As… copies no local file a web page names: a web page, or a local page with a web frame, saves as one file or as its HTML alone; a local page alone still saves complete (D49, round 2 fix check M1)', async () => {
+  const { app } = orbit
+  // A web page naming local files as its style sheet, script, picture and a frame.
+  const secret = markedFiles('secret')
+  const web = page('SaveWeb')
+  const webId = await openTab(app, web)
+  await inFrame(
+    app,
+    webId,
+    '/page/SaveWeb',
+    `document.body.insertAdjacentHTML('beforeend', ${JSON.stringify(naming(secret))})`,
+  )
+  for (const [name, format] of [
+    ['SaveWeb.mhtml', 'MHTML'],
+    ['SaveWeb.html', 'HTMLOnly'],
+  ] as const) {
+    const out = mkdtempSync(join(tmpdir(), 'orbit-e2e-saved-'))
+    const saved = await savePageAs(app, web, webId, join(out, name))
+    expect(holding(out, secret.marker), name).toEqual([])
+    expect(holding(out, 'SaveWeb'), name).toEqual([name])
+    expect(saved).toBe(format)
+  }
+
+  // A local page with its own local files and a web frame, which names other local files.
+  const own = markedFiles('own')
+  const framed = markedFiles('framed')
+  const localPath = join(own.folder, 'local.html')
+  writeFileSync(
+    localPath,
+    `<!doctype html><title>Local</title><h1 id="title">Local</h1>${naming(own)}<iframe id="web" src="${page('SaveFrame')}"></iframe>`,
+  )
+  const local = pathToFileURL(localPath).href
+  const localId = await openTab(app, local)
+  await expect.poll(() => inFrame(app, localId, '/page/SaveFrame', 'document.readyState')).toBe('complete')
+  await inFrame(
+    app,
+    localId,
+    '/page/SaveFrame',
+    `document.body.insertAdjacentHTML('beforeend', ${JSON.stringify(naming(framed))})`,
+  )
+  for (const [name, format] of [
+    ['Framed.html', 'HTMLOnly'],
+    ['Framed.mhtml', 'MHTML'],
+  ] as const) {
+    const out = mkdtempSync(join(tmpdir(), 'orbit-e2e-saved-'))
+    const saved = await savePageAs(app, local, localId, join(out, name))
+    expect(holding(out, framed.marker), name).toEqual([])
+    expect(saved).toBe(format)
+  }
+
+  // Without the web frame, the local page saves complete: its own local files beside it.
+  await inFrame(app, localId, local, `document.getElementById('web').remove()`)
+  await expect.poll(() => inFrame(app, localId, '/page/SaveFrame', '1')).toBe(null)
+  const out = mkdtempSync(join(tmpdir(), 'orbit-e2e-saved-'))
+  expect(await savePageAs(app, local, localId, join(out, 'Local.html'))).toBe('HTMLComplete')
+  expect(holding(out, own.marker)).toEqual(
+    expect.arrayContaining(['Local_files/own.css', 'Local_files/own.js', 'Local_files/own.png']),
+  )
 })
