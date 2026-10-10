@@ -90,6 +90,8 @@ function start(): void {
     if (windows.ids().length === 0) windows.open()
   })
   app.on('before-quit', () => {
+    // The e2e harness times a quit from here: Playwright does work of its own before it asks (D28).
+    if (e2e) console.error('[orbit] quit requested')
     windows.quitting = true
     persistence.flush()
   })
