@@ -268,15 +268,23 @@ function isMacKeys(mac: string, other: string): string {
   return process.platform === 'darwin' ? mac : other
 }
 
+type UiBridge = { orbit: { invoke: (n: string, a: unknown) => Promise<unknown> } }
+
 /** Runs a command from a Mini Window's own UI (as its buttons and menus do), without waiting on it. */
 async function fromMini(app: ElectronApplication, windowId: string, name: string, args: unknown): Promise<void> {
   const ui = await miniUi(app, windowId)
-  await ui.evaluate(
-    ([n, a]) => {
-      void (window as unknown as { orbit: { invoke: (n: string, a: unknown) => Promise<unknown> } }).orbit.invoke(n, a)
-    },
-    [name, args] as const,
-  )
+  await ui
+    .evaluate(
+      ([n, a]) => {
+        void (window as unknown as UiBridge).orbit.invoke(n, a)
+      },
+      [name, args] as const,
+    )
+    .catch(async (err: unknown) => {
+      // A command that closes the Mini Window can close it before the evaluate's reply gets back.
+      if (!ui.isClosed()) await ui.waitForEvent('close', { timeout: 2000 }).catch(() => {})
+      if (!ui.isClosed()) throw err
+    })
 }
 
 test('[MW-05] "Open in…" moves the page into the chosen Space of the main window', async () => {

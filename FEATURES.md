@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 476 spec’d · 140 built (45 partial) · 189 tested · 0 feel right. 9 more are out of scope and not counted.
+**Totals:** 476 spec’d · 146 built (57 partial) · 208 tested · 0 feel right. 9 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
-| P0 | 174 | 97 | 118 |
-| P1 | 221 | 39 | 66 |
-| P2 | 81 | 4 | 5 |
+| P0 | 174 | 101 | 127 |
+| P1 | 221 | 40 | 75 |
+| P2 | 81 | 5 | 6 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -29,7 +29,7 @@ Spec: `spec/sidebar.md`
 | SB-07 | "+ New Tab" row | P0 | ✅ | ✅ e2e | – | + New Tab row with press animation opens the command bar |
 | SB-08 | Empty sidebar area: double-click, drag, right-click | P1 | – | – | – |  |
 | SB-09 | Bottom bar: Library, Space switcher, "+" menu | P0 | 🟡 partial | ✅ e2e | – | switcher and + menu done; Library button arrives with the archive lane |
-| SB-10 | Transient trays above the bottom bar | P1 | – | – | – |  |
+| SB-10 | Transient trays above the bottom bar | P1 | 🟡 partial | ✅ e2e | – | media tray and call controls (media lane), above the bottom bar, pushing the list up; download progress and the update banner belong to other lanes |
 | SB-11 | Show / hide the sidebar | P0 | 🟡 partial | – | – | scaffold |
 | SB-12 | Hover to reveal the hidden sidebar | P0 | – | – | – |  |
 | SB-13 | Feedback when things happen while the sidebar is hidden | P1 | – | – | – |  |
@@ -69,8 +69,8 @@ Spec: `spec/tabs.md`
 | TB-12 | Rename a tab and set a custom icon | P1 | ✅ | ✅ e2e | – | double-click/menu rename, empty reverts; emoji icon picker |
 | TB-13 | Multi-select tabs | P1 | 🟡 partial | ✅ e2e | – | Cmd-click, Shift-click ranges, Escape/plain click clears; Cmd+W, Copy URL, menu pin/unpin/move/new folder and group drag act on the selection; open-as-split is the split lane's |
 | TB-14 | Tab context menu | P0 | 🟡 partial | ✅ e2e | – | native menus with every tab, pinned, Favorite, folder and multi-selection item; not theme-coloured; split/share items belong to other lanes |
-| TB-15 | Audio, mute, microphone/camera and screen-share indicators | P1 | 🟡 partial | ✅ e2e | – | audio icon toggles mute; no mic/camera/screen-share indicators |
-| TB-16 | Tab sleeping and background resource limits | P1 | 🟡 partial | ✅ e2e+unit | – | sleep timer (settings.sleepAfterMs), Favorites warm 4x, audible/selected never sleep |
+| TB-15 | Audio, mute, microphone/camera and screen-share indicators | P1 | 🟡 partial | ✅ e2e | – | audio icon toggles mute; camera/microphone indicator (media lane); no screen-share indicator or Favorites notes |
+| TB-16 | Tab sleeping and background resource limits | P1 | 🟡 partial | ✅ e2e+unit | – | sleep timer (settings.sleepAfterMs), Favorites warm 4x; selected, audible, playing (muted too), PiP and camera/mic tabs never sleep |
 | TB-17 | Tabs across multiple windows | P1 | 🟡 partial | ✅ e2e+unit | – | tab handoff; no two windows ever show the same tab (close, Clear, archive, moves, undo, drag-out); no blank window yet |
 | TB-18 | Undo sidebar actions | P1 | ✅ | ✅ e2e+unit | – | Cmd+Z undoes moves, close, Clear, archive below, renames, icons and folder changes (page text fields keep their own undo); Cmd+Shift+Z redoes moves, closes and renames |
 | TB-19 | Back on a fresh child tab returns to its opener | P2 | 🟡 partial | ✅ e2e | – | Back with no history closes a link-opened Today tab and selects its opener (shortcut/command) |
@@ -305,22 +305,22 @@ Spec: `spec/media.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| MD-01 | Automatic picture-in-picture when leaving a video tab | P0 | – | – | – |  |
-| MD-02 | Open picture-in-picture manually | P1 | – | – | – |  |
-| MD-03 | The floating player's look and placement | P0 | – | – | – |  |
-| MD-04 | Floating player controls | P0 | – | – | – |  |
-| MD-05 | Keyboard and media keys for the floating player | P1 | – | – | – |  |
-| MD-06 | Move, resize and zoom the floating player | P1 | – | – | – |  |
-| MD-07 | Ending picture-in-picture | P0 | – | – | – |  |
-| MD-08 | Turning automatic picture-in-picture off | P0 | – | – | – |  |
-| MD-09 | Sidebar media controls for background audio | P0 | – | – | – |  |
-| MD-10 | Several players: the media tray | P1 | – | – | – |  |
-| MD-11 | Audio and recording indicators, mute | P0 | – | – | – |  |
-| MD-12 | Media and the tab lifecycle | P0 | – | – | – |  |
-| MD-13 | Video calls: automatic call picture-in-picture | P1 | – | – | – |  |
-| MD-14 | Call controls in the sidebar | P1 | – | – | – |  |
+| MD-01 | Automatic picture-in-picture when leaving a video tab | P0 | 🟡 partial | ✅ e2e+unit | – | Orbit's own floating player: leaving a tab whose main video plays (tab, Space or split change; the largest playing video) moves it there within ~300 ms, still playing; not when paused, muted or turned off (MD-08); selecting the tab again puts it back in the page with no blank frame; moving between a split's panes doesn't float it; media inside frames (embedded players) isn't seen yet: no automatic PiP, and its controller has only Go to tab and Close, which leaves it playing |
+| MD-02 | Open picture-in-picture manually | P1 | 🟡 partial | ✅ e2e | – | Picture in Picture in a video's page right-click menu, the Picture in Picture action and the tray's PiP button; while the tab stays selected the engine's own PiP window shows the video (Orbit's player needs the tab's view), so its controls are the engine's until the tab is left and Orbit's player takes over |
+| MD-03 | The floating player's look and placement | P0 | ✅ | ✅ e2e+unit | – | frameless, always-on-top window, 320x180 for 16:9 (keeps the video's shape), bottom-right 16 px inside the work area; rounded corners (a window shape where the system has none) and shadow; video only until hovered, then controls over a dark gradient; the same player on every platform |
+| MD-04 | Floating player controls | P0 | ✅ | ✅ e2e+unit | – | on hover: play/pause, +/-15 s, progress with elapsed and total time (seekable; LIVE badge for streams), Back to tab (selects it in its window and Space), x (keeps playing in the sidebar), ... menu (playback speed, turn off today / always for the site), previous/next for Media Session pages; double-click goes back to the tab |
+| MD-05 | Keyboard and media keys for the floating player | P1 | 🟡 partial | ✅ e2e | – | with the player focused (clicked) Space plays/pauses and arrows seek 5 s (tested); hardware media keys go through Chromium's media key handling to the playing page, not verifiable under Xvfb |
+| MD-06 | Move, resize and zoom the floating player | P1 | 🟡 partial | ✅ e2e+unit | – | drag or two-finger hover-scroll moves it and it glides to the corner the release or fling heads for; corner drag resizes keeping the shape, at least 200 px wide (tall videos too) and at most half the screen width and the screen's height, with rubber-band resistance; Cmd/Ctrl+scroll or pinch zooms (crops) inside the window; corner and size remembered; doesn't yet move aside for Orbit's alerts and dialogs |
+| MD-07 | Ending picture-in-picture | P0 | ✅ | ✅ e2e | – | returning (select, double-click, Back to tab) ends it with the video playing in the page; x closes it and the media keeps playing in the sidebar controls; closing or unloading the tab stops media and player; navigating the tab or the video ending closes it, without replay |
+| MD-08 | Turning automatic picture-in-picture off | P0 | 🟡 partial | ✅ e2e+unit | – | player ... menu Turn Off for Today / Always Turn Off for This Site (also in the tray controller menu); global switch (settings.autoPip, Picture in Picture action); turning off keeps playback (sidebar controls); muted tabs never trigger; the site controls checkbox (SB-04) and Settings > Advanced (ST-10) belong to other lanes (media.setSitePip and the setting are ready) |
+| MD-09 | Sidebar media controls for background audio | P0 | 🟡 partial | ✅ e2e+unit | – | controller above the bottom bar: favicon, Media Session title/artist or tab title (marquee), play/pause, next, previous where supported, x pauses and hides; click jumps to the tab (switching Space); quiet audio counts; hidden while its tab is selected; no artwork yet; media inside frames (embedded players) isn't seen yet: no automatic PiP, and its controller has only Go to tab and Close, which leaves it playing |
+| MD-10 | Several players: the media tray | P1 | ✅ | ✅ e2e+unit | – | one controller per background tab, newest first, appears and disappears by itself, works across windows; a video's controller has Picture in Picture (Back to PiP): the player grows out of the controller while the controller gives way |
+| MD-11 | Audio and recording indicators, mute | P0 | 🟡 partial | ✅ e2e | – | pulsing camera/microphone indicator on tab rows (tracks the page shows); per-pane Mute/Unmute in the split row's menu (split lane's menu, tested here: only that pane goes silent); no screen-share indicator; no switcher indicators (TB-05 has no overlay yet) |
+| MD-12 | Media and the tab lifecycle | P0 | ✅ | ✅ e2e+unit | – | playing (muted too), PiP and camera/mic tabs never sleep, auto-archive, Clear or Archive Below; closing stops media, PiP and controller; isAnyMediaPlaying() is ready for the updates lane |
+| MD-13 | Video calls: automatic call picture-in-picture | P1 | 🟡 partial | ✅ e2e | – | leaving a call tab floats the largest participant video (never the self view) in Orbit's player with microphone/camera toggles and Back to call tab; moves and resizes like any video; no document picture-in-picture, leave-call or chat toggle |
+| MD-14 | Call controls in the sidebar | P1 | 🟡 partial | ✅ e2e+unit | – | a background call tab (or a closed call window) gets a sidebar call controller: microphone and camera toggles (track.enabled on the tracks the page shows) and jump back; detection needs the page to show its own camera (a self view) |
 | MD-15 | Switch which tab is being screen-shared | P2 | – | – | – |  |
-| MD-16 | Feel: entering and leaving picture-in-picture | P1 | – | – | – |  |
+| MD-16 | Feel: entering and leaving picture-in-picture | P1 | 🟡 partial | ✅ e2e+unit | – | enter: the video shrinks from its place in the page to the corner (~300 ms, standard curve); Back to tab/double-click: the tab is selected at once and a still of the last frame flies back into the page; release glides to the corner; Back to PiP grows from the controller; tray slides with the snappy spring; with reduced motion (FL-28) the player appears and goes without motion and a release settles with a 120 ms ease-out; no haptic tick on macOS |
 
 ## Archive, recently closed, history and sidebar backups (prefix AR)
 
@@ -356,7 +356,7 @@ Spec: `spec/shortcuts.md`
 | KS-08 | Page navigation and page tools | P0 | – | – | – |  |
 | KS-09 | Split view | P0 | – | – | – |  |
 | KS-10 | Peek and Mini Window | P1 | – | – | – |  |
-| KS-11 | Media | P1 | – | – | – |  |
+| KS-11 | Media | P1 | 🟡 partial | ✅ e2e | – | Space and arrows in the focused player, Cmd/Ctrl+scroll and pinch zoom (tested), hardware media keys via Chromium (untested), Mute Tab action assignable; the calendar meeting shortcut (P2) belongs to TB-21/FV-09 |
 | KS-12 | Library, history, downloads, settings, extensions, help | P1 | – | – | – |  |
 | KS-13 | Developer tools | P1 | – | – | – |  |
 | KS-14 | Canvases, notes, capture and Tweaks | P2 | – | – | – |  |
@@ -400,11 +400,11 @@ Spec: `spec/feel.md`
 | FL-25 | Menus, popovers and tooltips | P1 | – | – | – |  |
 | FL-26 | Recent-tab switcher (Ctrl+Tab) | P1 | – | – | – |  |
 | FL-27 | Window-level motion | P1 | – | – | – |  |
-| FL-28 | Reduced motion | P0 | – | – | – |  |
+| FL-28 | Reduced motion | P0 | – | ✅ e2e+unit | – |  |
 | FL-29 | Responsiveness budgets (input to visual) | P0 | – | – | – |  |
 | FL-30 | What makes it feel native and smooth | P0 | – | – | – |  |
 | FL-31 | Haptics (macOS trackpads) | P2 | – | – | – |  |
-| FL-32 | Picture-in-picture and media tray motion | P2 | – | – | – |  |
+| FL-32 | Picture-in-picture and media tray motion | P2 | ✅ | ✅ e2e+unit | – | corner resize follows the pointer, resists past its limits (rubber band) and springs back on release; a fling heads for the corner in its direction and settles with the spring; tray slides up with the snappy timing; Back to tab flies to the video's place; pinch zooms (MD-06) rather than resizes |
 
 ## Appearance (global)
 

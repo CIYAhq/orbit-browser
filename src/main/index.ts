@@ -17,6 +17,10 @@ import { WindowManager } from './windows'
 const perf = new Perf()
 perf.mark('main:start')
 
+// An exception nothing caught is logged, and Orbit carries on. Electron's default shows it in a modal
+// box that blocks the main thread until someone dismisses it: until then Orbit can't even quit (D28).
+process.on('uncaughtException', (err) => console.error('[orbit] uncaught exception:', err))
+
 // Tests and perf runs isolate their profile data.
 if (process.env.ORBIT_USER_DATA) app.setPath('userData', process.env.ORBIT_USER_DATA)
 const e2e = process.env.ORBIT_E2E === '1'
