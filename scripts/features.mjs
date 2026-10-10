@@ -59,6 +59,7 @@ const neutral = (title) =>
   title
     .replace(/\s*\((?:Arc[^)]*|[^)]*\bArc\b[^)]*)\)/g, '')
     .replace(/\s*\[[^\]]*\bArc\b[^\]]*\]/g, '')
+    .replace(/\bfrom Arc\b/g, 'from a browser Orbit can’t read')
     .trim()
 
 const sections = []
