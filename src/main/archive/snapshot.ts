@@ -228,6 +228,8 @@ export interface RestorePlan {
   histories: Map<TabId, ArchiveHistory>
   /** Tabs now in a Space of another profile: their page starts again in that profile's session. */
   reload: TabId[]
+  /** Spaces left as they are (a private window's, a private or gone profile's), and their windows. */
+  keptSpaces: SpaceId[]
 }
 
 /** Tab fields that say how a tab sits in the sidebar; a restore puts them back on tabs that stay. */
@@ -254,19 +256,28 @@ function reachable(state: OrbitState, roots: readonly ItemId[], out: Set<ItemId>
  * still has them (with their history, which the Archive entry hands back), else at the backup's
  * address. Tabs that are not in the backup go to the Archive like closed tabs.
  *
- * Left alone: Spaces and Favorites of private profiles, Favorites of profiles the backup does not
- * know, and pages in a Peek or Mini Window. A Space whose profile was deleted comes back in the
- * Default profile.
+ * Left alone: Spaces outside the Space list (a private window's) and Spaces of private or gone
+ * profiles, with their tabs and the windows that show them; Favorites of private profiles and of
+ * profiles the backup does not know; pages in a Peek or Mini Window. A Space whose profile was
+ * deleted since does not come back (its data is gone, PR-08).
  */
 export function planRestore(state: OrbitState, snap: SidebarSnapshot, look: RestoreLookups, now: number): RestorePlan {
-  // Containers the restore leaves as they are, and everything in them.
-  const keptSpaces = state.spaceOrder.filter((id) => {
+  // Spaces the restore leaves as they are, with everything in them and the windows that show them:
+  // Spaces outside the Space list (a private window's) and Spaces of a private or gone profile.
+  const listed = new Set(state.spaceOrder)
+  const keptSpaces = Object.keys(state.spaces).filter((id) => {
     const space = state.spaces[id]
-    return !!space && isPrivateOrGone(state, space.profileId)
+    return !!space && (!listed.has(id) || isPrivateOrGone(state, space.profileId))
   })
-  const restoredProfiles = Object.keys(state.profiles).filter(
-    (id) => !isPrivateOrGone(state, id) && Array.isArray(snap.favorites[id]),
-  )
+  const keptSpaceIds = new Set(keptSpaces)
+  const liveProfiles = Object.keys(state.profiles).filter((id) => !isPrivateOrGone(state, id))
+  const restoredProfiles = liveProfiles.filter((id) => Array.isArray(snap.favorites[id]))
+  // The backup's Spaces that come back: not one of those, and not one of a profile deleted since
+  // (its data is gone for good, PR-08).
+  const spaceIds = snap.spaceOrder.filter((id) => {
+    const space = snap.spaces[id]
+    return !!space && !keptSpaceIds.has(id) && liveProfiles.includes(space.profileId)
+  })
   const kept = new Set<ItemId>()
   for (const id of keptSpaces) {
     const space = state.spaces[id]
@@ -283,10 +294,10 @@ export function planRestore(state: OrbitState, snap: SidebarSnapshot, look: Rest
     Object.fromEntries(Object.entries(list).filter(([id]) => !kept.has(id)))
   const n = normalizeState(
     structuredClone({
-      spaces: snap.spaces,
-      spaceOrder: snap.spaceOrder,
+      spaces: Object.fromEntries(spaceIds.map((id) => [id, snap.spaces[id]])),
+      spaceOrder: spaceIds,
       profiles: Object.fromEntries(
-        restoredProfiles.map((id) => [id, { ...state.profiles[id], favorites: snap.favorites[id] ?? [] }]),
+        liveProfiles.map((id) => [id, { ...state.profiles[id], favorites: snap.favorites[id] ?? [] }]),
       ),
       tabs: without(snap.tabs),
       folders: without(snap.folders),
@@ -385,7 +396,8 @@ export function planRestore(state: OrbitState, snap: SidebarSnapshot, look: Rest
     if (split) splits[id] = split
   }
   return {
-    spaceOrder: [...n.spaceOrder, ...keptSpaces],
+    // Kept Spaces that were in the Space list stay in it, after the backup's.
+    spaceOrder: [...n.spaceOrder, ...keptSpaces.filter((id) => listed.has(id))],
     spaces,
     favorites: Object.fromEntries(restoredProfiles.map((id) => [id, n.profiles[id]?.favorites ?? []])),
     folders,
@@ -396,6 +408,7 @@ export function planRestore(state: OrbitState, snap: SidebarSnapshot, look: Rest
     unarchived,
     histories,
     reload,
+    keptSpaces,
   }
 }
 
@@ -454,7 +467,10 @@ export function applyRestore(d: OrbitState, before: OrbitState, plan: RestorePla
   for (const tab of Object.values(d.tabs))
     if (tab.floating && !d.spaces[tab.spaceId]) tab.spaceId = spaceFor(tab.spaceId)
   const lost: WindowId[] = []
+  const keptSpaces = new Set(plan.keptSpaces)
   for (const win of Object.values(d.windows)) {
+    // A window on a Space left as it is (a private window, say) stays as it is.
+    if (keptSpaces.has(win.spaceId)) continue
     const shown = win.activeTab[win.spaceId]
     if (!d.spaces[win.spaceId]) {
       const old = win.spaceId

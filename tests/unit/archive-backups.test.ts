@@ -241,7 +241,49 @@ describe('Sidebar backups (AR-11)', () => {
     expect(s.windows[w.w1]?.activeTab[w.a]).toBe(w.keep)
   })
 
-  it('[AR-11] Spaces added since go; windows move to a Space that stays; private Spaces and Peeks stay as they are', async () => {
+  it('[AR-11] a private window opened since keeps its Space, its tab and its place; so do Spaces of a private or gone profile (review M2)', async () => {
+    const w = await world()
+    const snap = buildSnapshot(w.store.state, Date.now() - MIN)
+    // Since: a private window. Its Space is not in the Space list and its profile keeps nothing.
+    const priv = { ...createProfile('Private', 'private-1'), partition: 'orbit-private-1' }
+    const ps = createSpace('Private', priv.id)
+    const pw = createWindowState(ps.id)
+    // And a listed Space whose profile is gone (state from an older build, say).
+    const orphan = createSpace('Orphan', 'p-gone')
+    w.store.update((d) => {
+      d.profiles[priv.id] = priv
+      d.spaces[ps.id] = ps
+      d.windows[pw.id] = pw
+      d.spaces[orphan.id] = orphan
+      d.spaceOrder.push(orphan.id)
+    })
+    const secret = makeTab({ spaceId: ps.id, profileId: priv.id, url: 'https://secret.test/', title: 'Secret' })
+    const stray = makeTab({ spaceId: orphan.id, profileId: 'p-gone', url: 'https://stray.test/', title: 'Stray' })
+    w.store.update((d) => {
+      d.tabs[secret.id] = secret
+      d.spaces[ps.id]?.today.unshift(secret.id)
+      const win = d.windows[pw.id]
+      if (win) win.activeTab[ps.id] = secret.id
+      d.tabs[stray.id] = stray
+      d.spaces[orphan.id]?.today.unshift(stray.id)
+    })
+    const closedBefore = w.destroyed.length
+
+    restoreSidebar(w.ctx, w.archive, snap)
+    const s = w.store.state
+    // The backup's Spaces are back, and the private Space stays out of the Space list.
+    expect(s.spaceOrder).toEqual([w.a, w.b, orphan.id])
+    expect(s.spaces[ps.id]?.today).toEqual([secret.id])
+    expect(s.tabs[secret.id]).toMatchObject({ spaceId: ps.id, profileId: priv.id, url: 'https://secret.test/' })
+    expect(s.spaces[orphan.id]?.today).toEqual([stray.id])
+    expect(s.tabs[stray.id]).toBeDefined()
+    // The private window was not moved and still shows its tab; no page was closed.
+    expect(s.windows[pw.id]).toMatchObject({ spaceId: ps.id, activeTab: { [ps.id]: secret.id } })
+    expect(w.destroyed.slice(closedBefore)).toEqual([])
+    expect(s.windows[w.w1]).toMatchObject({ spaceId: w.a, activeTab: { [w.a]: w.keep } })
+  })
+
+  it('[AR-11] Spaces added since go; a deleted profile’s Space stays gone; windows move to a Space that stays; private Spaces and Peeks stay as they are', async () => {
     const w = await world()
     const work = createProfile('Work')
     const c = createSpace('Charlie', work.id)
@@ -280,13 +322,13 @@ describe('Sidebar backups (AR-11)', () => {
 
     restoreSidebar(w.ctx, w.archive, snap)
     const s: OrbitState = w.store.state
-    expect(s.spaceOrder).toEqual([w.a, w.b, c.id, secret.id])
+    expect(s.spaceOrder).toEqual([w.a, w.b, secret.id])
     expect(s.spaces[n.id]).toBeUndefined()
     expect(s.tabs[fresh]).toBeUndefined()
     expect(s.archive.at(-1)).toMatchObject({ tabId: fresh, spaceName: 'New' })
-    // Work is gone: its Space comes back in the Default profile, with its tab.
-    expect(s.spaces[c.id]?.profileId).toBe(DEFAULT_PROFILE_ID)
-    expect(s.tabs[inC]).toMatchObject({ spaceId: c.id, profileId: DEFAULT_PROFILE_ID, asleep: true })
+    // The Work profile was deleted, and its data with it (PR-08): its Space and tab stay gone.
+    expect(s.spaces[c.id]).toBeUndefined()
+    expect(s.tabs[inC]).toBeUndefined()
     // The window was on the new Space: now on one of the same profile, showing its tab.
     expect(s.windows[w.w1]?.spaceId).toBe(w.a)
     expect(s.windows[w.w1]?.activeTab[w.a]).toBe(w.keep)
