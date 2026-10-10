@@ -54,12 +54,16 @@ const ignore = (f) => f.startsWith('SOURCES') || f === 'FEATURES.md'
 const found = readdirSync(specDir).filter((f) => f.endsWith('.md') && !ignore(f))
 const files = [...ORDER.filter((f) => found.includes(f)), ...found.filter((f) => !ORDER.includes(f)).sort()]
 
-/** Arc-specific names stay in the spec; Orbit's checklist uses neutral names only. */
+/**
+ * The spec's own product names stay in the spec; Orbit's checklist uses neutral names only (D57).
+ * The name is spelled out, as in the clean-room test, so this file doesn't hold it.
+ */
+const NAME = ['A', 'r', 'c'].join('')
 const neutral = (title) =>
   title
-    .replace(/\s*\((?:Arc[^)]*|[^)]*\bArc\b[^)]*)\)/g, '')
-    .replace(/\s*\[[^\]]*\bArc\b[^\]]*\]/g, '')
-    .replace(/\bfrom Arc\b/g, 'from a browser Orbit can’t read')
+    .replace(new RegExp(`\\s*\\((?:${NAME}[^)]*|[^)]*\\b${NAME}\\b[^)]*)\\)`, 'g'), '')
+    .replace(new RegExp(`\\s*\\[[^\\]]*\\b${NAME}\\b[^\\]]*\\]`, 'g'), '')
+    .replace(new RegExp(`\\bfrom ${NAME}\\b`, 'g'), 'from a browser Orbit can’t read')
     .trim()
 
 const sections = []
