@@ -965,6 +965,37 @@ test('[NV-09] a pop-up blocked on a web page is offered to open later unless it 
     .toEqual([`[Pop-ups blocked on ${host}]`, `Open ${page('Surprise')}`, `Always Allow Pop-ups from ${host}`])
 })
 
+test('[NV-12] a script, a page’s source or a data link offers no way to open it; copying it stays (round 2 fix check F6)', async () => {
+  const { app } = orbit
+  const web = page('Odd')
+  await openTab(app, web)
+  const tab = await tabPage(app, '/page/Odd')
+  const links: Record<string, string> = {
+    script: 'javascript:void(0)',
+    source: `view-source:${page('Odd-next')}`,
+    data: 'data:text/html,<title>Data</title>',
+  }
+  await tab.evaluate((list) => {
+    for (const [id, href] of Object.entries(list).reverse()) {
+      const a = Object.assign(document.createElement('a'), { id, href, textContent: id })
+      const p = document.createElement('p')
+      p.append(a)
+      document.body.prepend(p)
+    }
+  }, links)
+  const opens = (labels: string[]) => labels.filter((l) => l.startsWith('Open '))
+  for (const id of [...Object.keys(links), 'next']) {
+    // The page's own menu first, so the link's is told from the one before.
+    await clickInPage(app, web, '#title', [], 'right')
+    await expect.poll(async () => (await pageMenu(app))?.labels ?? []).toContain('Back')
+    await clickInPage(app, web, `#${id}`, [], 'right')
+    await expect.poll(async () => (await pageMenu(app))?.labels ?? []).toContain('Copy Link Address')
+    const labels = (await pageMenu(app))?.labels ?? []
+    if (id === 'next') expect(opens(labels)).toContain('Open Link in New Tab')
+    else expect(opens(labels), id).toEqual([])
+  }
+})
+
 test('[TB-02] a local file’s address dropped on the sidebar opens nothing, as a link or as text; a web link dropped after it opens (D49)', async () => {
   const { app, shell } = orbit
   const local = localFiles()

@@ -41,19 +41,24 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
   // A local file's link or picture on a page that isn't a local file keeps only its copy items:
   // Orbit opens or saves it for no web page (D49).
   const mayOpen = (url: string) => pageMayOpen(referrer.url, url)
+  // A script, a page's source or data is no page to open: the engine names the first two
+  // about:blank#blocked here, and would show data as a page of its own (round 2 fix check F6).
+  // Copying and saving stay.
+  const opensAsPage = (url: string) => !/^\s*(javascript|view-source|data|about):/i.test(url)
 
   if (params.linkURL) {
     const link = params.linkURL
-    const open: MenuItemConstructorOptions[] = mayOpen(link)
-      ? [
-          { label: 'Open Link in New Tab', click: () => openFromPage(link) },
-          // A new pane beside the page's pane (SV-08).
-          linkSplitMenuItem(ctx, tabId, link),
-          // Then Peek and Mini Window, new and private windows: the order NV-12 lists.
-          ...linkPeekMenuItems(ctx, tabId, link),
-          ...linkWindowItems(ctx, tabId, link, referrer),
-        ]
-      : []
+    const open: MenuItemConstructorOptions[] =
+      mayOpen(link) && opensAsPage(link)
+        ? [
+            { label: 'Open Link in New Tab', click: () => openFromPage(link) },
+            // A new pane beside the page's pane (SV-08).
+            linkSplitMenuItem(ctx, tabId, link),
+            // Then Peek and Mini Window, new and private windows: the order NV-12 lists.
+            ...linkPeekMenuItems(ctx, tabId, link),
+            ...linkWindowItems(ctx, tabId, link, referrer),
+          ]
+        : []
     items.push(
       ...open,
       { label: 'Copy Link Address', click: () => clipboard.writeText(link) },
