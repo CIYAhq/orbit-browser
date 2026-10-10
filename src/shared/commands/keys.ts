@@ -41,6 +41,22 @@ export interface RecordedKey {
   modifiers: string
 }
 
+/** A key the operating system keeps for itself, so Orbit never receives it (KS-03). */
+export interface SystemClash {
+  /** The binding, written as `canonicalAccelerator` writes it. */
+  accel: string
+  /** What has it, e.g. "Mission Control: Switch to Desktop 1". */
+  owner: string
+}
+
+/** The Go to Tab options (TB-04, FV-10, ST-08). */
+export interface TabNumberOptions {
+  /** ⌘1–⌘8 count Favorites first. */
+  countFavorites?: boolean
+  /** ⌘9 goes to the last item (true) or the ninth (false). */
+  lastTabOnCmd9?: boolean
+}
+
 export interface KeyCommands {
   /** Gives an action a binding (KS-01, ST-08). See BindRequest. */
   'keys.bind': { args: BindRequest; result: BindResult }
@@ -57,4 +73,8 @@ export interface KeyCommands {
   'keys.record': { args: { on: boolean }; result: void }
   /** Who gets the action's keys first when a page also handles them (KS-02). */
   'keys.setPriority': { args: { actionId: string; priority: ShortcutPriority }; result: void }
+  /** The Go to Tab options of Settings → Shortcuts (ST-08). */
+  'keys.setOptions': { args: TabNumberOptions; result: void }
+  /** Keys the operating system keeps, so Orbit never receives them (KS-03): shown in Settings → Shortcuts. */
+  'keys.systemClashes': { args: Record<string, never>; result: SystemClash[] }
 }

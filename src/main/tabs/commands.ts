@@ -664,6 +664,25 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   actions.register('tab.recent', stepRecent(1))
   actions.register('tab.recentBack', stepRecent(-1))
   tabs.onControlUp = endRecent
+  // W, with Control still held, closes the highlighted tab; the next one in the switcher takes its
+  // place and switching goes on (TB-05, keys lane KS-06).
+  tabs.recentSwitch = {
+    active: (windowId) => recent?.windowId === windowId,
+    closeHighlighted: (windowId) => {
+      const r = recent
+      if (!r || r.windowId !== windowId) return
+      const closing = r.order[r.index]
+      if (!closing) return
+      r.order.splice(r.index, 1)
+      r.times.delete(closing)
+      if (r.index >= r.order.length) r.index = 0
+      ops.closeTabs([closing], 'closed')
+      const next = r.order[r.index]
+      if (next && store.state.tabs[next]) ops.activate(windowId, next)
+      if (r.timer) clearTimeout(r.timer)
+      r.timer = setTimeout(endRecent, 1500)
+    },
+  }
   commands.register('tabs.endRecentSwitch', () => endRecent())
   for (let n = 1; n <= 9; n++) {
     actions.register(`tab.goto.${n}`, (c) => {

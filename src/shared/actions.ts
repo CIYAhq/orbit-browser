@@ -133,6 +133,10 @@ export const ACTIONS: ActionDef[] = [
   },
   { id: 'tab.togglePin', title: 'Pin / Unpin Tab', category: 'Tabs', mac: ['Cmd+D'], other: ['Ctrl+D'] },
   { id: 'tab.duplicate', title: 'Duplicate Tab', category: 'Tabs' },
+  // KS-05's assignable tab actions (no default keys).
+  { id: 'tab.rename', title: 'Rename Tab', category: 'Tabs' },
+  { id: 'tab.archive', title: 'Archive Tab', category: 'Tabs' },
+  { id: 'tab.pickSpace', title: 'Move Tab to Space…', category: 'Tabs', keywords: ['move to', 'space'] },
   { id: 'tab.resetToPinned', title: 'Reset Tab', category: 'Tabs', keywords: ['pinned url', 'home', 'go back'] },
   {
     id: 'tab.favorite',

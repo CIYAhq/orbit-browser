@@ -85,6 +85,18 @@ export type PageVerdict =
 /** How long to wait for the page's answer before taking it that the page kept the key. */
 export const VERDICT_WAIT_MS = 250
 
+/** How long main waits for an answer at all: a page whose renderer is busy or hung answers late. */
+const ANSWER_WAIT_MS = 1000
+
+/**
+ * Whether the page can say at once what it did with a key press. Electron runs no isolated-world
+ * script in a page while its main frame loads (the script waits until the load ends), so a page
+ * on its way, or one still loading the first document's resources, can't answer in time.
+ */
+export function pageCanAnswer(contents: WebContents): boolean {
+  return !contents.isDestroyed() && !contents.isCrashed() && !contents.isLoadingMainFrame()
+}
+
 /**
  * What the page did with the key press `input`, pressed at `pressedAt` (main's clock, which the
  * page shares). Asked as the press is let through to the page.
@@ -94,12 +106,21 @@ export async function pageVerdict(
   input: Electron.Input,
   pressedAt: number,
 ): Promise<PageVerdict> {
+  if (!pageCanAnswer(contents)) return undefined
   const sig = [input.meta, input.control, input.alt, input.shift, input.code].join(',')
   const code = `window.__orbitKeys ? window.__orbitKeys.verdict(${JSON.stringify(sig)}, ${pressedAt - 10}, ${VERDICT_WAIT_MS}) : null`
+  let timer: NodeJS.Timeout | undefined
   try {
-    const verdict = (await contents.executeJavaScriptInIsolatedWorld(KEYS_WORLD, [{ code }])) as PageVerdict | null
+    const verdict = (await Promise.race([
+      contents.executeJavaScriptInIsolatedWorld(KEYS_WORLD, [{ code }]),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(null), ANSWER_WAIT_MS)
+      }),
+    ])) as PageVerdict | null
     return verdict ?? undefined
   } catch {
     return undefined
+  } finally {
+    clearTimeout(timer)
   }
 }

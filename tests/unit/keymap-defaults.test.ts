@@ -29,6 +29,10 @@ const TABLE: [id: string, mac: string[], other: string[]][] = [
   ['focus.cycle', ['F6'], ['F6']],
   ['tab.duplicate', [], []],
   ['tab.resetToPinned', [], []],
+  ['tab.rename', [], []],
+  ['tab.pickSpace', [], []],
+  ['tab.archive', [], []],
+  ['tab.favorite', [], []],
   // KS-06
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n): [string, string[], string[]] => [
     `tab.goto.${n}`,

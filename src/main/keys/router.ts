@@ -4,7 +4,7 @@ import type { RecordedKey } from '../../shared/commands/keys'
 import { acceleratorFromInput, modifiersOf } from '../../shared/keymap'
 import type { WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
-import { pageVerdict, watchPageKeys } from './page-keys'
+import { pageCanAnswer, pageVerdict, watchPageKeys } from './page-keys'
 
 /** A second press of the same keys within this long after the page took the first runs the action (KS-02). */
 export const AGAIN_MS = 1000
@@ -96,6 +96,21 @@ export class KeyRouter {
   }
 
   /**
+   * W, with Control still held, while switching to a recent tab (⌃Tab) closes the highlighted tab
+   * (KS-06, TB-05); a held W closes one. Returns true when the press was the switcher's: the
+   * caller keeps it from the page and every shortcut (Ctrl+W, Ctrl+Shift+W).
+   */
+  switcherKey(input: Electron.Input, windowOf: () => WindowId | undefined): boolean {
+    if (input.type !== 'keyDown' || !input.control || input.meta || input.alt) return false
+    if (input.code !== 'KeyW' && input.key.toLowerCase() !== 'w') return false
+    const windowId = windowOf()
+    const recent = this.ctx?.tabs.recentSwitch
+    if (!windowId || !recent?.active(windowId)) return false
+    if (!input.isAutoRepeat) recent.closeHighlighted(windowId)
+    return true
+  }
+
+  /**
    * Keys a web page may use (KS-02, KS-16). Returns true when the press goes to the page: the
    * caller lets it through and runs nothing now. Applies to a tab's page and:
    * - an action that prefers websites: if the page leaves the press alone, the action runs then.
@@ -105,6 +120,8 @@ export class KeyRouter {
    * - an action that prefers Orbit but leaves its keys to text fields (Back and Forward's ⌘[ ⌘]):
    *   the action runs unless focus was in a text field and the page used the press, or the press
    *   went into a frame Orbit can't see into.
+   * A page whose main frame is loading can't say what it did with a press in time: Orbit takes
+   * the keys at once then.
    */
   leaveToPage(
     contents: WebContents,
@@ -116,6 +133,8 @@ export class KeyRouter {
     if (!ctx?.tabs.tabIdFor(contents)) return false
     const priority = priorityFor(action, process.platform, ctx.store.state.settings.shortcutPriority)
     if (priority === 'orbit' && !action.pageFirstInFields) return false
+    // A page that is loading can't say in time what it did with the key: Orbit takes it at once.
+    if (!pageCanAnswer(contents)) return false
     const key = `${contents.id} ${acceleratorFromInput(input) ?? ''}`
     const windowId = windowOf()
     // Until the page's answer is in, the macOS menu may run the action instead (`menuRuns`).

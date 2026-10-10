@@ -1062,6 +1062,11 @@ export class WindowManager {
         return
       }
       if (input.type !== 'keyDown') return
+      // W while switching to a recent tab closes the highlighted tab (keys lane, KS-06).
+      if (keyRouter.switcherKey(input, () => this.windowIdFor(contents) ?? this.focusedWindowId())) {
+        event.preventDefault()
+        return
+      }
       const action = actionForInput(input, process.platform)
       if (!action || !this.ctx.actions.has(action.id)) {
         this.runOutsideText(contents, input)

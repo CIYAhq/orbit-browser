@@ -4,6 +4,8 @@ import type { MainContext } from '../context'
 import { installMenu } from '../menu'
 import { bind, reset, setPriority, unbind } from './bindings'
 import { keyRouter } from './router'
+import { setSystemClashesForTest, systemClashes } from './system'
+import { registerTabKeys } from './tab-keys'
 import { registerWindowKeys } from './window-keys'
 
 /**
@@ -65,7 +67,19 @@ export function registerKeys(ctx: MainContext): void {
     if (!text(actionId)) return
     savePriorities(setPriority(store.state.settings.shortcutPriority, actionId, priority, platform))
   })
+  commands.register('keys.setOptions', ({ countFavorites, lastTabOnCmd9 }) =>
+    store.update((d) => {
+      if (typeof countFavorites === 'boolean') d.settings.countFavoritesInShortcuts = countFavorites
+      if (typeof lastTabOnCmd9 === 'boolean') d.settings.lastTabOnCmd9 = lastTabOnCmd9
+    }),
+  )
+  commands.register('keys.systemClashes', () => systemClashes())
   registerWindowKeys(ctx)
+  registerTabKeys(ctx)
   keyRouter.init(ctx)
   commands.register('keys.record', ({ on }, c) => keyRouter.setRecording(on ? c.windowId : undefined))
+  // Tests say which keys the system keeps instead of asking it.
+  if (ctx.e2e) {
+    ;(globalThis as unknown as { __orbitKeys: unknown }).__orbitKeys = { setSystemClashes: setSystemClashesForTest }
+  }
 }
