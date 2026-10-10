@@ -371,15 +371,15 @@ test('[TB-22] a tab closed while its history is restoring leaves no rejection be
 })
 
 test('[TB-22] app.close() asks Orbit to quit between tasks, never part-way through a timer (D28)', async () => {
-  // Main stays busy in timers for about 3 s, so an ask through the inspector arrives inside one. A quit
+  // Main stays busy in timers until it quits, so an ask through the inspector lands inside one. A quit
   // handler run there that clears the timer Node is about to call makes Node throw (helpers.ts, askQuit).
   await orbit.app.evaluate(({ app }) => {
     const g = globalThis as unknown as { inTimer?: boolean }
     app.on('before-quit', () => console.error(`[test] quit handler inside a timer: ${g.inTimer === true}`))
-    for (let i = 0; i < 1500; i++) {
-      setTimeout(() => {
+    for (let i = 0; i < 10; i++) {
+      setInterval(() => {
         g.inTimer = true
-        const end = Date.now() + 2
+        const end = Date.now() + 10
         while (Date.now() < end) {
           // busy
         }
