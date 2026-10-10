@@ -1,4 +1,4 @@
-import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { type CSSProperties, useCallback, useLayoutEffect, useMemo, useSyncExternalStore } from 'react'
 import type { SpaceTheme } from '../../shared/state'
 import { mixPalettes, type Palette, paletteFor, resolveDark } from '../../shared/theme'
 import { getOrbitState, useOrbit } from './store'
@@ -10,14 +10,19 @@ export function prefersReducedMotion(): boolean {
   return reducedMotionQuery.matches
 }
 
+function onDarkChange(notify: () => void): () => void {
+  darkQuery.addEventListener('change', notify)
+  return () => darkQuery.removeEventListener('change', notify)
+}
+
+/**
+ * The page's prefers-color-scheme: the system's mode under Match system, else the mode forced.
+ * Read on every render, not only on `change`: Chromium fires that event with the page's next
+ * frame, which a closed command bar or a starved window may not draw for seconds, while a change
+ * of Orbit's own appearance reaches the page before the state patch that re-renders it (AP-01).
+ */
 export function useSystemDark(): boolean {
-  const [dark, setDark] = useState(darkQuery.matches)
-  useEffect(() => {
-    const onChange = () => setDark(darkQuery.matches)
-    darkQuery.addEventListener('change', onChange)
-    return () => darkQuery.removeEventListener('change', onChange)
-  }, [])
-  return dark
+  return useSyncExternalStore(onDarkChange, () => darkQuery.matches)
 }
 
 /** The one global light/dark choice (SP-18, D12), resolved against the OS. */

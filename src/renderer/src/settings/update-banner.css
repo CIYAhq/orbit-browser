@@ -1,0 +1,160 @@
+/* The sidebar's update and What's new banner (UP-02, UP-06), in the Space's colours. */
+
+.upd {
+  position: relative;
+  flex: none;
+  margin: 4px 2px 6px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  box-shadow:
+    0 0 0 0.5px var(--divider),
+    0 1px 3px rgba(0, 0, 0, 0.06);
+  color: var(--text);
+  animation: upd-in 220ms var(--ease-out);
+}
+
+.upd__main {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 28px 7px 9px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.upd__main:hover {
+  background: var(--hover);
+}
+
+.upd__main:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.upd__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+}
+
+.upd--security .upd__icon {
+  color: #e5484d;
+}
+
+.upd__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.upd__title {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Collapsed to the one line until hovered or focused (UP-02). */
+.upd__more {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 200ms var(--ease-out);
+}
+
+.upd__more-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.upd:hover .upd__more,
+.upd:focus-within .upd__more {
+  grid-template-rows: 1fr;
+}
+
+.upd__detail {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.upd__cta {
+  display: inline-block;
+  margin: 7px 0 2px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent), color-mix(in oklab, var(--accent) 55%, #ff6fb5));
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.upd__link {
+  color: var(--accent);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.upd__close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  opacity: 0;
+  cursor: pointer;
+}
+
+.upd:hover .upd__close,
+.upd:focus-within .upd__close {
+  opacity: 1;
+}
+
+.upd__close:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.upd__close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+@keyframes upd-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .upd {
+    animation: none;
+  }
+
+  .upd__more {
+    transition: none;
+  }
+}
