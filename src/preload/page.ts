@@ -67,7 +67,10 @@ function patchPage(stateOf: StateOf, clicked: () => void) {
         configurable: true,
         enumerable: request.enumerable,
         writable: true,
-        value: function requestPermission(callback?: (value: NotificationPermission) => void) {
+        // The callback comes as a rest argument, so the function declares none (`length` 0), as the
+        // engine's (review B-F11).
+        value: function requestPermission(...args: unknown[]) {
+          const callback = args[0]
           return apply(then, apply(ask, NativeNotification, []), [
             (value: NotificationPermission) => {
               const answer = undecided(value)
@@ -97,6 +100,9 @@ function patchPage(stateOf: StateOf, clicked: () => void) {
         writable: true,
         value: Notification,
       })
+      // A notification's `constructor` is the Notification the page sees (review B-F11).
+      const made = describe(NativeNotification.prototype, 'constructor')
+      if (made?.configurable) define(NativeNotification.prototype, 'constructor', { ...made, value: Notification })
     }
   }
 

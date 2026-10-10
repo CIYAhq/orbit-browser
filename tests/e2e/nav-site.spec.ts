@@ -358,15 +358,26 @@ test('[NV-15] pages read an undecided permission as not decided yet, as in Chrom
   expect(await permissionState(p, 'notifications')).toBe('prompt')
   expect(await permissionState(p, 'geolocation')).toBe('prompt')
   expect(await permissionState(p, 'camera')).toBe('prompt')
-  // The page's Notification is still the one it knows.
+  // The page's Notification is still the one it knows, down to what it declares (review B-F11).
   expect(
     await p.evaluate(() => ({
       name: Notification.name,
       request: typeof Notification.requestPermission,
+      requestName: Notification.requestPermission.name,
+      requestLength: Notification.requestPermission.length,
+      constructor: Notification.prototype.constructor === Notification,
       maxActions: typeof (Notification as unknown as { maxActions: number }).maxActions,
       own: Object.keys(window).filter((k) => /orbit/i.test(k)),
     })),
-  ).toEqual({ name: 'Notification', request: 'function', maxActions: 'number', own: [] })
+  ).toEqual({
+    name: 'Notification',
+    request: 'function',
+    requestName: 'requestPermission',
+    requestLength: 0,
+    constructor: true,
+    maxActions: 'number',
+    own: [],
+  })
 
   const prompt = shell.getByTestId('permission-prompt')
   await ask(p, 'notifications')
@@ -381,7 +392,17 @@ test('[NV-15] pages read an undecided permission as not decided yet, as in Chrom
   await prompt.getByTestId('permission-allow').click()
   await expect.poll(() => answerOf(p, 'notifications')).toBe('granted')
   expect(await permissionState(p, 'notifications')).toBe('granted')
-  expect(await p.evaluate(() => new Notification('Hello') instanceof Notification)).toBe(true)
+  expect(
+    await p.evaluate(() => {
+      const made = new Notification('Hello')
+      made.close()
+      return { instance: made instanceof Notification, constructor: made.constructor === Notification }
+    }),
+  ).toEqual({ instance: true, constructor: true })
+  // The old callback form answers too.
+  expect(await p.evaluate(() => new Promise<string>((resolve) => void Notification.requestPermission(resolve)))).toBe(
+    'granted',
+  )
 })
 
 /**
