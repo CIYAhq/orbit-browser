@@ -214,11 +214,12 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
   }
 
   /**
-   * Find acts on the window's page, not on one a Peek covers: while a Peek is open, ⌘F and ⌘G do
-   * nothing and the keyboard stays in the Peek (review A-M3; finding in the Peek is PK-11's).
+   * Find acts on the window's page, not on one a Peek or the Library covers: while either is open,
+   * ⌘F, ⌘G and F3 do nothing here and the keyboard stays where it is (review A-M3, fix check A M2;
+   * finding in the Peek is PK-11's, the Library's ⌘F searches it).
    */
   const findable = (windowId: WindowId | undefined): windowId is WindowId =>
-    !!windowId && !peekShown(store.state, windowId)
+    !!windowId && !peekShown(store.state, windowId) && !windows.hasPageCover(windowId)
 
   /** ⌘F: the bar opens (or its text is selected again), starting from the page's selection or the tab's last search. */
   const openFind = (windowId: WindowId | undefined) => {
@@ -363,7 +364,8 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
   const zoomAction = (direction: 1 | -1 | 0) => (c: CallContext) => {
     const windowId = windowOf(c)
     const tabId = activeOf(windowId)
-    if (windowId && tabId) zoom(windowId, tabId, direction)
+    // Not the page under the Library: it would stay zoomed, and kept so for its site (fix check A, M2).
+    if (windowId && tabId && !windows.hasPageCover(windowId)) zoom(windowId, tabId, direction)
   }
   actions.register('page.zoomIn', zoomAction(1))
   actions.register('page.zoomOut', zoomAction(-1))

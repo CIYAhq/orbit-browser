@@ -389,6 +389,36 @@ test('[NV-05][PK-11] ⌘F and ⌘G with a Peek open leave the tab under it alone
   expect((await windowState(app)).overlay.kind).toBe('peek')
 })
 
+test('[NV-05][NV-06] with the Library open, ⌘G, F3 and ⌘+ leave the tab under it alone: no find bar, no zoom, and the keyboard stays in the Library (fix check A, M2)', async () => {
+  const { app } = orbit
+  await openTab(app, findPage('Covered'))
+  // The tab has a search of its own, which ⌘G or F3 would bring back.
+  const tools = await openFind('/page/Covered')
+  await tools.keyboard.type('orbit')
+  await expect(tools.getByTestId('find-count')).toHaveText('1/3')
+  await tools.keyboard.press('Escape')
+  await expect.poll(async () => (await toolsInfo(app)).placed).toBe(false)
+  await cmd(app, 'library.open')
+  await expect.poll(() => cmd(app, 'library.testInfo')).toMatchObject({ open: true, visible: true })
+  await expect.poll(() => focusedUrl(app)).toContain('view=library')
+  const library = app.windows().find((p) => p.url().includes('view=library'))
+  if (!library) throw new Error('no Library page')
+  await library.evaluate(() => {
+    const w = window as unknown as { __keys: string[] }
+    w.__keys = []
+    addEventListener('keydown', (e) => w.__keys.push(e.key), true)
+  })
+  await pressInPage(app, 'view=library', 'G', [mod])
+  await pressInPage(app, 'view=library', 'F3')
+  await pressInPage(app, 'view=library', '=', [mod])
+  // Keys reach main in order: once the Library has a later key, Orbit has dealt with those.
+  await pressInPage(app, 'view=library', 'End')
+  await expect.poll(() => library.evaluate(() => (window as unknown as { __keys: string[] }).__keys)).toContain('End')
+  expect(await focusedUrl(app)).toContain('view=library')
+  expect(await toolsInfo(app)).toMatchObject({ placed: false, find: { open: false } })
+  expect(await zoomOf(app, '/page/Covered')).toBeCloseTo(1, 3)
+})
+
 test('[NV-05][KS-08] Jump to Selection (⌘J on macOS) scrolls the page back to the selected text', async () => {
   const { app } = orbit
   await openTab(app, findPage('Jump'))

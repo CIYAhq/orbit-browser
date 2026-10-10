@@ -753,6 +753,14 @@ export class WindowManager {
    * Whether a window's permission prompt view is on screen: placed, and not under a page cover
    * (the prompt view's page asks when it loads; after that it hears each change).
    */
+  /**
+   * Whether a view covers the window's pages (the Library, AR-02): what acts on the shown page,
+   * find and zoom, leaves it alone meanwhile (fix check A, M2).
+   */
+  hasPageCover(windowId: WindowId): boolean {
+    return !!this.records.get(windowId)?.cover
+  }
+
   promptOnScreen(windowId: WindowId): boolean {
     const rec = this.records.get(windowId)
     return !!rec && rec.promptShown && !rec.cover
