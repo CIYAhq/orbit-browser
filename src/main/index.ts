@@ -20,6 +20,11 @@ perf.mark('main:start')
 // An exception nothing caught is logged, and Orbit carries on. Electron's default shows it in a modal
 // box that blocks the main thread until someone dismisses it: until then Orbit can't even quit (D28).
 process.on('uncaughtException', (err) => console.error('[orbit] uncaught exception:', err))
+// A promise rejection nothing handled is logged with the same marker, so the e2e quit check fails
+// the test that caused it. Electron's default only prints a warning (PR #11 review F3).
+process.on('unhandledRejection', (reason) =>
+  console.error('[orbit] uncaught exception: (a promise rejection nothing handled)', reason),
+)
 
 // Tests and perf runs isolate their profile data.
 if (process.env.ORBIT_USER_DATA) app.setPath('userData', process.env.ORBIT_USER_DATA)
@@ -90,6 +95,8 @@ function start(): void {
     if (windows.ids().length === 0) windows.open()
   })
   app.on('before-quit', () => {
+    // The e2e harness times a quit from here: Playwright does work of its own before it asks (D28).
+    if (e2e) console.error('[orbit] quit requested')
     windows.quitting = true
     persistence.flush()
   })
