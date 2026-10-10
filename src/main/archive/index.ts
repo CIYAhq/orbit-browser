@@ -17,7 +17,7 @@ import type { CallContext } from '../registry'
 import { findMenuItem, menuLabels } from '../tabs/menus'
 import { BackupStore, scheduleBackups } from './backups'
 import { historyMenuItems, historyQuery, historyRows } from './history-view'
-import { sidebarRestored } from './inbox'
+import { provideArchiveSource, sidebarRestored } from './inbox'
 import { LibraryHost } from './library'
 import { archiveSectionItems, setKeepDays } from './menus'
 import { ArchivePreviews } from './preview'
@@ -55,6 +55,8 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
   const store = new ArchiveStore(join(ctx.paths.userData, 'archive', 'archive.jsonl'))
   const sync = new ArchiveSync(ctx, store)
   sync.start()
+  // The command bar searches the whole Archive, not only the recent entries in state (AR-04).
+  provideArchiveSource(store)
   // Entries past their time go once the log is read, then hourly (AR-08).
   const stopRetention = scheduleRetention(ctx, sync, store)
   setTimeout(() => void store.load(), LOAD_DELAY_MS)

@@ -1,3 +1,4 @@
+import type { ArchivedTab, ProfileId } from '../../shared/state'
 import type { ArchiveHistory } from './store'
 
 /**
@@ -46,4 +47,26 @@ export function onSidebarRestored(fn: ((undo?: () => void) => void) | undefined)
 /** Called by the Archive code right after it restored the sidebar from a backup. */
 export function sidebarRestored(undo?: () => void): void {
   restoredListener?.(undo)
+}
+
+/** What the command bar searches for archived tabs (AR-04): the whole Archive, beyond `state.archive`. */
+export interface ArchiveSource {
+  /** False until the Archive log was read: until then only `state.archive` is known. */
+  readonly ready: boolean
+  /** Bumped on every change. */
+  readonly version: number
+  /** A profile's entries, newest first, with their lowercased title and URL key. */
+  newestFirst(profileId: ProfileId): Iterable<{ e: ArchivedTab; titleLower: string; urlKey: string }>
+}
+
+let archiveSourceRef: ArchiveSource | undefined
+
+/** Set by the Archive module once its store exists. */
+export function provideArchiveSource(source: ArchiveSource | undefined): void {
+  archiveSourceRef = source
+}
+
+/** The Archive's store, for the command bar (undefined before the Archive module started). */
+export function archiveSource(): ArchiveSource | undefined {
+  return archiveSourceRef
 }
