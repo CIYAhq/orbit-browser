@@ -4,14 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 161 built (60 partial) · 227 tested · 0 feel right.
+**Totals:** 475 spec’d · 161 built (60 partial) · 227 tested · 0 feel right. 10 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
-| ? | 7 | 0 | 0 |
 | P0 | 174 | 110 | 136 |
 | P1 | 221 | 44 | 82 |
-| P2 | 83 | 7 | 9 |
+| P2 | 80 | 7 | 9 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -104,7 +103,7 @@ Spec: `spec/tabs.md`
 | TD-05 | Archive tabs below | P1 | ✅ | ✅ e2e | – | menu Archive Tabs Below, undoable |
 | TD-06 | Per-Space scope of Today actions | P0 | ✅ | ✅ e2e+unit | – | Clear/archive-below/auto-archive per Space |
 | TD-07 | First-run explanation of auto-archive | P2 | – | – | – |  |
-| TD-08 | AI "tidy" of Today tabs | P2 | – | – | – |  |
+| TD-08 | AI "tidy" of Today tabs | P2 | ⛔ out of scope | – | – | it needs a model, and Orbit uses no paid APIs; the spec leaves it out of milestone 1 (D41) |
 | FD-01 | What folders are and where they can live | P0 | ✅ | ✅ e2e+unit | – | folders only in the pinned area (tree.canMoveTo) |
 | FD-02 | Create a folder | P0 | ✅ | ✅ e2e | – | New Folder at end of pinned in rename mode; New Folder with selected tabs |
 | FD-03 | Rename a folder | P0 | ✅ | ✅ e2e | – | menu or double-click; Enter/blur saves, Escape cancels, empty keeps name |
@@ -148,7 +147,7 @@ Spec: `spec/spaces.md`
 | SP-23 | Spaces across windows | P0 | ✅ | ✅ e2e+unit | – | each window keeps its own Space; all windows share Spaces |
 | SP-24 | What a new window shows | P0 | ✅ | ✅ e2e | – | Cmd/Ctrl+N: same Space, sidebar shown, cascaded, command bar open, full screen follows |
 | SP-25 | Spaces menu in the app menu | P2 | – | – | – |  |
-| SP-26 | Sharing a Space (out of scope) | P2 | – | – | – |  |
+| SP-26 | Sharing a Space (out of scope) | P2 | ⛔ out of scope | – | – | it needs an online service, so the spec leaves it out of milestone 1 (D41) |
 | PR-01 | What a profile is | P0 | ✅ | ✅ e2e+unit | – | Default profile always exists and cannot be deleted |
 | PR-02 | Create a profile | P0 | ✅ | ✅ e2e+unit | – | Space menu → Profile → New Profile… assigns it at once; also in the new-Space flow |
 | PR-03 | Assign a Space to a profile | P0 | ✅ | ✅ e2e+unit | – | tabs move with the Space and restart in the new session |
@@ -250,7 +249,7 @@ Spec: `spec/navigation.md`
 | NV-19 | Links that open other apps (external protocols) | P1 | – | – | – |  |
 | NV-20 | Full screen | P1 | – | ✅ e2e | – |  |
 | NV-21 | Save page and view source | P2 | – | – | – |  |
-| NV-22 | Translate a page | P2 | – | – | – |  |
+| NV-22 | Translate a page | P2 | ⛔ out of scope | – | – | Orbit's engine has no built-in translation, and the spec allows no paid API (D45). ST-14's offer to translate, the Translate command and the address field's translate button go with it |
 | NV-23 | Reader mode | P2 | – | – | – |  |
 | NV-24 | Page dialogs (alert, confirm, prompt, leave-page, sign-in, file pickers) | P1 | – | – | – |  |
 | NV-25 | Share the current page | P2 | – | – | – |  |
@@ -359,7 +358,7 @@ Spec: `spec/shortcuts.md`
 | KS-10 | Peek and Mini Window | P1 | – | – | – |  |
 | KS-11 | Media | P1 | 🟡 partial | ✅ e2e | – | Space and arrows in the focused player, Cmd/Ctrl+scroll and pinch zoom (tested), hardware media keys via Chromium (untested), Mute Tab action assignable; the calendar meeting shortcut (P2) belongs to TB-21/FV-09 |
 | KS-12 | Library, history, downloads, settings, extensions, help | P1 | – | – | – |  |
-| KS-13 | Developer tools | P1 | – | ✅ e2e | – |  |
+| KS-13 | Developer tools | P1 | – | ✅ e2e+unit | – |  |
 | KS-14 | Canvases, notes, capture and Tweaks | P2 | – | – | – |  |
 | KS-15 | Standard app and window keys | P1 | – | – | – |  |
 | KS-16 | Text-editing keys keep their meaning | P0 | – | – | – |  |
@@ -458,7 +457,7 @@ Spec: `spec/boosts.md`
 | BO-19 | Use Space theme colours inside customization CSS | P2 | – | – | – |  |
 | BO-20 | Sharing customizations and the customization gallery | P2 | – | – | – |  |
 | BO-21 | Customization commands in the command bar | P1 | – | – | – |  |
-| BO-22 | Legacy code-only customization builder | ? | – | – | – |  |
+| BO-22 | Legacy code-only customization builder | OOS | ⛔ out of scope | – | – | the spec leaves it out |
 
 ## Chrome extension support
 
@@ -490,8 +489,8 @@ Spec: `spec/devtools.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| DT-01 | Open / close DevTools | P0 | ✅ | ✅ e2e | – | ⌥⌘I / F12 (Ctrl+Shift+I / F12) open DevTools for the selected tab or focused split pane, docked inside its view, and close them, also from inside DevTools; a Peek's or Mini Window's page gets its own. ⌥⌘J (Ctrl+Shift+J) opens them on the Console; View → Developer menu (macOS) and the command bar. A key held down acts once. Copy, paste (after DevTools' own paste warning) and the device toolbar work; links DevTools open become tabs. Windows/Linux: while DevTools have the keyboard, only the DevTools keys reach Orbit |
-| DT-02 | Inspect element (context menu and picker) | P0 | ✅ | ✅ e2e | – | right-click → Inspect (last item) opens DevTools with that element selected, or just selects it when they're open. Picker: ⌥⌘C on macOS, no default key on Windows/Linux, Inspect Element in the command bar. ⇧⌘C stays Copy URL; inside DevTools it is DevTools' own picker. Remap: give the devtools.inspect action ⇧⌘C (and take it from tab.copyUrl) in src/shared/actions.ts, or in Settings → Shortcuts once remapping (ST-08) lands |
+| DT-01 | Open / close DevTools | P0 | ✅ | ✅ e2e+unit | – | ⌥⌘I / F12 (Ctrl+Shift+I / F12) open DevTools for the selected tab or focused split pane, docked inside its view, and close them, also from inside DevTools; a Peek's or Mini Window's page gets its own. ⌥⌘J (Ctrl+Shift+J) opens them on the Console; View → Developer menu (macOS) and the command bar. A key held down acts once. Copy, paste (after DevTools' own paste warning) and the device toolbar work; links DevTools open become tabs. Windows/Linux: while DevTools have the keyboard, only the DevTools keys reach Orbit |
+| DT-02 | Inspect element (context menu and picker) | P0 | ✅ | ✅ e2e+unit | – | right-click → Inspect (last item) opens DevTools with that element selected, or just selects it when they're open. Picker: ⌥⌘C on macOS, no default key on Windows/Linux, Inspect Element in the command bar. ⇧⌘C stays Copy URL; inside DevTools it is DevTools' own picker. Remap: give the devtools.inspect action ⇧⌘C (and take it from tab.copyUrl) in src/shared/actions.ts, or in Settings → Shortcuts once remapping (ST-08) lands |
 | DT-03 | DevTools docking, size and focus | P1 | ✅ | ✅ e2e | – | docked right/left/bottom or undocked from DevTools' dock menu; the engine keeps the side per profile across restarts. Each tab (pane, Peek, Mini Window) has its own DevTools, shown and hidden with its page; a page shown again takes the docked size last chosen. Undocked: the open key brings them to the front (checked on Linux; macOS unverified), and closes them when they have the keyboard. No windows added, however many tabs have DevTools |
 | DT-04 | View page source | P1 | – | – | – |  |
 | DT-05 | Developer mode turns on automatically for local development URLs | P1 | – | – | – |  |
@@ -528,7 +527,7 @@ Spec: `spec/downloads.md`
 | DL-15 | Pause, resume and retry | P1 | – | – | – |  |
 | DL-16 | Downloads in private windows, Little windows and Peek | P2 | – | – | – |  |
 | DL-17 | Dock / taskbar progress | P2 | – | – | – |  |
-| DL-18 | Smart renaming of downloads | ? | – | – | – |  |
+| DL-18 | Smart renaming of downloads | OOS | ⛔ out of scope | – | – | the spec leaves it out |
 
 ## Settings / preferences
 
@@ -553,8 +552,8 @@ Spec: `spec/settings.md`
 | ST-15 | Passwords and autofill settings | P1 | – | – | – |  |
 | ST-16 | Session restore on launch | P1 | – | – | – |  |
 | ST-17 | About Orbit | P1 | – | – | – |  |
-| ST-18 | Account, sign-in and sync sections | ? | – | – | – |  |
-| ST-19 | AI features section | ? | – | – | – |  |
+| ST-18 | Account, sign-in and sync sections | OOS | ⛔ out of scope | – | – | the spec leaves it out |
+| ST-19 | AI features section | OOS | ⛔ out of scope | – | – | the spec leaves it out |
 | ST-20 | Which settings are global and which are per profile | P1 | – | – | – |  |
 | ST-21 | Enterprise / managed policies | P2 | – | – | – |  |
 
@@ -602,7 +601,7 @@ Spec: `spec/onboarding.md`
 | OB-12 | Essential keyboard shortcuts sheet | P1 | – | – | – |  |
 | OB-13 | Help and feedback entry points | P1 | – | – | – |  |
 | OB-14 | Skip, resume and reset onboarding | P2 | – | – | – |  |
-| OB-15 | AI features opt-in step | ? | – | – | – |  |
+| OB-15 | AI features opt-in step | OOS | ⛔ out of scope | – | – | the spec leaves it out |
 | OB-16 | Personal welcome card | P2 | – | – | – |  |
 
 ## Updates (delivery and surfacing)
@@ -644,7 +643,7 @@ Spec: `spec/easels-notes.md`
 | EZ-12 | Canvas theming | P2 | – | – | – |  |
 | EZ-13 | Canvas content storage and offline behaviour | P2 | – | – | – |  |
 | EZ-14 | Open canvases from links | P2 | – | – | – |  |
-| EZ-15 | Sharing and real-time collaboration | ? | – | – | – |  |
+| EZ-15 | Sharing and real-time collaboration | OOS | ⛔ out of scope | – | – | it needs accounts and a sync server. Local substitutes: EZ-11's PNG export, and exporting and importing a canvas file (inferred P2), built with Canvases |
 | NT-01 | Create a note | P2 | – | – | – |  |
 | NT-02 | Note editor: rich text with Markdown shortcuts | P2 | – | – | – |  |
 | NT-03 | New note in split view beside the current page | P2 | – | – | – |  |
@@ -652,4 +651,4 @@ Spec: `spec/easels-notes.md`
 | NT-05 | Export notes | P2 | – | – | – |  |
 | NT-06 | Import notes from HTML/Markdown files | P2 | – | – | – |  |
 | NT-07 | Default notes app (external services) | P2 | – | – | – |  |
-| NT-08 | Sharing notes | ? | – | – | – |  |
+| NT-08 | Sharing notes | OOS | ⛔ out of scope | – | – | it needs accounts and sync. Local substitutes: NT-05's export, and copying a note as Markdown (inferred P2), built with Notes |

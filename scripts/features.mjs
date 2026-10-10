@@ -8,6 +8,10 @@
  * - "Tested" is derived: a unit or e2e test file mentions the ID (put IDs in test titles).
  * - "Built" and "Feels right" come from docs/feature-status.json, updated by build lanes
  *   ("built": "yes" | "partial") and by the lead after a feel review ("feel": true).
+ * - Out of scope: rows the spec marks `Priority: OOS`, and rows the lead has ruled out
+ *   ("scope": "out" with a note saying why). They are listed but left out of the totals.
+ * - Warnings (printed, not fatal): an out-of-scope row that is also marked built or felt, or that a
+ *   test names; a row ruled out with no note; a status entry whose ID matches no spec row.
  *
  * Usage: node scripts/features.mjs [specDir]
  */
@@ -70,7 +74,7 @@ for (const file of files) {
     if (!m) continue
     let priority = '?'
     for (let j = i + 1; j < Math.min(lines.length, i + 6); j++) {
-      const p = /^Priority:\s*(P\d)/.exec(lines[j])
+      const p = /^Priority:\s*(P\d|OOS)\b/.exec(lines[j])
       if (p) {
         priority = p[1]
         break
@@ -103,7 +107,9 @@ walk(join(root, 'tests/e2e'), 'e2e')
 const statusFile = join(root, 'docs/feature-status.json')
 const status = existsSync(statusFile) ? JSON.parse(readFileSync(statusFile, 'utf8')) : {}
 
-const totals = { all: 0, built: 0, partial: 0, tested: 0, feel: 0 }
+const totals = { all: 0, built: 0, partial: 0, tested: 0, feel: 0, outOfScope: 0 }
+/** Entries the checklist ignores or can't place; printed after writing, so they don't go unnoticed. */
+const warnings = []
 const byPriority = {}
 const cell = (v) => v || '–'
 const out = []
@@ -112,6 +118,19 @@ for (const s of sections) {
   out.push('| ID | Feature | P | Built | Tested | Feels right | Notes |', '|---|---|---|---|---|---|---|')
   for (const it of s.items) {
     const st = status[it.id] ?? {}
+    if (it.priority === 'OOS' || st.scope === 'out') {
+      totals.outOfScope++
+      const ignored = [
+        st.built && `"built": "${st.built}"`,
+        st.feel && '"feel"',
+        tested.has(it.id) && 'a test naming it',
+      ]
+      for (const what of ignored.filter(Boolean)) warnings.push(`${it.id} is out of scope, so ${what} is ignored.`)
+      if (it.priority !== 'OOS' && !st.note) warnings.push(`${it.id} is ruled out with no note saying why.`)
+      const note = st.note ?? (it.priority === 'OOS' ? 'the spec leaves it out' : 'ruled out by the lead')
+      out.push(`| ${it.id} | ${it.title} | ${it.priority} | ⛔ out of scope | – | – | ${note} |`)
+      continue
+    }
     const kinds = tested.get(it.id)
     const built = st.built === 'yes' ? '✅' : st.built === 'partial' ? '🟡 partial' : ''
     const test = kinds ? `✅ ${[...kinds].sort().join('+')}` : ''
@@ -133,6 +152,11 @@ for (const s of sections) {
   out.push('')
 }
 
+const specIds = new Set(sections.flatMap((s) => s.items.map((it) => it.id)))
+for (const id of Object.keys(status)) {
+  if (!specIds.has(id)) warnings.push(`docs/feature-status.json has ${id}, which matches no spec row.`)
+}
+
 const pending = ORDER.filter((f) => !found.includes(f))
 const header = [
   '# Orbit feature checklist',
@@ -141,7 +165,7 @@ const header = [
   '',
   'Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).',
   '',
-  `**Totals:** ${totals.all} spec’d · ${totals.built} built (${totals.partial} partial) · ${totals.tested} tested · ${totals.feel} feel right.`,
+  `**Totals:** ${totals.all} spec’d · ${totals.built} built (${totals.partial} partial) · ${totals.tested} tested · ${totals.feel} feel right. ${totals.outOfScope} more are out of scope and not counted.`,
   '',
   '| Priority | Spec’d | Built | Tested |',
   '|---|---|---|---|',
@@ -160,3 +184,4 @@ if (pending.length) {
 }
 writeFileSync(join(root, 'FEATURES.md'), `${[...header, ...out].join('\n').trimEnd()}\n`)
 console.log(`FEATURES.md: ${totals.all} features from ${sections.length} spec files (${pending.length} pending).`)
+for (const w of warnings) console.warn(`warning: ${w}`)
