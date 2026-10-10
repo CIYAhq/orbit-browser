@@ -10,7 +10,7 @@ Orbit is an independent, clean-room implementation in the spirit of Arc. It was 
 
 ## Develop
 
-Requirements: Node.js 22+ and npm. macOS is the primary target. Linux works for development and CI.
+Requirements: Node.js 22+ and npm. macOS is the primary target. Linux works for development and testing.
 
 ```sh
 npm ci
@@ -43,7 +43,7 @@ npm run package:mac      # .dmg and .zip (arm64 + x64) in release/
 npm run package:linux    # unpacked Linux build in release/
 ```
 
-CI builds the macOS `.dmg`/`.zip` on every push to `main` and on manual runs.
+Build the macOS `.dmg`/`.zip` on a Mac. The CI workflow that built them on every push is turned off.
 
 ## How it's built
 

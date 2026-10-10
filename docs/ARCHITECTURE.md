@@ -98,7 +98,7 @@ Measured by `scripts/perf/` (Electron under Xvfb on Linux; the same harness runs
 
 | Metric | Budget | How |
 |---|---|---|
-| Cold start → first shell frame | ≤ 600 ms (Linux CI box), ≤ 400 ms on an M-series Mac | `main:start` → `shell:first-frame` |
+| Cold start → first shell frame | ≤ 600 ms (Linux test machine), ≤ 400 ms on an M-series Mac | `main:start` → `shell:first-frame` |
 | Cold start → active tab painted | ≤ 1.2 s, the page itself excluded | first `did-first-visually-non-empty-paint` |
 | Tab switch (awake tab) | ≤ 16 ms main-side, visible next frame | `tabs.activate` → view swapped (fast path) |
 | Space switch | ≤ 100 ms including theme transition start | command → shell frame with new list |
@@ -109,11 +109,11 @@ Measured by `scripts/perf/` (Electron under Xvfb on Linux; the same harness runs
 
 Rules: no synchronous disk I/O on hot paths after boot, no full-state broadcasts after startup, debounce persistence, sleep background tabs, and keep the overlay renderer preloaded (hidden) so the command bar opens without a cold renderer.
 
-## 9. Testing and CI
+## 9. Testing and the merge gate
 
 - **Unit** (`vitest`): shared logic (tree moves, URL parsing, accelerators, theme math, persistence normalization), main-process models with fakes. Fast; run on every commit.
 - **E2E** (`@playwright/test` `_electron`): `tests/e2e/helpers.ts` launches the built app with an isolated `userData` and `ORBIT_E2E=1`. That exposes `globalThis.__orbit` test hooks in main (state, view bounds, run command) and serves local fixture pages from a loopback HTTP server, so there's no network dependence. **Every test title starts with the feature IDs it covers**, e.g. `test('[TB-06][TB-07] close and reopen a tab', …)`. `scripts/features.mjs` reads those IDs to mark rows tested in `FEATURES.md`.
-- **CI** (`.github/workflows/ci.yml`): typecheck + lint + unit (Linux), e2e under Xvfb (Linux), and build + unit + e2e + unsigned `.dmg`/`.zip` packaging (macOS). Green CI is required before merge.
+- **Merge gate** (D42): no GitHub Actions; `.github/workflows/ci.yml` stays disabled. Before a PR merges, the full check runs locally on its head: `npm run build`, `npm run typecheck`, `npm run lint`, `npx vitest run`, and the whole e2e suite under Xvfb at 1440×900 with one worker. The PR gets the command and the results, with macOS marked unverified, and an independent review approves it. While working, run only the spec files a change touches. The workflow file still describes the Linux and macOS jobs (e2e, and unsigned `.dmg`/`.zip` packaging on macOS) for if it is turned back on.
 - **Feel checks and clips**: `scripts/capture/record.mjs <scenario>` drives the built app through `scripts/capture/scenarios/<scenario>.mjs` while ffmpeg (`ORBIT_FFMPEG`, needs x11grab) records the X display, so native tab views are captured exactly as composited. Clips are named by feature ID and stored in `clips/` in the Orca context directory, screenshots in `screenshots/`. "Feels right" in `FEATURES.md` is a lead sign-off against `feel.md`.
 
 ## 10. Security baseline
@@ -122,6 +122,6 @@ Sandboxed, context-isolated renderers everywhere. No Node in pages. Pages never 
 
 ## 11. Packaging and updates
 
-`electron-builder` produces ad-hoc signed macOS `.dmg` and `.zip` (arm64 + x64) in CI, and a Linux `dir` build for local testing. Ad-hoc signing (`mac.identity: '-'`, no certificate) keeps arm64 Macs from rejecting the bundle as "damaged"; until Orbit has a Developer ID, a downloaded build still needs right-click → Open once (or `xattr -dr com.apple.quarantine /Applications/Orbit.app`). The updater is a stub for now (UP-10): it checks a release feed, says when a newer version exists, and links to it. There's no silent install until signing exists.
+`electron-builder` produces ad-hoc signed macOS `.dmg` and `.zip` (arm64 + x64) on a Mac (`npm run package:mac`), and a Linux `dir` build for local testing. Ad-hoc signing (`mac.identity: '-'`, no certificate) keeps arm64 Macs from rejecting the bundle as "damaged"; until Orbit has a Developer ID, a downloaded build still needs right-click → Open once (or `xattr -dr com.apple.quarantine /Applications/Orbit.app`). The updater is a stub for now (UP-10): it checks a release feed, says when a newer version exists, and links to it. There's no silent install until signing exists.
 
 Only packages the main process imports at runtime belong in `dependencies` (today just `immer`); they are the only `node_modules` packed into `app.asar`. Renderer packages (React, motion, lucide, dnd-kit, zustand) are bundled by Vite and live in `devDependencies`.
