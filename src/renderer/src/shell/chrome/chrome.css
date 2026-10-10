@@ -176,16 +176,8 @@ html[data-view="sidebar"] body {
   bottom: var(--gutter-hidden);
   left: var(--gutter-hidden);
   width: var(--sidebar-w);
-  /* Out: the quick timing (FL-01, FL-03). */
-  transform: translateX(calc(-100% - var(--gutter-hidden) - 16px));
-  transition: transform 160ms var(--ease-quick);
+  /* FloatingSidebarApp slides it (FL-03): off to the left by its width, the gutter and 16 px. */
   will-change: transform;
-}
-
-.float-sidebar.is-out .float-sidebar__slide {
-  transform: none;
-  /* In: the snappy timing, no overshoot (structure doesn't bounce). */
-  transition: transform 200ms var(--ease-snappy);
 }
 
 /* The shadow fades in with the slide. */
@@ -218,9 +210,7 @@ html[data-view="sidebar"] body {
   height: 100%;
 }
 
-.reduce-motion .float-sidebar__slide,
 .reduce-motion .float-sidebar__shadow,
-.reduce-motion .float-sidebar.is-out .float-sidebar__slide,
 .reduce-motion .float-sidebar.is-out .float-sidebar__shadow {
   transition: none;
 }

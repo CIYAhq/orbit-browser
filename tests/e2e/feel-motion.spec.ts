@@ -135,7 +135,8 @@ test('[FL-01][FL-03] re-entering the edge while the hover sidebar slides out tur
   await expect.poll(async () => (await floatingInfo(app)).placed).toBe(true)
   const slideX = () =>
     floating.evaluate(() => document.querySelector('.float-sidebar__slide')?.getBoundingClientRect().x ?? Number.NaN)
-  await expect.poll(slideX).toBeGreaterThan(0)
+  // In and at rest, inset by the hidden sidebar's 6 px margin.
+  await expect.poll(slideX).toBeGreaterThan(5.5)
   const rest = await slideX()
   const rec = await record(floating, { slide: '.float-sidebar__slide' }, { maxMs: 6000 })
   await pageMouse(app, '/page/Under', 'mouseMove', 700, 300)
@@ -147,13 +148,21 @@ test('[FL-01][FL-03] re-entering the edge while the hover sidebar slides out tur
   await pageMouse(app, 'view=sidebar', 'mouseMove', 3, 300)
   await floating.waitForTimeout(600)
   const r = await rec.stop()
-  const xs = series(r, 'slide', (bx) => bx.x)
-  const at = r.frames[frameAfterWall(r, back)]?.t ?? 0
-  const turn = interruption(xs, at)
-  const lowest = Math.min(...xs.filter((p) => !Number.isNaN(p.v)).map((p) => p.v))
-  note('FL-01', 'hover sidebar: step after turning back', turn.after, `≤ 2 × ${turn.before.toFixed(1)} + 2`, 'px')
-  note('FL-01', 'hover sidebar: furthest out before turning back', rest - lowest, '< its width (turned mid-way)', 'px')
+  const xs = series(r, 'slide', (bx) => bx.x).filter((p) => !Number.isNaN(p.v))
+  // Where it turned: the furthest out it went after the pointer came back.
+  const sinceBack = xs.filter((p) => p.t >= (r.frames[frameAfterWall(r, back)]?.t ?? 0))
+  const lowest = sinceBack.reduce((a, p) => (p.v < a.v ? p : a), sinceBack[0] ?? { t: 0, v: Number.NaN })
+  const turn = interruption(xs, lowest.t)
+  note('FL-01', 'hover sidebar: step either side of the turn', turn.after, `≤ 2 × ${turn.before.toFixed(1)} + 2`, 'px')
+  note(
+    'FL-01',
+    'hover sidebar: furthest out before turning back',
+    rest - lowest.v,
+    '< its width (turned mid-way)',
+    'px',
+  )
   note('FL-01', 'hover sidebar: jump ratio', jumpRatio(xs), '≤ 6', '×')
+  expect(rest - lowest.v).toBeLessThan(await floating.evaluate(() => innerWidth))
   expect(carriesOn(turn, 2)).toBe(true)
   expect(xs.at(-1)?.v ?? 0).toBeCloseTo(rest, 0)
 })
