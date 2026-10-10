@@ -185,8 +185,8 @@ export interface ImportCommands {
   /** Done: shows the imported folder in the browser window (IM-14). */
   'import.reveal': { args: { jobId: string }; result: void }
   'import.close': { args: Record<string, never>; result: void }
-  /** Accepts or declines a starter suggestion of a held import (IM-16). */
-  'import.suggest': { args: { jobId: string; url: string; accepted: boolean }; result: void }
+  /** Accepts or declines a starter suggestion of a held import (IM-16); without a url, dismisses them all. */
+  'import.suggest': { args: { jobId: string; url?: string; accepted: boolean }; result: void }
   /** Writes pinned items as a bookmarks file (IM-17). Returns the path, or null when cancelled. */
   'import.exportPinned': { args: { profileId?: ProfileId; includeToday?: boolean }; result: string | null }
 }

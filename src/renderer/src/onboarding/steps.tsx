@@ -7,7 +7,7 @@ import type { ColorMode, SpaceTheme } from '../../../shared/state'
 import { NEUTRAL_THEME } from '../../../shared/theme'
 import { engineFor, SEARCH_ENGINES } from '../../../shared/url'
 import { invoke } from '../api'
-import { ImportSummary, OnboardingImport } from '../import/Onboarding'
+import { ImportSuggestions, ImportSummary, OnboardingImport } from '../import/Onboarding'
 import { swatchBackground, ThemeEditor } from '../shell/spaces/ThemeEditor'
 import '../shell/spaces/spaces.css'
 import { useOrbit } from '../store'
@@ -491,6 +491,7 @@ export function DoneStep({
           </dd>
         </div>
       </dl>
+      {importer && <ImportSuggestions jobId={importJob} />}
       <Actions>
         <Button primary onClick={onStart} disabled={finishing} testId="onboarding-start">
           {returning ? 'Back to browsing' : 'Start browsing'}

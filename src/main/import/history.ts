@@ -1,9 +1,9 @@
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
-import type { BrowserKind, ImportProgressItem } from '../../shared/commands/import'
+import type { BrowserKind, ImportProgressItem, StarterSuggestion } from '../../shared/commands/import'
 import type { ProfileId } from '../../shared/state'
 import type { HistoryService } from '../history'
-import { type ImportedPage, isRecordable, MAX_ENTRIES, MAX_VISITS_PER_ENTRY } from '../history/store'
+import { hostOf, type ImportedPage, isRecordable, MAX_ENTRIES, MAX_VISITS_PER_ENTRY } from '../history/store'
 import type { FoundProfile, FoundSource } from './browsers'
 import { LockedError, type Scratch, withDatabase, withScratch } from './copy'
 import type { ImportJobs, Job, Task } from './jobs'
@@ -253,6 +253,37 @@ export async function readProfileHistory(
   return read ?? false
 }
 
+/**
+ * Starter suggestions (IM-16): the sites visited most, each as its most-visited page (its home
+ * page when that is a search or other query). The first half are offered as Favorites, the rest
+ * as pinned tabs; none is added until accepted.
+ */
+export function starterSuggestions(pages: readonly ImportedPage[], count = 6): StarterSuggestion[] {
+  const sites = new Map<string, { visits: number; top: ImportedPage }>()
+  for (const p of pages) {
+    const host = /^https?:/i.test(p.url) ? hostOf(p.url)?.host : undefined
+    if (!host) continue
+    const site = sites.get(host)
+    if (!site) sites.set(host, { visits: p.visitCount, top: p })
+    else {
+      site.visits += p.visitCount
+      if (p.visitCount > site.top.visitCount) site.top = p
+    }
+  }
+  return [...sites.entries()]
+    .sort(([, a], [, b]) => b.visits - a.visits || (b.top.visits[0] ?? 0) - (a.top.visits[0] ?? 0))
+    .slice(0, count)
+    .map(([host, { top }], i) => {
+      const home = top.url.includes('?') ? `${hostOf(top.url)?.origin}/` : undefined
+      return {
+        url: home ?? top.url,
+        title: (!home && top.title) || host,
+        kind: i < Math.ceil(count / 2) ? 'favorite' : 'pinned',
+        accepted: false,
+      }
+    })
+}
+
 /** Where history may go: a profile that keeps it (private ones never do). */
 export type HistoryTarget = (profileId: ProfileId) => boolean
 
@@ -308,6 +339,10 @@ export function historyTask(
       }
       item.total = [...read.values()].reduce((n, kept) => n + kept.size, 0)
       item.done = 0
+      // Onboarding's import proposes a few of the sites visited most (IM-16).
+      if (job.plan.hold && item.total > 0) {
+        job.status.suggestions = starterSuggestions([...read.values()].flatMap((kept) => kept.take()))
+      }
       if (item.total === 0) {
         item.state = failed ? 'failed' : 'skipped'
         item.note = locked ? `${source.name} is using it` : failed ? 'It couldn’t be read' : 'Nothing to import'

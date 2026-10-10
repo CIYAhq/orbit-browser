@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 475 spec’d · 182 built (75 partial) · 263 tested · 0 feel right. 10 more are out of scope and not counted.
+**Totals:** 475 spec’d · 183 built (75 partial) · 264 tested · 0 feel right. 10 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 111 | 136 |
 | P1 | 221 | 61 | 114 |
-| P2 | 80 | 10 | 13 |
+| P2 | 80 | 11 | 14 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -578,7 +578,7 @@ Spec: `spec/import.md`
 | IM-13 | Import from files (standard formats) | P1 | ✅ | ✅ e2e+unit | – | bookmarks HTML (the Netscape format; Chromium- and Firefox-style exports tested) and a .txt list of links, from From a file… or dropped on the import window or the sidebar. Bookmarks map as IM-05 into "Imported bookmarks"; links as IM-12; a file with neither says "No bookmarks found in this file" and imports nothing; a cut-off file imports what it holds; 64 MB at most. No passwords CSV (D52) |
 | IM-14 | Progress, summary and errors | P1 | ✅ | ✅ e2e+unit | – | progress per data type (a spinner, then a check), then a summary with counts per type and the skipped items with reasons; Done shows the imported folder in the sidebar (its Space, the pinned section open, the folder in view); the browser window stays responsive meanwhile. A file the source browser holds (it can't be copied) shows "Chrome is using some of its files. Quit Chrome and try again, or import the rest" with Try again; the types it could read can still be imported. History shows the pages read, then added; Done says they're in History and the command bar; what History can't keep is listed with the reason |
 | IM-15 | Re-import and duplicates | P2 | ✅ | ✅ e2e+unit | – | the same browser or file again makes a new "Imported from <Browser> (2)" folder (then (3)…), never merging into or changing the first. History de-duplicates silently: a page already imported gains only the visits it lacked, so its counts aren't doubled. Passwords aren't imported (D52) |
-| IM-16 | Starter suggestions from imported history | P2 | – | – | – |  |
+| IM-16 | Starter suggestions from imported history | P2 | ✅ | ✅ e2e+unit | – | after onboarding's import of a history, the Done step offers the six sites visited most (each by its most-visited page, or its home page when that's a search): the first three as Favorites, the rest as pinned tabs. One click takes one (another takes it back); Dismiss all drops them. They're added unloaded with the import when Start browsing ends onboarding, never with Skip setup (D44). Orbit can't tell web apps from other sites, so it ranks by visits; a suggested pinned tab is named after its site until first opened |
 | IM-17 | Export Orbit's pinned items (anti-lock-in) | P2 | – | ✅ unit | – |  |
 
 ## Onboarding (first run), tips and tutorials

@@ -185,7 +185,7 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
   commands.register('import.cancel', ({ jobId }) => jobs.cancel(jobId))
   commands.register('import.commit', ({ jobId }) => jobs.commit(jobId))
   commands.register('import.close', () => win.close())
-  commands.register('import.suggest', () => undefined)
+  commands.register('import.suggest', ({ jobId, url, accepted }) => jobs.suggest(jobId, url, accepted === true))
   commands.register('import.exportPinned', async () => null)
 
   // Done (IM-14): the browser window shows the imported folder, in its Space, pinned section open.

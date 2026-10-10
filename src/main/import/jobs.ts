@@ -124,6 +124,15 @@ export class ImportJobs {
     this.release.get(jobId)?.()
   }
 
+  /** Accepts or declines a held import's starter suggestion (IM-16); without a url, Dismiss all. */
+  suggest(jobId: string, url: string | undefined, accepted: boolean): void {
+    const job = this.jobs.get(jobId)
+    if (!job?.status.suggestions || (job.status.phase !== 'held' && job.status.phase !== 'reading')) return
+    if (url === undefined) job.status.suggestions = []
+    for (const s of job.status.suggestions) if (s.url === url) s.accepted = accepted
+    this.changed(job, true)
+  }
+
   /** Held imports nobody committed are dropped (onboarding ended with Skip setup, OB-14). */
   dropHeld(): void {
     for (const job of this.jobs.values()) if (job.plan.hold && !job.cancelled) this.cancel(job.status.id)
@@ -176,6 +185,7 @@ export class ImportJobs {
         if (task.item.state === 'running') task.item.state = 'done'
         this.changed(job)
       }
+      await this.addSuggestions(job)
       job.status.phase = 'done'
     } finally {
       // One more turn of the event loop, so the histogram sees the last stretch of work end.
@@ -183,6 +193,25 @@ export class ImportJobs {
       lag.disable()
       job.status.stats = { ms: Math.round(performance.now() - started), longestTaskMs: Math.round(lag.max / 1e6) }
       this.changed(job, true)
+    }
+  }
+
+  /** The starter suggestions accepted (IM-16): Favorites of the target profile, pinned tabs of its Space, unloaded. */
+  private async addSuggestions(job: Job): Promise<void> {
+    const dest = [...job.destinations.values()][0]
+    const run = this.ctx.commands.run.bind(this.ctx.commands) as unknown as (
+      n: string,
+      a: unknown,
+      c: CallContext,
+    ) => Promise<unknown>
+    for (const s of job.status.suggestions ?? []) {
+      if (!s.accepted || !dest) continue
+      const container =
+        s.kind === 'favorite'
+          ? { kind: 'favorites', profileId: dest.profileId }
+          : { kind: 'pinned', spaceId: dest.spaceId }
+      // Favorites already full: that one is left out (the tabs code says so).
+      await run('tabs.create', { url: s.url, container, activate: false }, { windowId: job.opener }).catch(() => {})
     }
   }
 

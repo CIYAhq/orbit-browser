@@ -565,3 +565,67 @@ html[data-platform="darwin"] .im .im-flow__body {
   line-height: 1.5;
   user-select: text;
 }
+
+/* ---- Starter suggestions (IM-16), on onboarding's Done step ---- */
+
+.im-suggestions {
+  --im-card: color-mix(in oklab, var(--surface) 55%, #ffffff);
+  max-width: 460px;
+  margin: 14px auto 0;
+  font-size: 12.5px;
+  text-align: left;
+}
+
+.ob[data-dark] .im-suggestions {
+  --im-card: color-mix(in oklab, var(--surface) 88%, #ffffff);
+}
+
+.im-suggestions p {
+  margin: 0 0 6px;
+  color: var(--text-muted);
+}
+
+.im-suggestions ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.im-suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 4px 10px;
+  border: 1px solid color-mix(in oklab, var(--text) 14%, transparent);
+  border-radius: 999px;
+  background: var(--im-card);
+  color: inherit;
+  font: inherit;
+}
+
+.im-suggestion[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.im-suggestion:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--accent) 70%, transparent);
+  outline-offset: 2px;
+}
+
+.im-suggestion__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.im-suggestion__kind {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}

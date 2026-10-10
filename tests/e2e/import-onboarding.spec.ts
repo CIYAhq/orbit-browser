@@ -142,7 +142,7 @@ test('[OB-14][OB-03] Skip setup after an import was chosen imports nothing (D44)
   expect(Object.values(s.tabs).filter((t) => t.url.startsWith('https://example.com/'))).toEqual([])
 })
 
-test('[OB-03][IM-02][IM-06] onboarding offers the browsers on this computer: several profiles, types and bookmarks, into the first Space', async () => {
+test('[OB-03][IM-02][IM-06][IM-16] onboarding offers the browsers on this computer: several profiles, types and bookmarks, into the first Space, then sites to add', async () => {
   const places = JSON.stringify([{ browser: 'chrome', dir: fixturePath('chrome') }])
   orbit = await launchFirstRun({ env: { ORBIT_ONBOARDING: '1', ORBIT_IMPORT_PLACES: places } })
   const { app } = orbit
@@ -172,15 +172,67 @@ test('[OB-03][IM-02][IM-06] onboarding offers the browsers on this computer: sev
   const titles = async () =>
     ((await run(app, 'history.visits', { profileId, limit: 100 })) as { title: string }[]).map((v) => v.title)
   expect(await titles()).toEqual([])
+  // IM-16: the sites visited most, each one click to add (and one more to take back).
+  const offer = (title: string) => page.getByTestId('import-suggestion').filter({ hasText: title })
+  await expect(page.getByTestId('import-suggestion').locator('.im-suggestion__title')).toHaveText([
+    'Inbox',
+    'Example News',
+    'Team calendar',
+    'Plan for the spring',
+    'Weather',
+    'Cart',
+  ])
+  for (const title of ['Inbox', 'Weather', 'Cart', 'Cart']) await offer(title).click()
+  await expect(offer('Inbox')).toHaveAttribute('aria-pressed', 'true')
+  await expect(offer('Weather')).toHaveAttribute('aria-pressed', 'true')
+  await expect(offer('Cart')).toHaveAttribute('aria-pressed', 'false')
   await closing(page, () => page.getByTestId('onboarding-start').click())
 
   await expect.poll(async () => importedFolders(await state(app)).map((f) => f.name)).toEqual(['Imported from Chrome'])
+  await expect.poll(async () => ((await run(app, 'import.status', {})) as ImportJob).phase).toBe('done')
   const s = await state(app)
-  const folderId = s.spaces[s.spaceOrder[0] as string]?.pinned.at(-1) as string
+  const folderId = importedFolders(s)[0]?.id as string
   expect(s.folders[folderId]?.children.map((id) => s.folders[id]?.name)).toEqual(['Work', 'Personal'])
   expect(tabsUnder(s, folderId)).toHaveLength(9)
   // Both profiles' history, in the first Space's profile.
   await expect.poll(async () => (await titles()).slice(0, 3)).toEqual(['Inbox', 'Weather', 'Example News'])
+  // The suggestions taken, unloaded: a Favorite and, after the folder, a pinned tab.
+  const first = s.spaces[s.spaceOrder[0] as string]
+  const favorites = (s.profiles[profileId as string]?.favorites ?? []).map((id) => s.tabs[id])
+  expect(favorites.filter((t) => t?.pinnedUrl === 'https://mail.example.net/inbox')).toHaveLength(1)
+  expect(favorites.every((t) => t?.asleep)).toBe(true)
+  expect(first?.pinned.map((id) => s.folders[id]?.name ?? s.tabs[id]?.pinnedUrl)).toEqual([
+    'Imported from Chrome',
+    'https://weather.example.org/',
+  ])
+})
+
+test('[IM-16] Dismiss all: none of the suggestions is added', async () => {
+  const places = JSON.stringify([{ browser: 'chrome', dir: fixturePath('chrome') }])
+  orbit = await launchFirstRun({ env: { ORBIT_ONBOARDING: '1', ORBIT_IMPORT_PLACES: places } })
+  const { app } = orbit
+  const page = await onboardingAt(app, 'welcome')
+  await page.getByTestId('onboarding-next').click()
+  await page.getByTestId('import-source-chrome').click()
+  await page.getByTestId('import-next').click()
+  // The first profile (Work), its history only.
+  await page.getByTestId('import-next').click()
+  await page.getByTestId('import-type-bookmarks').getByRole('checkbox').uncheck()
+  await page.getByTestId('import-next').click()
+  await expect(page.getByTestId('import-step-target')).toBeVisible()
+  await page.getByTestId('import-next').click()
+  await expect(page.getByTestId('onboarding-step-theme')).toBeVisible()
+  await page.getByTestId('onboarding-next').click()
+  await page.getByTestId('onboarding-next').click()
+  await page.getByTestId('onboarding-browser-later').click()
+  await page.getByTestId('import-suggestion').first().click()
+  await expect(page.getByTestId('import-suggestion').first()).toHaveAttribute('aria-pressed', 'true')
+  await page.getByTestId('import-suggestions-dismiss').click()
+  await expect(page.getByTestId('import-suggestions')).toHaveCount(0)
+  await closing(page, () => page.getByTestId('onboarding-start').click())
+  await expect.poll(async () => ((await run(app, 'import.status', {})) as ImportJob).phase).toBe('done')
+  const s = await state(app)
+  expect(Object.values(s.tabs).filter((t) => t.url.startsWith('https://mail.example.net/'))).toEqual([])
 })
 
 test('[OB-09] Do this later: the Done screen says nothing was imported and where to find it', async () => {

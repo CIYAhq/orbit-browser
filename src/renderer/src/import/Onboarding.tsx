@@ -1,5 +1,6 @@
+import { Check, Pin, Star } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import type { ImportJob, ImportProgressItem } from '../../../shared/commands/import'
+import type { ImportJob, ImportProgressItem, StarterSuggestion } from '../../../shared/commands/import'
 import { invoke } from '../api'
 import { ImportFlow } from './ImportFlow'
 
@@ -31,8 +32,8 @@ export function importCounts(job: ImportJob): string {
   return parts.join(' · ')
 }
 
-/** The Done step's import line (OB-09): what will be added from where, or that nothing will. */
-export function ImportSummary({ jobId }: { jobId: string | undefined }) {
+/** An import's status, kept current. */
+function useImportJob(jobId: string | undefined): ImportJob | null {
   const [job, setJob] = useState<ImportJob | null>(null)
   useEffect(() => {
     if (!jobId) return
@@ -41,6 +42,12 @@ export function ImportSummary({ jobId }: { jobId: string | undefined }) {
       if ((status as ImportJob).id === jobId) setJob(status as ImportJob)
     })
   }, [jobId])
+  return job
+}
+
+/** The Done step's import line (OB-09): what will be added from where, or that nothing will. */
+export function ImportSummary({ jobId }: { jobId: string | undefined }) {
+  const job = useImportJob(jobId)
   let text = 'Nothing imported: it’s in Settings, under General'
   if (jobId && job) {
     if (job.phase === 'reading') text = `Reading ${job.source}…`
@@ -48,4 +55,49 @@ export function ImportSummary({ jobId }: { jobId: string | undefined }) {
     else if (job.phase !== 'cancelled') text = `${importCounts(job)} from ${job.source}`
   }
   return <span data-testid="onboarding-summary-import">{text}</span>
+}
+
+/** Starter suggestions from the imported history (IM-16), under the Done step's summary: one click each, added with the import. */
+export function ImportSuggestions({ jobId }: { jobId: string | undefined }) {
+  const job = useImportJob(jobId)
+  const suggestions: StarterSuggestion[] = job?.phase === 'held' ? (job.suggestions ?? []) : []
+  if (!jobId || suggestions.length === 0) return null
+  return (
+    <div className="im-suggestions" data-testid="import-suggestions">
+      <p>The sites you visit most in {job?.source}. Choose any to add:</p>
+      <ul>
+        {suggestions.map((s) => (
+          <li key={s.url}>
+            <button
+              type="button"
+              className="im-suggestion"
+              aria-pressed={s.accepted}
+              data-testid="import-suggestion"
+              data-kind={s.kind}
+              title={s.url}
+              onClick={() => void invoke('import.suggest', { jobId, url: s.url, accepted: !s.accepted })}
+            >
+              {s.accepted ? (
+                <Check size={13} aria-hidden="true" />
+              ) : s.kind === 'favorite' ? (
+                <Star size={13} aria-hidden="true" />
+              ) : (
+                <Pin size={13} aria-hidden="true" />
+              )}
+              <span className="im-suggestion__title">{s.title}</span>
+              <span className="im-suggestion__kind">{s.kind === 'favorite' ? 'Favorite' : 'Pinned tab'}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button
+        type="button"
+        className="im-link"
+        data-testid="import-suggestions-dismiss"
+        onClick={() => void invoke('import.suggest', { jobId, accepted: false })}
+      >
+        Dismiss all
+      </button>
+    </div>
+  )
 }

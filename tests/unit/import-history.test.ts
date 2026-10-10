@@ -7,7 +7,14 @@ import { FIXTURE_ROOT, type FixturePage, manyPages, sampleHistory, writeChromium
 import { HistoryStore, type ImportedPage } from '../../src/main/history/store'
 import { type FoundSource, findSources } from '../../src/main/import/browsers'
 import { withScratch } from '../../src/main/import/copy'
-import { countHistory, historySql, historyTask, NewestPages, readProfileHistory } from '../../src/main/import/history'
+import {
+  countHistory,
+  historySql,
+  historyTask,
+  NewestPages,
+  readProfileHistory,
+  starterSuggestions,
+} from '../../src/main/import/history'
 import type { Job } from '../../src/main/import/jobs'
 import type { ImportJob, ImportSkip } from '../../src/shared/commands/import'
 
@@ -264,6 +271,8 @@ describe('[IM-07][IM-14] the import’s history line', () => {
     const skipped: ImportSkip[] = []
     const job = {
       cancelled: false,
+      // Held, as onboarding's import is: it proposes starter suggestions (IM-16).
+      plan: { hold: true },
       status: { skipped } as unknown as ImportJob,
       destinations: new Map(Object.entries(destinations).map(([k, profileId]) => [k, { spaceId: 's', profileId }])),
     } as unknown as Job
@@ -280,7 +289,7 @@ describe('[IM-07][IM-14] the import’s history line', () => {
 
   it('reads every chosen profile, then adds each to its destination; a private window’s profile gets none', async () => {
     const chrome = await source('chrome')
-    const { item, total, skipped, stores, dir } = await runTask(
+    const { item, total, skipped, stores, dir, job } = await runTask(
       chrome,
       { Default: 'p-work', 'Profile 1': 'private-1' },
       ['p-work'],
@@ -290,6 +299,14 @@ describe('[IM-07][IM-14] the import’s history line', () => {
     expect(stores.get('p-work')?.size).toBe(6)
     expect(stores.get('private-1')).toBeUndefined()
     expect(skipped).toEqual([{ what: 'page', count: 1, reason: 'A private window keeps no history' }])
+    expect(job.status.suggestions?.map((x) => x.title)).toEqual([
+      'Inbox',
+      'Example News',
+      'Team calendar',
+      'Plan for the spring',
+      'Weather',
+      'Cart',
+    ])
     // Written once, read back on a later start.
     const again = new HistoryStore(join(dir, 'p-work.jsonl'))
     await again.load()
@@ -317,4 +334,26 @@ describe('[IM-07][IM-14] the import’s history line', () => {
       }
     },
   )
+})
+
+describe('[IM-16] starter suggestions from imported history', () => {
+  it('the sites visited most, each by its most-visited page: the first half as Favorites, the rest as pinned tabs', () => {
+    const offer = (url: string, title: string, kind: string) => ({ url, title, kind, accepted: false })
+    expect(
+      starterSuggestions(
+        expected((p) => p.typed ?? 0),
+        4,
+      ),
+    ).toEqual([
+      offer('https://mail.example.net/inbox', 'Inbox', 'favorite'),
+      offer('https://news.example.org/', 'Example News', 'favorite'),
+      // example.com's calendar and a search there count as one site.
+      offer('https://example.com/page/Calendar', 'Team calendar', 'pinned'),
+      offer('https://docs.example.com/d/plan', 'Plan for the spring', 'pinned'),
+    ])
+    // A site whose page visited most is a search: its home page, by name.
+    expect(starterSuggestions([page(1, DAY, { url: 'https://www.search.example/?q=bread', visitCount: 9 })])).toEqual([
+      offer('https://www.search.example/', 'search.example', 'favorite'),
+    ])
+  })
 })
