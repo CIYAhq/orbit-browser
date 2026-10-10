@@ -199,9 +199,9 @@ test('[DL-09][FL-24] once Orbit is idle after launch the Library view is made of
     .toBe(1)
   const shown = (await marks()).filter((x) => x.name === 'library:shown').at(-1)?.t ?? 0
   console.info(`[archive e2e perf] first Library open→shown ${(shown - start).toFixed(1)} ms`)
-  // 66–77 ms on a quiet machine, 127–165 ms at load 30–44 (re-review R2). Without the view made
-  // ahead the first open takes about 490 ms, so this still fails without it. The idle wait itself
-  // is tested in archive-library-idle.test.ts.
+  // 66–77 ms in the builder's runs, 81 ms at load 10, and 127–165 ms at load 30–44 (re-review R2).
+  // Without the view made ahead the first open takes about 490 ms, so this still fails without it.
+  // The idle wait itself is tested in archive-library-idle.test.ts.
   expect(shown - start).toBeLessThanOrEqual(250 * FRAME_SLACK)
 })
 
