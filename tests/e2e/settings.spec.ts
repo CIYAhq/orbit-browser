@@ -393,6 +393,33 @@ test('[ST-01][AP-02] Settings takes the theme colours of the Space it was opened
   await expect.poll(accent).toBe(paletteFor(theme, false).accent)
 })
 
+test("[ST-01] Settings opened from a second Space paints in that Space's colours from its first frame", async () => {
+  const windowId = (await browserWindowIds())[0] as string
+  const before = await state(orbit.app)
+  const first = before.spaces[before.spaceOrder[0] as string]?.theme as SpaceTheme
+  const second = (await run(orbit.app, 'spaces.create', { name: 'Second', activate: false })) as string
+  await run(orbit.app, 'spaces.switch', { spaceId: second })
+  await expect.poll(async () => (await state(orbit.app)).windows[windowId]?.spaceId).toBe(second)
+  const theme = (await state(orbit.app)).spaces[second]?.theme as SpaceTheme
+  // Settings' first render, which its window shows at ready-to-show: its accent and mode.
+  await orbit.app.context().addInitScript(() => {
+    new MutationObserver((_records, observer) => {
+      const el = document.querySelector<HTMLElement>('[data-testid="settings"]')
+      if (!el) return
+      const w = window as unknown as { __firstPaint: { accent: string; dark: boolean } }
+      w.__firstPaint = { accent: el.style.getPropertyValue('--accent'), dark: el.hasAttribute('data-dark') }
+      observer.disconnect()
+    }).observe(document, { childList: true, subtree: true })
+  })
+  const page = await openSettings(orbit.app)
+  const firstPaint = await page.evaluate(
+    () => (window as unknown as { __firstPaint?: { accent: string; dark: boolean } }).__firstPaint,
+  )
+  const dark = firstPaint?.dark ?? false
+  expect(paletteFor(theme, dark).accent).not.toBe(paletteFor(first, dark).accent)
+  expect(firstPaint?.accent).toBe(paletteFor(theme, dark).accent)
+})
+
 // ---- Search engines (ST-06) ----
 
 /** Types a search into the browser window's command bar and returns the URL of the tab it opens. */

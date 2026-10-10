@@ -170,7 +170,9 @@ export class SettingsWindow {
       clearTimeout(this.saveTimer)
       if (this.win === win) this.win = undefined
     })
-    loadRenderer(contents, 'settings')
+    // The page's first render takes its opener (and its Space's colours) from here, without
+    // waiting for settings.context: the window shows on its first paint (ST-01).
+    loadRenderer(contents, 'settings', { reveal: JSON.stringify(this.reveal()) })
   }
 
   /** The remembered size, centred over the browser window it was opened from. */

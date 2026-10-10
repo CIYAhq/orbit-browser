@@ -159,9 +159,9 @@ function SectionPage({ section }: { section: SettingsSection }) {
   )
 }
 
-/** What Settings was opened with: fetched at start, then pushed by main on each reopening. */
+/** What Settings was opened with: in its address at start, then pushed by main on each reopening. */
 function useReveal(): SettingsView {
-  const [view, setView] = useState<SettingsView>({ context: { profileId: DEFAULT_PROFILE_ID }, target: {}, nonce: -1 })
+  const [view, setView] = useState<SettingsView>(firstReveal)
   useEffect(() => {
     let latest = -1
     const apply = (r: SettingsReveal) => {
@@ -173,6 +173,20 @@ function useReveal(): SettingsView {
     return window.orbit.on('settings.reveal', (payload) => apply(payload as SettingsReveal))
   }, [])
   return view
+}
+
+/** What main put in the page's address when it created the window (see SettingsWindow.create). */
+function firstReveal(): SettingsView {
+  try {
+    const raw = new URLSearchParams(window.location.search).get('reveal')
+    const r = raw ? (JSON.parse(raw) as Partial<SettingsReveal>) : undefined
+    if (r && typeof r.nonce === 'number' && typeof r.context?.profileId === 'string') {
+      return { context: r.context, target: r.target ?? {}, nonce: r.nonce }
+    }
+  } catch {
+    // Not there or not readable: settings.context answers in a moment.
+  }
+  return { context: { profileId: DEFAULT_PROFILE_ID }, target: {}, nonce: -1 }
 }
 
 /** The opener window's Space theme in the current light/dark mode (follows Space switches live). */
