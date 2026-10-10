@@ -1,6 +1,8 @@
 import { AnimatePresence, domAnimation, LazyMotion, MotionConfig } from 'motion/react'
 import { type CSSProperties, useEffect, useState } from 'react'
+import { DOWNLOADS_FLYOUT_PANEL } from '../../../shared/commands/downloads'
 import { invoke } from '../api'
+import { DownloadsFlyout } from '../downloads/DownloadsFlyout'
 import { isSpacePanel, SpacePanels } from '../shell/spaces/SpacePanels'
 import { useWindow } from '../store'
 import { paletteVars, usePalette } from '../theme'
@@ -56,6 +58,12 @@ export function OverlayApp() {
             <SpacePanels key={overlay.nonce} overlay={overlay} />
           )}
           {overlay?.kind === 'peek' && <PeekLayer key={overlay.nonce} overlay={overlay} />}
+          {/* The downloads flyout (downloads lane, DL-14). */}
+          <AnimatePresence>
+            {overlay?.kind === 'panel' && overlay.panel === DOWNLOADS_FLYOUT_PANEL && (
+              <DownloadsFlyout key={overlay.nonce} />
+            )}
+          </AnimatePresence>
         </div>
       </MotionConfig>
     </LazyMotion>

@@ -60,6 +60,8 @@ function readRecord(value: unknown): DownloadRecord | undefined {
   if (typeof value.mimeType === 'string') record.mimeType = value.mimeType
   if (typeof value.pageUrl === 'string') record.pageUrl = value.pageUrl
   if (typeof value.canResume === 'boolean') record.canResume = value.canResume
+  // Held back as possibly harmful (DL-12): only a complete download can be.
+  if (value.danger === 'file-type' && state === 'completed') record.danger = 'file-type'
   const r = value.resume
   if (isRecord(r) && Array.isArray(r.urlChain) && typeof r.tempPath === 'string') {
     record.resume = {

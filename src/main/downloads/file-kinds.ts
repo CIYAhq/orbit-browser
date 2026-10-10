@@ -1,47 +1,10 @@
 /**
- * What kind of file a download is, for what Orbit does with it (DL-04, DL-13). Pure Node, unit-tested.
+ * Files on the clipboard (DL-04); what kind of file a download is lives in the shared
+ * `commands/downloads.ts` (`fileKind`, `showsInline`). Pure Node, unit-tested.
  */
-import { extname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-/** Files Orbit shows in a tab itself instead of handing them to another app. */
-const INLINE = new Set([
-  // PDF (the engine's viewer)
-  '.pdf',
-  // images
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.gif',
-  '.webp',
-  '.avif',
-  '.bmp',
-  '.ico',
-  '.svg',
-  // plain text
-  '.txt',
-  '.text',
-  '.log',
-  '.md',
-  '.json',
-  // audio and video
-  '.mp4',
-  '.m4v',
-  '.webm',
-  '.ogv',
-  '.mp3',
-  '.m4a',
-  '.ogg',
-  '.oga',
-  '.opus',
-  '.wav',
-  '.flac',
-])
-
-/** Whether Orbit opens this file in a tab (by its extension). */
-export function showsInline(path: string): boolean {
-  return INLINE.has(extname(path).toLowerCase())
-}
+export { showsInline } from '../../shared/commands/downloads'
 
 /** A raw clipboard format of the OS, by name (Electron's clipboard). */
 const raw = (format: string) => `electron application/osclipboard;format="${format}"`

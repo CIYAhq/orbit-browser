@@ -127,6 +127,16 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
   // Archive retention in days (AR-08): a whole number, 0 for forever; else the default.
   const keep = state.settings.archiveKeepDays
   if (!(Number.isInteger(keep) && keep >= 0 && keep <= 36_500)) state.settings.archiveKeepDays = 30
+  // What the Library button's popover and the Media section show (DL-05, DL-11).
+  const recent: Record<string, unknown> = isRecord(state.settings.recentFiles) ? state.settings.recentFiles : {}
+  state.settings.recentFiles = {
+    downloads: typeof recent.downloads === 'boolean' ? recent.downloads : DEFAULT_SETTINGS.recentFiles.downloads,
+    screenshots:
+      typeof recent.screenshots === 'boolean' ? recent.screenshots : DEFAULT_SETTINGS.recentFiles.screenshots,
+  }
+  if (typeof state.settings.libraryScreenshots !== 'boolean') {
+    state.settings.libraryScreenshots = DEFAULT_SETTINGS.libraryScreenshots
+  }
   // spaceOrder must list exactly the existing spaces.
   state.spaceOrder = [...new Set(state.spaceOrder)].filter((id) => state.spaces[id])
   for (const id of Object.keys(state.spaces)) if (!state.spaceOrder.includes(id)) state.spaceOrder.push(id)
@@ -156,18 +166,21 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
 
 /**
  * Downloads the sidebar shows (DL-01, DL-03). One that was running or paused at quit comes back
- * interrupted, so it can be resumed or retried; finished, cancelled and private ones are dropped
- * (the downloads list keeps the rest), and so are malformed entries.
+ * interrupted, so it can be resumed or retried; one held back as possibly harmful stays held (DL-12);
+ * finished, cancelled and private ones are dropped (the downloads list keeps the rest), and so are
+ * malformed entries.
  */
 function normalizeDownloads(state: OrbitState): void {
   for (const [id, d] of Object.entries(state.downloads)) {
     const named = typeof d.url === 'string' && typeof d.filename === 'string' && typeof d.savePath === 'string'
-    if (!named || d.private === true || d.state === 'completed' || d.state === 'cancelled') {
+    // A complete download held back as possibly harmful (DL-12) waits for Keep or Discard.
+    const held = d.state === 'completed' && d.danger === 'file-type'
+    if (!named || d.private === true || (d.state === 'completed' && !held) || d.state === 'cancelled') {
       delete state.downloads[id]
       continue
     }
     d.id = id
-    d.state = 'interrupted'
+    if (!held) d.state = 'interrupted'
     d.receivedBytes = time(d.receivedBytes)
     d.totalBytes = time(d.totalBytes)
     d.startedAt = time(d.startedAt)

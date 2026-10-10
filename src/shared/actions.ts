@@ -274,6 +274,15 @@ export const ACTIONS: ActionDef[] = [
     mac: ['Cmd+Shift+L'],
     keywords: ['library', 'archive', 'downloads', 'media'],
   },
+  // Downloads (DL-14, KS-12): the Library's Downloads section on macOS, the downloads flyout elsewhere.
+  {
+    id: 'app.downloads',
+    title: 'Downloads',
+    category: 'App',
+    mac: ['Cmd+Shift+J', 'Cmd+Alt+L'],
+    other: ['Ctrl+J'],
+    keywords: ['open downloads', 'downloaded files', 'library'],
+  },
   // Every page visit of the profile, in the Library (AR-10).
   {
     id: 'app.history',

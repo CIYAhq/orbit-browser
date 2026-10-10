@@ -94,6 +94,8 @@ const actions = (): DownloadMenuActions => ({
   cancel: vi.fn(),
   remove: vi.fn(),
   delete: vi.fn(),
+  keep: vi.fn(),
+  discard: vi.fn(),
 })
 
 const labels = (d: DownloadEntry, platform = 'linux') =>
@@ -125,6 +127,17 @@ describe('[DL-04][DL-08][DL-15] a download menu fits its state', () => {
       'Remove from List',
     ])
     expect(items[0]?.enabled).toBe(false)
+  })
+
+  it('[DL-12] held back as possibly harmful: keep or discard', () => {
+    const a = actions()
+    const items = downloadMenu(download({ danger: 'file-type' }), a, 'linux')
+    expect(items.map((i) => i.label ?? '-')).toEqual(['Keep', 'Discard', '-', 'Copy Download Link'])
+    for (const item of items.slice(0, 2)) (item.click as () => void)()
+    expect(a.keep).toHaveBeenCalledOnce()
+    expect(a.discard).toHaveBeenCalledOnce()
+    // Its file gone meanwhile: like any missing file.
+    expect(labels(download({ danger: 'file-type', missing: true }))[0]).toBe('File Missing')
   })
 
   it('running: pause or resume, cancel; failed: resume when it can continue, else retry', () => {

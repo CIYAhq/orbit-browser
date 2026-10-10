@@ -1,4 +1,5 @@
 import { existsSync, linkSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
+import { access } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { DownloadItem, Session, WebContents } from 'electron'
@@ -10,6 +11,7 @@ import type { MainContext } from '../context'
 import { showsInline } from './file-kinds'
 import type { FileActions } from './files'
 import { freePath, PARTIAL_SUFFIX, safeFilename } from './names'
+import { isDangerous, markFromInternet } from './safety'
 import type { DownloadRecord, DownloadStore, ResumeInfo } from './store'
 
 /** How long a finished download stays on the sidebar's row (DL-03: about 3–5 s). */
@@ -42,8 +44,8 @@ interface PrivateEntry {
   session: Session
 }
 
-/** What the window a download started from is told (DL-02, DL-03). */
-export type DownloadFeedback = 'started' | 'done' | 'failed'
+/** What the window a download started from is told (DL-02, DL-03, DL-12). */
+export type DownloadFeedback = 'started' | 'done' | 'failed' | 'held'
 
 export interface DownloadManagerOptions {
   /** The folder a profile's downloads are saved to (DL-07). */
@@ -116,18 +118,42 @@ export class DownloadManager {
   }
 
   /** A profile's downloads, newest first: its list and its private windows' (DL-10, DL-16). */
-  entries(profileId: ProfileId, limit?: number): DownloadEntry[] {
+  records(profileId: ProfileId, limit?: number): DownloadRecord[] {
     const privates = [...this.privates.values()].map((p) => p.record).filter((r) => r.profileId === profileId)
     const all = [...privates, ...this.list.list(profileId)].sort((a, b) => b.startedAt - a.startedAt)
-    const some = typeof limit === 'number' ? all.slice(0, Math.max(0, limit)) : all
-    return some.map((r) => this.entry(r))
+    return typeof limit === 'number' ? all.slice(0, Math.max(0, limit)) : all
   }
 
-  /** A download as the UI shows it: the sidebar's live fields, whether its file is gone, whether it can continue. */
-  entry(record: DownloadRecord): DownloadEntry {
+  /**
+   * A profile's downloads as the UI shows them (DL-10), newest first. Whether finished files are
+   * still there is checked off the main thread, all at once.
+   */
+  async entries(profileId: ProfileId, limit?: number): Promise<DownloadEntry[]> {
+    const records = this.records(profileId, limit)
+    const there = await Promise.all(
+      records.map((r) =>
+        r.state === 'completed'
+          ? access(fileOf(r)).then(
+              () => true,
+              () => false,
+            )
+          : true,
+      ),
+    )
+    return records.map((r, i) => this.entry(r, there[i]))
+  }
+
+  /**
+   * A download as the UI shows it: the sidebar's live fields, whether its file is gone, whether it can
+   * continue. `exists`: whether its file is there, when already known.
+   */
+  entry(record: DownloadRecord, exists?: boolean): DownloadEntry {
     const { resume: _resume, ...stored } = record
     const out: DownloadEntry = { ...stored, ...this.ctx.store.state.downloads[record.id] }
-    if (out.state === 'completed' && !existsSync(out.savePath)) out.missing = true
+    if (out.state === 'completed') {
+      if (!(exists ?? existsSync(fileOf(out)))) out.missing = true
+      else if (!out.danger) out.fileUrl = pathToFileURL(out.savePath).href
+    }
     if (out.state === 'interrupted' && !this.live.has(record.id)) out.canResume = this.resumable(record)
     return out
   }
@@ -258,6 +284,41 @@ export class DownloadManager {
     ses.downloadURL(record.url)
   }
 
+  /**
+   * Keeps a download held back as possibly harmful (DL-12): it goes into place under its name (a free
+   * one if something took it meanwhile), marked as from the internet. False when it couldn't.
+   */
+  keep(id: string, windowId?: WindowId): boolean {
+    const record = this.get(id)
+    if (record?.state !== 'completed' || !record.danger) return false
+    const partial = partialPath(record)
+    let savePath = record.savePath
+    try {
+      if (this.taken(savePath)) savePath = freePath(dirname(savePath), basename(savePath), (p) => this.taken(p))
+      renameSync(partial, savePath)
+    } catch (err) {
+      console.error('[downloads] cannot keep a download:', err)
+      this.opts.notify(windowId, `Couldn't keep ${record.filename}`)
+      return false
+    }
+    void markFromInternet(savePath, record)
+    this.finish(id, record.profileId, {
+      danger: undefined,
+      savePath,
+      filename: basename(savePath),
+      endedAt: Date.now(),
+    })
+    return true
+  }
+
+  /** Discards a download held back as possibly harmful (DL-12): its file is deleted, its entry goes. */
+  discard(id: string): void {
+    const record = this.get(id)
+    if (record?.state !== 'completed' || !record.danger) return
+    removePartial(record)
+    this.forget(id, record.profileId)
+  }
+
   /** Takes a download off the list and the sidebar; a finished file stays, a partial one goes (DL-08). */
   remove(id: string): void {
     const record = this.get(id)
@@ -267,7 +328,7 @@ export class DownloadManager {
       // Running or held by the engine: stopping it deletes its partial file.
       live.removed = true
       live.item.cancel()
-    } else if (record.state !== 'completed') {
+    } else if (record.state !== 'completed' || record.danger) {
       removePartial(record)
     }
     this.forget(id, record.profileId)
@@ -281,7 +342,7 @@ export class DownloadManager {
   async trash(id: string, windowId?: WindowId): Promise<boolean> {
     const record = this.get(id)
     if (!record) return false
-    if (record.state === 'completed' && !this.live.has(id) && existsSync(record.savePath)) {
+    if (record.state === 'completed' && !record.danger && !this.live.has(id) && existsSync(record.savePath)) {
       try {
         await this.opts.files.trashItem(record.savePath)
       } catch (err) {
@@ -296,16 +357,26 @@ export class DownloadManager {
   }
 
   /**
-   * Clears a profile's list of everything not running ("Clear all", DL-08; clearing "Download
-   * history"); files stay, partial ones go. Returns how many entries went.
+   * Clears a profile's list of its finished downloads ("Clear all", DL-08; clearing "Download
+   * history"): complete, cancelled, and failed ones that can't continue. Running, paused, held
+   * (DL-12) and resumable ones stay. Files stay, partial ones of failed downloads go. Returns how
+   * many entries went.
    */
   clear(profileId: ProfileId): number {
-    const running = (id: string) => this.live.get(id)?.item.getState() === 'progressing'
+    const stays = (r: Download) => {
+      if (this.live.get(r.id)?.item.getState() === 'progressing') return true
+      if (r.state === 'progressing' || r.state === 'paused' || r.danger) return true
+      if (r.state !== 'interrupted') return false
+      const live = this.live.get(r.id)
+      if (live) return canContinue(live.item)
+      const record = this.list.get(r.id)
+      return !!record && this.resumable(record)
+    }
     const ids = new Set<string>()
-    for (const r of this.list.list(profileId)) if (!running(r.id)) ids.add(r.id)
-    for (const [id, p] of this.privates) if (p.record.profileId === profileId && !running(id)) ids.add(id)
+    for (const r of this.list.list(profileId)) if (!stays(r)) ids.add(r.id)
+    for (const [id, p] of this.privates) if (p.record.profileId === profileId && !stays(p.record)) ids.add(id)
     for (const d of Object.values(this.ctx.store.state.downloads)) {
-      if (d.profileId === profileId && !running(d.id)) ids.add(d.id)
+      if (d.profileId === profileId && !stays(d)) ids.add(d.id)
     }
     for (const id of ids) {
       const record = this.get(id)
@@ -353,14 +424,15 @@ export class DownloadManager {
   /** A finished download's file, when it is still there. */
   finishedFile(id: string): string | undefined {
     const record = this.get(id)
-    if (record?.state !== 'completed' || this.live.has(id)) return undefined
+    if (record?.state !== 'completed' || record.danger || this.live.has(id)) return undefined
     return existsSync(record.savePath) ? record.savePath : undefined
   }
 
   /** Shows the file in its folder (DL-04): the finished file, or the partial one while it downloads. */
   showInFolder(id: string): boolean {
     const live = this.live.get(id)
-    const path = live ? live.tempPath : this.finishedFile(id)
+    const record = live ? undefined : this.get(id)
+    const path = live ? live.tempPath : record?.danger ? partialPath(record) : this.finishedFile(id)
     if (!path || !existsSync(path)) return false
     this.opts.files.showItemInFolder(path)
     return true
@@ -552,8 +624,16 @@ export class DownloadManager {
   }
 
   /** A name is taken by a file on disk or by a download still running. */
+  /**
+   * A name in use: a file there, one a running download will get, or one a download waiting to
+   * continue (DL-15) will get when it does.
+   */
   private taken(path: string): boolean {
-    return this.reserved.has(path.toLowerCase()) || existsSync(path)
+    const key = path.toLowerCase()
+    if (this.reserved.has(key) || existsSync(path)) return true
+    return this.list
+      .list()
+      .some((r) => r.state !== 'completed' && r.state !== 'cancelled' && r.savePath.toLowerCase() === key)
   }
 
   private progress(live: Live, state: 'progressing' | 'interrupted'): void {
@@ -662,14 +742,32 @@ export class DownloadManager {
       this.opts.feedback(live.windowId, 'failed', { id: live.id, filename: basename(live.finalPath) })
       return
     }
+    const received = item.getReceivedBytes()
+    const total = item.getTotalBytes() || received
+    if (isDangerous(live.finalPath)) {
+      // Held back (DL-12): complete, but under its partial name until the user keeps or discards it.
+      this.finish(live.id, live.profileId, {
+        state,
+        endedAt,
+        danger: 'file-type',
+        receivedBytes: received,
+        totalBytes: total,
+        canResume: undefined,
+        resume: undefined,
+      })
+      this.opts.feedback(live.windowId, 'held', { id: live.id, filename: basename(live.finalPath) })
+      return
+    }
     const savePath = this.place(live)
+    const record = this.get(live.id)
+    if (record) void markFromInternet(savePath, record)
     this.finish(live.id, live.profileId, {
       state,
       endedAt,
       savePath,
       filename: basename(savePath),
-      receivedBytes: item.getReceivedBytes(),
-      totalBytes: item.getTotalBytes() || item.getReceivedBytes(),
+      receivedBytes: received,
+      totalBytes: total,
       canResume: undefined,
       resume: undefined,
     })
@@ -714,7 +812,8 @@ export class DownloadManager {
       return
     }
     this.save(id, profileId, fields)
-    if (fields.state === 'completed') {
+    const record = this.get(id)
+    if (record?.state === 'completed' && !record.danger) {
       const timer = setTimeout(() => {
         this.lingers.delete(id)
         if (this.ctx.store.state.downloads[id]?.state === 'completed') this.dismiss(id)
@@ -749,9 +848,14 @@ function isBlank(contents: WebContents): boolean {
   return (url === '' || url === 'about:blank') && !contents.navigationHistory.canGoBack()
 }
 
-/** Where a download not running here left its partial file. */
+/** Where a download not running here left its partial file (or a held one, DL-12, its file). */
 function partialPath(record: DownloadRecord): string {
   return record.resume?.tempPath ?? `${record.savePath}${PARTIAL_SUFFIX}`
+}
+
+/** Where a finished download's file is: in place, or under its partial name while held (DL-12). */
+function fileOf(record: DownloadRecord): string {
+  return record.danger ? partialPath(record) : record.savePath
 }
 
 /**

@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createServer, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
@@ -7,7 +7,21 @@ import { expect, type Page, test } from '@playwright/test'
 import type { MainContext } from '../../src/main/context'
 import type { DownloadEntry } from '../../src/shared/commands/downloads'
 import type { Download, OrbitState } from '../../src/shared/state'
-import { action, activeTabId, isMac, launchOrbit, listenInRange, type Orbit, run, state, tabPage } from './helpers'
+import {
+  action,
+  activeTabId,
+  FRAME_SLACK,
+  isMac,
+  launchOrbit,
+  listenInRange,
+  MOD,
+  type Orbit,
+  run,
+  state,
+  tabPage,
+  viewPage,
+} from './helpers'
+import { pressInTab } from './peek-helpers'
 
 /**
  * Downloads (DL). A local server sends the files, with an ETag and byte ranges (so a download can
@@ -670,18 +684,30 @@ test('[DL-08] Remove from List keeps the file; Delete File moves it to the Trash
   expect(readdirSync(trash).filter((f) => f.endsWith('trash.csv'))).toHaveLength(1)
 })
 
-test('[DL-08] Clear all empties the list but for running downloads; files stay, partial ones go', async () => {
+test('[DL-08] Clear all takes finished downloads off the list; running and resumable ones stay; files stay', async () => {
   const { page } = await openPage()
-  await startDownloads(page, '/file/done.csv?size=1000', `/held/running.bin?size=${MB}`, `/cut/failed.bin?size=${MB}`)
+  await startDownloads(
+    page,
+    '/file/done.csv?size=1000',
+    `/held/running.bin?size=${MB}`,
+    `/cut/failed.bin?size=${MB}&plain`,
+    `/cut/resumable.bin?size=${MB}`,
+  )
   await expect.poll(async () => (await named('done.csv'))?.state).toBe('completed')
   await expect.poll(async () => (await named('failed.bin'))?.state, { timeout: 15_000 }).toBe('interrupted')
+  await expect.poll(async () => (await named('resumable.bin'))?.state, { timeout: 15_000 }).toBe('interrupted')
   await expect.poll(async () => (await named('running.bin'))?.state).toBe('progressing')
+  expect((await entry('resumable.bin')).canResume).toBe(true)
+  expect((await entry('failed.bin')).canResume).toBe(false)
   expect(await run(orbit.app, 'downloads.clear', {})).toBe(2)
-  expect((await list()).map((d) => d.filename)).toEqual(['running.bin'])
+  expect((await list()).map((d) => d.filename).sort()).toEqual(['resumable.bin', 'running.bin'])
   expect(existsSync(join(folder(), 'done.csv'))).toBe(true)
   await expect.poll(() => existsSync(join(folder(), 'failed.bin.crdownload'))).toBe(false)
-  await expect(rows()).toHaveCount(1)
-  await expect(row('running.bin')).toBeVisible()
+  await expect(rows()).toHaveCount(2)
+  // The one kept for later still continues where it stopped.
+  server.repair('resumable.bin')
+  expect(await run(orbit.app, 'downloads.resume', { id: await idOf('resumable.bin') })).toBe(true)
+  await expect.poll(async () => (await named('resumable.bin'))?.state).toBe('completed')
   server.release('running.bin')
   await expect.poll(async () => (await named('running.bin'))?.state).toBe('completed')
 })
@@ -751,4 +777,489 @@ test("[DL-16] a private session's downloads are in no saved list, and leave when
   await run(orbit.app, 'tabs.close', { tabId })
   await expect.poll(async () => list(priv)).toEqual([])
   expect(existsSync(join(folder(), 'big.bin'))).toBe(true)
+})
+
+// ---- DL-05, DL-06, DL-09 to DL-12, DL-14: the Library's sections, recent files, the flyout, safety ----
+
+/** The Library's own view (`?view=library`), once it has been created. */
+async function libraryPage(): Promise<Page> {
+  const deadline = Date.now() + 20_000
+  while (Date.now() < deadline) {
+    const found = orbit.app.windows().find((p) => p.url().includes('view=library'))
+    if (found) return found
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  throw new Error('No library page')
+}
+
+/** Opens the Library on a section and waits until it shows it. */
+async function openLibrary(section: string): Promise<Page> {
+  await run(orbit.app, 'library.open', { section })
+  const lib = await libraryPage()
+  await expect(lib.getByTestId('library')).toHaveAttribute('data-open', 'true')
+  await expect(lib.getByTestId('library-section')).toHaveAttribute('data-section-id', section)
+  return lib
+}
+
+/** Downloads a picture the page draws (a real PNG, so it shows). */
+async function downloadPicture(page: Page, name: string): Promise<void> {
+  await page.evaluate(async (n) => {
+    const c = document.createElement('canvas')
+    c.width = 64
+    c.height = 48
+    const g = c.getContext('2d') as CanvasRenderingContext2D
+    g.fillStyle = '#3a7'
+    g.fillRect(0, 0, 64, 48)
+    const blob = await new Promise<Blob>((r) => c.toBlob((b) => r(b as Blob), 'image/png'))
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = n
+    document.body.append(a)
+    a.click()
+    a.remove()
+  }, name)
+  await expect.poll(async () => (await named(name))?.state).toBe('completed')
+}
+
+/** Downloads a short video the page records (a real WebM, so it plays). */
+async function downloadVideo(page: Page, name: string): Promise<void> {
+  await page.evaluate(async (n) => {
+    const c = document.createElement('canvas')
+    c.width = 64
+    c.height = 48
+    const g = c.getContext('2d') as CanvasRenderingContext2D
+    let hue = 0
+    const draw = setInterval(() => {
+      hue += 30
+      g.fillStyle = `hsl(${hue}, 70%, 50%)`
+      g.fillRect(0, 0, 64, 48)
+    }, 40)
+    const recorder = new MediaRecorder(c.captureStream(25), { mimeType: 'video/webm;codecs=vp8' })
+    const chunks: Blob[] = []
+    recorder.ondataavailable = (e) => chunks.push(e.data)
+    recorder.start(100)
+    await new Promise((r) => setTimeout(r, 800))
+    const stopped = new Promise((r) => {
+      recorder.onstop = r
+    })
+    recorder.stop()
+    await stopped
+    clearInterval(draw)
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob(chunks, { type: 'video/webm' }))
+    a.download = n
+    document.body.append(a)
+    a.click()
+    a.remove()
+  }, name)
+  await expect.poll(async () => (await named(name))?.state).toBe('completed')
+}
+
+/** The URL of the web contents that has the keyboard. */
+const focusedUrl = () => orbit.app.evaluate(({ webContents }) => webContents.getFocusedWebContents()?.getURL() ?? '')
+
+/**
+ * Presses keys where the keyboard is (the focused web contents), through the browser's input
+ * handling where Orbit's shortcuts listen. Returns the URL of the contents that got them.
+ */
+function pressFocused(accel: string): Promise<string> {
+  return orbit.app.evaluate(
+    ({ webContents }, [keys, mac]) => {
+      const contents = webContents.getFocusedWebContents()
+      if (!contents) return ''
+      const parts = keys.split('+')
+      const keyCode = parts.pop() as string
+      const modifiers = parts.map((m) => (m === 'Mod' ? (mac ? 'meta' : 'control') : m.toLowerCase())) as (
+        | 'shift'
+        | 'control'
+        | 'alt'
+        | 'meta'
+      )[]
+      contents.sendInputEvent({ type: 'keyDown', keyCode, modifiers })
+      contents.sendInputEvent({ type: 'keyUp', keyCode, modifiers })
+      return contents.getURL()
+    },
+    [accel, isMac] as const,
+  )
+}
+
+const libraryRow = (lib: Page, filename: string) => lib.locator(`[data-testid="library-download"][title="${filename}"]`)
+const dragged = () => hooks((h) => (h as unknown as { dragged: string[] }).dragged)
+/** The overlay of the (only) window: a Peek, a panel such as the downloads flyout, or none. */
+const overlayKind = async () => Object.values((await state(orbit.app)).windows)[0]?.overlay
+
+test("[DL-10] the Library's Downloads section lists the profile's downloads newest first by day, with size and site", async () => {
+  const { page } = await openPage()
+  await startDownloads(page, '/file/data.csv?size=4096', '/file/notes.zip?size=2048')
+  await expect.poll(async () => (await list()).filter((d) => d.state === 'completed').length).toBe(2)
+  await downloadPicture(page, 'photo.png')
+  await page.locator('#held').click()
+  await expect.poll(async () => (await named('big.bin'))?.receivedBytes).toBe(2 * MB)
+  const lib = await openLibrary('downloads')
+  await expect(lib.getByTestId('library-download')).toHaveCount(4)
+  await expect(lib.getByTestId('library-download-name')).toHaveText(['big.bin', 'photo.png', 'notes.zip', 'data.csv'])
+  await expect(lib.getByTestId('downloads-day')).toHaveText(['Today'])
+  await expect(libraryRow(lib, 'data.csv').getByTestId('library-download-status')).toHaveText('4 KB')
+  await expect(libraryRow(lib, 'data.csv')).toContainText(new URL(server.url('/')).host)
+  // A running one shows its progress, as it goes.
+  await expect(libraryRow(lib, 'big.bin').getByTestId('library-download-status')).toHaveText('2 MB of 4 MB')
+  server.release('big.bin')
+  await expect(libraryRow(lib, 'big.bin').getByTestId('library-download-status')).toHaveText('4 MB')
+  // A picture shows itself; others show their kind.
+  await expect
+    .poll(() =>
+      libraryRow(lib, 'photo.png')
+        .locator('img')
+        .evaluate((img: HTMLImageElement) => img.naturalWidth),
+    )
+    .toBe(64)
+  // Search filters by name; Esc clears it.
+  await lib.getByTestId('downloads-search').fill('ZIP')
+  await expect(lib.getByTestId('library-download-name')).toHaveText(['notes.zip'])
+  await lib.getByTestId('downloads-search').fill('nothing like it')
+  await expect(lib.getByTestId('downloads-empty')).toHaveText('No downloads match.')
+  await lib.getByTestId('downloads-search').press('Escape')
+  await expect(lib.getByTestId('library-download')).toHaveCount(4)
+  // Files downloaded elsewhere stay off the list: only what was downloaded through Orbit shows.
+  expect(readdirSync(folder()).sort()).toEqual(['big.bin', 'data.csv', 'notes.zip', 'photo.png'])
+})
+
+test('[DL-10] a row previews its file in a Peek over the Library; ⌘/Ctrl-click opens a tab; others open in their app', async () => {
+  const { page } = await openPage()
+  await downloadPicture(page, 'photo.png')
+  await page.locator('#attachment').click()
+  await expect.poll(async () => (await named('data.csv'))?.state).toBe('completed')
+  const lib = await openLibrary('downloads')
+  await libraryRow(lib, 'photo.png').click()
+  await expect.poll(async () => (await overlayKind())?.kind).toBe('peek')
+  const peekTab = ((await overlayKind()) as { tabId: string }).tabId
+  expect((await state(orbit.app)).tabs[peekTab]?.url).toBe(pathToFileURL(join(folder(), 'photo.png')).href)
+  // The Library stays under the Peek.
+  expect(((await run(orbit.app, 'library.status')) as { open: boolean }).open).toBe(true)
+  await run(orbit.app, 'peek.close')
+  await expect.poll(async () => (await overlayKind())?.kind).toBe('none')
+  // Not a file Orbit shows: its app opens it.
+  await libraryRow(lib, 'data.csv').click()
+  await expect.poll(() => hooks((h) => h.opened)).toEqual([join(folder(), 'data.csv')])
+  // ⌘/Ctrl-click: a new tab, and the Library makes way.
+  const tabs = await tabCount()
+  await libraryRow(lib, 'photo.png').click({ modifiers: [isMac ? 'Meta' : 'Control'] })
+  await expect.poll(tabCount).toBe(tabs + 1)
+  const active = (await state(orbit.app)).tabs[(await activeTabId(orbit.app)) as string]
+  expect(active?.url).toBe(pathToFileURL(join(folder(), 'photo.png')).href)
+  await expect(lib.getByTestId('library')).toHaveAttribute('data-open', 'false')
+})
+
+test('[DL-10][DL-06] rows drag out as the file, show in their folder, and their menu removes them', async () => {
+  const { page } = await openPage()
+  await page.locator('#attachment').click()
+  await expect.poll(async () => (await named('data.csv'))?.state).toBe('completed')
+  const lib = await openLibrary('downloads')
+  const r = libraryRow(lib, 'data.csv')
+  await r.dispatchEvent('dragstart')
+  await expect.poll(dragged).toEqual([join(folder(), 'data.csv')])
+  await r.hover()
+  await r.getByTestId('library-download-show').click()
+  await expect.poll(() => hooks((h) => h.shown)).toEqual([join(folder(), 'data.csv')])
+  await r.click({ button: 'right' })
+  await expect.poll(() => hooks((h) => h.menu())).toContain('Remove from List')
+  await clickMenu('Remove from List')
+  await expect(lib.getByTestId('library-download')).toHaveCount(0)
+  await expect(lib.getByTestId('downloads-empty')).toContainText('No downloads yet')
+  expect(existsSync(join(folder(), 'data.csv'))).toBe(true)
+  // The sidebar's row drags out too.
+  await startDownloads(page, '/file/second.csv?size=100')
+  await expect.poll(async () => (await named('second.csv'))?.state).toBe('completed')
+  await row('second.csv').getByTestId('download-open').dispatchEvent('dragstart')
+  await expect.poll(dragged).toEqual([join(folder(), 'data.csv'), join(folder(), 'second.csv')])
+})
+
+test('[DL-08][DL-10] Clear all in the Library leaves the running download; another profile has its own list', async () => {
+  const { page } = await openPage()
+  await page.locator('#attachment').click()
+  await expect.poll(async () => (await named('data.csv'))?.state).toBe('completed')
+  await page.locator('#held').click()
+  await expect.poll(async () => (await named('big.bin'))?.state).toBe('progressing')
+  const lib = await openLibrary('downloads')
+  await expect(lib.getByTestId('library-download')).toHaveCount(2)
+  await lib.getByTestId('downloads-clear').click()
+  await expect(lib.getByTestId('library-download-name')).toHaveText(['big.bin'])
+  await expect(lib.getByTestId('library-toast')).toContainText('Cleared 1 download')
+  // With a second profile: a switcher, and that profile's (empty) list.
+  expect(await lib.getByTestId('downloads-profile').count()).toBe(0)
+  await run(orbit.app, 'profiles.create', { name: 'Work' })
+  await expect(lib.getByTestId('downloads-profile')).toBeVisible()
+  const work = Object.values((await state(orbit.app)).profiles).find((p) => p.name === 'Work')?.id as string
+  await lib.getByTestId('downloads-profile').selectOption(work)
+  await expect(lib.getByTestId('downloads-empty')).toContainText('No downloads yet')
+  await lib.getByTestId('downloads-profile').selectOption('p-default')
+  await expect(lib.getByTestId('library-download-name')).toHaveText(['big.bin'])
+  server.release('big.bin')
+})
+
+test('[DL-09] right after a download the Library opens on Downloads; an open Library stays where it is', async () => {
+  const { page } = await openPage()
+  await run(orbit.app, 'library.setSection', { section: 'history' })
+  await page.locator('#attachment').click()
+  await expect
+    .poll(async () => ((await run(orbit.app, 'library.status')) as { section: string }).section)
+    .toBe('downloads')
+  await run(orbit.app, 'library.open', {})
+  const lib = await libraryPage()
+  await expect(lib.getByTestId('library-section')).toHaveAttribute('data-section-id', 'downloads')
+  await expect(libraryRow(lib, 'data.csv')).toBeVisible()
+  // Open on another section: a new download leaves it there.
+  await lib.locator('[data-testid="library-nav-item"][data-section-id="archive"]').click()
+  await startDownloads(page, '/file/more.csv?size=100')
+  await expect.poll(async () => (await named('more.csv'))?.state).toBe('completed')
+  await expect(lib.getByTestId('library-section')).toHaveAttribute('data-section-id', 'archive')
+  // The sections: Media just before Downloads.
+  const ids = await lib
+    .getByTestId('library-nav-item')
+    .evaluateAll((els) => els.map((e) => e.getAttribute('data-section-id')))
+  expect(ids.indexOf('media')).toBe(ids.indexOf('downloads') - 1)
+})
+
+test('[DL-11] the Media section shows downloaded pictures and videos; videos play silently; a tile previews', async () => {
+  const { page } = await openPage()
+  await downloadPicture(page, 'photo.png')
+  await downloadVideo(page, 'clip.webm')
+  await page.locator('#attachment').click()
+  await expect.poll(async () => (await named('data.csv'))?.state).toBe('completed')
+  const lib = await openLibrary('media')
+  // Newest first; the spreadsheet is no picture.
+  await expect
+    .poll(() => lib.getByTestId('media-tile').evaluateAll((els) => els.map((e) => e.getAttribute('title'))))
+    .toEqual(['clip.webm', 'photo.png'])
+  const video = lib.getByTestId('media-video')
+  expect(await video.evaluate((v: HTMLVideoElement) => v.muted)).toBe(true)
+  await expect.poll(() => video.evaluate((v: HTMLVideoElement) => !v.paused && v.currentTime > 0)).toBe(true)
+  await expect.poll(() => lib.getByTestId('media-image').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(64)
+  // Dragging a tile drags the file.
+  await lib.locator('[data-testid="media-tile"][title="photo.png"]').dispatchEvent('dragstart')
+  await expect.poll(dragged).toEqual([join(folder(), 'photo.png')])
+  // A click: a larger preview, over the Library.
+  await lib.locator('[data-testid="media-tile"][title="photo.png"]').click()
+  await expect.poll(async () => (await overlayKind())?.kind).toBe('peek')
+})
+
+test('[DL-11] with reduced motion, video tiles stay still', async () => {
+  const { page } = await openPage()
+  await downloadVideo(page, 'clip.webm')
+  const lib = await openLibrary('downloads')
+  await lib.emulateMedia({ reducedMotion: 'reduce' })
+  await lib.locator('[data-testid="library-nav-item"][data-section-id="media"]').click()
+  await expect(lib.getByTestId('library-section')).toHaveAttribute('data-section-id', 'media')
+  const video = lib.getByTestId('media-video')
+  await expect(video).toBeVisible()
+  await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState >= 1)).toBe(true)
+  expect(await video.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true)
+})
+
+test("[DL-05][DL-11] the Library button's menu adds the OS screenshots to the recent files and to Media", async () => {
+  const { page } = await openPage()
+  await downloadPicture(page, 'photo.png')
+  const shots = join(orbit.userData, 'Screenshots')
+  mkdirSync(shots, { recursive: true })
+  const png = readFileSync(join(folder(), 'photo.png'))
+  writeFileSync(join(shots, 'Screenshot 2026-10-10 at 09.41.00.png'), png)
+  writeFileSync(join(shots, 'holiday.png'), png)
+  const recent = async () => ((await run(orbit.app, 'downloads.recent', {})) as { name: string }[]).map((f) => f.name)
+  expect(await recent()).toEqual(['photo.png'])
+  await orbit.shell.getByTestId('library-button').click({ button: 'right' })
+  await expect
+    .poll(() => hooks((h) => h.menu()))
+    .toEqual(['Recent Files', 'Downloads', 'Screenshots', 'Show Screenshots in Library'])
+  await clickMenu('Screenshots')
+  expect((await state(orbit.app)).settings.recentFiles).toEqual({ downloads: true, screenshots: true })
+  // The newest first: the screenshot was written after the download.
+  await expect.poll(recent).toEqual(['Screenshot 2026-10-10 at 09.41.00.png', 'photo.png'])
+  // Media: screenshots only once chosen there.
+  const lib = await openLibrary('media')
+  await expect(lib.getByTestId('media-tile')).toHaveCount(1)
+  await run(orbit.app, 'downloads.libraryMenu', {})
+  await clickMenu('Show Screenshots in Library')
+  await expect(lib.getByTestId('media-tile')).toHaveCount(2)
+  await expect(lib.locator('[data-testid="media-tile"][data-source="screenshot"]')).toHaveAttribute(
+    'title',
+    'Screenshot 2026-10-10 at 09.41.00.png',
+  )
+  // Its menu shows the file; dragging it drags the file.
+  await lib.locator('[data-testid="media-tile"][data-source="screenshot"]').dispatchEvent('dragstart')
+  await expect.poll(dragged).toEqual([join(shots, 'Screenshot 2026-10-10 at 09.41.00.png')])
+  await lib.locator('[data-testid="media-tile"][data-source="screenshot"]').click({ button: 'right' })
+  await expect.poll(() => hooks((h) => h.menu())).toEqual(['Open', SHOW_IN_FOLDER, 'Copy File'])
+  await clickMenu(SHOW_IN_FOLDER)
+  await expect.poll(() => hooks((h) => h.shown)).toEqual([join(shots, 'Screenshot 2026-10-10 at 09.41.00.png')])
+  // Downloads off: the popover lists screenshots only; the choice is kept.
+  await run(orbit.app, 'downloads.libraryMenu', {})
+  await clickMenu('Downloads')
+  await expect.poll(recent).toEqual(['Screenshot 2026-10-10 at 09.41.00.png'])
+})
+
+test('[DL-05] hovering the Library button shows the recent files; one opens on click; they go when the pointer leaves', async () => {
+  const { page } = await openPage()
+  await page.locator('#attachment').click()
+  await expect.poll(async () => (await named('data.csv'))?.state).toBe('completed')
+  await downloadPicture(page, 'photo.png')
+  const button = orbit.shell.getByTestId('library-button')
+  await button.hover()
+  const popover = orbit.shell.getByTestId('recent-files')
+  await expect(popover).toBeVisible()
+  await expect(popover.getByTestId('recent-file')).toHaveCount(2)
+  await expect(popover.getByTestId('recent-file').first()).toHaveAttribute('title', 'photo.png')
+  await expect
+    .poll(() =>
+      popover
+        .getByTestId('recent-file')
+        .first()
+        .locator('img')
+        .evaluate((i: HTMLImageElement) => i.naturalWidth),
+    )
+    .toBe(64)
+  // Inside the sidebar, above the button.
+  const box = await popover.boundingBox()
+  const bar = await button.boundingBox()
+  const sidebar = await orbit.shell.getByTestId('sidebar').boundingBox()
+  expect(box && bar && sidebar).toBeTruthy()
+  if (box && bar && sidebar) {
+    expect(box.y + box.height).toBeLessThanOrEqual(bar.y + FRAME_SLACK)
+    expect(box.x + box.width).toBeLessThanOrEqual(sidebar.x + sidebar.width + FRAME_SLACK)
+  }
+  // Onto the popover and off it: it goes after a moment.
+  await popover.getByTestId('recent-file').first().hover()
+  await expect(popover).toBeVisible()
+  await orbit.shell.mouse.move(sidebar ? sidebar.x + sidebar.width / 2 : 100, 40)
+  await expect(popover).toBeHidden()
+  // A click opens the file (one Orbit doesn't show opens in its app).
+  await button.hover()
+  await popover.locator('[data-testid="recent-file"][title="data.csv"]').click()
+  await expect.poll(() => hooks((h) => h.opened)).toEqual([join(folder(), 'data.csv')])
+  await expect(popover).toBeHidden()
+  // Dragging one drags the file.
+  await orbit.shell.mouse.move(sidebar ? sidebar.x + sidebar.width / 2 : 100, 40)
+  await button.hover()
+  await popover.locator('[data-testid="recent-file"][title="photo.png"]').dispatchEvent('dragstart')
+  await expect.poll(dragged).toEqual([join(folder(), 'photo.png')])
+})
+
+test('[DL-14] the Downloads keys: the flyout beside the sidebar on Windows and Linux, the Library on macOS', async () => {
+  const { tabId, page } = await openPage()
+  await page.locator('#attachment').click()
+  await expect.poll(async () => (await named('data.csv'))?.state).toBe('completed')
+  await page.locator('#held').click()
+  await expect.poll(async () => (await named('big.bin'))?.receivedBytes).toBe(2 * MB)
+  // Pressed in the page, as a person would (Playwright's own key presses come in below Orbit's keys).
+  if (isMac) {
+    await pressInTab(orbit.app, tabId, 'Mod+Alt+L')
+    const lib = await libraryPage()
+    await expect(lib.getByTestId('library-section')).toHaveAttribute('data-section-id', 'downloads')
+    await run(orbit.app, 'library.close')
+    await pressInTab(orbit.app, tabId, 'Shift+Mod+J')
+    await expect(lib.getByTestId('library')).toHaveAttribute('data-open', 'true')
+    server.release('big.bin')
+    return
+  }
+  await pressInTab(orbit.app, tabId, 'Mod+J')
+  const overlay = await viewPage(orbit.app, 'overlay')
+  const flyout = overlay.getByTestId('downloads-flyout')
+  await expect(flyout).toBeVisible()
+  await expect(flyout.getByTestId('flyout-download-name')).toHaveText(['big.bin', 'data.csv'])
+  await expect(flyout.locator('[data-testid="flyout-download"][title="big.bin"]')).toContainText('2 MB of 4 MB')
+  // Beside the sidebar, at the top.
+  const win = (await state(orbit.app)).windows[Object.keys((await state(orbit.app)).windows)[0] as string]
+  const box = await flyout.boundingBox()
+  expect(box?.x).toBeGreaterThanOrEqual((win?.sidebar.width ?? 0) - FRAME_SLACK)
+  expect(box?.y).toBeLessThan(40)
+  // Live progress.
+  server.release('big.bin')
+  await expect(flyout.locator('[data-testid="flyout-download"][title="big.bin"]')).toContainText('4 MB')
+  // Show in folder, drag out; Esc closes it.
+  await flyout.locator('[data-testid="flyout-download"][title="data.csv"]').hover()
+  await flyout.locator('[data-testid="flyout-download"][title="data.csv"]').getByTestId('flyout-download-show').click()
+  await expect.poll(() => hooks((h) => h.shown)).toEqual([join(folder(), 'data.csv')])
+  await overlay.keyboard.press('Escape')
+  await expect.poll(async () => (await overlayKind())?.kind).toBe('none')
+  // Again: a click opens a file, and the flyout makes way.
+  await pressInTab(orbit.app, tabId, 'Mod+J')
+  await expect(flyout).toBeVisible()
+  await flyout.locator('[data-testid="flyout-download"][title="data.csv"]').click()
+  await expect.poll(() => hooks((h) => h.opened)).toEqual([join(folder(), 'data.csv')])
+  await expect.poll(async () => (await overlayKind())?.kind).toBe('none')
+  // Ctrl+J again (the flyout has the keyboard) closes it.
+  await pressInTab(orbit.app, tabId, 'Mod+J')
+  await expect(flyout).toBeVisible()
+  await expect.poll(focusedUrl).toContain('view=overlay')
+  expect(await pressFocused('Mod+J')).toContain('view=overlay')
+  await expect.poll(async () => (await overlayKind())?.kind).toBe('none')
+  await expect(flyout).toHaveCount(0)
+  // Show All: the Library's Downloads section.
+  await pressInTab(orbit.app, tabId, 'Mod+J')
+  await flyout.getByTestId('flyout-show-all').click()
+  const lib = await libraryPage()
+  await expect(lib.getByTestId('library-section')).toHaveAttribute('data-section-id', 'downloads')
+  await expect(lib.getByTestId('library')).toHaveAttribute('data-open', 'true')
+  await expect.poll(async () => (await overlayKind())?.kind).toBe('none')
+  // On macOS the keys open the Library's Downloads section (tried here as if on a Mac).
+  await run(orbit.app, 'library.setSection', { section: 'archive' })
+  await run(orbit.app, 'library.close')
+  await orbit.app.evaluate(() => {
+    ;(globalThis as unknown as { __orbitDownloads: { platform?: string } }).__orbitDownloads.platform = 'darwin'
+  })
+  await action(orbit.app, 'app.downloads')
+  await expect(lib.getByTestId('library')).toHaveAttribute('data-open', 'true')
+  await expect(lib.getByTestId('library-section')).toHaveAttribute('data-section-id', 'downloads')
+})
+
+test('[DL-14] the command bar has a "Downloads" action, with its keys', async () => {
+  await orbit.shell.keyboard.press(`${MOD}+T`)
+  const overlay = await viewPage(orbit.app, 'overlay')
+  const input = overlay.getByTestId('command-input')
+  await expect(input).toBeFocused()
+  await input.fill('downloads')
+  const result = overlay.locator('[data-testid="command-result"][data-id="action:app.downloads"]')
+  await expect(result.getByTestId('command-result-title')).toHaveText('Downloads')
+  await expect(result.getByTestId('command-shortcut')).toHaveText(isMac ? '⇧⌘J' : 'Ctrl+J')
+  await result.click()
+  if (isMac) {
+    const lib = await libraryPage()
+    await expect(lib.getByTestId('library')).toHaveAttribute('data-open', 'true')
+    await expect(lib.getByTestId('library-section')).toHaveAttribute('data-section-id', 'downloads')
+    return
+  }
+  await expect(overlay.getByTestId('downloads-flyout')).toBeVisible()
+  await expect(overlay.getByTestId('flyout-empty')).toHaveText('No downloads yet')
+  expect((await overlayKind())?.kind).toBe('panel')
+})
+
+test('[DL-12] a program waits in its row until kept or discarded; only a kept one is put in place', async () => {
+  const { page } = await openPage()
+  await startDownloads(page, '/file/setup.exe?size=2048')
+  await expect.poll(async () => (await named('setup.exe'))?.danger).toBe('file-type')
+  expect((await entry('setup.exe')).state).toBe('completed')
+  expect(existsSync(join(folder(), 'setup.exe'))).toBe(false)
+  expect(sizeOf(join(folder(), 'setup.exe.crdownload'))).toBe(2048)
+  const r = row('setup.exe')
+  await expect(r.getByTestId('download-meta')).toHaveText('Can harm your computer')
+  expect(await menuOf(await idOf('setup.exe'))).toEqual(['Keep', 'Discard', 'Copy Download Link'])
+  // It waits through a restart.
+  const { userData } = orbit
+  await orbit.app.close()
+  orbit = await launchOrbit({ userData })
+  await expect(row('setup.exe').getByTestId('download-keep')).toBeVisible()
+  await row('setup.exe').getByTestId('download-keep').click()
+  await expect.poll(() => sizeOf(join(folder(), 'setup.exe'))).toBe(2048)
+  expect(existsSync(join(folder(), 'setup.exe.crdownload'))).toBe(false)
+  expect((await entry('setup.exe')).danger).toBeUndefined()
+  await expect(row('setup.exe').getByTestId('download-meta')).toHaveText(/^Done/)
+  // Discard deletes it.
+  const again = await openPage()
+  await startDownloads(again.page, '/file/tool.exe?size=1024')
+  await expect.poll(async () => (await named('tool.exe'))?.danger).toBe('file-type')
+  const lib = await openLibrary('downloads')
+  await expect(libraryRow(lib, 'tool.exe').getByTestId('library-download-status')).toHaveText('Can harm your computer')
+  await libraryRow(lib, 'tool.exe').getByTestId('library-download-discard').click()
+  await expect.poll(async () => named('tool.exe')).toBeUndefined()
+  expect(readdirSync(folder()).filter((f) => f.startsWith('tool'))).toEqual([])
+  await expect(row('tool.exe')).toHaveCount(0)
 })

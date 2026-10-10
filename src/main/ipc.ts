@@ -11,7 +11,7 @@ export function registerIpc(ctx: MainContext): void {
   ipcMain.handle('orbit:invoke', async (event, name: CommandName, args: unknown) => {
     if (!ctx.windows.isUi(event.sender)) throw new Error('Forbidden')
     const windowId = ctx.windows.windowIdFor(event.sender)
-    return ctx.commands.run(name, args as never, { windowId })
+    return ctx.commands.run(name, args as never, { windowId, sender: event.sender })
   })
 
   ipcMain.on('orbit:send', (event, name: EventName, payload: OrbitEvents[EventName]) => {

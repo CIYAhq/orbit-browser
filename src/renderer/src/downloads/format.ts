@@ -66,3 +66,48 @@ export function splitName(name: string, tailLength = 10): { head: string; tail: 
   if (cut <= 1) return { head: '', tail: name }
   return { head: stem.slice(0, cut), tail: stem.slice(cut) + ext }
 }
+
+/** What the Library and the flyout say about a download (DL-10, DL-12, DL-14). */
+export function statusText(d: {
+  state: 'progressing' | 'paused' | 'completed' | 'cancelled' | 'interrupted'
+  receivedBytes: number
+  totalBytes: number
+  canResume?: boolean
+  missing?: boolean
+  danger?: string
+}): string {
+  switch (d.state) {
+    case 'completed':
+      if (d.missing) return 'File missing'
+      return d.danger ? 'Can harm your computer' : formatBytes(d.totalBytes || d.receivedBytes)
+    case 'progressing':
+      return formatProgress(d.receivedBytes, d.totalBytes)
+    case 'paused':
+      return `Paused · ${formatProgress(d.receivedBytes, d.totalBytes)}`
+    case 'interrupted':
+      return d.canResume ? `Failed · ${formatProgress(d.receivedBytes, d.totalBytes)}` : 'Failed'
+    case 'cancelled':
+      return 'Cancelled'
+  }
+}
+
+/** Downloads grouped by local day, newest first: [start of the day (ms), how many that day]. */
+export function byDay(times: readonly number[]): [number, number][] {
+  const days: [number, number][] = []
+  for (const at of times) {
+    const d = new Date(at)
+    d.setHours(0, 0, 0, 0)
+    const start = d.getTime()
+    const last = days[days.length - 1]
+    if (last && last[0] === start) last[1]++
+    else days.push([start, 1])
+  }
+  return days
+}
+
+/** Whether a file name has every word of a search (any case, any order). */
+export function nameMatches(name: string, search: string): boolean {
+  const words = search.toLowerCase().split(/\s+/).filter(Boolean)
+  const lower = name.toLowerCase()
+  return words.every((w) => lower.includes(w))
+}

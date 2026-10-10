@@ -1,4 +1,4 @@
-import { ArrowDownToLine, Check, CircleAlert, Pause, Play, RotateCw, X } from 'lucide-react'
+import { ArrowDownToLine, Check, CircleAlert, Pause, Play, RotateCw, ShieldAlert, X } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { memo, type ReactNode, useEffect, useRef, useState } from 'react'
 import type { DownloadStarted } from '../../../shared/commands/downloads'
@@ -6,6 +6,7 @@ import type { Download, OrbitState, ProfileId, WindowState } from '../../../shar
 import { invoke } from '../api'
 import { QUICK_EASE, SNAPPY } from '../shell/sidebar/motion-tokens'
 import { useOrbit, useOrbitShallow } from '../store'
+import { dragOut } from './file-ui'
 import { flyToLibrary } from './flight'
 import { formatBytes, formatProgress, formatTimeLeft, percentDone, secondsLeft, smoothSpeed, splitName } from './format'
 import './downloads.css'
@@ -28,8 +29,9 @@ function shownIds(s: OrbitState, profileId: ProfileId | undefined): string[] {
 /**
  * The sidebar's downloads row (DL-03), just above the bottom bar: the newest download with its
  * progress, bytes and time left, and a "+N" for the others; hovering (or clicking "+N") lists them
- * all. A finished download shows "done" for a few seconds and opens on click; a failed one offers
- * Resume or Retry. Right-click: the download's menu (DL-04, DL-08, DL-15). With no downloads it
+ * all. A finished download shows "done" for a few seconds, opens on click and drags out as the file
+ * (DL-06); a failed one offers Resume or Retry; one held back as possibly harmful waits for Keep or
+ * Discard (DL-12). Right-click: the download's menu (DL-04, DL-08, DL-15). With no downloads it
  * takes no room at all. Also plays the start animation (DL-02).
  */
 export const DownloadsTray = memo(function DownloadsTray({ win }: { win: WindowState }) {
@@ -132,21 +134,26 @@ const DownloadRow = memo(function DownloadRow({
   const speed = useSmoothedSpeed(d)
   if (!d) return null
   const { state } = d
-  const done = state === 'completed'
+  const held = state === 'completed' && !!d.danger
+  const done = state === 'completed' && !held
   const failed = state === 'interrupted'
   const pct = percentDone(d.receivedBytes, d.totalBytes)
   const left = state === 'progressing' ? secondsLeft(d.receivedBytes, d.totalBytes, speed) : undefined
-  const meta = done
-    ? `Done · ${formatBytes(d.totalBytes || d.receivedBytes)}`
-    : state === 'paused'
-      ? `Paused · ${formatProgress(d.receivedBytes, d.totalBytes)}`
-      : failed
-        ? d.canResume
-          ? `Failed · ${formatProgress(d.receivedBytes, d.totalBytes)}`
-          : 'Failed'
-        : `${formatProgress(d.receivedBytes, d.totalBytes)}${left !== undefined ? ` · ${formatTimeLeft(left)}` : ''}`
+  const meta = held
+    ? 'Can harm your computer'
+    : done
+      ? `Done · ${formatBytes(d.totalBytes || d.receivedBytes)}`
+      : state === 'paused'
+        ? `Paused · ${formatProgress(d.receivedBytes, d.totalBytes)}`
+        : failed
+          ? d.canResume
+            ? `Failed · ${formatProgress(d.receivedBytes, d.totalBytes)}`
+            : 'Failed'
+          : `${formatProgress(d.receivedBytes, d.totalBytes)}${left !== undefined ? ` · ${formatTimeLeft(left)}` : ''}`
   const name = splitName(d.filename)
-  const icon = done ? (
+  const icon = held ? (
+    <ShieldAlert size={14} />
+  ) : done ? (
     <Check size={14} />
   ) : failed ? (
     <CircleAlert size={14} />
@@ -171,7 +178,7 @@ const DownloadRow = memo(function DownloadRow({
   )
   return (
     <div
-      className={`dl-row is-${state}`}
+      className={`dl-row is-${state}${held ? ' is-held' : ''}`}
       data-testid="download-row"
       data-id={id}
       data-state={state}
@@ -187,6 +194,8 @@ const DownloadRow = memo(function DownloadRow({
           className="dl-row__main"
           data-testid="download-open"
           aria-label={`Open ${d.filename}`}
+          draggable
+          onDragStart={(e) => void dragOut(e, id)}
           onClick={() => void invoke('downloads.open', { id })}
         >
           {body}
@@ -206,6 +215,26 @@ const DownloadRow = memo(function DownloadRow({
           >
             +{more}
           </button>
+        )}
+        {held && (
+          <>
+            <button
+              type="button"
+              className="dl-row__choice"
+              data-testid="download-keep"
+              onClick={() => void invoke('downloads.keep', { id })}
+            >
+              Keep
+            </button>
+            <button
+              type="button"
+              className="dl-row__choice"
+              data-testid="download-discard"
+              onClick={() => void invoke('downloads.discard', { id })}
+            >
+              Discard
+            </button>
+          </>
         )}
         {state === 'paused' && (
           <RowButton label="Resume" testId="download-resume" onClick={() => void invoke('downloads.resume', { id })}>
@@ -241,7 +270,7 @@ const DownloadRow = memo(function DownloadRow({
           </RowButton>
         )}
       </div>
-      {!done && (
+      {!done && !held && (
         <div
           className={`dl-row__bar${pct === undefined ? ' is-indeterminate' : ''}`}
           data-testid="download-progress"

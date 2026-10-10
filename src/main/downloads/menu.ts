@@ -13,6 +13,8 @@ export interface DownloadMenuActions {
   cancel: () => void
   remove: () => void
   delete: () => void
+  keep: () => void
+  discard: () => void
 }
 
 /**
@@ -20,7 +22,8 @@ export interface DownloadMenuActions {
  * - running: Pause or Resume, Cancel;
  * - failed: Resume when it can continue, else Retry;
  * - finished: Open, Show in Finder (Show in Folder), Copy File, Delete File (to the Trash);
- *   a file moved or deleted since shows "File Missing" and Download Again.
+ *   a file moved or deleted since shows "File Missing" and Download Again;
+ * - held back as possibly harmful (DL-12): Keep, Discard.
  * Every one copies its download link; a stopped one can be removed from the list.
  */
 export function downloadMenu(
@@ -51,6 +54,9 @@ export function downloadMenu(
     case 'cancelled':
       return [{ label: 'Retry', click: a.retry }, separator, copyLink, separator, remove]
     case 'completed':
+      if (d.danger && !d.missing) {
+        return [{ label: 'Keep', click: a.keep }, { label: 'Discard', click: a.discard }, separator, copyLink]
+      }
       if (d.missing) {
         return [
           { label: 'File Missing', enabled: false },
@@ -72,4 +78,21 @@ export function downloadMenu(
         { label: 'Delete File', click: a.delete },
       ]
   }
+}
+
+/** What a screenshot's menu can do (DL-05, DL-11). */
+export interface FileMenuActions {
+  open: () => void
+  showInFolder: () => void
+  copyFile: () => void
+}
+
+/** The menu of a screenshot in the Library button's popover or the Media section. */
+export function fileMenu(a: FileMenuActions, platform: string = process.platform): MenuItemConstructorOptions[] {
+  return [
+    { label: 'Open', click: a.open },
+    { label: platform === 'darwin' ? 'Show in Finder' : 'Show in Folder', click: a.showInFolder },
+    { type: 'separator' },
+    { label: 'Copy File', click: a.copyFile },
+  ]
 }

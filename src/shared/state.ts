@@ -303,6 +303,10 @@ export interface Settings {
   librarySection: string
   /** Archive entries older than this many days are deleted (AR-08). 0 = kept forever. */
   archiveKeepDays: number
+  /** What the Library button's popover of recent files lists (DL-05): downloads, OS screenshots. */
+  recentFiles: { downloads: boolean; screenshots: boolean }
+  /** The OS's screenshots show in the Library's Media section (DL-11). */
+  libraryScreenshots: boolean
 }
 
 /** "URL contains …" or "URL is exactly …" → a Space (ST-09 link routing). */
@@ -368,6 +372,11 @@ export interface Download {
   pageUrl?: string
   /** Downloaded in a private window: never written to disk (DL-16). */
   private?: boolean
+  /**
+   * Held back as a file that can harm the computer (DL-12): complete, but kept under its partial
+   * name until the user keeps it (it goes into place) or discards it.
+   */
+  danger?: 'file-type'
 }
 
 /** Per-site customisation ("Tweak"): CSS/JS applied to matching hosts. */

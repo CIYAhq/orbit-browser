@@ -1,16 +1,19 @@
 import { mkdirSync, renameSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { app, type BrowserWindow, clipboard, Menu, type MenuItemConstructorOptions, type Session } from 'electron'
+import { DOWNLOADS_FLYOUT_PANEL } from '../../shared/commands/downloads'
 import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
-import type { ProfileId, TabId, WindowId } from '../../shared/state'
+import type { ProfileId, Settings, TabId, WindowId } from '../../shared/state'
 import { sectionOf } from '../../shared/tree'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
 import { activeTabOf } from '../windows'
 import { copyFileToClipboard, type FileActions, systemFiles } from './files'
+import { DownloadsLibrary, dragIcon, isScreenshotId } from './library'
 import { type DownloadFeedback, DownloadManager } from './manager'
-import { downloadMenu } from './menu'
+import { downloadMenu, fileMenu } from './menu'
 import { askToQuit, guardQuit, quitQuestion } from './quit'
+import { readMacScreenshotLocation, type ScreenshotFolder, screenshotFolders } from './screenshots'
 import { DownloadStore } from './store'
 
 /**
@@ -22,6 +25,9 @@ import { DownloadStore } from './store'
  *   start another app.
  * - `trash`: the test runs' Trash (a folder in userData); `trashFails` makes moving there fail.
  * - `menu`, `clickMenu`: the last download menu's labels, and clicking one (the menu never shows).
+ * - `dragged`: files dragged out of Orbit (DL-06); test runs never start the OS's drag.
+ * - `screenshots`: the folder test runs take the OS's screenshots from (DL-05, DL-11).
+ * - `platform`: the OS the Downloads keys act as on (DL-14), to try macOS's on another.
  */
 export interface DownloadTestHooks {
   quitAnswer?: 'quit' | 'cancel'
@@ -34,11 +40,15 @@ export interface DownloadTestHooks {
   trashFails?: boolean
   menu: () => string[]
   clickMenu: (label: string) => boolean
+  dragged: string[]
+  screenshots: string
+  platform?: NodeJS.Platform
 }
 
 /**
- * Downloads (DL-01 to DL-04, DL-08, DL-15, DL-16): every profile session's downloads go to that
- * profile's download folder; the sidebar shows them while they run.
+ * Downloads (DL-01 to DL-06, DL-08, DL-10 to DL-12, DL-14 to DL-16): every profile session's
+ * downloads go to that profile's download folder; the sidebar shows them while they run, the
+ * Library's Downloads and Media sections afterwards.
  * Main-process API for other features: `registerDownloads(ctx)` returns the DownloadManager.
  */
 export function registerDownloads(ctx: MainContext): DownloadManager {
@@ -49,6 +59,13 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
   const folder = (_profileId?: ProfileId) => defaultFolder
 
   let lastMenu: MenuItemConstructorOptions[] = []
+  /** Shows a menu at the pointer, over a window (test runs keep it for the hooks instead). */
+  const popup = (template: MenuItemConstructorOptions[], windowId: WindowId | undefined) => {
+    lastMenu = template
+    if (ctx.e2e) return
+    const win = windowId ? windows.get(windowId) : undefined
+    Menu.buildFromTemplate(template).popup(win ? { window: win } : undefined)
+  }
   const hooks: DownloadTestHooks = {
     asked: [],
     folder: (profileId) => folder(profileId ?? DEFAULT_PROFILE_ID),
@@ -62,6 +79,8 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
       ;(item?.click as (() => void) | undefined)?.()
       return !!item?.click
     },
+    dragged: [],
+    screenshots: process.env.ORBIT_SCREENSHOTS_DIR || join(ctx.paths.userData, 'Screenshots'),
   }
   const files: FileActions = ctx.e2e
     ? {
@@ -100,8 +119,17 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
         ? `Downloading ${d.filename}`
         : event === 'done'
           ? `Downloaded ${d.filename}`
-          : `Couldn't download ${d.filename}`
+          : event === 'held'
+            ? `${d.filename} can harm your computer: keep or discard it in Downloads`
+            : `Couldn't download ${d.filename}`
     ctx.toast(target, message)
+  }
+  // Right after a download, the Library opens on Downloads (DL-09).
+  const libraryOnDownloads = async (windowId: WindowId | undefined) => {
+    const target = mainWindow(windowId)
+    if (!target || !commands.has('library.setSection')) return
+    const status = await commands.run('library.status', {}, { windowId: target })
+    if (!status.open) await commands.run('library.setSection', { section: 'downloads' }, { windowId: target })
   }
 
   const manager: DownloadManager = new DownloadManager(
@@ -109,7 +137,10 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
     new DownloadStore(join(ctx.paths.userData, 'downloads.json')),
     {
       folder,
-      feedback,
+      feedback: (windowId, event, d) => {
+        feedback(windowId, event, d)
+        if (event === 'started') void libraryOnDownloads(windowId).catch(() => {})
+      },
       notify: (windowId, message) => ctx.toast(mainWindow(windowId), message),
       closeBlankTab: (tabId) => closeBlankTab(ctx, tabId),
       changed: (profileId) => windows.broadcast('orbit:downloads.changed', { profileId }),
@@ -132,8 +163,29 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
     const win = windowId ? store.state.windows[windowId] : undefined
     return (win && store.state.spaces[win.spaceId]?.profileId) || DEFAULT_PROFILE_ID
   }
+  // The OS's screenshots (DL-05, DL-11): test runs read a folder of their own.
+  const screenshotPlaces = async (): Promise<ScreenshotFolder[]> => {
+    if (ctx.e2e || process.env.ORBIT_SCREENSHOTS_DIR) return [{ path: hooks.screenshots, all: false }]
+    const paths = { home: app.getPath('home'), desktop: app.getPath('desktop'), pictures: app.getPath('pictures') }
+    const macLocation = process.platform === 'darwin' ? await readMacScreenshotLocation() : undefined
+    return screenshotFolders(process.platform, paths, macLocation)
+  }
+  const library = new DownloadsLibrary(ctx, manager, {
+    files,
+    screenshotFolders: screenshotPlaces,
+    startDrag: (sender, path) => {
+      if (ctx.e2e) {
+        hooks.dragged.push(path)
+        return
+      }
+      sender.startDrag({ file: path, icon: dragIcon() })
+    },
+    mainWindow,
+    notify: (windowId, message) => ctx.toast(mainWindow(windowId), message),
+  })
+
   const copyFile = async (id: string): Promise<boolean> => {
-    const path = manager.finishedFile(id)
+    const path = library.pathOf(id)
     if (!path) return false
     await copyFileToClipboard(path)
     return true
@@ -147,10 +199,16 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
   commands.register('downloads.cancel', ({ id }) => manager.cancel(id))
   commands.register('downloads.dismiss', ({ id }) => manager.dismiss(id))
   commands.register('downloads.active', () => manager.activeCount())
-  commands.register('downloads.open', ({ id }, c) => manager.open(id, c.windowId))
-  commands.register('downloads.showInFolder', ({ id }) => manager.showInFolder(id))
+  commands.register('downloads.open', ({ id }, c) => library.open(id, c.windowId))
+  commands.register('downloads.preview', ({ id, tab }, c) => library.preview(id, tab === true, c.windowId))
+  commands.register('downloads.showInFolder', ({ id }) => library.showInFolder(id))
   commands.register('downloads.copyFile', ({ id }) => copyFile(id))
   commands.register('downloads.copyLink', ({ id }) => copyLink(id))
+  commands.register('downloads.drag', ({ id }, c) => library.drag(id, c.sender))
+  commands.register('downloads.keep', ({ id }, c) => manager.keep(id, c.windowId))
+  commands.register('downloads.discard', ({ id }) => manager.discard(id))
+  commands.register('downloads.media', ({ profileId, limit }, c) => library.media(profileOf(profileId, c), limit))
+  commands.register('downloads.recent', ({ limit }, c) => library.recent(profileOf(undefined, c), limit))
   commands.register('downloads.remove', ({ id }) => manager.remove(id))
   commands.register('downloads.delete', ({ id }, c) => manager.trash(id, c.windowId))
   commands.register('downloads.clear', ({ profileId }, c) => manager.clear(profileOf(profileId, c)))
@@ -158,10 +216,22 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
   commands.register('downloads.resume', ({ id }) => manager.resume(id))
   commands.register('downloads.retry', ({ id }) => manager.retry(id))
   commands.register('downloads.menu', ({ id }, c) => {
+    const windowId = c.windowId
+    if (isScreenshotId(id)) {
+      if (!library.pathOf(id)) return
+      popup(
+        fileMenu({
+          open: () => void library.open(id, windowId),
+          showInFolder: () => void library.showInFolder(id),
+          copyFile: () => void copyFile(id),
+        }),
+        windowId,
+      )
+      return
+    }
     const record = manager.get(id)
     if (!record) return
-    const windowId = c.windowId
-    lastMenu = downloadMenu(manager.entry(record), {
+    const menu = downloadMenu(manager.entry(record), {
       open: () => void manager.open(id, windowId),
       showInFolder: () => void manager.showInFolder(id),
       copyFile: () => void copyFile(id),
@@ -175,10 +245,76 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
       cancel: () => manager.cancel(id),
       remove: () => manager.remove(id),
       delete: () => void manager.trash(id, windowId),
+      keep: () => void manager.keep(id, windowId),
+      discard: () => manager.discard(id),
     })
-    if (ctx.e2e) return
-    const win = windowId ? windows.get(windowId) : undefined
-    Menu.buildFromTemplate(lastMenu).popup(win ? { window: win } : undefined)
+    popup(menu, windowId)
+  })
+
+  // The Library button's right-click menu (DL-05, DL-11): what its popover and the Media section show.
+  const setSettings = (change: (s: Settings) => void) => store.update((d) => change(d.settings))
+  commands.register('downloads.libraryMenu', (_args, c) => {
+    const { recentFiles, libraryScreenshots } = store.state.settings
+    popup(
+      [
+        { label: 'Recent Files', enabled: false },
+        {
+          label: 'Downloads',
+          type: 'checkbox',
+          checked: recentFiles.downloads,
+          click: () =>
+            setSettings((s) => {
+              s.recentFiles = { ...s.recentFiles, downloads: !recentFiles.downloads }
+            }),
+        },
+        {
+          label: 'Screenshots',
+          type: 'checkbox',
+          checked: recentFiles.screenshots,
+          click: () =>
+            setSettings((s) => {
+              s.recentFiles = { ...s.recentFiles, screenshots: !recentFiles.screenshots }
+            }),
+        },
+        { type: 'separator' },
+        {
+          label: 'Show Screenshots in Library',
+          type: 'checkbox',
+          checked: libraryScreenshots,
+          click: () =>
+            setSettings((s) => {
+              s.libraryScreenshots = !libraryScreenshots
+            }),
+        },
+      ],
+      c.windowId,
+    )
+  })
+
+  // The downloads flyout (DL-14, Windows and Linux): over the window's top left; again closes it.
+  const toggleFlyout = (windowId: WindowId | undefined) => {
+    const target = mainWindow(windowId)
+    if (!target) return
+    const overlay = store.state.windows[target]?.overlay
+    if (overlay?.kind === 'panel' && overlay.panel === DOWNLOADS_FLYOUT_PANEL) {
+      void commands.run('overlay.close', {}, { windowId: target })
+      return
+    }
+    void commands.run(
+      'overlay.open',
+      { overlay: { kind: 'panel', panel: DOWNLOADS_FLYOUT_PANEL } },
+      { windowId: target },
+    )
+  }
+  commands.register('downloads.flyout', (_args, c) => toggleFlyout(c.windowId))
+  // ⌘⇧J / ⌥⌘L on macOS: the Library's Downloads section; Ctrl+J elsewhere: the flyout (DL-14).
+  ctx.actions.register('app.downloads', (c) => {
+    if ((hooks.platform ?? process.platform) !== 'darwin') {
+      toggleFlyout(c.windowId)
+      return
+    }
+    const target = mainWindow(c.windowId)
+    if (target) void commands.run('library.open', { section: 'downloads' }, { windowId: target })
   })
 
   // Quitting with downloads in progress asks first (DL-01).
