@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { type ElectronApplication, expect, test } from '@playwright/test'
+import type { BackupInfo } from '../../src/shared/commands/archive'
 import type { OrbitState } from '../../src/shared/state'
 import { action, isMac, launchOrbit, MOD, type Orbit, state } from './helpers'
 import {
@@ -405,4 +406,86 @@ test('[NV-11][NV-18] a launch with --private-window opens its links in a private
     )
   await expect.poll(history).toEqual([page(`${token}Kept`)])
   expect(Object.values((await state(app)).windows).map((w) => w.kind)).toEqual(['main', 'private'])
+})
+
+/** Each listed Space's pinned and Today items: the sidebar normal windows show. */
+const sidebarOf = (s: OrbitState) =>
+  Object.fromEntries(s.spaceOrder.map((id) => [id, { pinned: s.spaces[id]?.pinned, today: s.spaces[id]?.today }]))
+
+test('[NV-11][AR-11] Restore Data leaves an open private window on its own Space with its tab, and closing that window afterwards deletes no other Space (archive review M2)', async () => {
+  const { app } = orbit
+  const main = (await windowList(app))[0] as WindowInfo
+  const a = main.spaceId
+  // Space A, first in the list: a pinned tab and a Today tab. The window then goes to Space B.
+  const pinned = await openTab(app, page('PinnedA'))
+  await cmd(app, 'tabs.pin', { tabId: pinned })
+  const today = await openTab(app, page('TodayA'))
+  const b = await cmd<string>(app, 'spaces.create', { name: 'Bravo' })
+  await expect.poll(async () => (await windowList(app))[0]?.spaceId).toBe(b)
+  const inB = await openTab(app, page('InB'))
+  const backup = await cmd<BackupInfo>(app, 'backups.take')
+  // Since the backup: a tab in Space B (the restore archives it) and a private window with a tab.
+  const late = await openTab(app, page('LateB'))
+  const priv = await openPrivate(app)
+  const secret = await openTabIn(app, priv.id, page('SecretRestore'))
+  const listed = (await state(app)).spaceOrder
+
+  // Restore Data, from the main window.
+  expect(await cmdIn(app, main.id, 'backups.restore', { id: backup.id })).toMatchObject({ restored: true })
+  await expect.poll(async () => (await state(app)).tabs[late]).toBeUndefined()
+  const s = await state(app)
+  // The private window still shows its own Space and tab, and the tab's page is still there.
+  expect(s.windows[priv.id]).toMatchObject({ kind: 'private', spaceId: priv.spaceId })
+  expect(s.windows[priv.id]?.activeTab[priv.spaceId]).toBe(secret)
+  expect(s.spaces[priv.spaceId]?.today).toEqual([secret])
+  expect(s.tabs[secret]).toMatchObject({ url: page('SecretRestore'), spaceId: priv.spaceId })
+  await waitLoaded(app, secret, page('SecretRestore'))
+  // The main window is still on Space B, and the Space list is as it was.
+  expect(s.windows[main.id]?.spaceId).toBe(b)
+  expect(s.spaceOrder).toEqual(listed)
+  const restored = sidebarOf(s)
+  expect(restored[a]?.pinned).toContain(pinned)
+  expect(restored[a]?.today).toContain(today)
+  expect(restored[b]?.today).toContain(inB)
+
+  // Closing the private window takes its Space and tab along, and nothing else.
+  await closeWindow(app, priv.id)
+  await expect.poll(async () => privateLeft(await state(app))).toEqual(NOTHING_PRIVATE)
+  const after = await state(app)
+  expect(Object.keys(after.spaces).toSorted()).toEqual(listed.toSorted())
+  expect(sidebarOf(after)).toEqual(restored)
+  for (const id of [pinned, today, inB]) expect(after.tabs[id]).toBeDefined()
+  expect(after.windows[main.id]?.spaceId).toBe(b)
+})
+
+test('[NV-11][AR-09] a normal window’s Recently Closed menus leave out pages closed in a private window, which still reopens its own (archive review M3)', async () => {
+  const { app } = orbit
+  const main = (await windowList(app))[0] as WindowInfo
+  const normal = await openTab(app, page('ClosedNormal'))
+  await cmd(app, 'tabs.close', { tabId: normal })
+  const priv = await openPrivate(app)
+  const secret = await openTabIn(app, priv.id, page('SecretClosedPrivate'))
+  await cmdIn(app, priv.id, 'tabs.close', { tabId: secret })
+  await expect.poll(async () => (await state(app)).tabs[secret]).toBeUndefined()
+  // The Library's Recently Closed menu in the main window, while the private window is open.
+  const menu = async () => {
+    await cmdIn(app, main.id, 'archive.recentlyClosedMenu', {})
+    return cmd<string[]>(app, 'archive.testMenu', {})
+  }
+  expect(await menu()).toEqual(['ClosedNormal', 'Reopen Closed Tab'])
+  // File → Recently Closed (macOS has the only app menu).
+  const appMenu = () => cmd<string[]>(app, 'archive.testMenu', { appMenu: true })
+  if (isMac) await expect.poll(appMenu).toEqual(['ClosedNormal'])
+  else expect(await appMenu()).toEqual([])
+  // The private window still brings its own closed tab back.
+  expect(await cmdIn(app, priv.id, 'tabs.reopenClosed', {})).toBe(secret)
+  await expect.poll(async () => (await state(app)).spaces[priv.spaceId]?.today).toEqual([secret])
+  await cmdIn(app, priv.id, 'tabs.close', { tabId: secret })
+  await expect.poll(async () => (await state(app)).tabs[secret]).toBeUndefined()
+  expect(await menu()).toEqual(['ClosedNormal', 'Reopen Closed Tab'])
+  // Once the private window is gone too.
+  await closeWindow(app, priv.id)
+  await expect.poll(async () => privateLeft(await state(app))).toEqual(NOTHING_PRIVATE)
+  expect(await menu()).toEqual(['ClosedNormal', 'Reopen Closed Tab'])
+  if (isMac) await expect.poll(appMenu).toEqual(['ClosedNormal'])
 })
