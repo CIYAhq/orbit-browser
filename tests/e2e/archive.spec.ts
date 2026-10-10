@@ -882,7 +882,7 @@ test('[AR-11] Restore Data lists sidebar backups; the one from before a folder w
   await lib.getByTestId('backup-confirm-ok').click()
   const toast = lib.getByTestId('library-toast').filter({ hasText: 'Sidebar restored from today at' })
   await expect(toast).toBeVisible()
-  // Under the pointer the toast stays (FL-22) while the checks below run.
+  // Under the pointer the toast stays while the checks below run.
   await toast.hover()
 
   // The folder is back in the pinned section with its tabs, which left the Archive; the tab
