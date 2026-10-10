@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -11,6 +11,7 @@ import {
   scheduleBackups,
 } from '../../src/main/archive/backups'
 import { sidebarRestored } from '../../src/main/archive/inbox'
+import { RestoreData } from '../../src/main/archive/restore-data'
 import { ArchiveSync } from '../../src/main/archive/service'
 import { buildSnapshot, restoreSidebar, sidebarHash } from '../../src/main/archive/snapshot'
 import { ArchiveStore } from '../../src/main/archive/store'
@@ -398,5 +399,42 @@ describe('Sidebar backups (AR-11)', () => {
     })
     vi.advanceTimersByTime(BACKUP_EVERY_MS * 2)
     expect(taken).toHaveLength(2)
+  })
+})
+
+describe('Restore Data (AR-11)', () => {
+  /** A backups folder of its own. */
+  const backupsDir = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orbit-backups-'))
+    dirs.push(dir)
+    return dir
+  }
+
+  it('[AR-11] when the sidebar can’t be backed up first, nothing changes and the result says why (review M4)', async () => {
+    const w = await world()
+    const dir = backupsDir()
+    const backups = new BackupStore(dir)
+    const earlier = await backups.take(w.store.state, Date.now() - 5 * MIN)
+    // Since then: a Space with a tab.
+    const added = createSpace('Added', DEFAULT_PROFILE_ID)
+    w.store.update((d) => {
+      d.spaces[added.id] = added
+      d.spaceOrder.push(added.id)
+    })
+    w.tab(added.id, 'https://added.test/')
+    const before = w.store.state
+    const steps = w.ops.undo.size
+    // The disk takes no new file (full, say). Permissions don't hold back root: then the write fails outright.
+    if (process.getuid?.() === 0) backups.take = () => Promise.reject(new Error('EACCES: permission denied'))
+    else chmodSync(dir, 0o555)
+    try {
+      const result = await new RestoreData(w.ctx, w.archive, backups).restore(earlier.id)
+      expect(result).toEqual({ restored: false, reason: 'backup-failed' })
+    } finally {
+      chmodSync(dir, 0o755)
+    }
+    expect(w.store.state).toBe(before)
+    expect(w.destroyed).toEqual([])
+    expect(w.ops.undo.size).toBe(steps)
   })
 })

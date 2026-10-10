@@ -70,7 +70,11 @@ export function BackupsSection({ show }: LibrarySectionProps) {
     try {
       const result = await invoke('backups.restore', { id: b.id })
       if (!result.restored) {
-        libraryToast('This backup can’t be restored')
+        libraryToast(
+          result.reason === 'backup-failed'
+            ? 'Couldn’t back up the sidebar first; nothing was changed'
+            : 'This backup can’t be restored',
+        )
         return
       }
       const undoId = result.undoId

@@ -136,7 +136,13 @@ export class BackupStore {
       const info: StoredBackup = { id, at: now, spaces, tabs, hash }
       await writeAtomic(join(this.dir, `${id}.json`), JSON.stringify(snap))
       const keep = backupsToKeep([info, ...list], now)
-      for (const b of list) if (!keep.has(b.id)) await rm(join(this.dir, `${b.id}.json`), { force: true })
+      for (const b of list) {
+        if (keep.has(b.id)) continue
+        // Housekeeping: a file that can't go now goes with a later backup; this one is written.
+        await rm(join(this.dir, `${b.id}.json`), { force: true }).catch((err) =>
+          console.error('[backups] could not remove an old backup', err),
+        )
+      }
       this.onChange?.()
       return info
     })

@@ -117,8 +117,13 @@ export interface BackupInfo {
 
 /** What Restore Data did (AR-11). */
 export interface BackupRestoreResult {
-  /** The sidebar is back as the backup has it (false: no such backup, or it could not be read). */
+  /** The sidebar is back as the backup has it. */
   restored: boolean
+  /**
+   * Why nothing changed: there is no such backup or it can't be read (`unreadable`), or the sidebar
+   * as it is couldn't be backed up first (`backup-failed`).
+   */
+  reason?: 'unreadable' | 'backup-failed'
   /** The backup of the sidebar taken just before: restoring it undoes this restore. */
   undoId?: string
   /** Tabs that came back, and tabs that went to the Archive. */
