@@ -670,7 +670,7 @@ test('[ST-12] Privacy: Orbit says what it sends (nothing); Secure DNS can be tur
   await expect.poll(async () => (await state(orbit.app)).settings.secureDns).toBe('automatic')
 })
 
-test('[ST-12][KS-12] Clear browsing data: ⌘⇧⌫ opens it; history and site data go, the cache stays when unticked', async () => {
+test('[ST-12][KS-12] Clear browsing data: ⌘⇧⌫ opens it; site data and cache start unticked unless All time; ticked site data goes', async () => {
   const url = fx.url('/page/Cookie')
   await run(orbit.app, 'tabs.create', { url })
   const site = await tabPage(orbit.app, '/page/Cookie')
@@ -701,8 +701,24 @@ test('[ST-12][KS-12] Clear browsing data: ⌘⇧⌫ opens it; history and site d
   const dialog = page.getByTestId('clear-data-dialog')
   await expect(dialog).toBeVisible()
   await expect(dialog).toContainText('From the profile “Default”.')
-  await expect(page.getByTestId('clear-data-range')).toHaveValue('hour')
-  await page.getByTestId('clear-data-cache').click()
+  // Site data and the cache go from all time whatever the range, so a short range leaves them
+  // unticked: a quick clear doesn't sign you out of every site. They follow the range until ticked.
+  const range = page.getByTestId('clear-data-range')
+  const box = (kind: string) => page.getByTestId(`clear-data-${kind}`).locator('input')
+  await expect(range).toHaveValue('hour')
+  await expect(box('history')).toBeChecked()
+  await expect(box('site-data')).not.toBeChecked()
+  await expect(box('cache')).not.toBeChecked()
+  await range.selectOption('all')
+  await expect(box('site-data')).toBeChecked()
+  await expect(box('cache')).toBeChecked()
+  await range.selectOption('hour')
+  await expect(box('site-data')).not.toBeChecked()
+  await expect(box('cache')).not.toBeChecked()
+  await page.getByTestId('clear-data-site-data').click()
+  await range.selectOption('day')
+  await expect(box('site-data')).toBeChecked()
+  await expect(box('cache')).not.toBeChecked()
   await page.getByTestId('clear-data-confirm').click()
   await expect(dialog).toHaveCount(0)
   await expect(page.getByTestId('clear-data-status')).toHaveText('Deleted from Default')

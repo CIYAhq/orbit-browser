@@ -119,10 +119,18 @@ function ClearDataDialog({
   )
   const name = useProfileName(profileId)
   const [range, setRange] = useState<ClearDataRange>('hour')
-  const [kinds, setKinds] = useState<Record<ClearDataKind, boolean>>({ history: true, siteData: true, cache: true })
+  // What was ticked or unticked here; the rest follow the range. Site data and the cache go from
+  // all time whatever the range, so they start ticked only for All time: a quick clear of the last
+  // hour doesn't sign you out of every site.
+  const [picked, setPicked] = useState<Partial<Record<ClearDataKind, boolean>>>({})
+  const kinds: Record<ClearDataKind, boolean> = {
+    history: picked.history ?? true,
+    siteData: picked.siteData ?? range === 'all',
+    cache: picked.cache ?? range === 'all',
+  }
   const [busy, setBusy] = useState(false)
   const chosen = (Object.keys(kinds) as ClearDataKind[]).filter((k) => kinds[k])
-  const toggle = (kind: ClearDataKind) => (next: boolean) => setKinds((k) => ({ ...k, [kind]: next }))
+  const toggle = (kind: ClearDataKind) => (next: boolean) => setPicked((p) => ({ ...p, [kind]: next }))
   return (
     <Dialog
       title="Clear browsing data"
