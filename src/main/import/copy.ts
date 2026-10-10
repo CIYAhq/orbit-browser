@@ -17,6 +17,13 @@ let root: string | undefined
 let cleared: Promise<void> = Promise.resolve()
 /** The scratch folders being read now. */
 const inUse = new Set<Scratch>()
+/** How a file is copied in: e2e tests hold a copy open with it, to quit while one is (`setCopyStep`). */
+let copyStep: CopyFile = copyFile
+
+/** Tests (e2e): every copy from now on is made with `step`. */
+export function setCopyStep(step: CopyFile): void {
+  copyStep = step
+}
 
 /** Startup: copies go in `dir`, and whatever a quit or a crash left there is removed first (D58). */
 export function setScratchFolder(dir: string): void {
@@ -112,7 +119,7 @@ export async function withScratch<T>(fn: (scratch: Scratch) => Promise<T>, copy?
   await cleared
   const parent = root ?? tmpdir()
   if (root) await mkdir(root, { recursive: true })
-  const scratch = new Scratch(await mkdtemp(join(parent, root ? 'read-' : 'orbit-import-')), copy)
+  const scratch = new Scratch(await mkdtemp(join(parent, root ? 'read-' : 'orbit-import-')), copy ?? copyStep)
   inUse.add(scratch)
   try {
     return await fn(scratch)

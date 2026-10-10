@@ -1,5 +1,12 @@
 import type { ClipboardEvent as ReactClipboardEvent, DragEvent as ReactDragEvent } from 'react'
-import { MAX_FILE_BYTES, type ParsedFile, parseLinkList, TOO_LARGE } from '../../../shared/commands/import'
+import {
+  type ImportOpening,
+  MAX_FILE_BYTES,
+  PASTED_LIST,
+  type ParsedFile,
+  parseLinkList,
+  TOO_LARGE,
+} from '../../../shared/commands/import'
 import { pageMayOpen } from '../../../shared/link-routing'
 import { engineForSpace, parseInput } from '../../../shared/url'
 import { invoke } from '../api'
@@ -30,7 +37,7 @@ export function importDroppedFile(e: ReactDragEvent, text: string, spaceId: stri
       parsed =
         file.size > MAX_FILE_BYTES
           ? { kind: 'error', name: file.name, message: TOO_LARGE }
-          : await invoke('import.parseFile', { name: file.name, text: await file.text() })
+          : await invoke('import.parseFile', { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) })
     } catch {
       parsed = { kind: 'error', name: file.name, message: 'Orbit couldn’t read this file' }
     }
@@ -52,8 +59,9 @@ export function importDroppedFile(e: ReactDragEvent, text: string, spaceId: stri
 /**
  * ⌘V (Ctrl+V) on the sidebar, outside a text field, with a list of two or more links on the
  * clipboard offers to import them as a pinned folder (IM-12): the import window opens at "Paste a
- * list of links" with them filled in. One link, or other text, is left alone. Returns whether the
- * paste was taken.
+ * list of links" with them filled in. One link, or other text, is left alone. A list over the file
+ * cap isn't sent: the import window says it's too large, as it does of a file (D62 (5)). Returns
+ * whether the paste was taken.
  */
 export function importPastedLinks(e: ReactClipboardEvent): boolean {
   const el = e.target instanceof Element ? e.target : null
@@ -62,7 +70,12 @@ export function importPastedLinks(e: ReactClipboardEvent): boolean {
   // Read here, in the browser window: only the start, and only until two links are found (D58).
   if (!text || parseLinkList(text.slice(0, PASTE_LOOK), 2).links.length < 2) return false
   e.preventDefault()
-  void invoke('import.open', { start: { kind: 'links', text } })
+  // As UTF-8: main passes the bytes on to the reader, never making text of them (D62 (5)).
+  const start: ImportOpening =
+    text.length > MAX_FILE_BYTES
+      ? { kind: 'file', file: { kind: 'error', name: PASTED_LIST, message: TOO_LARGE } }
+      : { kind: 'links', bytes: new TextEncoder().encode(text) }
+  void invoke('import.open', { start })
   return true
 }
 

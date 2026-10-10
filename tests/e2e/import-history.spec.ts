@@ -236,6 +236,30 @@ test('[IM-07][IM-14] a quit while history is read leaves no copy of it: not in t
   expect(readdirSync(temp).filter((f) => f.startsWith('orbit-import-'))).toEqual([])
 })
 
+test('[IM-14] a quit while a copy is still being made removes it: the quit clears every copy open (D58)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orbit-import-e2e-'))
+  scratch.push(dir)
+  writeChromium(join(dir, 'chrome'), [{ folder: 'Default', name: 'Small', history: manyPages(100) }])
+  const temp = join(dir, 'temp')
+  mkdirSync(temp)
+  orbit = await launchImport({ places: [{ browser: 'chrome', dir: join(dir, 'chrome') }], env: { TMPDIR: temp } })
+  const { app, userData } = orbit
+  const page = await importHistory(app, 'chrome')
+  // From now on each copy is made but its step never finishes, so the read never reaches the end where it removes its
+  // own copies: only the quit can.
+  await app.evaluate(() =>
+    (globalThis as unknown as { __orbitImport: { holdCopying: () => void } }).__orbitImport.holdCopying(),
+  )
+  await page.getByTestId('import-next').click()
+  await expect
+    .poll(() => copiesIn(temp, userData).map((f) => basename(f)), { intervals: [10], timeout: 30_000 })
+    .toEqual(['0-History'])
+  expect(((await run(app, 'import.status', {})) as ImportJob).phase).toBe('reading')
+  await app.close()
+  orbit = undefined
+  expect(copiesIn(temp, userData)).toEqual([])
+})
+
 test('[IM-14] copies a crash left in user data are removed when Orbit starts (D58)', async () => {
   const userData = mkdtempSync(join(tmpdir(), 'orbit-e2e-'))
   scratch.push(userData)

@@ -1,4 +1,5 @@
-import { stat, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { copyFile, stat, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { app, BrowserWindow, dialog } from 'electron'
 import { ACTIONS_BY_ID } from '../../shared/actions'
@@ -8,8 +9,11 @@ import {
   type ImportProgressItem,
   type ImportSkip,
   type ImportSource,
+  type ImportStart,
   type Inspection,
+  isLongList,
   MAX_FILE_BYTES,
+  PASTED_LIST,
   type ParsedFile,
   type ProfileContents,
   TOO_LARGE,
@@ -20,9 +24,9 @@ import type { MainContext } from '../context'
 import type { HistoryService } from '../history'
 import type { CallContext } from '../registry'
 import { type FoundSource, findSources, inspectProfile, publicSource } from './browsers'
-import { removeScratch, setScratchFolder, withScratch } from './copy'
+import { removeScratch, setCopyStep, setScratchFolder, withScratch } from './copy'
 import { pinnedExport } from './export'
-import { cleanTree, FILE_FOLDER_NAME, LINKS_FOLDER_NAME, OVER_LIMIT } from './files'
+import { cleanTree, FILE_FOLDER_NAME, type FileRead, LINKS_FOLDER_NAME, OVER_LIMIT } from './files'
 import { historyTask } from './history'
 import { ImportJobs, type Task } from './jobs'
 import { countBookmarks, NO_BOOKMARKS, writeBookmarksHtml } from './netscape'
@@ -47,26 +51,74 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
       holdAddingAt: (at: number) => {
         jobs.testPause = (made) => (made >= at ? new Promise<void>(() => {}) : undefined)
       },
+      /** Each copy of another browser's file is made, then its step never finishes: only the quit can remove it. */
+      holdCopying: () => {
+        setCopyStep(async (from, to) => {
+          await copyFile(from, to)
+          await new Promise<void>(() => {})
+        })
+      },
     }
     ;(globalThis as unknown as { __orbitImport: typeof hooks }).__orbitImport = hooks
   }
-  const win = new ImportWindow(ctx, () => {
-    const windowId = win.browserWindow()
-    const spaceId = windowId ? store.state.windows[windowId]?.spaceId : store.state.spaceOrder[0]
-    return {
-      ...(spaceId ? { spaceId, profileId: store.state.spaces[spaceId]?.profileId } : {}),
-      job: jobs.status(),
+  // A list of links too long to edit (D62 (5)): main holds its bytes for the import window, which shows only its count
+  // and first lines. One at a time: the newest replaces it; an import started from it, or the window closing, lets it go.
+  // Main's thread never makes text of it: the bytes come from the window and go to the reader, moved, not copied.
+  let held: { id: string; bytes: Uint8Array } | undefined
+  /** A file or a list, read: a long list is held here, and the window gets its count and first lines (D62 (5)). */
+  const present = (read: FileRead): ParsedFile => {
+    if (read.kind !== 'links') return read
+    const count = read.info.count
+    if (!read.bytes) return { kind: 'links', name: read.name, count, text: read.text ?? '' }
+    held = { id: randomUUID(), bytes: read.bytes }
+    return { kind: 'links', name: read.name, count, held: { id: held.id, count, preview: read.info.preview } }
+  }
+  /** A pasted list's bytes: over the cap it says so (D62 (5)); else counted once, in the reader, and held when long. */
+  const checkedList = async (name: string, bytes: unknown): Promise<ParsedFile> => {
+    if (!(bytes instanceof Uint8Array)) return { kind: 'error', name, message: UNREADABLE }
+    if (bytes.byteLength > MAX_FILE_BYTES) return { kind: 'error', name, message: TOO_LARGE }
+    return present(await readFileOffMain({ op: 'list', name, bytes }))
+  }
+  /** Where the import window is asked to start (a paste or a drop on the sidebar), checked: a pasted list is read. */
+  const checkStart = async (start: unknown): Promise<ImportStart | undefined> => {
+    const s = start as Partial<{ kind: string; bytes: unknown; file: unknown }> | undefined
+    if (s?.kind === 'file' && s.file && typeof s.file === 'object') {
+      const file = s.file as ParsedFile
+      // A list sent as text too long to edit (only an older window would) is held all the same.
+      if (file.kind === 'links' && 'text' in file && typeof file.text === 'string' && isLongList(file.text)) {
+        return { kind: 'file', file: await checkedList(file.name, new TextEncoder().encode(file.text)) }
+      }
+      return { kind: 'file', file }
     }
-  })
+    if (s?.kind !== 'links') return undefined
+    const list = await checkedList(PASTED_LIST, s.bytes)
+    if (list.kind === 'links' && 'held' in list) return { kind: 'links', held: list.held }
+    if (list.kind === 'links') return { kind: 'links', text: list.text }
+    return { kind: 'file', file: list }
+  }
+  const win = new ImportWindow(
+    ctx,
+    () => {
+      const windowId = win.browserWindow()
+      const spaceId = windowId ? store.state.windows[windowId]?.spaceId : store.state.spaceOrder[0]
+      return {
+        ...(spaceId ? { spaceId, profileId: store.state.spaces[spaceId]?.profileId } : {}),
+        job: jobs.status(),
+      }
+    },
+    () => {
+      held = undefined
+    },
+  )
   /** The browser window a call acts for (the import window and onboarding act for one). */
   const browserOf = (c: CallContext): WindowId | undefined => {
     const id = c.windowId
     return id && store.state.windows[id]?.kind === 'main' ? id : win.browserWindow()
   }
 
-  commands.register('import.open', ({ start }, c) => {
-    if (c.windowId === IMPORT_WINDOW_ID) win.open(undefined, start)
-    else win.open(c.windowId ?? windows.focusedWindowId(), start)
+  commands.register('import.open', async ({ start }, c) => {
+    const from = c.windowId === IMPORT_WINDOW_ID ? undefined : (c.windowId ?? windows.focusedWindowId())
+    win.open(from, await checkStart(start))
   })
   commands.register('import.session', () => win.takeSession())
 
@@ -97,12 +149,14 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
     return { sourceId: source.id, browser: source.browser, name: source.name, profiles }
   })
   // A file is read in a worker, never on main's thread (D58).
-  commands.register('import.parseFile', async ({ name, text }): Promise<ParsedFile> => {
+  // Its bytes go to the worker as they came, moved, not copied (D62 (5)).
+  commands.register('import.parseFile', async ({ name, bytes }): Promise<ParsedFile> => {
     const file = typeof name === 'string' ? basename(name) : 'file'
-    if (typeof text !== 'string') return { kind: 'error', name: file, message: NO_BOOKMARKS }
-    if (text.length > MAX_FILE_BYTES) return { kind: 'error', name: file, message: TOO_LARGE }
-    return readFileOffMain({ op: 'file', name: file, text })
+    if (!(bytes instanceof Uint8Array)) return { kind: 'error', name: file, message: NO_BOOKMARKS }
+    if (bytes.byteLength > MAX_FILE_BYTES) return { kind: 'error', name: file, message: TOO_LARGE }
+    return present(await readFileOffMain({ op: 'file', name: file, bytes }))
   })
+  commands.register('import.holdLinks', ({ bytes }) => checkedList(PASTED_LIST, bytes))
   commands.register('import.chooseFile', async (_args, c): Promise<ParsedFile | null> => {
     const parent = (c.windowId === IMPORT_WINDOW_ID ? win.window : undefined) ?? BrowserWindow.getFocusedWindow()
     const options: Electron.OpenDialogOptions = {
@@ -122,7 +176,7 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
     } catch {
       return { kind: 'error', name, message: UNREADABLE }
     }
-    return readFileOffMain({ op: 'path', name, path })
+    return present(await readFileOffMain({ op: 'path', name, path }))
   })
 
   commands.register('import.start', async ({ plan }, c) => {
@@ -165,12 +219,21 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
       const folderName =
         (typeof p.folderName === 'string' ? p.folderName.trim().slice(0, 200) : '') || LINKS_FOLDER_NAME
       const source = typeof p.name === 'string' && p.name ? basename(p.name) : 'a pasted list'
+      // A long list is held here (D62 (5)): the import takes it, and it's let go.
+      let list: string | Uint8Array = typeof p.text === 'string' ? p.text : ''
+      if (typeof list === 'string' && list.length > MAX_FILE_BYTES) throw new Error(TOO_LARGE)
+      if (typeof p.held === 'string') {
+        if (held?.id !== p.held) throw new Error('This list of links is gone: drop or paste it again')
+        list = held.bytes
+        held = undefined
+      }
       const tasks: Task[] = [
         {
           item: links,
           read: async (job) => {
             // Read in a worker (D58); main takes the answer a part at a time.
-            const { nodes, lines, cut } = await readLinksOffMain(typeof p.text === 'string' ? p.text : '')
+            const { nodes, lines, cut } = await readLinksOffMain(list)
+            list = ''
             links.total = countBookmarks(nodes)
             job.bookmarks.set('', [{ title: '', nodes }])
             jobs.addSkips(job, [

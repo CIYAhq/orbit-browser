@@ -2,8 +2,8 @@ import { produce } from 'immer'
 import { describe, expect, it } from 'vitest'
 import { LINKS_TXT } from '../../scripts/import-fixtures'
 import { freeFolderName, placeBookmarks, skippedLines } from '../../src/main/import/bookmarks'
-import { linkNodes, parseFile } from '../../src/main/import/files'
-import { parseLinkList } from '../../src/shared/commands/import'
+import { linkNodes, linksInfo, parseFile } from '../../src/main/import/files'
+import { isLongList, LONG_LIST_CHARS, LONG_LIST_LINES, parseLinkList } from '../../src/shared/commands/import'
 import { createInitialState } from '../../src/shared/defaults'
 import type { OrbitState } from '../../src/shared/state'
 
@@ -94,8 +94,31 @@ describe('[IM-12] a pasted list of links', () => {
 })
 
 describe('[IM-13][IM-12] a .txt file', () => {
-  it('is read as a list of links', () => {
-    expect(parseFile('links.txt', LINKS_TXT)).toEqual({ kind: 'links', name: 'links.txt', text: LINKS_TXT, count: 5 })
+  it('is read as a list of links: counted once, in the reader, with its first lines (D62 (5))', () => {
+    expect(parseFile('links.txt', LINKS_TXT)).toEqual({
+      kind: 'links',
+      name: 'links.txt',
+      info: { count: 5, preview: LINKS_TXT.split('\n').slice(0, 7), long: false },
+    })
+  })
+})
+
+describe('[IM-12][IM-13] a list too long to edit (D62 (5))', () => {
+  it('is one over 1,000,000 characters or 10,000 lines', () => {
+    expect(isLongList('a'.repeat(LONG_LIST_CHARS))).toBe(false)
+    expect(isLongList('a'.repeat(LONG_LIST_CHARS + 1))).toBe(true)
+    expect(isLongList('\n'.repeat(LONG_LIST_LINES - 1))).toBe(false)
+    expect(isLongList('\n'.repeat(LONG_LIST_LINES))).toBe(true)
+  })
+
+  it('shows its count and its first eight lines, each cut to 200 characters', () => {
+    const urls = Array.from({ length: 20_000 }, (_, i) => `https://example.com/${i}`)
+    const info = linksInfo(`${'x'.repeat(500)}\r\n${urls.join('\n')}\n`)
+    expect(info).toEqual({ count: 20_000, preview: ['x'.repeat(200), ...urls.slice(0, 7)], long: true })
+    // One line of 2,000,000 characters: its start only.
+    expect(linksInfo(`https://example.com/${'a'.repeat(2_000_000)}`).preview).toEqual([
+      `https://example.com/${'a'.repeat(180)}`,
+    ])
   })
 })
 

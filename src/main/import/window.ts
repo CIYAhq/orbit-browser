@@ -26,6 +26,8 @@ export class ImportWindow {
   constructor(
     private readonly ctx: MainContext,
     private readonly session: () => Omit<ImportSession, 'start' | 'nonce'>,
+    /** The window has closed. */
+    private readonly closed: () => void = () => {},
   ) {
     nativeTheme.on('updated', () => this.window?.setBackgroundColor(this.background()))
   }
@@ -104,6 +106,7 @@ export class ImportWindow {
     })
     win.once('closed', () => {
       if (this.win === win) this.win = undefined
+      this.closed()
       // Back to the browser window it was opened over.
       const back = this.browserWindow()
       const target = back ? this.ctx.windows.get(back) : undefined

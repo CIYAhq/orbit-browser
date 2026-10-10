@@ -18,8 +18,10 @@ const TEXT_END = /<\/?(?:a|h3|dt|dd|dl)\b/gi
 export const MAX_TITLE = 1000
 /** Folders deeper than this are flattened: their items go in the deepest folder kept (F1). */
 export const MAX_DEPTH = 64
-/** A file's bookmarks and folders past this many are left out, and counted (IM-14). */
-export const MAX_NODES = 200_000
+/** Bookmarks past this many in one import are left out, and counted (IM-14). Folders don't count toward it (N7). */
+export const MAX_BOOKMARKS = 200_000
+/** Folders past this many aren't made: their items go in the folder that holds them, as a folder too deep does (F1). */
+export const MAX_FOLDERS = 20_000
 
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
 
@@ -157,7 +159,7 @@ export function countAll(nodes: readonly BookmarkNode[]): number {
   return n
 }
 
-/** A bookmarks file read: its top-level items, and the bookmarks left out past `MAX_NODES`. */
+/** A bookmarks file read: its top-level items, and the bookmarks left out past `MAX_BOOKMARKS`. */
 export interface BookmarksFile {
   tree: BookmarkNode[]
   cut: number
@@ -173,8 +175,8 @@ export function parseBookmarksHtml(html: string): BookmarkNode[] | undefined {
 
 /**
  * Reads a bookmarks HTML file in one pass, in time linear in its size (D58): each tag and each title is read once.
- * Folders deeper than `MAX_DEPTH` are flattened into the deepest one kept, and items past `MAX_NODES` are counted,
- * not kept (F1, F3).
+ * Folders deeper than `MAX_DEPTH`, or past `MAX_FOLDERS`, are flattened into the one that holds them, and bookmarks
+ * past `MAX_BOOKMARKS` are counted, not kept (F1, F3, N7).
  */
 export function readBookmarksHtml(html: string): BookmarksFile | undefined {
   if (!/<!doctype\s+netscape-bookmark-file/i.test(html) && !(/<dl[\s>]/i.test(html) && /<dt[\s>]/i.test(html))) {
@@ -187,6 +189,8 @@ export function readBookmarksHtml(html: string): BookmarksFile | undefined {
   /** A folder whose H3 was just read: the next DL holds its children. */
   let opened: BookmarkNode | undefined
   let seq = 0
+  let folders = 0
+  let bookmarks = 0
   let cut = 0
   // `[^<>]` ends a tag's attributes at the next "<" too, so a "<a" with no ">" is read once (D58).
   const tag = /<(\/?)(dl|h3|a)\b([^<>]*)>/gi
@@ -217,16 +221,20 @@ export function readBookmarksHtml(html: string): BookmarksFile | undefined {
     tag.lastIndex = end
     opened = undefined
     if (name === 'h3') {
-      // Too deep, or past the limit: no folder, so the next DL's items go in this one's list (F1).
-      if (depth >= MAX_DEPTH || seq >= MAX_NODES) continue
+      // Too deep, past the folders' limit or the bookmarks': no folder, so the next DL's items go in this one's list (F1).
+      if (depth >= MAX_DEPTH || folders >= MAX_FOLDERS || bookmarks >= MAX_BOOKMARKS) continue
+      folders++
       const folder: BookmarkNode = { id: `n${seq++}`, title: cleanText(inner) || 'Untitled folder', children: [] }
       level.push(folder)
       opened = folder
     } else {
       const href = attribute(attrs, 'href')
       if (!href) continue
-      if (seq >= MAX_NODES) cut++
-      else level.push(bookmark(`n${seq++}`, cleanText(inner) || cutTitle(href), href))
+      if (bookmarks >= MAX_BOOKMARKS) cut++
+      else {
+        bookmarks++
+        level.push(bookmark(`n${seq++}`, cleanText(inner) || cutTitle(href), href))
+      }
     }
   }
   return countAll(root) > 0 ? { tree: root, cut } : undefined

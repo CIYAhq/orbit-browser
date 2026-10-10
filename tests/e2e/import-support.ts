@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { type ElectronApplication, expect, type Page } from '@playwright/test'
@@ -85,6 +86,95 @@ export async function dropLargeFile(page: Page, selector: string, name: string, 
     },
     { selector, name, bytes },
   )
+}
+
+/**
+ * Drops a file made in the page (too large to send from the test) on an element: `head`, then `unit` repeated in parts
+ * of about 1 MB until it holds at least `bytes`. `beforeDrop` runs once the file is made, just before it's dropped (to
+ * start measuring there). Returns how many times `unit` is in it.
+ */
+export async function dropMadeFile(
+  page: Page,
+  selector: string,
+  file: { name: string; type: string; head?: string; unit: string; bytes: number },
+  beforeDrop?: () => Promise<void>,
+): Promise<number> {
+  await page.locator(selector).first().waitFor()
+  const units = await page.evaluate((file) => {
+    const each = Math.max(1, Math.floor(1_048_576 / file.unit.length))
+    const part = file.unit.repeat(each)
+    const parts = Math.ceil(file.bytes / part.length)
+    const made = new File([file.head ?? '', ...Array(parts).fill(part)], file.name, { type: file.type })
+    ;(window as unknown as { __madeFile?: File }).__madeFile = made
+    return parts * each
+  }, file)
+  await beforeDrop?.()
+  await page.evaluate((selector) => {
+    const target = document.querySelector(selector) as HTMLElement
+    const holder = window as unknown as { __madeFile?: File }
+    const data = new DataTransfer()
+    data.items.add(holder.__madeFile as File)
+    holder.__madeFile = undefined
+    const rect = target.getBoundingClientRect()
+    const at = { clientX: rect.left + rect.width / 2, clientY: rect.top + Math.min(rect.height / 2, 40) }
+    for (const type of ['dragenter', 'dragover', 'drop']) {
+      target.dispatchEvent(new DragEvent(type, { dataTransfer: data, bubbles: true, cancelable: true, ...at }))
+    }
+  }, selector)
+  return units
+}
+
+/** The import window's renderer process, or 0 when it isn't open. */
+export function importWindowPid(app: ElectronApplication): Promise<number> {
+  return app.evaluate(
+    ({ webContents }) =>
+      webContents
+        .getAllWebContents()
+        .find((w) => w.getURL().includes('view=import'))
+        ?.getOSProcessId() ?? 0,
+  )
+}
+
+/** A process's resident memory in MB (Linux, from /proc): now, and its peak since it started. */
+export function memoryMb(pid: number): { now: number; peak: number } {
+  const status = readFileSync(`/proc/${pid}/status`, 'utf8')
+  const mb = (key: string) => Math.round(Number(new RegExp(`${key}:\\s+(\\d+) kB`).exec(status)?.[1] ?? 0) / 1024)
+  return { now: mb('VmRSS'), peak: mb('VmHWM') }
+}
+
+/**
+ * Watches a process's memory while a test waits: past `limitMb` it's stopped at once, so a run that goes wrong can't
+ * take the machine (the fix check saw a window pass 8 GB). Returns a stop function, which gives the MB it was stopped
+ * at (0 if it wasn't).
+ */
+export function guardMemory(pid: number, limitMb: number): () => number {
+  let stoppedAt = 0
+  const timer = setInterval(() => {
+    try {
+      const { now } = memoryMb(pid)
+      if (now <= limitMb) return
+      stoppedAt = now
+      clearInterval(timer)
+      process.kill(pid, 'SIGKILL')
+    } catch {
+      clearInterval(timer)
+    }
+  }, 50)
+  return () => {
+    clearInterval(timer)
+    return stoppedAt
+  }
+}
+
+/** Closes the import window, if it's open, and waits until it's gone. */
+export async function closeImport(app: ElectronApplication): Promise<void> {
+  const page = app.windows().find((p) => p.url().includes('view=import') && !p.isClosed())
+  if (!page) return
+  const closed = page.waitForEvent('close')
+  await app.evaluate(({ BrowserWindow }) => {
+    for (const w of BrowserWindow.getAllWindows()) if (w.webContents.getURL().includes('view=import')) w.close()
+  })
+  await closed
 }
 
 /**

@@ -9,6 +9,7 @@ import {
   clickDone,
   dropFile,
   dropLargeFile,
+  dropMadeFile,
   fixturePath,
   importPage,
   launchImport,
@@ -282,6 +283,41 @@ test('[IM-13] hostile files of 1 MB are read off main’s thread: main never sta
   await expect(page.getByTestId('import-tree-bookmark')).toHaveCount(0)
 })
 
+test('[IM-13] a 16 MB file with every </A> left out is read off main’s thread: main never stalls 300 ms (D58)', async () => {
+  test.setTimeout(300_000)
+  orbit = await launchImport()
+  const { app } = orbit
+  const page = await openImport(app)
+  const head = '<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<TITLE>Bookmarks</TITLE>\n<DL><p>\n<DT><H3>Links</H3>\n<DL><p>\n'
+  // Best of three rounds (D46). Read on main's thread, this file stalled main 1,192–1,419 ms (1,360 ms at the fix
+  // check, N1); read in the worker, about 70 ms.
+  const rounds: number[] = []
+  for (let round = 0; round < 3; round++) {
+    if (round > 0) {
+      // Back to the first step, so that the count shown is this round's.
+      await page.keyboard.press('Escape')
+      await expect(page.getByTestId('import-step-source')).toBeVisible()
+    }
+    const file = {
+      name: 'no-close-a.html',
+      type: 'text/html',
+      head,
+      unit: '<DT><A HREF="https://example.com/page">A page\n',
+      bytes: 16 * 1024 * 1024,
+    }
+    // Measured from the drop: the file is made in the page first.
+    await dropMadeFile(page, '[data-testid="import-flow"]', file, () => startMainLag(app))
+    // 387,515 bookmarks: the first 200,000 are offered (IM-14).
+    await expect(page.getByTestId('import-count')).toHaveText('200,000 of 200,000 bookmarks selected', {
+      timeout: 120_000,
+    })
+    rounds.push(await mainLagMs(app))
+    if ((rounds.at(-1) as number) < 300) break
+  }
+  console.log(`[D58] main's longest stall for a 16 MB file with </A> left out, by round: ${JSON.stringify(rounds)}`)
+  expect(Math.min(...rounds), JSON.stringify(rounds)).toBeLessThan(300)
+})
+
 test('[IM-05][IM-14] 2,000 bookmarks: one closed folder, nothing loaded, quick, and the window stays responsive', async () => {
   server = await loggedServer()
   const html = netscapeHtml(manyBookmarks(2000, server.url('')))
@@ -443,6 +479,69 @@ test('[IM-13][IM-14] a quit part-way leaves nothing of the import and every tab 
   }
 })
 
+test('[IM-14] a crash part-way leaves nothing of the import: its tabs sit in no section, and the next start removes them (D62 (3))', async () => {
+  test.setTimeout(180_000)
+  const userData = mkdtempSync(join(tmpdir(), 'orbit-e2e-'))
+  server = await loggedServer()
+  const local = server
+  const imported = (s: Awaited<ReturnType<typeof state>>) =>
+    Object.values(s.tabs).filter((t) => t.pinnedUrl?.startsWith('https://example.com/page/'))
+  try {
+    orbit = await launchImport({ userData })
+    const { app } = orbit
+    const s = await state(app)
+    const spaceId = s.windows[Object.keys(s.windows)[0] as string]?.spaceId as string
+    const container = { kind: 'pinned', spaceId }
+    const mine = (await run(app, 'tabs.create', {
+      url: local.url('/mine'),
+      spaceId,
+      container,
+      activate: false,
+    })) as string
+    // 20,000 bookmarks, held once 5,000 are made (an e2e hook).
+    await app.evaluate(() =>
+      (globalThis as unknown as { __orbitImport: { holdAddingAt: (n: number) => void } }).__orbitImport.holdAddingAt(
+        5000,
+      ),
+    )
+    await run(app, 'import.start', {
+      plan: { kind: 'file', name: 'many.html', bookmarks: inFolders(10, 2000), target: { kind: 'space', spaceId } },
+    })
+    // Orbit crashes once the state saved on disk holds the tabs made so far.
+    const file = join(userData, 'orbit-state.json')
+    let saved = 0
+    await expect
+      .poll(
+        () => {
+          try {
+            saved = imported(JSON.parse(readFileSync(file, 'utf8'))).length
+          } catch {
+            saved = 0
+          }
+          return saved >= 5000
+        },
+        { intervals: [100], timeout: 60_000 },
+      )
+      .toBe(true)
+    app.process().kill('SIGKILL')
+    await app.close().catch(() => {})
+    console.log(`[D62] crashed with ${saved.toLocaleString('en-US')} of the import's tabs in the state saved on disk`)
+
+    orbit = await launchImport({ userData })
+    const after = await state(orbit.app)
+    const folders = Object.values(after.folders).map((f) => f.name)
+    console.log(`[D62] after the restart: ${imported(after).length} imported tabs; folders: ${JSON.stringify(folders)}`)
+    expect(imported(after)).toHaveLength(0)
+    expect(folders).toEqual([])
+    expect(after.tabs[mine]?.pinnedUrl).toBe(local.url('/mine'))
+    expect(after.spaces[spaceId]?.pinned).toContain(mine)
+  } finally {
+    await orbit?.app.close().catch(() => {})
+    orbit = undefined
+    rmSync(userData, { recursive: true, force: true })
+  }
+})
+
 test('[IM-14] while 20,000 bookmarks are added, the browser window never freezes for 200 ms (N3)', async () => {
   test.setTimeout(240_000)
   orbit = await launchImport()
@@ -586,9 +685,9 @@ test('[IM-13] a file nested 2,000 or 50,000 folders deep is read, its folders ke
   await expect(page.getByTestId('import-file-error')).toHaveText('other.html: Orbit couldn’t read this file')
 })
 
-test('[IM-13] a file over 64 MB is said to be too large, by every route, and isn’t read (F2)', async () => {
-  test.setTimeout(120_000)
-  const TOO_LARGE = 'This file is too large to be a bookmarks file (the limit is 64 MB)'
+test('[IM-13][IM-12] a file or a paste over 64 MB is said to be too large, by every route, and isn’t read (F2, D62 (5))', async () => {
+  test.setTimeout(180_000)
+  const TOO_LARGE = 'This is too large to import (the limit is 64 MB)'
   const dir = mkdtempSync(join(tmpdir(), 'orbit-import-e2e-'))
   try {
     const big = join(dir, 'huge.html')
@@ -603,6 +702,22 @@ test('[IM-13] a file over 64 MB is said to be too large, by every route, and isn
     await expect(page.getByTestId('import-file-error')).toHaveText(`huge.html: ${TOO_LARGE}`)
     await dropLargeFile(shell, '[data-testid="sidebar-scroll"]', 'sidebar.html', 65 * 1024 * 1024)
     await expect(page.getByTestId('import-file-error')).toHaveText(`sidebar.html: ${TOO_LARGE}`)
+    // A list of links over 64 MB, pasted on the sidebar and in the import window, says the same (D62 (5)).
+    await app.evaluate(
+      ({ clipboard }, bytes) => {
+        clipboard.writeText(`https://example.com/a\nhttps://example.com/b\n${'x'.repeat(bytes)}`)
+      },
+      65 * 1024 * 1024,
+    )
+    await shell.getByTestId('sidebar-scroll').evaluate((el) => (el as HTMLElement).focus())
+    await shell.keyboard.press(`${MOD}+V`)
+    await expect(page.getByTestId('import-file-error')).toHaveText(`Pasted list: ${TOO_LARGE}`)
+    await page.getByTestId('import-paste').click()
+    await expect(page.getByTestId('import-file-error')).toHaveCount(0)
+    await page.getByTestId('import-links-text').focus()
+    await page.keyboard.press(`${MOD}+V`)
+    await expect(page.getByTestId('import-file-error')).toHaveText(`Pasted list: ${TOO_LARGE}`)
+    await expect(page.getByTestId('import-step-source')).toBeVisible()
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

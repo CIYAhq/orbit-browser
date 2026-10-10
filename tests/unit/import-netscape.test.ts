@@ -17,6 +17,20 @@ import type { BookmarkNode } from '../../src/shared/commands/import'
 
 const fixture = (name: string) => readFileSync(join(FIXTURE_ROOT, 'files', name), 'utf8')
 
+/** How many folders a tree holds. */
+function countFolders(nodes: readonly BookmarkNode[]): number {
+  let n = 0
+  const lists: (readonly BookmarkNode[])[] = [nodes]
+  for (let list = lists.pop(); list; list = lists.pop()) {
+    for (const node of list) {
+      if (!node.children) continue
+      n++
+      lists.push(node.children)
+    }
+  }
+  return n
+}
+
 /** How many folders deep the deepest bookmark is. */
 function depthOf(nodes: readonly BookmarkNode[]): number {
   let deepest = 0
@@ -147,6 +161,41 @@ describe('[IM-13] reading a bookmarks file', () => {
     expect(parseFile('many.html', html)).toMatchObject({ kind: 'bookmarks', count: 200_000, cut: 10 })
   })
 
+  it('[N7] counts only bookmarks toward the 200,000: the selection and the summary agree', () => {
+    const link = '<DT><A HREF="https://example.com/">A</A>'
+    const folder = (n: number, size: number) => `<DT><H3>F${n}</H3><DL>${link.repeat(size)}</DL>`
+    const file = (folders: string[]) => `<!DOCTYPE NETSCAPE-Bookmark-file-1><DL>${folders.join('')}</DL>`
+    // 200 folders of 1,000: every bookmark is kept.
+    const exact = parseFile('exact.html', file(Array.from({ length: 200 }, (_, i) => folder(i, 1000))))
+    expect(exact).toMatchObject({ kind: 'bookmarks', count: 200_000, cut: 0 })
+    // 200,010 in 21 folders: "200,000 of 200,000 bookmarks selected", and the summary leaves out the other 10.
+    const over = parseFile(
+      'over.html',
+      file([...Array.from({ length: 20 }, (_, i) => folder(i, 10_000)), folder(20, 10)]),
+    )
+    expect(over).toMatchObject({ kind: 'bookmarks', count: 200_000, cut: 10 })
+    // The window sends that tree back: the import keeps all of it.
+    const tree = parseBookmarksHtml(file(Array.from({ length: 200 }, (_, i) => folder(i, 1000)))) ?? []
+    const clean = cleanTree(tree)
+    expect([countBookmarks(clean.nodes), countFolders(clean.nodes), clean.cut]).toEqual([200_000, 200, 0])
+  })
+
+  it('[N7] makes at most 20,000 folders: the bookmarks of those past it go in the folder that holds them', () => {
+    const folders = Array.from(
+      { length: 20_005 },
+      (_, i) => `<DT><H3>F${i}</H3><DL><DT><A HREF="https://example.com/${i}">B${i}</A></DL>`,
+    )
+    const read = parseBookmarksHtml(`<!DOCTYPE NETSCAPE-Bookmark-file-1><DL>${folders.join('')}</DL>`) ?? []
+    expect([countBookmarks(read), countFolders(read)]).toEqual([20_005, 20_000])
+    expect(read.slice(-6).map((n) => n.title)).toEqual(['F19999', 'B20000', 'B20001', 'B20002', 'B20003', 'B20004'])
+    const tree = Array.from({ length: 20_005 }, (_, i) => ({
+      title: `F${i}`,
+      children: [{ title: `B${i}`, url: `https://example.com/${i}` }],
+    }))
+    const clean = cleanTree(tree)
+    expect([countBookmarks(clean.nodes), countFolders(clean.nodes), clean.cut]).toEqual([20_005, 20_000, 0])
+  })
+
   it('reads what a cut-off file holds, up to where it stops', () => {
     const whole = fixture('bookmarks.htm')
     const cut = whole.slice(0, whole.indexOf('Morning paper'))
@@ -200,7 +249,7 @@ describe('[IM-13] a dropped or chosen file', () => {
   it('is a bookmarks file, a list of links, or the error that it holds no bookmarks', () => {
     const bookmarks = parseFile('bookmarks.htm', fixture('bookmarks.htm'))
     expect(bookmarks).toMatchObject({ kind: 'bookmarks', name: 'bookmarks.htm', count: 6 })
-    expect(parseFile('links.txt', fixture('links.txt'))).toMatchObject({ kind: 'links', count: 5 })
+    expect(parseFile('links.txt', fixture('links.txt'))).toMatchObject({ kind: 'links', info: { count: 5 } })
     expect(parseFile('malformed.htm', fixture('malformed.htm'))).toEqual({
       kind: 'error',
       name: 'malformed.htm',
@@ -242,8 +291,9 @@ describe('[IM-13] a dropped or chosen file', () => {
   it('[F3] counts the bookmarks past 200,000 that it leaves out', () => {
     const many = Array.from({ length: 200_010 }, (_, i) => ({ title: `b${i}`, url: `https://example.com/${i}` }))
     const { nodes, cut } = cleanTree([{ title: 'All', children: many }])
-    expect(countBookmarks(nodes)).toBe(199_999)
-    expect(cut).toBe(11)
+    // The folder doesn't count toward the 200,000 (N7).
+    expect(countBookmarks(nodes)).toBe(200_000)
+    expect(cut).toBe(10)
   })
 })
 

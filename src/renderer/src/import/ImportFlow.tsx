@@ -2,6 +2,7 @@ import { ArrowRight, ClipboardList, FileUp, HelpCircle } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   type BookmarkNode,
+  type HeldLinks,
   type ImportDataType,
   type ImportJob,
   type ImportPlan,
@@ -10,7 +11,9 @@ import {
   type ImportStart,
   type ImportTarget,
   type Inspection,
+  isLongList,
   MAX_FILE_BYTES,
+  PASTED_LIST,
   type ParsedFile,
   parseLinkList,
   TOO_LARGE,
@@ -45,6 +48,12 @@ interface FileTree {
 }
 
 const UNREADABLE = 'Orbit couldn’t read this file'
+
+/** The links in a list short enough to edit (D62 (5)): quick to count again as it's edited. */
+const countLinks = (text: string) => parseLinkList(text).links.length
+
+/** A list of links to import: its text and, when known, its count; or a long one main holds (D62 (5)). */
+type LinkList = { text: string; count?: number } | { held: HeldLinks }
 
 interface Target {
   spaceId: string
@@ -82,6 +91,10 @@ export function ImportFlow({
   const [file, setFile] = useState<FileTree>()
   const [fileError, setFileError] = useState<string>()
   const [linksText, setLinksText] = useState('')
+  /** A list too long to edit (D62 (5)): main holds its text; the window has its count and first lines only. */
+  const [held, setHeld] = useState<HeldLinks>()
+  /** The list's links, counted once by the reader; an edit counts again (the text edits well, so that's quick). */
+  const [linkCount, setLinkCount] = useState(0)
   /** The .txt file the links came from (IM-13), if they weren't pasted. */
   const [linksFile, setLinksFile] = useState<string>()
   const [folderName, setFolderName] = useState(PASTE_DEFAULT_NAME)
@@ -131,6 +144,18 @@ export function ImportFlow({
     void invoke('import.sources', {}).then(setSources)
   }, [])
 
+  const showList = (list: LinkList) => {
+    if ('held' in list) {
+      setHeld(list.held)
+      setLinksText('')
+      setLinkCount(list.held.count)
+    } else {
+      setHeld(undefined)
+      setLinksText(list.text)
+      setLinkCount(list.count ?? countLinks(list.text))
+    }
+  }
+
   /** A dropped or chosen file (IM-13): its bookmarks to choose from, its links, or why it can't be read. */
   const openFile = (parsed: ParsedFile) => {
     setFileError(undefined)
@@ -142,8 +167,8 @@ export function ImportFlow({
     }
     if (parsed.kind === 'links') {
       setRoute('links')
-      setLinksText(parsed.text)
-      setLinksFile(parsed.name)
+      showList('held' in parsed ? { held: parsed.held } : { text: parsed.text, count: parsed.count })
+      setLinksFile(parsed.name || undefined)
       go('links')
       return
     }
@@ -159,7 +184,7 @@ export function ImportFlow({
     const start: ImportStart | undefined = session?.start
     if (start?.kind === 'links') {
       setRoute('links')
-      setLinksText(start.text)
+      showList(start)
       go('links')
     } else if (start?.kind === 'file') {
       openFile(start.file)
@@ -215,7 +240,33 @@ export function ImportFlow({
   }
 
   const index = steps.indexOf(step)
-  const linkCount = useMemo(() => parseLinkList(linksText).links.length, [linksText])
+
+  /** The list edited: one grown too long to edit (a paste, a drop) goes to main, which holds it (D62 (5)). */
+  const editLinks = (text: string) => {
+    if (isLongList(text)) {
+      void holdLinks(text)
+      return
+    }
+    setHeld(undefined)
+    setLinksText(text)
+    setLinkCount(countLinks(text))
+  }
+  const holdLinks = async (text: string) => {
+    let parsed: ParsedFile
+    try {
+      // Over the cap, it says so as a file over it does (D62 (5)).
+      parsed =
+        text.length > MAX_FILE_BYTES
+          ? { kind: 'error', name: PASTED_LIST, message: TOO_LARGE }
+          : await invoke('import.holdLinks', { bytes: new TextEncoder().encode(text) })
+    } catch {
+      parsed = { kind: 'error', name: PASTED_LIST, message: UNREADABLE }
+    }
+    if (parsed.kind === 'error') openFile(parsed)
+    else if (parsed.kind === 'links') {
+      showList('held' in parsed ? { held: parsed.held } : { text: parsed.text, count: parsed.count })
+    }
+  }
 
   const canNext = (() => {
     switch (step) {
@@ -281,7 +332,8 @@ export function ImportFlow({
     }
     if (route === 'links') {
       const name = linksFile ? { name: linksFile } : {}
-      return { kind: 'links', folderName: folderName.trim(), text: linksText, ...name, target: t, ...hold }
+      const list = held ? { held: held.id } : { text: linksText }
+      return { kind: 'links', folderName: folderName.trim(), ...list, ...name, target: t, ...hold }
     }
     if (route === 'browser' && sourceId && inspection && inspection !== 'loading') {
       return {
@@ -333,7 +385,10 @@ export function ImportFlow({
       openFile({ kind: 'error', name: f.name, message: TOO_LARGE })
       return
     }
-    await readFile(f.name, async () => invoke('import.parseFile', { name: f.name, text: await f.text() }))
+    // Its bytes as they are: the reader makes text of them, off main's thread (D58, D62 (5)).
+    await readFile(f.name, async () =>
+      invoke('import.parseFile', { name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) }),
+    )
   }
 
   // Enter is Next and Escape is Back (the window: Escape on the first step cancels). In onboarding the
@@ -452,7 +507,9 @@ export function ImportFlow({
         {step === 'links' && (
           <LinksStep
             text={linksText}
-            onText={setLinksText}
+            held={held}
+            onText={editLinks}
+            onClear={() => editLinks('')}
             name={folderName}
             onName={setFolderName}
             count={linkCount}
@@ -618,32 +675,69 @@ function ProfilesStep({
 
 function LinksStep({
   text,
+  held,
   onText,
+  onClear,
   name,
   onName,
   count,
 }: {
   text: string
+  held: HeldLinks | undefined
   onText: (t: string) => void
+  onClear: () => void
   name: string
   onName: (n: string) => void
   count: number
 }) {
+  /** What the field would hold with `added` put in place of its selection. */
+  const withAdded = (field: HTMLTextAreaElement, added: string) =>
+    field.value.slice(0, field.selectionStart) + added + field.value.slice(field.selectionEnd)
   return (
     <>
       <p className="im-lead">
         Paste links copied from another browser: one address per line, or “Title — address”. Each becomes a pinned tab,
         in this order, in one new folder.
       </p>
-      <textarea
-        className="im-textarea"
-        data-testid="import-links-text"
-        aria-label="Links"
-        placeholder={'https://example.com\nNews — https://news.example.com'}
-        value={text}
-        spellCheck={false}
-        onChange={(e) => onText(e.target.value)}
-      />
+      {held ? (
+        // Too long to edit (D62 (5)): its first lines, read-only; main holds the rest.
+        <div className="im-held" data-testid="import-links-held">
+          <pre className="im-held__lines" aria-label="The list’s first lines">
+            {held.preview.join('\n')}
+          </pre>
+          <p className="im-note">
+            This list is too long to edit here, so it’s imported as it is.{' '}
+            <button type="button" className="im-link" data-testid="import-links-clear" onClick={onClear}>
+              Clear
+            </button>
+          </p>
+        </div>
+      ) : (
+        <textarea
+          className="im-textarea"
+          data-testid="import-links-text"
+          aria-label="Links"
+          placeholder={'https://example.com\nNews — https://news.example.com'}
+          value={text}
+          spellCheck={false}
+          // A paste or a drop that makes the list too long to edit never goes into the field (D62 (5)).
+          onPaste={(e) => {
+            const next = withAdded(e.currentTarget, e.clipboardData.getData('text/plain'))
+            if (!isLongList(next)) return
+            e.preventDefault()
+            onText(next)
+          }}
+          onDrop={(e) => {
+            const dropped = e.dataTransfer.files.length === 0 ? e.dataTransfer.getData('text/plain') : ''
+            const next = dropped ? e.currentTarget.value + dropped : ''
+            if (!isLongList(next)) return
+            e.preventDefault()
+            e.stopPropagation()
+            onText(next)
+          }}
+          onChange={(e) => onText(e.target.value)}
+        />
+      )}
       <label className="im-field">
         <span>Folder name</span>
         <input

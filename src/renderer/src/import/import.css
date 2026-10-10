@@ -462,6 +462,30 @@ html[data-platform="darwin"] .im .im-flow__body {
   user-select: text;
 }
 
+.im-held {
+  margin-bottom: 12px;
+}
+
+.im-held__lines {
+  max-height: 180px;
+  margin: 0 0 8px;
+  padding: 10px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--im-field);
+  box-shadow: inset 0 0 0 1px var(--im-border);
+  color: var(--text-muted);
+  font:
+    12.5px / 1.5 ui-monospace,
+    "SF Mono",
+    Menlo,
+    Consolas,
+    monospace;
+  white-space: pre;
+  text-overflow: ellipsis;
+  user-select: text;
+}
+
 .im-field {
   display: flex;
   flex-direction: column;

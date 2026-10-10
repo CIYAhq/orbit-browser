@@ -95,8 +95,11 @@ export type ImportPlan = (
     }
   /** `cut`: the file's bookmarks past the limit of one import, left out when it was read (IM-14). */
   | { kind: 'file'; name: string; bookmarks: BookmarkNode[]; cut?: number }
-  /** A pasted list of links (IM-12), or a .txt file's (`name`, IM-13). */
-  | { kind: 'links'; folderName: string; text: string; name?: string }
+  /**
+   * A pasted list of links (IM-12), or a .txt file's (`name`, IM-13): its text, or the id main holds a long one by
+   * (`held`, D62 (5)).
+   */
+  | { kind: 'links'; folderName: string; text?: string; held?: string; name?: string }
 ) & {
   target: ImportTarget
   /** Onboarding: read now, add when onboarding finishes (Skip setup imports nothing, OB-14). */
@@ -158,23 +161,60 @@ export interface ImportJob {
   suggestions?: StarterSuggestion[]
 }
 
-/** Files larger than this aren't bookmark files (IM-13). */
+/** Files larger than this aren't bookmark files (IM-13); a pasted list is capped at it too (D62 (5)). */
 export const MAX_FILE_BYTES = 64 * 1024 * 1024
-/** What every route says of a file over `MAX_FILE_BYTES`, before reading it (F2). */
-export const TOO_LARGE = 'This file is too large to be a bookmarks file (the limit is 64 MB)'
+/** What every route says of a file or a paste over `MAX_FILE_BYTES`, before reading it (F2, D62 (5)). */
+export const TOO_LARGE = 'This is too large to import (the limit is 64 MB)'
+/** A paste's name where the import window names a file. */
+export const PASTED_LIST = 'Pasted list'
+
+/** A list of links longer than this (in characters, or lines) is never held as editable text (D62 (5)). */
+export const LONG_LIST_CHARS = 1_000_000
+export const LONG_LIST_LINES = 10_000
+
+/** Whether a list of links is too long to edit (D62 (5)). Lines are counted only up to LONG_LIST_CHARS. */
+export function isLongList(text: string): boolean {
+  if (text.length > LONG_LIST_CHARS) return true
+  let lines = 1
+  for (let i = text.indexOf('\n'); i >= 0; i = text.indexOf('\n', i + 1)) if (++lines > LONG_LIST_LINES) return true
+  return false
+}
+
+/**
+ * A list of links too long to edit (D62 (5)): main holds its text, which `import.start` takes by `id`; the import
+ * window shows only its count and its first lines, read-only.
+ */
+export interface HeldLinks {
+  id: string
+  /** The links in it, counted once, in the reader (D58). */
+  count: number
+  /** Its first lines as written, each cut short. */
+  preview: string[]
+}
 
 /**
  * A file dropped or chosen (IM-13), read in a worker (D58). A bookmarks file's tree comes as JSON text (`json`, a
  * `BookmarkNode[]`): main passes it on without reading it, so a big tree costs main's thread only a copy. `cut`: its
- * bookmarks past the limit of one import, left out (IM-14).
+ * bookmarks past the limit of one import, left out (IM-14). A list of links comes as its text, or held in main when
+ * it is too long to edit (`held`, D62 (5)).
  */
 export type ParsedFile =
   | { kind: 'bookmarks'; name: string; json: string; count: number; cut: number }
   | { kind: 'links'; name: string; text: string; count: number }
+  | { kind: 'links'; name: string; held: HeldLinks; count: number }
   | { kind: 'error'; name: string; message: string }
 
-/** Where the import window starts (a dropped file, a paste in the sidebar). */
-export type ImportStart = { kind: 'links'; text: string } | { kind: 'file'; file: ParsedFile }
+/** Where the import window starts (a dropped file, a paste in the sidebar: main holds a long one, D62 (5)). */
+export type ImportStart =
+  | { kind: 'links'; text: string }
+  | { kind: 'links'; held: HeldLinks }
+  | { kind: 'file'; file: ParsedFile }
+
+/**
+ * Where a browser window asks the import window to start: a file it read, or a pasted list as its UTF-8 bytes, which
+ * main passes to the reader without making text of them (D62 (5)).
+ */
+export type ImportOpening = { kind: 'links'; bytes: Uint8Array } | { kind: 'file'; file: ParsedFile }
 
 /** What the import window shows when it opens or is asked again (`import.session`). */
 export interface ImportSession {
@@ -188,15 +228,17 @@ export interface ImportSession {
 
 export interface ImportCommands {
   /** Opens the import window for the calling browser window (IM-01), optionally at a route. */
-  'import.open': { args: { start?: ImportStart }; result: void }
+  'import.open': { args: { start?: ImportOpening }; result: void }
   /** The import window's starting point. */
   'import.session': { args: Record<string, never>; result: ImportSession }
   /** Browsers on this computer and their profiles (IM-02). */
   'import.sources': { args: Record<string, never>; result: ImportSource[] }
   /** What the chosen profiles hold: types, counts, bookmark trees (IM-03, IM-04). */
   'import.inspect': { args: { sourceId: string; profileIds: string[] }; result: Inspection }
-  /** Reads a dropped file (IM-13). */
-  'import.parseFile': { args: { name: string; text: string }; result: ParsedFile }
+  /** Reads a dropped file (IM-13): its bytes, as they are, which the reader takes (D58, D62 (5)). */
+  'import.parseFile': { args: { name: string; bytes: Uint8Array }; result: ParsedFile }
+  /** Takes a list of links too long to edit, pasted in the import window, as UTF-8: main holds it (D62 (5)). */
+  'import.holdLinks': { args: { bytes: Uint8Array }; result: ParsedFile }
   /** "From a file…": the system's file picker, then the file read. Null when cancelled. */
   'import.chooseFile': { args: Record<string, never>; result: ParsedFile | null }
   /** Starts an import; returns its id. */
