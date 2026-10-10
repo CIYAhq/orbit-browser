@@ -611,7 +611,23 @@ test('[DT-03][NV-05][SB-27] the find bar and the link pill stay on the page, off
 
 // ---- DT-14 ----
 
+/** Records the actions run from now on (keys, menus, the command bar), by id. */
+async function recordActions(): Promise<() => Promise<string[]>> {
+  await orbit.app.evaluate(() => {
+    const g = globalThis as unknown as OrbitGlobal & { __actionsRun: string[] }
+    const { actions } = g.__orbit.ctx
+    const runAction = actions.run.bind(actions)
+    g.__actionsRun = []
+    actions.run = (id, c) => {
+      g.__actionsRun.push(id)
+      return runAction(id, c)
+    }
+  })
+  return () => orbit.app.evaluate(() => (globalThis as unknown as { __actionsRun: string[] }).__actionsRun)
+}
+
 test('[DT-14] ⇧⌘R reloads bypassing the cache, and brings back a crashed tab', async () => {
+  const actionsRun = await recordActions()
   const tabId = (await run(orbit.app, 'tabs.create', { url: site.url('/cached/page') })) as string
   await expect.poll(() => inPage(tabId, 'window.assetRuns')).toBe(1)
   const docs = () => site.requests('/cached/page')
@@ -624,11 +640,12 @@ test('[DT-14] ⇧⌘R reloads bypassing the cache, and brings back a crashed tab
   expect(docs()[1]?.cacheControl).toBe('max-age=0')
   await expect.poll(() => inPage(tabId, 'window.assetRuns')).toBe(1)
   expect(assets()).toHaveLength(1)
-  // ⇧⌘R: the page and its script come from the server again.
+  // ⇧⌘R: the page and its script come from the server again, through the navigation lane's action.
   await press({ tab: tabId }, 'Shift+Mod+R')
   await expect.poll(() => assets().length).toBe(2)
   expect(docs()[2]).toMatchObject({ cacheControl: 'no-cache', pragma: 'no-cache' })
   expect(assets()[1]).toMatchObject({ cacheControl: 'no-cache', pragma: 'no-cache' })
+  expect(await actionsRun()).toEqual(['nav.reload', 'nav.hardReload'])
   // A crashed tab: the window keeps the keyboard, and ⇧⌘R brings the page back.
   await orbit.app.evaluate((_e, id) => {
     ;(globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id)?.forcefullyCrashRenderer()
@@ -638,6 +655,7 @@ test('[DT-14] ⇧⌘R reloads bypassing the cache, and brings back a crashed tab
   await press('focused', 'Shift+Mod+R')
   await expect.poll(() => inPage(tabId, 'document.title')).toBe('Cached')
   expect(docs()[3]).toMatchObject({ cacheControl: 'no-cache' })
+  expect(await actionsRun()).toEqual(['nav.reload', 'nav.hardReload', 'nav.hardReload'])
   await expect.poll(async () => (await state(orbit.app)).tabs[tabId]?.error).toBeUndefined()
 })
 
