@@ -1,4 +1,5 @@
-import type { DragEvent as ReactDragEvent } from 'react'
+import type { ClipboardEvent as ReactClipboardEvent, DragEvent as ReactDragEvent } from 'react'
+import { parseLinkList } from '../../../shared/commands/import'
 import { engineForSpace, parseInput } from '../../../shared/url'
 import { invoke } from '../api'
 import { useKeyboardFocus } from '../shell/sidebar/ui-state'
@@ -31,6 +32,22 @@ export function importDroppedFile(e: ReactDragEvent, text: string, spaceId: stri
     }
     await invoke('import.open', { start: { kind: 'file', file: parsed } })
   })()
+  return true
+}
+
+/**
+ * ⌘V (Ctrl+V) on the sidebar, outside a text field, with a list of two or more links on the
+ * clipboard offers to import them as a pinned folder (IM-12): the import window opens at "Paste a
+ * list of links" with them filled in. One link, or other text, is left alone. Returns whether the
+ * paste was taken.
+ */
+export function importPastedLinks(e: ReactClipboardEvent): boolean {
+  const el = e.target instanceof Element ? e.target : null
+  if (el?.closest('input, textarea, [contenteditable]:not([contenteditable="false"])')) return false
+  const text = e.clipboardData.getData('text/plain')
+  if (!text || parseLinkList(text).links.length < 2) return false
+  e.preventDefault()
+  void invoke('import.open', { start: { kind: 'links', text } })
   return true
 }
 

@@ -16,7 +16,7 @@ import type { Space, SpaceId } from '../../../../shared/state'
 import { containerKey, locate, sectionOf, splitOfTab } from '../../../../shared/tree'
 import { engineForSpace, parseInput } from '../../../../shared/url'
 import { invoke, isMac, runAction } from '../../api'
-import { importDroppedFile, revealInSidebar } from '../../import/sidebar'
+import { importDroppedFile, importPastedLinks, revealInSidebar } from '../../import/sidebar'
 import { activeTabId } from '../../selectors'
 import { getOrbitState, useOrbit } from '../../store'
 import { DragGhost } from './DragGhost'
@@ -95,6 +95,7 @@ export const SidebarItems = memo(function SidebarItems({
           onKeyDown={onKeyDown}
           onDragOver={onLinkDragOver}
           onDrop={(e) => onLinkDrop(e, space.id)}
+          onPaste={importPastedLinks}
           onContextMenu={(e) => {
             if (!e.defaultPrevented) onContextMenu?.(e)
           }}

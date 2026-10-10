@@ -169,7 +169,10 @@ export function placeBookmarks(
   return placed
 }
 
-/** Reasons for left-out bookmarks, as summary lines. */
-export function skippedLines(skipped: Map<string, number>): { what: string; count: number; reason: string }[] {
-  return [...skipped].map(([reason, count]) => ({ what: count === 1 ? 'bookmark' : 'bookmarks', count, reason }))
+/** Reasons for left-out bookmarks (or links), as summary lines. */
+export function skippedLines(
+  skipped: Map<string, number>,
+  [one, many]: readonly [string, string] = ['bookmark', 'bookmarks'],
+): { what: string; count: number; reason: string }[] {
+  return [...skipped].map(([reason, count]) => ({ what: count === 1 ? one : many, count, reason }))
 }

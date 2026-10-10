@@ -7,7 +7,7 @@ import type { WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import type { HistoryService } from '../history'
 import type { CallContext } from '../registry'
-import { cleanTree, FILE_FOLDER_NAME, MAX_FILE_BYTES, parseFile } from './files'
+import { cleanTree, FILE_FOLDER_NAME, LINKS_FOLDER_NAME, linkNodes, MAX_FILE_BYTES, parseFile } from './files'
 import { ImportJobs, type Task } from './jobs'
 import { countBookmarks, NO_BOOKMARKS } from './netscape'
 import { importPlaces } from './places'
@@ -91,6 +91,27 @@ export function registerImport(ctx: MainContext, _history: HistoryService): void
         },
       ]
       return jobs.start(p, basename(String(p.name ?? 'file')), FILE_FOLDER_NAME, tasks, { windowId: browserOf(c) })
+    }
+    if (p?.kind === 'links') {
+      // IM-12: one pinned folder, named by the user, with a pinned tab per link in the list's order.
+      const links = item('links')
+      const folderName =
+        (typeof p.folderName === 'string' ? p.folderName.trim().slice(0, 200) : '') || LINKS_FOLDER_NAME
+      const source = typeof p.name === 'string' && p.name ? basename(p.name) : 'a pasted list'
+      const tasks: Task[] = [
+        {
+          item: links,
+          read: async (job) => {
+            await new Promise((resolve) => setImmediate(resolve))
+            const { nodes, lines } = linkNodes(typeof p.text === 'string' ? p.text : '')
+            links.total = countBookmarks(nodes)
+            job.bookmarks.set('', [{ title: '', nodes }])
+            jobs.addSkips(job, [{ what: lines === 1 ? 'line' : 'lines', count: lines, reason: 'Not a link' }])
+          },
+          add: async (job) => jobs.addBookmarks(job, links),
+        },
+      ]
+      return jobs.start(p, source, folderName, tasks, { windowId: browserOf(c) })
     }
     throw new Error('Unknown import')
   })

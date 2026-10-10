@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 475 spec’d · 174 built (77 partial) · 260 tested · 0 feel right. 10 more are out of scope and not counted.
+**Totals:** 475 spec’d · 176 built (76 partial) · 261 tested · 0 feel right. 10 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 111 | 136 |
-| P1 | 221 | 54 | 111 |
+| P1 | 221 | 56 | 112 |
 | P2 | 80 | 9 | 13 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -574,9 +574,9 @@ Spec: `spec/import.md`
 | IM-09 | Extension import (Chromium-family sources) | P1 | – | – | – |  |
 | IM-10 | Cookies / signed-in sessions import | P2 | – | – | – |  |
 | IM-11 | Autofill addresses and payment cards import | P2 | – | – | – |  |
-| IM-12 | Bringing data over from Arc (user-facing exports only) | P1 | – | – | – |  |
-| IM-13 | Import from files (standard formats) | P1 | 🟡 partial | ✅ e2e+unit | – | bookmarks HTML (the Netscape format; Chromium- and Firefox-style exports tested) from From a file… or dropped on the import window or the sidebar, mapped as IM-05 into "Imported bookmarks"; a file with no bookmarks says "No bookmarks found in this file" and imports nothing; a cut-off file imports what it holds; 64 MB at most. A .txt list of links opens the paste route (IM-12). No passwords CSV (D52) |
-| IM-14 | Progress, summary and errors | P1 | 🟡 partial | ✅ e2e | – | progress per data type, then a summary with counts and the skipped items with reasons; Done shows the imported folder in the sidebar (its Space, the pinned section open, the folder in view); the browser window stays responsive meanwhile. Locked browser files come with IM-02 |
+| IM-12 | Bringing data over from Arc (user-facing exports only) | P1 | ✅ | ✅ e2e+unit | – | Paste a list of links (one address per line, "Title — address" with a dash, bar or tab, Markdown links, bullets): one pinned folder named by the user, a pinned tab per link in order, asleep; lines that aren't links are counted in the summary. ⌘V / Ctrl+V on the sidebar (outside a text field) with two or more links on the clipboard opens the same import with them filled in. The other routes (a bookmarks file, notes, canvases, site styles) are explained in the import window's help, which reads nothing from another browser; passwords are out of scope (D52) |
+| IM-13 | Import from files (standard formats) | P1 | ✅ | ✅ e2e+unit | – | bookmarks HTML (the Netscape format; Chromium- and Firefox-style exports tested) and a .txt list of links, from From a file… or dropped on the import window or the sidebar. Bookmarks map as IM-05 into "Imported bookmarks"; links as IM-12; a file with neither says "No bookmarks found in this file" and imports nothing; a cut-off file imports what it holds; 64 MB at most. No passwords CSV (D52) |
+| IM-14 | Progress, summary and errors | P1 | 🟡 partial | ✅ e2e+unit | – | progress per data type, then a summary with counts and the skipped items with reasons; Done shows the imported folder in the sidebar (its Space, the pinned section open, the folder in view); the browser window stays responsive meanwhile. Locked browser files come with IM-02 |
 | IM-15 | Re-import and duplicates | P2 | – | ✅ e2e+unit | – |  |
 | IM-16 | Starter suggestions from imported history | P2 | – | – | – |  |
 | IM-17 | Export Orbit's pinned items (anti-lock-in) | P2 | – | ✅ unit | – |  |

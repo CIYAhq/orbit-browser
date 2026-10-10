@@ -40,7 +40,7 @@ export function Progress({ job }: { job: ImportJob }) {
         {job.phase === 'adding' && `Adding from ${job.source}… You can keep browsing.`}
         {done &&
           (folderName
-            ? `Done. Bookmarks are in the pinned folder “${folderName}”${spaceName ? ` in ${spaceName}` : ''}.`
+            ? `Done. The ${job.items[0]?.type === 'links' ? 'links' : 'bookmarks'} are in the pinned folder “${folderName}”${spaceName ? ` in ${spaceName}` : ''}.`
             : 'Done.')}
         {job.phase === 'failed' &&
           `The import stopped: ${job.error ?? 'something went wrong'}. Nothing more was added.`}

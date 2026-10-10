@@ -25,6 +25,19 @@ export function parseFile(name: string, text: string): ParsedFile {
   return { kind: 'bookmarks', name, tree, count: countBookmarks(tree) }
 }
 
+/** IM-12: the folder a list of links goes into when the import window sends no name. */
+export const LINKS_FOLDER_NAME = 'Imported links'
+
+/**
+ * A list of links (IM-12), pasted or from a .txt file, as bookmarks in their order. Lines that
+ * aren't links are only counted.
+ */
+export function linkNodes(text: string): { nodes: BookmarkNode[]; lines: number } {
+  const { links, skipped } = parseLinkList(text.slice(0, MAX_FILE_BYTES))
+  const nodes = links.slice(0, MAX_NODES).map((l, i) => bookmark(`l${i}`, l.title ?? '', l.url))
+  return { nodes, lines: skipped + Math.max(0, links.length - MAX_NODES) }
+}
+
 /** A bookmark tree sent back by the import window, checked again (addresses, size, depth). */
 export function cleanTree(nodes: unknown): BookmarkNode[] {
   let budget = MAX_NODES

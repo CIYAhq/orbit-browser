@@ -92,7 +92,8 @@ export type ImportPlan = (
       profiles: { profileId: string; types: ImportDataType[]; bookmarks?: BookmarkNode[] }[]
     }
   | { kind: 'file'; name: string; bookmarks: BookmarkNode[] }
-  | { kind: 'links'; folderName: string; text: string }
+  /** A pasted list of links (IM-12), or a .txt file's (`name`, IM-13). */
+  | { kind: 'links'; folderName: string; text: string; name?: string }
 ) & {
   target: ImportTarget
   /** Onboarding: read now, add when onboarding finishes (Skip setup imports nothing, OB-14). */

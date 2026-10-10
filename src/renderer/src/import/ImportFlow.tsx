@@ -70,6 +70,8 @@ export function ImportFlow({
   const [file, setFile] = useState<Extract<ParsedFile, { kind: 'bookmarks' }>>()
   const [fileError, setFileError] = useState<string>()
   const [linksText, setLinksText] = useState('')
+  /** The .txt file the links came from (IM-13), if they weren't pasted. */
+  const [linksFile, setLinksFile] = useState<string>()
   const [folderName, setFolderName] = useState(PASTE_DEFAULT_NAME)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [target, setTarget] = useState<Target>()
@@ -126,6 +128,7 @@ export function ImportFlow({
     if (parsed.kind === 'links') {
       setRoute('links')
       setLinksText(parsed.text)
+      setLinksFile(parsed.name)
       go('links')
       return
     }
@@ -244,7 +247,10 @@ export function ImportFlow({
     if (route === 'file' && file) {
       return { kind: 'file', name: file.name, bookmarks: filterTree(file.tree, '', selected), target: t, ...hold }
     }
-    if (route === 'links') return { kind: 'links', folderName: folderName.trim(), text: linksText, target: t, ...hold }
+    if (route === 'links') {
+      const name = linksFile ? { name: linksFile } : {}
+      return { kind: 'links', folderName: folderName.trim(), text: linksText, ...name, target: t, ...hold }
+    }
     if (route === 'browser' && sourceId && inspection && inspection !== 'loading') {
       return {
         kind: 'browser',
@@ -298,7 +304,8 @@ export function ImportFlow({
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.defaultPrevented || e.nativeEvent.isComposing || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
     const el = e.target instanceof Element ? e.target : null
-    if (e.key === 'Enter' && !el?.closest('button, a, input, select, textarea, label, [role="radio"]')) {
+    // Enter in a text field (the folder's name) is Next too; not on a button, a checkbox or in the list of links.
+    if (e.key === 'Enter' && !el?.closest('button, a, select, textarea, [role="radio"], input[type="checkbox"]')) {
       if (step === 'source' && !canNext) return
       e.preventDefault()
       if (step !== 'progress') void next()
@@ -357,6 +364,7 @@ export function ImportFlow({
                 testId="import-paste"
                 onClick={() => {
                   setRoute('links')
+                  setLinksFile(undefined)
                   go('links')
                 }}
               />

@@ -265,7 +265,7 @@ export class ImportJobs {
       this.recordUndo(placed.folderId)
     }
     item.done = added
-    job.status.skipped.push(...skippedLines(skipped))
+    job.status.skipped.push(...skippedLines(skipped, item.type === 'links' ? ['link', 'links'] : undefined))
   }
 
   addSkips(job: Job, skips: ImportSkip[]): void {
