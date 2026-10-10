@@ -98,6 +98,43 @@ function pageBounds(app: ElectronApplication, tabId: string) {
   )
 }
 
+/** Runs script in the page whose address contains `part`, as the person's own act (a user gesture). */
+function inPage(app: ElectronApplication, part: string, code: string): Promise<unknown> {
+  return app.evaluate(
+    ({ webContents }, [p, c]) => {
+      const contents = webContents.getAllWebContents().find((w) => w.getURL().includes(p))
+      if (!contents) throw new Error(`no page ${p}`)
+      return contents.executeJavaScript(c, true)
+    },
+    [part, code] as const,
+  )
+}
+
+/** The first window's views, bottom to top: a page's path, or an Orbit view's name in capitals. */
+function zOrder(app: ElectronApplication): Promise<string[]> {
+  return app.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().includes('view=shell'))
+    return (win?.contentView.children ?? []).map((v) => {
+      const wc = (v as Electron.WebContentsView).webContents
+      if (!wc || wc.isDestroyed()) return 'dead'
+      const url = new URL(wc.getURL() || 'about:blank')
+      return url.searchParams.get('view')?.toUpperCase() ?? url.pathname
+    })
+  })
+}
+
+/** True while a page of the first window is in HTML full screen. */
+function htmlFullscreen(app: ElectronApplication): Promise<boolean> {
+  return app.evaluate(() => {
+    const { windows } = (
+      globalThis as unknown as {
+        __orbit: { ctx: { windows: { ids: () => string[]; inHtmlFullscreen: (id: string) => boolean } } }
+      }
+    ).__orbit.ctx
+    return windows.inHtmlFullscreen(windows.ids()[0] as string)
+  })
+}
+
 /** Tells the first window it lost (or got) the focus, as the OS does when another app comes forward. */
 function focusEvent(app: ElectronApplication, kind: 'blur' | 'focus') {
   return app.evaluate(({ BrowserWindow }, k) => {
@@ -192,6 +229,44 @@ test('[SB-28][FL-23] a load shorter than the delay never shows the indicator; sw
   await cmd(app, 'tabs.activate', { tabId: id })
   await expect.poll(async () => (await loading(app)).tabId).toBe(id)
   await expect.poll(async () => (await loading(app)).visible).toBe(true)
+})
+
+test('[SB-28][NV-20] the loading indicator stays off a page in HTML full screen and its view leaves the window: the page is top-most under the overlay; it comes back after (review A-M1)', async () => {
+  const { app } = orbit
+  const id = await openTab(app, page('Start'))
+  const url = fx.url('/slow/Film?ms=600')
+  // The indicator comes for a slow load and goes, before full screen.
+  await cmd(app, 'tabs.navigate', { tabId: id, url })
+  await expect.poll(async () => (await loading(app)).visible).toBe(true)
+  await waitLoaded(app, id, url)
+  await expect.poll(async () => (await loading(app)).visible).toBe(false)
+  expect(await inPage(app, '/slow/Film', 'document.documentElement.requestFullscreen().then(() => "in")')).toBe('in')
+  await expect.poll(() => htmlFullscreen(app)).toBe(true)
+  // Nothing of Orbit's but the overlay is above the page: no hidden indicator either.
+  await expect.poll(async () => (await zOrder(app)).slice(-2)).toEqual(['/slow/Film', 'OVERLAY'])
+  // A frame that takes a second to load: the tab loads all that time, but the indicator never shows.
+  const before = (await loading(app)).shown
+  const framed = `new Promise((done) => {
+    const frame = document.createElement('iframe')
+    frame.onload = () => done('loaded')
+    frame.src = '/slow/Frame?ms=1000'
+    document.body.append(frame)
+  })`
+  expect(await inPage(app, '/slow/Film', framed)).toBe('loaded')
+  expect(await loading(app)).toMatchObject({ visible: false, shown: before })
+  expect((await zOrder(app)).slice(-2)).toEqual(['/slow/Film', 'OVERLAY'])
+  // A frame still loading when full screen ends: the indicator comes for it then.
+  await inPage(
+    app,
+    '/slow/Film',
+    `document.body.append(Object.assign(document.createElement('iframe'), { src: '/slow/Long?ms=30000' })), 1`,
+  )
+  await expect.poll(async () => (await state(app)).tabs[id]?.loading).toBe(true)
+  expect(await loading(app)).toMatchObject({ visible: false, shown: before })
+  expect(await inPage(app, '/slow/Film', 'document.exitFullscreen().then(() => "out")')).toBe('out')
+  await expect.poll(() => htmlFullscreen(app)).toBe(false)
+  await expect.poll(async () => (await loading(app)).visible).toBe(true)
+  expect((await loading(app)).tabId).toBe(id)
 })
 
 test('[NV-04][SB-28] the address shows where a typed address is going; Esc stops it, the indicator goes and the address stays', async () => {

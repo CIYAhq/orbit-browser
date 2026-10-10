@@ -130,8 +130,8 @@ test('[TB-19] a target=_blank link shows its tab in exactly one attached, top-mo
   await expect
     .poll(async () => (await placedUrls(orbit.app, windowId)).filter((v) => v.url.includes('/page/External')))
     .toEqual([{ url: expect.stringContaining('/page/External'), current: true }])
-  const placed = await placedUrls(orbit.app, windowId)
-  expect(placed.at(-1)?.url).toContain('/page/External')
+  // Above every other view but the overlay, once the loading indicator (SB-28) has gone with the load.
+  await expect.poll(async () => (await placedUrls(orbit.app, windowId)).at(-1)?.url).toContain('/page/External')
 })
 
 test('[TB-06] a page that closes itself leaves no dead view; the tab shows again (review M3)', async () => {

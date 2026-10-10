@@ -740,8 +740,8 @@ export class WindowManager {
 
   /**
    * A small transparent Orbit UI view for another module (the loading indicator, SB-28; the link
-   * pill, SB-27; page dialogs, NV-24): hidden until showUiView(), kept above the window's pages
-   * (under the overlay and the floating sidebar) and closed with the window.
+   * pill, SB-27; page dialogs, NV-24): out of the window until showUiView(), then above the window's
+   * pages (under the overlay and the floating sidebar) until hideUiView(); closed with the window.
    */
   createUiView(windowId: WindowId, view: RendererView): WebContentsView | undefined {
     const rec = this.records.get(windowId)
@@ -758,7 +758,10 @@ export class WindowManager {
     return created
   }
 
-  /** Shows a createUiView() view at `bounds` (window coordinates); `focus` gives it the keyboard. */
+  /**
+   * Shows a createUiView() view at `bounds` (window coordinates), placing it above the pages again;
+   * `focus` gives it the keyboard.
+   */
   showUiView(windowId: WindowId, view: WebContentsView, bounds: Rect, focus = false): void {
     const rec = this.records.get(windowId)
     if (!rec || rec.win.isDestroyed() || !rec.uiViews.has(view) || !viewContents(view)) return
@@ -777,13 +780,19 @@ export class WindowManager {
     if (focus) viewContents(view)?.focus()
   }
 
-  /** Hides a createUiView() view; keyboard focus in it goes back to the page. */
+  /**
+   * Takes a createUiView() view out of the window, as hideTools() does: a view only made invisible
+   * would stay above every page, a full-screen one included (review A-M1). Keyboard focus in it
+   * goes back to the page.
+   */
   hideUiView(windowId: WindowId, view: WebContentsView): void {
     const rec = this.records.get(windowId)
     if (!rec || rec.win.isDestroyed() || !rec.uiViews.has(view) || !viewContents(view)) return
-    if (!view.getVisible()) return
+    const placed = rec.win.contentView.children.includes(view)
+    if (!view.getVisible() && !placed) return
     const focused = webContents.getFocusedWebContents() === viewContents(view)
     view.setVisible(false)
+    if (placed) this.removeChild(rec, view)
     if (focused && !rec.overlayShown && rec.win.isFocused()) this.focusActiveTab(rec.id)
   }
 

@@ -126,6 +126,12 @@ export function registerLoading(ctx: MainContext): { info: (windowId: WindowId) 
     if (!s) return
     clearTimeout(s.showTimer)
     s.showTimer = undefined
+    // Never over a page in HTML full screen (a video): it comes back when that ends, if the page is
+    // still loading (review A-M1). Native full screen keeps it (SB-28).
+    if (windows.inHtmlFullscreen(windowId)) {
+      if (s.tabId) hide(windowId, s)
+      return
+    }
     const target = activeTabOf(store.state, windowId)
     const started = target ? since.get(target) : undefined
     if (!target || started === undefined) {
@@ -183,9 +189,12 @@ export function registerLoading(ctx: MainContext): { info: (windowId: WindowId) 
       if (tabId && since.has(tabId)) evaluate(windowId)
     }
   })
+  // The page card moved, or HTML full screen began or ended: the indicator follows, goes, or comes back.
   windows.onLayout((windowId) => {
     const s = perWindow.get(windowId)
-    if (s?.tabId) evaluate(windowId)
+    if (!s) return
+    const target = activeTabOf(store.state, windowId)
+    if (s.tabId || (target && since.has(target))) evaluate(windowId)
   })
 
   return {
