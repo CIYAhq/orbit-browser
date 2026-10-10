@@ -82,6 +82,29 @@ export interface LibraryOpenArgs {
   section?: string
   /** Ask to clear the Archive as soon as it shows (AR-07 from the menu or the command bar). */
   confirmClear?: boolean
+  /** Ask before a shorter Keep time deletes entries (AR-08, chosen in a menu). */
+  confirmKeep?: ArchiveKeepAsk
+}
+
+/** A shorter Keep time waiting for the user's yes: it deletes `count` entries (AR-08). */
+export interface ArchiveKeepAsk {
+  days: number
+  count: number
+}
+
+/** What `archive.setKeepDays` did (AR-08). */
+export interface ArchiveKeepResult {
+  /** The setting is `days` now. */
+  set: boolean
+  /** Entries the new time deletes: deleted now when `set`, else waiting for the user's yes. */
+  purges: number
+}
+
+/** Entries deleted from the Archive (`archive:deleted` to the Library): `undo` puts them back. */
+export interface ArchiveDeleted {
+  ids: string[]
+  /** For `archive.undoDelete`, while the toast offers Undo. */
+  undo?: number
 }
 
 /** What the Library shows; sent to its view on each open (`library:show`) and returned by `library.status`. */
@@ -91,6 +114,8 @@ export interface LibraryShow {
   nonce: number
   /** Ask to clear the Archive right away (AR-07 from the menu or the command bar). */
   confirmClear?: boolean
+  /** Ask before a shorter Keep time deletes entries (AR-08). */
+  confirmKeep?: ArchiveKeepAsk
   /** The Library was closed before this open: play the entrance (FL-24). */
   entering?: boolean
 }
@@ -160,15 +185,29 @@ export interface ArchiveCommands {
   'archive.preview': { args: { id: string }; result: { tabId: TabId; peek: boolean } | null }
   /** Restores the entry the calling window's Peek previews and closes the Peek (AR-06). */
   'archive.restorePreview': { args: Record<string, never>; result: ArchiveRestoreResult }
-  /** Removes entries without restoring them (AR-07, row menu). Returns how many went. */
+  /**
+   * Removes entries without restoring them (AR-07: the row menu, the selection's Delete). The
+   * calling window's Library hears `archive:deleted` (ArchiveDeleted) and offers Undo. Returns how
+   * many went.
+   */
   'archive.delete': { args: { ids: string[] }; result: number }
+  /**
+   * The delete toast's Undo: puts the entries of delete `undo` back, with their history, for a
+   * minute after the delete. Entries whose tab is back in the sidebar, or whose profile is gone,
+   * stay deleted. Returns how many came back.
+   */
+  'archive.undoDelete': { args: { undo: number }; result: number }
   /**
    * Removes every entry of a profile (default: the calling window's) (AR-07); browsing history
    * stays. The Library asks first (`confirmClear`). Returns how many went.
    */
   'archive.clear': { args: { profileId?: ProfileId }; result: number }
-  /** How many days Archive entries are kept (AR-08): 30, 90, 365, or 0 for forever. */
-  'archive.setKeepDays': { args: { days: number }; result: void }
+  /**
+   * How many days Archive entries are kept (AR-08): 30, 90, 365, or 0 for forever. A shorter time
+   * deletes the older entries at once, so when it would delete any, nothing changes until
+   * `confirmed`: `purges` says how many, for the caller to ask first (the menus ask in the Library).
+   */
+  'archive.setKeepDays': { args: { days: number; confirmed?: boolean }; result: ArchiveKeepResult }
   /**
    * Shows the row's context menu (Restore, Open in New Tab, Copy URL, Delete) at a point of the
    * Library. With no ids, the Archive section's own menu (Clear Archive…, Keep Archived Tabs For).

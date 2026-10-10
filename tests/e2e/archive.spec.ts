@@ -516,13 +516,71 @@ test('[AR-08] the Archive keeps 30 days by default: older entries go at launch, 
   await seed(orbit, { count: 12, days: 120, prefix: 'Again' })
   const lib = await openLibrary(orbit)
   await expect.poll(() => countOf(lib)).toBe(15)
-  await archiveEntry(lib).click({ button: 'right' })
-  await run(orbit.app, 'archive.testMenu', { click: 'Keep Archived Tabs For > 90 Days' })
+  // A shorter time deletes the older entries, so the Library asks first, saying how many (F5).
+  const keep = lib.getByTestId('archive-keep')
+  const choose = async (label: string) => {
+    await archiveEntry(lib).click({ button: 'right' })
+    await run(orbit.app, 'archive.testMenu', { click: `Keep Archived Tabs For > ${label}` })
+  }
+  await choose('90 Days')
+  await expect(keep).toContainText('Keep archived tabs for 90 days?')
+  await expect(keep).toContainText('3 archived tabs are older than that and will be deleted now. This can’t be undone.')
+  await expect(lib.getByTestId('archive-keep-ok')).toHaveText('Delete 3 Tabs')
+  // Cancel keeps them all, and the time.
+  await lib.getByTestId('archive-keep-cancel').click()
+  await expect(keep).toHaveCount(0)
+  expect((await state(orbit.app)).settings.archiveKeepDays).toBe(0)
+  expect((await query(orbit)).total).toBe(15)
+  // Asked again and confirmed, they go.
+  await choose('90 Days')
+  await lib.getByTestId('archive-keep-ok').click()
   await expect.poll(() => countOf(lib)).toBe(12)
-  await archiveEntry(lib).click({ button: 'right' })
-  await run(orbit.app, 'archive.testMenu', { click: 'Keep Archived Tabs For > 30 Days' })
+  await expect(lib.getByTestId('library-toast').filter({ hasText: 'Deleted 3 archived tabs' })).toBeVisible()
+  expect((await state(orbit.app)).settings.archiveKeepDays).toBe(90)
+  await choose('30 Days')
+  await expect(keep).toContainText('6 archived tabs are older than that')
+  await lib.getByTestId('archive-keep-ok').click()
   await expect.poll(() => countOf(lib)).toBe(6)
   expect((await state(orbit.app)).settings.archiveKeepDays).toBe(30)
+  // A longer time deletes nothing: set at once, without a question.
+  await choose('1 Year')
+  await expect.poll(async () => (await state(orbit.app)).settings.archiveKeepDays).toBe(365)
+  await expect(keep).toHaveCount(0)
+  expect((await query(orbit)).total).toBe(6)
+})
+
+test('[AR-07] Delete, from a row’s menu or for a selection, offers Undo in a toast, which puts the entries back with their history', async () => {
+  const { app } = orbit
+  const t = await newTab(app, fx.url('/page/Undone'))
+  await waitTab(app, t, '/page/Undone')
+  await (await tabPage(app, '/page/Undone')).click('#next')
+  await waitTab(app, t, '/page/Undone-next')
+  await run(app, 'tabs.close', { tabId: t })
+  await expect.poll(async () => (await query(orbit)).rows[0]?.hasHistory).toBe(true)
+  await seed(orbit, { count: 2, days: 1, prefix: 'Pair' })
+  const lib = await openLibrary(orbit)
+  await expect.poll(() => countOf(lib)).toBe(3)
+  // The row menu's Delete: the toast (held under the pointer) offers Undo.
+  await lib.getByTestId('archive-row').filter({ hasText: 'Undone-next' }).click({ button: 'right' })
+  await run(app, 'archive.testMenu', { click: 'Delete from Archive' })
+  const one = lib.getByTestId('library-toast').filter({ hasText: 'Deleted from the Archive' })
+  await one.hover()
+  await expect.poll(() => countOf(lib)).toBe(2)
+  await one.getByTestId('library-toast-action').click()
+  await expect.poll(() => countOf(lib)).toBe(3)
+  expect((await query(orbit)).rows.find((r) => r.url === fx.url('/page/Undone-next'))).toMatchObject({
+    hasHistory: true,
+  })
+  // Two selected, deleted with the selection's Delete: Undo brings both back.
+  const pair = lib.getByTestId('archive-row').filter({ hasText: 'Pair' })
+  await pair.nth(0).click({ modifiers: [MOD === 'Meta' ? 'Meta' : 'Control'] })
+  await pair.nth(1).click({ modifiers: [MOD === 'Meta' ? 'Meta' : 'Control'] })
+  await lib.getByTestId('archive-delete-selected').click()
+  const two = lib.getByTestId('library-toast').filter({ hasText: 'Deleted 2 archived tabs' })
+  await two.hover()
+  await expect.poll(() => countOf(lib)).toBe(1)
+  await two.getByTestId('library-toast-action').click()
+  await expect.poll(() => countOf(lib)).toBe(3)
 })
 
 /** View History (AR-10): ⌘Y on macOS, Ctrl+H elsewhere. */

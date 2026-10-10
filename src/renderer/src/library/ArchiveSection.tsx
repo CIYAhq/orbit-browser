@@ -12,7 +12,14 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react'
-import type { ArchiveClosedBy, ArchiveRestoreResult, ArchiveRow, ArchiveSource } from '../../../shared/commands/archive'
+import type {
+  ArchiveClosedBy,
+  ArchiveDeleted,
+  ArchiveKeepAsk,
+  ArchiveRestoreResult,
+  ArchiveRow,
+  ArchiveSource,
+} from '../../../shared/commands/archive'
 import type { SpaceId } from '../../../shared/state'
 import { primaryColor } from '../../../shared/theme'
 import { displayHost } from '../../../shared/url'
@@ -50,6 +57,17 @@ const LEAVE_MS = 200
 
 /** The open of the Library whose "Clear Archive…" was asked already (showing the section again asks no more). */
 let askedClearNonce = -1
+/** The same for a shorter Keep time's question (AR-08). */
+let askedKeepNonce = -1
+
+/** "30 days", "a year": a Keep time in a sentence (AR-08). */
+function keepTime(days: number): string {
+  if (days % 365 === 0) return days === 365 ? 'a year' : `${days / 365} years`
+  return `${days} days`
+}
+
+/** "1 archived tab", "1,204 archived tabs". */
+const archivedTabs = (n: number) => (n === 1 ? '1 archived tab' : `${n.toLocaleString()} archived tabs`)
 
 /** "Kept for 30 days", "kept forever" (AR-08). */
 export function keptFor(days: number): string {
@@ -317,6 +335,14 @@ export function ArchiveSection({ show }: LibrarySectionProps) {
     libraryToast(n === 1 ? 'Cleared 1 archived tab' : `Cleared ${n.toLocaleString()} archived tabs`)
   }
 
+  // ---- A shorter Keep time (AR-08): it deletes the older entries, so the menus ask here first ----
+  const [keepAsk, setKeepAsk] = useState<ArchiveKeepAsk | null>(null)
+  const keepFor = async (ask: ArchiveKeepAsk) => {
+    setKeepAsk(null)
+    const result = await invoke('archive.setKeepDays', { days: ask.days, confirmed: true })
+    if (result.set && result.purges > 0) libraryToast(`Deleted ${archivedTabs(result.purges)}`)
+  }
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs for each open of the Library
   useEffect(() => {
     // A fresh open starts from the whole list, at its top match; the filters stay as they were.
@@ -331,6 +357,10 @@ export function ArchiveSection({ show }: LibrarySectionProps) {
     if (show.confirmClear && show.nonce !== askedClearNonce) {
       askedClearNonce = show.nonce
       void askClear()
+    }
+    if (show.confirmKeep && show.nonce !== askedKeepNonce) {
+      askedKeepNonce = show.nonce
+      setKeepAsk(show.confirmKeep)
     }
   }, [show.nonce])
 
@@ -409,15 +439,28 @@ export function ArchiveSection({ show }: LibrarySectionProps) {
         run: () => void (tabId ? invoke('tabs.activate', { tabId }) : invoke('spaces.switch', { spaceId: target })),
       })
     })
-    // Entries deleted from the row menu leave the selection.
+    // Deleted entries (the row menu, the selection's Delete) leave the selection; a toast offers Undo.
     const offDeleted = window.orbit.on('archive:deleted', (payload) => {
-      const ids = (payload as { ids: string[] }).ids
+      const { ids, undo } = payload as ArchiveDeleted
       setSelected((set) => {
         if (!ids.some((id) => set.has(id))) return set
         const next = new Set(set)
         for (const id of ids) next.delete(id)
         return next
       })
+      if (ids.length === 0) return
+      libraryToast(
+        ids.length === 1 ? 'Deleted from the Archive' : `Deleted ${archivedTabs(ids.length)}`,
+        typeof undo === 'number'
+          ? {
+              label: 'Undo',
+              run: () =>
+                void invoke('archive.undoDelete', { undo }).then((n) => {
+                  if (n === 0) libraryToast('They can’t be put back now')
+                }),
+            }
+          : undefined,
+      )
     })
     return () => {
       offChanged()
@@ -628,6 +671,7 @@ export function ArchiveSection({ show }: LibrarySectionProps) {
             </button>
             <button
               type="button"
+              data-testid="archive-delete-selected"
               onClick={() => void invoke('archive.delete', { ids: [...selected] }).then(() => setSelected(new Set()))}
             >
               Delete
@@ -702,6 +746,22 @@ export function ArchiveSection({ show }: LibrarySectionProps) {
           <p>
             {clearAsk.count === 1 ? 'The archived tab' : `All ${clearAsk.count.toLocaleString()} archived tabs`}
             {profileName ? ` in ${profileName}` : ''} will be deleted. This can’t be undone.
+          </p>
+          <p>Your browsing history is kept.</p>
+        </ConfirmDialog>
+      )}
+      {keepAsk && (
+        <ConfirmDialog
+          title={`Keep archived tabs for ${keepTime(keepAsk.days)}?`}
+          confirmLabel={keepAsk.count === 1 ? 'Delete 1 Tab' : `Delete ${keepAsk.count.toLocaleString()} Tabs`}
+          destructive
+          testId="archive-keep"
+          onConfirm={() => void keepFor(keepAsk)}
+          onCancel={() => setKeepAsk(null)}
+        >
+          <p>
+            {keepAsk.count === 1 ? '1 archived tab is' : `${keepAsk.count.toLocaleString()} archived tabs are`} older
+            than that{profileName ? ', counting every profile,' : ''} and will be deleted now. This can’t be undone.
           </p>
           <p>Your browsing history is kept.</p>
         </ConfirmDialog>

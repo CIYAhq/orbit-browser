@@ -114,7 +114,13 @@ export class LibraryHost {
     w.tab = activeTabOf(state, windowId)
     w.space = state.windows[windowId]?.spaceId
     w.overlay = (state.windows[windowId]?.overlay.kind ?? 'none') !== 'none'
-    w.show = { section, nonce: ++this.nonce, ...(args.confirmClear ? { confirmClear: true } : {}), entering }
+    w.show = {
+      section,
+      nonce: ++this.nonce,
+      ...(args.confirmClear ? { confirmClear: true } : {}),
+      ...(args.confirmKeep ? { confirmKeep: args.confirmKeep } : {}),
+      entering,
+    }
     view.setBounds(this.bounds(windowId))
     view.setBorderRadius(this.radii.get(windowId) ?? DEFAULT_RADIUS)
     this.place(windowId)
@@ -152,7 +158,7 @@ export class LibraryHost {
     this.sections.remember(section)
     const w = windowId ? this.wins.get(windowId) : undefined
     if (!windowId || !w) return
-    w.show = { ...w.show, section, confirmClear: undefined, entering: false }
+    w.show = { ...w.show, section, confirmClear: undefined, confirmKeep: undefined, entering: false }
     if (w.open) this.onChange?.(windowId, true, section)
   }
 

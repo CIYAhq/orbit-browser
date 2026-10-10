@@ -10,15 +10,16 @@ import { installMenu } from '../menu'
 import type { CallContext } from '../registry'
 import { findMenuItem, menuLabels } from '../tabs/menus'
 import { BackupStore, dropDeletedProfiles, scheduleBackups } from './backups'
+import { DeleteUndo } from './delete-undo'
 import { historyMenuItems, historyQuery, historyRows } from './history-view'
 import { provideArchiveSource } from './inbox'
 import { LibraryHost } from './library'
-import { archiveSectionItems, setKeepDays } from './menus'
+import { archiveSectionItems } from './menus'
 import { ArchivePreviews } from './preview'
 import { recentlyClosedItems, refreshRecentlyClosed, watchRecentlyClosed } from './recently-closed'
 import { restoreEntries } from './restore'
 import { RestoreData } from './restore-data'
-import { keepDaysOf, scheduleRetention } from './retention'
+import { KEEP_DAYS_CHOICES, keepDaysOf, scheduleRetention, setKeepDays } from './retention'
 import { ArchiveSync } from './service'
 import { ArchiveStore } from './store'
 
@@ -115,9 +116,15 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
 
   const openLibrary = (c: CallContext, args: LibraryOpenArgs = {}) => {
     const section = typeof args.section === 'string' && SECTION_ID.test(args.section) ? args.section : undefined
+    const keep = args.confirmKeep
+    const confirmKeep =
+      keep && KEEP_DAYS_CHOICES.some((k) => k.days === keep.days) && Number.isInteger(keep.count) && keep.count > 0
+        ? { days: keep.days, count: keep.count }
+        : undefined
     library.open(mainWindowOf(c), {
       ...(section ? { section } : {}),
       ...(args.confirmClear ? { confirmClear: true } : {}),
+      ...(confirmKeep ? { confirmKeep } : {}),
     })
   }
   commands.register('library.open', (args, c) => openLibrary(c, args ?? {}))
@@ -148,16 +155,34 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
     return store.query({ ...args, profileId: profileOf(args.profileId, c) }, (url) => ctx.tabs.faviconFor(url))
   })
 
-  commands.register('archive.delete', async ({ ids }) => {
+  // Deleted entries can come back from the toast's Undo for a minute (AR-07).
+  const deletes = new DeleteUndo(ctx, store)
+  const deleteEntries = (ids: readonly string[], windowId: WindowId | undefined): number => {
+    const entries = ids.map((id) => store.get(id)).filter((e) => !!e)
+    const gone = new Set(sync.remove(entries.map((e) => e.id)))
+    if (gone.size === 0) return 0
+    const undo = deletes.keep(entries.filter((e) => gone.has(e.id)))
+    // The Library offers Undo, and the entries leave its selection.
+    library.send(windowId, 'archive:deleted', { ids: [...gone], undo })
+    return gone.size
+  }
+  commands.register('archive.delete', async ({ ids }, c) => {
     await store.load()
-    return sync.remove(Array.isArray(ids) ? ids : []).length
+    return deleteEntries(Array.isArray(ids) ? ids.filter((id) => typeof id === 'string') : [], windowOf(c))
+  })
+  commands.register('archive.undoDelete', async ({ undo }) => {
+    await store.load()
+    return deletes.undo(undo)
   })
   // After the Library asked (AR-07). Browsing history is a separate store and stays.
   commands.register('archive.clear', async ({ profileId }, c) => {
     await store.load()
     return sync.clearProfile(profileOf(profileId, c)).length
   })
-  commands.register('archive.setKeepDays', ({ days }) => setKeepDays(ctx, days))
+  commands.register('archive.setKeepDays', async ({ days, confirmed }) => {
+    await store.load()
+    return setKeepDays(ctx, store, days, confirmed === true)
+  })
   // The app menu shows how long entries are kept (macOS has the only app menu).
   let keepDays = keepDaysOf(state.state)
   state.subscribe((next) => {
@@ -299,9 +324,10 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
       {
         label: many ? `Delete ${entries.length} from Archive` : 'Delete from Archive',
         click: () => {
-          const ids = sync.remove(entries.map((e) => e.id))
-          // They leave the Library's selection too.
-          library.send(windowId, 'archive:deleted', { ids })
+          deleteEntries(
+            entries.map((e) => e.id),
+            windowId,
+          )
         },
       },
     )

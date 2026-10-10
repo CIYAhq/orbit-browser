@@ -1,4 +1,6 @@
+import type { ArchiveKeepResult } from '../../shared/commands/archive'
 import type { OrbitState } from '../../shared/state'
+import type { MainContext } from '../context'
 import type { ArchiveSync } from './service'
 import type { ArchiveStore } from './store'
 
@@ -18,6 +20,28 @@ export const KEEP_DAYS_CHOICES: readonly { days: number; label: string }[] = [
 export function keepDaysOf(state: Pick<OrbitState, 'settings'>): number {
   const days = state.settings.archiveKeepDays
   return Number.isInteger(days) && days >= 0 ? days : KEEP_DAYS_DEFAULT
+}
+
+/**
+ * Sets how long Archive entries are kept (AR-08). A shorter time deletes the older entries at once
+ * (scheduleRetention), so when it would delete any, nothing changes until `confirmed`: the user is
+ * asked first, told how many go. The store must be read.
+ */
+export function setKeepDays(
+  ctx: Pick<MainContext, 'store'>,
+  store: Pick<ArchiveStore, 'olderThan'>,
+  days: number,
+  confirmed: boolean,
+  now: number = Date.now(),
+): ArchiveKeepResult {
+  if (!KEEP_DAYS_CHOICES.some((c) => c.days === days)) return { set: false, purges: 0 }
+  if (keepDaysOf(ctx.store.state) === days) return { set: true, purges: 0 }
+  const purges = days > 0 ? store.olderThan(now - days * DAY_MS).length : 0
+  if (purges > 0 && !confirmed) return { set: false, purges }
+  ctx.store.update((d) => {
+    d.settings.archiveKeepDays = days
+  })
+  return { set: true, purges }
 }
 
 /**

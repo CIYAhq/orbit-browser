@@ -115,7 +115,8 @@ export function installMenu(ctx: MainContext): void {
         item('app.library'),
         { type: 'separator' },
         item('archive.clear'),
-        keepForMenu(ctx),
+        // A shorter time that deletes entries asks first; until then the check stays where it was.
+        keepForMenu(ctx, { refresh: () => installMenu(ctx) }),
       ],
     },
     { role: 'windowMenu' },
