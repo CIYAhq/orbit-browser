@@ -1,6 +1,7 @@
 import { type MouseInputEvent, screen } from 'electron'
 import type { TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
+import { menuUpIn, onMenusClosed, watchMenus } from '../menu-watch'
 import type { CallContext } from '../registry'
 
 /** The pointer this close to the window's left edge reveals the hidden sidebar (FL-03: a 4–8 px band). */
@@ -59,6 +60,9 @@ const buttonDown = (mouse: MouseInputEvent) => (mouse.modifiers ?? []).some((m) 
  * the shell, main reads it for a moment and brings the card in if it is at the edge (review A-M2).
  * The card that comes for it has heard nothing either, so main reads the pointer on until the card
  * or a page hears it, and lets the card go when the pointer has left the window (fix check A, M1).
+ * The same goes for a pointer that leaves the card for where the card can't tell (`over: null`):
+ * nothing hears it over the window's resize border or the card's drag region (round 2 fix check,
+ * M4). While a native menu is up in the window, the card stays: the menu may reach out of it.
  */
 export function registerSidebarReveal(ctx: MainContext): {
   hold: (windowId: WindowId) => RevealHoldInfo | undefined
@@ -67,6 +71,9 @@ export function registerSidebarReveal(ctx: MainContext): {
 } {
   const { store, commands, windows } = ctx
   const holds = new Map<WindowId, Hold>()
+  watchMenus()
+  /** A native menu is up in the window (one the card opened, as it is out): the card stays (M4). */
+  const menuUp = (windowId: WindowId) => menuUpIn(windows.get(windowId))
   const windowOf = (c: CallContext): WindowId | undefined => c.windowId ?? windows.focusedWindowId()
   /** Per window: where the pointer was when the sidebar hid; the edge waits until it moves from there. */
   const restAt = new Map<WindowId, Point>()
@@ -191,16 +198,17 @@ export function registerSidebarReveal(ctx: MainContext): {
   }
 
   /**
-   * The card is out for a pointer that may be where nothing hears it (the window's very edge): until
-   * the card or a page hears it, main reads it. Gone out of the window with no button down, the
-   * pointer has left the card's side, and the card goes as it would when left (fix check A, M1).
+   * The card is out for a pointer that may be where nothing hears it (the window's very edge, its
+   * resize border, the card's drag region): until the card or a page hears it, main reads it. Gone
+   * out of the window with no button down and no menu up, the pointer has left the card's side, and
+   * the card goes as it would when left (fix check A, M1; round 2 fix check, M4).
    */
   const watchOut = (windowId: WindowId) => {
     stopOutWatch(windowId)
     const look = () => {
       const hold = holds.get(windowId)
       if (!store.state.windows[windowId]?.sidebar.peeking || !hold?.over) return stopOutWatch(windowId)
-      if (pressed.get(windowId) || inWindow(windowId)) return
+      if (pressed.get(windowId) || inWindow(windowId) || menuUp(windowId)) return
       stopOutWatch(windowId)
       hold.over = false
       settle(windowId)
@@ -214,17 +222,23 @@ export function registerSidebarReveal(ctx: MainContext): {
     setPeeking(windowId, false)
   }
 
-  /** Once nothing holds the card, it slides away after the grace delay. */
+  /** Once nothing holds the card, it slides away after the grace delay; not while a menu is up. */
   const settle = (windowId: WindowId) => {
     const hold = holdOf(windowId)
     clearTimeout(hold.timer)
     hold.timer = undefined
     if (!store.state.windows[windowId]?.sidebar.peeking || hold.over || hold.editing || hold.overlay) return
+    if (menuUp(windowId)) return
     hold.timer = setTimeout(() => {
       hold.timer = undefined
-      if (!hold.over && !hold.editing && !hold.overlay) setPeeking(windowId, false)
+      if (!hold.over && !hold.editing && !hold.overlay && !menuUp(windowId)) setPeeking(windowId, false)
     }, HIDE_GRACE_MS)
   }
+  // The last menu up in a window closed: the card goes if nothing else holds it.
+  onMenusClosed((win) => {
+    const windowId = windows.ids().find((id) => windows.get(id) === win)
+    if (windowId && holds.has(windowId)) settle(windowId)
+  })
 
   store.subscribe((next, prev) => {
     for (const [windowId, win] of Object.entries(next.windows)) {
@@ -319,7 +333,12 @@ export function registerSidebarReveal(ctx: MainContext): {
     const windowId = windowOf(c)
     if (!windowId || !store.state.windows[windowId]?.sidebar.peeking) return
     const hold = holdOf(windowId)
-    if (typeof over === 'boolean') {
+    if (over === null) {
+      // The pointer left the card for where the card can't tell: main reads it until a view hears
+      // it, and the card stays while it is in the window (round 2 fix check, M4).
+      hold.over = true
+      watchOut(windowId)
+    } else if (typeof over === 'boolean') {
       // The card heard the pointer: it says when the pointer leaves.
       stopOutWatch(windowId)
       hold.over = over

@@ -894,6 +894,64 @@ test('[SB-12][FL-03] the card the window’s very edge brought in goes again whe
   expect((await sidebarState()).peeking).toBe(true)
 })
 
+test('[SB-12][FL-03] a pointer that leaves the window from inside the card, where the card can’t tell it went, lets the card go; it stays while the pointer is in the window or a menu is up (round 2 fix check, M4)', async () => {
+  const { app } = orbit
+  await openTab(app, page('Inside'))
+  await hideSidebar()
+  const floating = await revealFloating()
+  /** The pointer moves over the card, which hears it. */
+  const overCard = async () => {
+    await floating.mouse.move(100, 400)
+    await floating.mouse.move(110, 410)
+    await expect.poll(async () => (await floatingInfo(app)).hold?.over).toBe(true)
+  }
+  // The card's last word as the pointer goes over the window's resize border or the card's drag
+  // region, where nothing hears it: a leave at x = 2, to nothing.
+  const leaveCard = () =>
+    floating.evaluate(() =>
+      document.body.dispatchEvent(new MouseEvent('mouseout', { clientX: 2, clientY: 45, bubbles: true })),
+    )
+  await overCard()
+  await leaveCard()
+  // On out of the window: the card goes within a second.
+  const left = Date.now()
+  await pointerAt(app, -40, 300)
+  await expect.poll(async () => (await sidebarState()).peeking, { timeout: 1000 * FRAME_SLACK }).toBe(false)
+  expect(Date.now() - left).toBeLessThan(1000 * FRAME_SLACK)
+
+  // Still in the window, over the card's drag region: the card stays.
+  await revealFloating()
+  await overCard()
+  await leaveCard()
+  await pointerAt(app, 3, 45)
+  await new Promise((r) => setTimeout(r, 1000))
+  expect((await floatingInfo(app)).hold).toMatchObject({ over: true, hiding: false })
+  expect((await sidebarState()).peeking).toBe(true)
+
+  // A menu from the card is up, reaching out of the window where the pointer went: the card stays
+  // while the menu is up, and goes once it closes.
+  await app.evaluate(({ Menu }) => {
+    const o = (
+      globalThis as unknown as {
+        __orbit: { windowIds: () => string[]; ctx: { windows: { get: (w: string) => Electron.BrowserWindow } } }
+      }
+    ).__orbit
+    const menu = Menu.buildFromTemplate([{ label: 'Kept' }, { label: 'Out' }])
+    ;(globalThis as unknown as { __menu: Electron.Menu }).__menu = menu
+    const [first] = o.windowIds()
+    if (!first) throw new Error('no window')
+    menu.popup({ window: o.ctx.windows.get(first), x: 120, y: 60 })
+  })
+  await pointerAt(app, -40, 300)
+  await new Promise((r) => setTimeout(r, 1000))
+  expect((await floatingInfo(app)).hold).toMatchObject({ over: true, hiding: false })
+  expect((await sidebarState()).peeking).toBe(true)
+  const closed = Date.now()
+  await app.evaluate(() => (globalThis as unknown as { __menu: Electron.Menu }).__menu.closePopup())
+  await expect.poll(async () => (await sidebarState()).peeking, { timeout: 1000 * FRAME_SLACK }).toBe(false)
+  expect(Date.now() - closed).toBeLessThan(1000 * FRAME_SLACK)
+})
+
 test('[SB-14] dragging the edge sets the width 1:1 within limits; double-click resets; far left hides', async () => {
   const { app, shell } = orbit
   await openTab(app, page('Resize'))

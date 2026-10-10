@@ -56,8 +56,10 @@ const isEditable = (el: Element | null) =>
 /**
  * Tells main whether the pointer is over the card (or just beside it) and whether a text field in it
  * has focus. The view reaches the window's top, left and bottom edges and ends beside the card, so
- * the pointer leaves it through an edge; a "leave" inside it means a menu or the command bar came up
- * over it, which says nothing about where the pointer is (main hears from the page once it moves on).
+ * the pointer leaves it through an edge. A leave short of the edge says nothing about where the
+ * pointer went: on over the window's resize border or the card's drag region, where nothing hears
+ * it, or nowhere, as a menu or the command bar came up over the card. The card says so (`over:
+ * null`), and main reads the pointer until a view hears it (round 2 fix check, M4).
  */
 function usePointerReports(peeking: boolean) {
   useEffect(() => {
@@ -65,12 +67,14 @@ function usePointerReports(peeking: boolean) {
     let over: boolean | null = null
     let editing: boolean | null = null
     let said = 0
+    let unsure = false
     const setOver = (value: boolean) => {
       // While the pointer moves over the card, say so now and then: main may have heard otherwise.
       const now = performance.now()
       if (value === over && (!value || now - said < REASSERT_MS)) return
       over = value
       said = now
+      unsure = false
       void invoke('sidebar.peekState', { over: value })
     }
     const setEditing = (value: boolean) => {
@@ -82,8 +86,14 @@ function usePointerReports(peeking: boolean) {
     const onOut = (e: MouseEvent) => {
       if (e.relatedTarget || e.buttons) return
       const atEdge = e.clientX <= 0 || e.clientY <= 0 || e.clientX >= innerWidth - 1 || e.clientY >= innerHeight - 1
-      if (atEdge) setOver(false)
-      else over = null
+      if (atEdge) {
+        setOver(false)
+        return
+      }
+      over = null
+      if (unsure) return
+      unsure = true
+      void invoke('sidebar.peekState', { over: null })
     }
     let focusTimer = 0
     const onFocus = () => {

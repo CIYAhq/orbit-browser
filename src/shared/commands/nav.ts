@@ -54,8 +54,9 @@ export interface NavCommands {
   /**
    * From the floating sidebar: whether the pointer is over it (`over`) and whether a text field in it
    * has focus (`editing`). It slides away shortly after neither holds and nothing it opened is up.
+   * `over: null`: the pointer left the card for where the card can't tell (main reads it then).
    */
-  'sidebar.peekState': { args: { over?: boolean; editing?: boolean }; result: void }
+  'sidebar.peekState': { args: { over?: boolean | null; editing?: boolean }; result: void }
   /** A click beside the floating sidebar's card: the card hides at once and the click goes on to the page. */
   'sidebar.peekDismiss': { args: { x: number; y: number; button: 'left' | 'middle' | 'right' }; result: void }
   /** What the page tools view shows for its window: the find bar and the zoom indicator (NV-05, NV-06). */
