@@ -514,6 +514,7 @@ html[data-view="library"] body {
 }
 
 .archive-row__time {
+  grid-area: 1 / 4;
   min-width: 56px;
   color: var(--text-muted);
   font-size: 12px;
@@ -521,11 +522,15 @@ html[data-view="library"] body {
   text-align: right;
 }
 
-/* Restore shows on hover (and for the keyboard highlight) in place of the time (AR-03). */
+/*
+ * Restore shows on hover (and for the keyboard highlight) in place of the time (AR-03). It shares
+ * the time's grid cell and always takes its room, so it never covers the Space name.
+ */
 .archive-row__restore {
-  position: absolute;
-  right: 6px;
-  display: none;
+  grid-area: 1 / 4;
+  justify-self: end;
+  display: inline-flex;
+  visibility: hidden;
   align-items: center;
   gap: 5px;
   height: 26px;
@@ -540,7 +545,7 @@ html[data-view="library"] body {
 
 .archive-row:hover .archive-row__restore,
 .archive-row.is-highlighted .archive-row__restore {
-  display: inline-flex;
+  visibility: visible;
 }
 
 .archive-row:hover .archive-row__time,
