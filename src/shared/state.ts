@@ -226,7 +226,10 @@ export interface Settings {
   miniWindowProfiles: Record<string, ProfileId>
   /** Size and position of the last Mini Window the user moved or resized (MW-04). */
   miniWindowBounds?: { x: number; y: number; width: number; height: number }
+  /** First-run onboarding is done or skipped (OB-01): later starts open the browser at once. */
   onboarded: boolean
+  /** The onboarding step a quit left off at, resumed on the next start (OB-14); see ONBOARDING_STEPS. */
+  onboardingStep?: string
   /** The Settings window's section shown last: Settings reopens there (ST-01). */
   settingsSection: string
   /** The Settings window's size when last resized (ST-01). */
@@ -247,7 +250,7 @@ export interface Settings {
   secureDns: SecureDnsChoice
 }
 
-/** Secure DNS choices (ST-12): providers are src/main/settings/system.ts's DOH_SERVERS. */
+/** Secure DNS choices (ST-12): providers are src/main/settings/dns.ts's DOH_SERVERS. */
 export type SecureDnsChoice = 'automatic' | 'off' | 'cloudflare' | 'google' | 'quad9'
 
 /** "URL contains …" or "URL is exactly …" → a Space (ST-09 link routing). */

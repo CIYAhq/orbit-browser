@@ -6,6 +6,7 @@ import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
 import { stubDefaultBrowser, systemDefaultBrowser } from './default-browser'
 import { registerLinkSettings } from './links'
+import { registerOnboarding } from './onboarding'
 import { registerProfileSettings } from './profiles'
 import { registerSearchSettings } from './search'
 import { registerSystemSettings } from './system'
@@ -38,6 +39,7 @@ export function registerSettings(ctx: MainContext): void {
   registerProfileSettings(ctx)
   registerLinkSettings(ctx)
   registerSystemSettings(ctx)
+  registerOnboarding(ctx)
 
   commands.register('settings.openUrl', async ({ url }) => {
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return

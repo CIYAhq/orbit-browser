@@ -4,8 +4,9 @@ import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
 import type { WindowId } from '../../shared/state'
 import { NEUTRAL_THEME, paletteFor } from '../../shared/theme'
 import type { MainContext } from '../context'
-import { loadRenderer, rendererEntry, uiWebPreferences } from '../windows'
+import { loadRenderer, uiWebPreferences } from '../windows'
 import { SECTION_ID_RE } from './normalize'
+import { guardOwnWindow } from './ui-window'
 
 /**
  * The Settings window's id for IPC, shortcuts and actions. It is not a browser window: there is no
@@ -33,7 +34,6 @@ export class SettingsWindow {
   private target: SettingsTarget = {}
   private nonce = 0
   private saveTimer: NodeJS.Timeout | undefined
-  private crashes: number[] = []
 
   constructor(private readonly ctx: MainContext) {
     nativeTheme.on('updated', () => this.applyBackground())
@@ -152,21 +152,7 @@ export class SettingsWindow {
     const contents = win.webContents
     this.ctx.windows.registerUi(contents, SETTINGS_WINDOW_ID)
     this.ctx.windows.attachShortcuts(contents)
-    // Orbit's own UI never navigates away or opens windows (links open as tabs through commands).
-    contents.on('will-navigate', (event, url) => {
-      const entry = rendererEntry()
-      if (!(entry.url && url.startsWith(entry.url))) event.preventDefault()
-    })
-    contents.setWindowOpenHandler(() => ({ action: 'deny' }))
-    contents.on('render-process-gone', (_event, details) => {
-      if (contents.isDestroyed() || details.reason === 'clean-exit') return
-      const now = Date.now()
-      this.crashes = this.crashes.filter((t) => now - t < 60_000)
-      this.crashes.push(now)
-      if (this.crashes.length > 3) return
-      console.error(`[settings] the Settings renderer is gone (${details.reason}); reloading`)
-      loadRenderer(contents, 'settings')
-    })
+    guardOwnWindow(contents, 'settings')
     win.once('ready-to-show', () => {
       if (win.isDestroyed()) return
       win.show()

@@ -1,7 +1,7 @@
 import { Search } from 'lucide-react'
 import { useState } from 'react'
-import type { SiteSearchDraft } from '../../../../shared/commands/settings'
-import type { ProfileId, SearchEngineId, SiteSearchEngine } from '../../../../shared/state'
+import { ENGINE_ORDER, type SiteSearchDraft } from '../../../../shared/commands/settings'
+import type { ProfileId, SiteSearchEngine } from '../../../../shared/state'
 import { engineFor, SEARCH_ENGINES, siteEngineId } from '../../../../shared/url'
 import { invoke } from '../../api'
 import { useOrbit } from '../../store'
@@ -9,18 +9,6 @@ import { useSettingsContext } from '../context'
 import { Button, type Option, RowMenu, Select, SettingGroup, SettingRow, Switch, TextField } from '../controls'
 import { useProfileName, useProfiles } from '../profiles'
 import type { SettingsSection } from '../registry'
-
-/** The built-in engines, in the order the list shows them (ST-06). */
-const ENGINE_ORDER: SearchEngineId[] = [
-  'google',
-  'bing',
-  'duckduckgo',
-  'brave',
-  'ecosia',
-  'startpage',
-  'kagi',
-  'perplexity',
-]
 
 /** A profile's default search engine (ST-06): built-in engines, plus its custom one when it uses one. */
 export function SearchEngineSelect({ profileId, testId }: { profileId: ProfileId; testId?: string }) {

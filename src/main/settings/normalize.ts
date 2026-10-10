@@ -1,5 +1,6 @@
 import { SECURE_DNS_CHOICES } from '../../shared/commands/settings'
 import { DEFAULT_SETTINGS } from '../../shared/defaults'
+import { isOnboardingStep } from '../../shared/onboarding'
 import type { OrbitState } from '../../shared/state'
 import { engineById, isBuiltInEngine } from '../../shared/url'
 
@@ -21,6 +22,7 @@ const saneSize = (n: unknown): n is number =>
 export function normalizeSettingsPrefs(state: OrbitState): void {
   const s = state.settings
   if (typeof s.onboarded !== 'boolean') s.onboarded = DEFAULT_SETTINGS.onboarded
+  if (s.onboarded || !isOnboardingStep(s.onboardingStep)) delete s.onboardingStep
   if (!(typeof s.settingsSection === 'string' && SECTION_ID_RE.test(s.settingsSection))) {
     s.settingsSection = DEFAULT_SETTINGS.settingsSection
   }

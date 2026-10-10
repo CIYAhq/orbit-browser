@@ -9,6 +9,7 @@ import { Perf } from './perf'
 import { loadState, Persistence } from './persist'
 import { ActionRegistry, CommandRegistry, EventRegistry } from './registry'
 import { Sessions } from './sessions'
+import { startOnboarding } from './settings/onboarding'
 import { applyStartupSwitches } from './settings/system'
 import { Store } from './store'
 import { TabRuntime } from './tabs/runtime'
@@ -85,12 +86,13 @@ function start(): void {
     for (const w of Object.values(d.windows)) if (w.kind !== 'main') delete d.windows[w.id]
   })
   if (saved.length > 0) for (const w of saved) windows.open(store.state.windows[w.id])
-  else windows.open()
+  // A first run shows onboarding, which opens the first window when it is done (OB-01).
+  else if (!startOnboarding()) windows.open()
   perf.mark('windows:opened')
   registerExternalLinks(ctx)
 
   app.on('activate', () => {
-    if (windows.ids().length === 0) windows.open()
+    if (windows.ids().length === 0 && !startOnboarding()) windows.open()
   })
   app.on('before-quit', () => {
     windows.quitting = true

@@ -1,5 +1,6 @@
 import type { ActionDef } from '../actions'
-import type { LinkRule, ProfileId, SecureDnsChoice, Settings, SpaceId, WindowId } from '../state'
+import type { OnboardingInfo, OnboardingStep } from '../onboarding'
+import type { LinkRule, ProfileId, SearchEngineId, SecureDnsChoice, Settings, SpaceId, WindowId } from '../state'
 
 /**
  * Owned by the settings lane: the Settings window (ST-*), the global appearance (AP-01),
@@ -119,6 +120,24 @@ export const SETTINGS_ACTIONS: SettingsActionDef[] = [
     settings: { section: 'about' },
     keywords: ['version', 'build info', 'licence', 'license', 'credits'],
   },
+]
+
+/** The settings lane's other actions, for the command bar and menus. */
+export const SETTINGS_LANE_ACTIONS: ActionDef[] = [
+  // Runs the first-run flow again over the open windows, keeping all data (OB-14).
+  { id: 'onboarding.reset', title: 'Reset Onboarding', category: 'App', keywords: ['welcome', 'first run', 'setup'] },
+]
+
+/** The built-in search engines, in the order Settings and onboarding list them (ST-06, OB-08). */
+export const ENGINE_ORDER: readonly SearchEngineId[] = [
+  'google',
+  'bing',
+  'duckduckgo',
+  'brave',
+  'ecosia',
+  'startpage',
+  'kagi',
+  'perplexity',
 ]
 
 /** Sent to the Settings window each time it is opened again (`window.orbit.on('settings.reveal', …)`). */
@@ -265,4 +284,13 @@ export interface SettingsCommands {
   'settings.capabilities': { args: Record<string, never>; result: SettingsCapabilities }
   /** Opens the import flow (IM-01) in the browser window Settings belongs to, when the import lane provides it. */
   'settings.openImport': { args: Record<string, never>; result: boolean }
+  /** Where first-run onboarding starts and what it can offer (OB-01, OB-03). */
+  'onboarding.info': { args: Record<string, never>; result: OnboardingInfo }
+  /** Remembers the step shown, so a quit part-way resumes there (OB-14). */
+  'onboarding.setStep': { args: { step: OnboardingStep }; result: void }
+  /**
+   * Ends onboarding (OB-09) or skips the rest of it (OB-14): adds the chosen Favorites (STARTER_APPS
+   * ids) and opens the first browser window, or returns to the one already open.
+   */
+  'onboarding.finish': { args: { favorites: string[] }; result: void }
 }

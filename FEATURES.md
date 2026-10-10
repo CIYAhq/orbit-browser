@@ -4,14 +4,14 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 148 built (49 partial) · 204 tested · 0 feel right.
+**Totals:** 485 spec’d · 154 built (51 partial) · 210 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
 | P0 | 174 | 101 | 121 |
-| P1 | 221 | 43 | 78 |
-| P2 | 83 | 4 | 5 |
+| P1 | 221 | 47 | 82 |
+| P2 | 83 | 6 | 7 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -588,20 +588,20 @@ Spec: `spec/onboarding.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| OB-01 | Welcome screen | P1 | – | ✅ e2e | – |  |
-| OB-02 | No account, no sign-in, ever | P0 | ✅ | ✅ e2e+unit | – | audit and e2e: no account UI anywhere; a first run sends nothing off the computer except Chromium's spell-check dictionary download (see test) |
-| OB-03 | Import step | P1 | – | – | – |  |
-| OB-04 | Pick a theme colour | P1 | – | – | – |  |
-| OB-05 | Pick favourite web apps (seed Favorites) | P1 | – | – | – |  |
-| OB-06 | Ad-blocking choice | P1 | – | – | – |  |
-| OB-07 | Set as default browser | P1 | – | – | – |  |
-| OB-08 | Default search engine choice | P2 | – | – | – |  |
-| OB-09 | Done screen and the first browser window | P1 | – | – | – |  |
+| OB-01 | Welcome screen | P1 | ✅ | ✅ e2e | – | a window of its own before any browser window on a first run (gated by settings.onboarded; e2e runs skip it unless ORBIT_ONBOARDING=1): Orbit's logo with the moon in motion (still with reduced motion), a welcome line, Get started; steps slide in (about 400 ms, none with reduced motion); Enter continues, Esc goes back; each step's title takes focus; progress dots are labelled. No sounds or music (optional), no haptics (Electron has no API), no first-window shimmer |
+| OB-02 | No account, no sign-in, ever | P0 | ✅ | ✅ e2e+unit | – | audit and e2e: no account UI anywhere, onboarding included; a first run sends nothing off the computer, with or without onboarding, except Chromium's spell-check dictionary download (see tests) |
+| OB-03 | Import step | P1 | 🟡 partial | – | – | placeholder step that says import isn't available yet, because the import lane has no import.open; when it has, the step offers Import… (opens that flow in a browser window) and Do this later with the same weight. Not inline, no background import or counts, no link for people moving from another browser yet |
+| OB-04 | Pick a theme colour | P1 | ✅ | ✅ e2e | – | the Space theme picker (same ThemeEditor) for the first Space, applied live, with a preview of sidebar and frame, grain and intensity; Light / Dark / Match system (Match system preselected, Continue works at once); says it can be changed later. No haptics |
+| OB-05 | Pick favourite web apps (seed Favorites) | P1 | ✅ | ✅ e2e+unit | – | 16 web apps as letter tiles (no logos fetched), nothing preselected, at most 12; they become the first Space's profile's Favorites, unloaded until opened. No ordering by imported history (no import yet) |
+| OB-06 | Ad-blocking choice | P1 | – | – | – | there is no ad and tracker blocker (OT-15), so the step is left out of the flow |
+| OB-07 | Set as default browser | P1 | ✅ | ✅ e2e | – | explains what the default browser does; Make Orbit my default and Not now with the same weight; on Windows says what to pick in Default apps; status asked again when the window comes back to the front; no reminders later. Test runs use a stub |
+| OB-08 | Default search engine choice | P2 | ✅ | ✅ e2e | – | a Search with row on the Done screen: the Default profile's engine (ST-06's list), Google until changed |
+| OB-09 | Done screen and the first browser window | P1 | 🟡 partial | ✅ e2e | – | Done screen sums up colours, Favorites, default browser and import; Start browsing (Back to browsing after a reset) opens the first window centred at about 86% of the screen with the colours and Favorites picked, command bar closed. No Orbit basics folder or local welcome tab (no local guide pages yet), no import counts |
 | OB-10 | Getting-started guide | P1 | – | – | – |  |
 | OB-11 | Contextual tips and one-time hints | P1 | – | – | – |  |
 | OB-12 | Essential keyboard shortcuts sheet | P1 | – | – | – |  |
 | OB-13 | Help and feedback entry points | P1 | – | – | – |  |
-| OB-14 | Skip, resume and reset onboarding | P2 | – | – | – |  |
+| OB-14 | Skip, resume and reset onboarding | P2 | ✅ | ✅ e2e+unit | – | Skip setup on every step but the last; the step is saved, so a quit part-way resumes there; Reset Onboarding (command bar only) runs the flow again over the open windows and deletes nothing. Decision: Skip keeps what earlier steps set (colours as picked, Favorites once continued past), so skipping at the start gives the default first window the spec describes |
 | OB-15 | AI features opt-in step | ? | – | – | – |  |
 | OB-16 | Personal welcome card | P2 | – | – | – |  |
 
