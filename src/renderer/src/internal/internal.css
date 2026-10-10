@@ -1,0 +1,118 @@
+/* Orbit's internal pages (DT-13): a plain, readable page in a normal tab. */
+
+html[data-view="internal"] {
+  --internal-bg: #fbfbfd;
+  --internal-text: #1c1c1f;
+  --internal-muted: rgba(28, 28, 31, 0.6);
+  --internal-line: rgba(0, 0, 0, 0.08);
+  --internal-link: #4652c4;
+}
+
+html[data-view="internal"][data-dark="true"] {
+  --internal-bg: #1d1d21;
+  --internal-text: #ececf1;
+  --internal-muted: rgba(236, 236, 241, 0.6);
+  --internal-line: rgba(255, 255, 255, 0.1);
+  --internal-link: #a9b1ff;
+}
+
+/* The app's views fill a fixed frame; an internal page is a document that scrolls. */
+html[data-view="internal"],
+html[data-view="internal"] body,
+html[data-view="internal"] #root {
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+}
+
+html[data-view="internal"] body {
+  font: 14px / 1.5 var(--font);
+  color: var(--internal-text);
+  background: var(--internal-bg);
+  user-select: text;
+  cursor: auto;
+}
+
+.internal__body {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 48px 24px 64px;
+}
+
+.internal__title {
+  margin: 0 0 24px;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.internal__text {
+  margin: 0 0 12px;
+}
+
+.internal__link {
+  color: var(--internal-link);
+  text-decoration: none;
+}
+
+.internal__link:hover {
+  text-decoration: underline;
+}
+
+.internal code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+.internal__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--internal-line);
+}
+
+.internal__item {
+  display: grid;
+  grid-template-columns: minmax(160px, auto) 1fr;
+  gap: 2px 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--internal-line);
+}
+
+.internal__item .internal__link {
+  grid-row: span 2;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+.internal__item-title {
+  font-weight: 600;
+}
+
+.internal__item-text {
+  color: var(--internal-muted);
+}
+
+.internal__facts {
+  margin: 0;
+  border-top: 1px solid var(--internal-line);
+}
+
+.internal__fact {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--internal-line);
+}
+
+.internal__fact dt {
+  color: var(--internal-muted);
+}
+
+.internal__fact dd {
+  margin: 0;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}

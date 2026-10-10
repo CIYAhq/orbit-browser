@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 475 spec’d · 167 built (67 partial) · 240 tested · 0 feel right. 10 more are out of scope and not counted.
+**Totals:** 475 spec’d · 167 built (68 partial) · 241 tested · 0 feel right. 10 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 110 | 136 |
-| P1 | 221 | 50 | 93 |
+| P1 | 221 | 50 | 94 |
 | P2 | 80 | 7 | 11 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -501,7 +501,7 @@ Spec: `spec/devtools.md`
 | DT-10 | Show full URL outside Developer mode | P1 | – | – | – |  |
 | DT-11 | Task manager (per-tab memory/CPU) | P1 | – | – | – |  |
 | DT-12 | Record a performance trace (local) | P2 | – | – | – |  |
-| DT-13 | Internal pages for engine-level settings | P1 | – | – | – |  |
+| DT-13 | Internal pages for engine-level settings | P1 | 🟡 partial | ✅ e2e+unit | – | orbit://<page>/ opens as a normal tab when typed in the command bar or address field, or from another internal page's link; orbit://pages/ lists them; orbit://version/ shows the versions of Orbit, Electron, Chromium, V8, Node and the OS. They follow the app's state (light/dark) through the same bridge as Orbit's UI. A web page can't navigate, frame, redirect to, open, load or fetch them, and gets no bridge. Infrastructure documented for reuse (D39) in src/main/devtools/internal-pages.ts and src/renderer/src/internal/registry.ts: a page is a *.internal-page.tsx module. Missing: the pages owned by other lanes (extensions EX-07, site settings OT-07, passwords OT-11, privacy and clearing data ST-12, languages ST-14, system options ST-12, about UP-07, history AR-10) |
 | DT-14 | Hard reload and cache-bypassing reload | P1 | ✅ | ✅ e2e | – | ⇧⌘R (Ctrl+Shift+R) is the navigation lane's nav.hardReload: page and subresources refetched (no-cache). A crashed page hands the keyboard to the window, so ⇧⌘R brings it back. Stopping a load (Esc, the reload button) is NV-04, the navigation lane's |
 
 ## Downloads and the Library

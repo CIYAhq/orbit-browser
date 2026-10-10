@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { app } from 'electron'
 import type { MainContext } from './context'
+import { registerInternalScheme } from './devtools/internal-pages'
 import { captureExternalLinks, registerExternalLinks } from './external-links'
 import { registerFeatures } from './features'
 import { registerIpc } from './ipc'
@@ -36,6 +37,8 @@ if (!e2e && !app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   captureExternalLinks()
+  // Before ready, and the app's only call to protocol.registerSchemesAsPrivileged (DT-13).
+  registerInternalScheme()
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit()
   })

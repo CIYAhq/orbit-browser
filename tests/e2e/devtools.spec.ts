@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
+import { resolve } from 'node:path'
 import { expect, test } from '@playwright/test'
 import type { MainContext } from '../../src/main/context'
 import type { DevtoolsState, DockSide } from '../../src/shared/commands/devtools'
@@ -11,11 +13,14 @@ import {
   listenInRange,
   MOD,
   type Orbit,
+  openViaCommandBar,
   run,
   state,
+  tabPage,
   tabView,
   viewPage,
 } from './helpers'
+import { clickInTab } from './peek-helpers'
 
 /**
  * DevTools (DT-01 to DT-03) and hard reload (DT-14). Keys are sent to whatever has the keyboard
@@ -45,7 +50,19 @@ const page = (title: string) => `<!doctype html><html><head><meta charset="utf-8
 <div id="other" style="position:absolute;left:40px;top:240px;width:200px;height:80px;background:#9cf">Other</div>
 </body></html>`
 
-/** `/page/<title>`: two boxes to inspect. `/cached/page` loads `/cached/asset.js`, cacheable for an hour. */
+/** A web page with links to internal pages (DT-13), one per row, 60 px apart from y = 30. */
+const LINKS = `<!doctype html><html><head><meta charset="utf-8"><title>Links</title>
+<style>body{margin:0;font:16px system-ui}a{position:absolute;left:20px;width:300px;height:40px;display:block}</style>
+</head><body>
+<a id="internal" href="orbit://pages/" style="top:10px">Internal pages</a>
+<a id="internal-blank" href="orbit://version/" target="_blank" style="top:70px">Version, in a new tab</a>
+</body></html>`
+const LINK_AT = { internal: { x: 60, y: 30 }, internalBlank: { x: 60, y: 90 } }
+
+/**
+ * `/page/<title>`: two boxes to inspect. `/cached/page` loads `/cached/asset.js`, cacheable for an
+ * hour. `/links`: links to internal pages. `/to-internal` redirects to one.
+ */
 async function startSite(): Promise<Site> {
   const log: Request[] = []
   const server: Server = createServer((req, res) => {
@@ -61,6 +78,12 @@ async function startSite(): Promise<Site> {
     } else if (path === '/cached/page') {
       res.writeHead(200, { 'content-type': 'text/html' })
       res.end(`<!doctype html><title>Cached</title><h1 id="title">Cached</h1><script src="/cached/asset.js"></script>`)
+    } else if (path === '/links') {
+      res.writeHead(200, { 'content-type': 'text/html' })
+      res.end(LINKS)
+    } else if (path === '/to-internal') {
+      res.writeHead(302, { location: 'orbit://version/' })
+      res.end()
     } else if (path === '/cached/asset.js') {
       res.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'max-age=3600' })
       res.end('window.assetRuns = (window.assetRuns || 0) + 1')
@@ -568,4 +591,149 @@ test('[DT-14] ⇧⌘R reloads bypassing the cache, and brings back a crashed tab
   await expect.poll(() => inPage(tabId, 'document.title')).toBe('Cached')
   expect(docs()[3]).toMatchObject({ cacheControl: 'no-cache' })
   await expect.poll(async () => (await state(orbit.app)).tabs[tabId]?.error).toBeUndefined()
+})
+
+// ---- DT-13 ----
+
+/** A tab's address, as the engine has it. */
+const tabUrl = (tabId: string) =>
+  orbit.app.evaluate(
+    (_e, id) => (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id)?.getURL() ?? '',
+    tabId,
+  )
+
+const openTabs = async () => Object.values((await state(orbit.app)).tabs)
+
+test('[DT-13] typing orbit://pages opens the internal pages in a tab; its links open them; they follow the app', async () => {
+  await openViaCommandBar(orbit, 'orbit://pages')
+  const page = await tabPage(orbit.app, 'orbit://pages/')
+  const root = page.getByTestId('internal-page')
+  await expect(root).toHaveAttribute('data-page', 'pages')
+  const tabId = (await activeTabId(orbit.app)) as string
+  await expect.poll(async () => (await state(orbit.app)).tabs[tabId]?.title).toBe('Internal pages')
+  expect((await state(orbit.app)).tabs[tabId]).toMatchObject({ url: 'orbit://pages/' })
+  // It has Orbit's bridge, for its window.
+  const windowId = Object.keys((await state(orbit.app)).windows)[0]
+  expect(await page.evaluate(() => (window as unknown as { orbit: { windowId: string } }).orbit.windowId)).toBe(
+    windowId,
+  )
+  // A link opens a page in the same tab.
+  await page.getByTestId('internal-page-link').filter({ hasText: 'orbit://version/' }).click()
+  await expect(root).toHaveAttribute('data-page', 'version')
+  const versions = await orbit.app.evaluate(({ app }) => ({
+    orbit: app.getVersion(),
+    electron: process.versions.electron,
+    chromium: process.versions.chrome,
+  }))
+  await expect(page.getByTestId('version-orbit')).toHaveText(versions.orbit)
+  await expect(page.getByTestId('version-electron')).toHaveText(versions.electron)
+  await expect(page.getByTestId('version-chromium')).toHaveText(versions.chromium)
+  await expect.poll(async () => (await state(orbit.app)).tabs[tabId]?.title).toBe('Version')
+  expect((await state(orbit.app)).tabs[tabId]).toMatchObject({ url: 'orbit://version/' })
+  // It follows the app's state: dark when Orbit is.
+  await run(orbit.app, 'spaces.setAppearance', { appearance: 'dark' })
+  await expect(root).toHaveAttribute('data-dark', 'true')
+  await run(orbit.app, 'spaces.setAppearance', { appearance: 'light' })
+  await expect(root).toHaveAttribute('data-dark', 'false')
+  // An address with no page says so.
+  await run(orbit.app, 'tabs.navigate', { tabId, url: 'orbit://nope/' })
+  await expect.poll(() => page.title()).toBe('No such page')
+  await expect(root).toHaveAttribute('data-page', '')
+  // A web page in the same tab has no bridge.
+  await run(orbit.app, 'tabs.navigate', { tabId, url: site.url('/page/After') })
+  await expect.poll(() => inPage(tabId, 'document.title')).toBe('After')
+  expect(await inPage(tabId, 'typeof window.orbit')).toBe('undefined')
+})
+
+test('[DT-13] a web page reaches no internal page: no link, frame, new tab, redirect, fetch or bridge', async () => {
+  // A pinned tab, where Peek also acts on links (PK-01).
+  const win = Object.values((await state(orbit.app)).windows)[0]
+  const container = { kind: 'pinned', spaceId: win?.spaceId }
+  const tabId = (await run(orbit.app, 'tabs.create', { url: site.url('/links'), container })) as string
+  await expect.poll(() => inPage(tabId, 'document.title')).toBe('Links')
+  // What becomes of navigations to internal pages in the tab (after Orbit's own handling), and
+  // where its frames went.
+  await orbit.app.evaluate((_e, id) => {
+    const g = globalThis as unknown as OrbitGlobal & { __navigations: string[] }
+    g.__navigations = []
+    const contents = g.__orbit.ctx.tabs.contents(id)
+    contents?.on('will-frame-navigate', (e) => {
+      if (e.url.startsWith('orbit:'))
+        g.__navigations.push(`${e.isMainFrame ? 'page' : 'frame'} ${e.defaultPrevented ? 'stopped' : 'went'} ${e.url}`)
+    })
+    contents?.on('did-frame-navigate', (_e, url) => g.__navigations.push(`showed ${url}`))
+  }, tabId)
+  const navigations = () =>
+    orbit.app.evaluate(() => (globalThis as unknown as { __navigations: string[] }).__navigations)
+
+  expect(await inPage(tabId, 'typeof window.orbit')).toBe('undefined')
+  expect(await inPage(tabId, "fetch('orbit://pages/').then(() => 'read', () => 'refused')")).toBe('refused')
+  // Nor can it load one, or the scripts internal pages run, as if they weren't there.
+  const script = (url: string, type = '') =>
+    inPage(
+      tabId,
+      `new Promise((done) => {
+        const s = Object.assign(document.createElement('script'), { src: ${JSON.stringify(url)}, type: '${type}' })
+        s.onload = () => done('loaded')
+        s.onerror = () => done('failed')
+        document.head.append(s)
+      })`,
+    )
+  const html = readFileSync(resolve('out/renderer/index.html'), 'utf8')
+  const bundle = /src="\.\/(assets\/[^"]+\.js)"/.exec(html)?.[1]
+  expect(bundle).toBeTruthy()
+  expect(await script(site.url('/cached/asset.js'))).toBe('loaded')
+  expect(await script(`orbit://pages/${bundle}`)).toBe('failed')
+  expect(await script(`orbit://pages/${bundle}`, 'module')).toBe('failed')
+  expect(await script('orbit://pages/')).toBe('failed')
+  // A frame.
+  await inPage(
+    tabId,
+    "document.body.append(Object.assign(document.createElement('iframe'), { src: 'orbit://pages/' })), 1",
+  )
+  await expect.poll(navigations).toContain('frame stopped orbit://pages/')
+  // A link.
+  await clickInTab(orbit.app, tabId, LINK_AT.internal)
+  await expect.poll(navigations).toContain('page stopped orbit://pages/')
+  // A link to a new tab: the first word on new tabs and windows (before Peek's) says no.
+  await orbit.app.evaluate(() => {
+    const g = globalThis as unknown as OrbitGlobal & { __opens: string[] }
+    g.__opens = []
+    const hooks = g.__orbit.ctx.hooks.windowOpen
+    const first = hooks[0]
+    hooks[0] = (openerTabId, details) => {
+      const response = first?.(openerTabId, details)
+      g.__opens.push(`${response?.action ?? 'passed'} ${details.url}`)
+      return response
+    }
+  })
+  await clickInTab(orbit.app, tabId, LINK_AT.internalBlank)
+  await expect
+    .poll(() => orbit.app.evaluate(() => (globalThis as unknown as { __opens: string[] }).__opens))
+    .toEqual(['deny orbit://version/'])
+  expect((await openTabs()).filter((t) => t.url.startsWith('orbit:'))).toEqual([])
+  expect(await inPage(tabId, 'location.pathname')).toBe('/links')
+  expect((await navigations()).filter((n) => n.startsWith('showed orbit:') || n.includes(' went '))).toEqual([])
+  // Nor do frames in the page show one.
+  const frames = await orbit.app.evaluate(
+    (_e, id) =>
+      (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs
+        .contents(id)
+        ?.mainFrame.framesInSubtree.map((f) => f.url) ?? [],
+    tabId,
+  )
+  expect(frames.filter((url) => url.startsWith('orbit:'))).toEqual([])
+  // A redirect.
+  const other = (await run(orbit.app, 'tabs.create', { url: site.url('/to-internal') })) as string
+  await expect.poll(() => site.requests('/to-internal').length).toBe(1)
+  await expect
+    .poll(() =>
+      orbit.app.evaluate(
+        (_e, id) => (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id)?.isLoading(),
+        other,
+      ),
+    )
+    .toBe(false)
+  expect(await tabUrl(other)).not.toContain('orbit:')
+  expect((await openTabs()).filter((t) => t.url.startsWith('orbit:'))).toEqual([])
 })

@@ -3,6 +3,7 @@ import { registerSearch } from './commandbar/search'
 import type { MainContext } from './context'
 import { registerCore } from './core'
 import { registerDevtools } from './devtools'
+import { registerInternalPages } from './devtools/internal-pages'
 import { registerDownloads } from './downloads'
 import { registerExtensions } from './extensions'
 import { registerHistory } from './history'
@@ -37,4 +38,6 @@ export function registerFeatures(ctx: MainContext): void {
   registerSettings(ctx)
   registerImport(ctx)
   registerUpdates(ctx)
+  // Last, so its guard on new tabs and windows goes before every other (Peek's, Mini Window's).
+  registerInternalPages(ctx)
 }

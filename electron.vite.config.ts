@@ -15,7 +15,8 @@ export default defineConfig({
       // Sandboxed preloads must be a single CommonJS file with no node_modules imports.
       externalizeDeps: false,
       rollupOptions: {
-        input: { shell: resolve('src/preload/shell.ts') },
+        // internal: the bridge of Orbit's internal pages (DT-13), run in every page of a profile.
+        input: { shell: resolve('src/preload/shell.ts'), internal: resolve('src/preload/internal.ts') },
         output: { format: 'cjs', entryFileNames: '[name].cjs' },
       },
     },

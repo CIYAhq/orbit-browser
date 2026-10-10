@@ -109,6 +109,7 @@ export class WindowManager {
   private records = new Map<WindowId, WindowRecord>()
   /** Orbit UI web contents (shell, overlay, settings…) → window. */
   private uiContents = new Map<number, WindowId>()
+  private broadcastListeners: ((channel: string, args: unknown[]) => void)[] = []
   /** Each tab's view that is placed in a window, and which window. Compared by view, not tab id. */
   private attached = new Map<TabId, Attachment>()
   /** Tabs whose page closed its own web contents (window.close()): not reopened until selected again. */
@@ -406,6 +407,12 @@ export class WindowManager {
       const contents = webContentsFromId(contentsId)
       if (contents && !contents.isDestroyed()) contents.send(channel, ...args)
     }
+    for (const listener of this.broadcastListeners) listener(channel, args)
+  }
+
+  /** Hears every broadcast too: internal pages pass them on to their own renderers (DT-13). */
+  onBroadcast(listener: (channel: string, args: unknown[]) => void): void {
+    this.broadcastListeners.push(listener)
   }
 
   sendToWindow(windowId: WindowId, channel: string, payload: unknown): void {
