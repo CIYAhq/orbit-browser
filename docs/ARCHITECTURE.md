@@ -18,7 +18,7 @@ BrowserWindow (frameless; hiddenInset traffic lights on macOS)
 - **Overlay renderer** (`?view=overlay`) is a transparent full-window view above the tabs. It's shown only while something floats (command bar, Peek card chrome, menus). Clicking its backdrop closes it.
 - **Other renderer views**: `mini` (Mini Window chrome) and `settings` (settings window). They come from the same bundle and are selected by the `view` query.
 - **Preload** (`src/preload/shell.ts`) runs sandboxed with context isolation. It exposes `window.orbit` (`OrbitBridge` in `src/shared/rpc.ts`) only to Orbit UI contents. Web pages get **no bridge**. IPC handlers reject any sender that isn't registered Orbit UI.
-- **Internal pages** (`orbit://<page>/`, DT-13) are Orbit UI in a normal tab, served from the renderer bundle by a protocol handler on each profile session. The one preload that runs in tabs (`src/preload/internal.ts`, registered on the sessions) does nothing unless its frame is an `orbit:` page's main frame; then it gives the same bridge on channels of its own, which main answers only for such frames. Web content can't navigate, frame, redirect to, open, load or fetch them. How they work and how to add a page: `src/main/devtools/internal-pages.ts`.
+- **Internal pages** (`orbit://<page>/`, DT-13) are Orbit UI in a normal tab, served from the renderer bundle by a protocol handler on each profile session. The one preload that runs in tabs (`src/preload/internal.ts`, registered on the sessions) does nothing unless its frame is an `orbit:` page's main frame; then it gives the same bridge on channels of its own, which main answers only for such frames, and only with the commands listed for the page (`INTERNAL_PAGE_COMMANDS`; no events), D53. Their documents run only their own scripts (`script-src 'self'`). Web content can't navigate, frame, redirect to, open, load or fetch them. How they work and how to add a page: `src/main/devtools/internal-pages.ts`.
 
 ## 2. State: one store, patches out
 
@@ -119,7 +119,7 @@ Rules: no synchronous disk I/O on hot paths after boot, no full-state broadcasts
 
 ## 10. Security baseline
 
-Sandboxed, context-isolated renderers everywhere. No Node in pages. Web pages never get a bridge: the internal pages' preload stays inert outside `orbit:` pages. IPC accepts registered Orbit UI senders only, and internal pages' channels accept only a tab's main frame showing an `orbit:` page. UI renderers can't navigate or open windows. Permission prompts are per origin. Tweak JS (user-authored, per site) is injected only through `webFrame.executeJavaScript` in an isolated world, never with Node. Extensions use Electron's built-in extension support plus Orbit's own (MIT) API shims (D3: no GPL dependency).
+Sandboxed, context-isolated renderers everywhere. No Node in pages. Web pages never get a bridge: the internal pages' preload stays inert outside `orbit:` pages. IPC accepts registered Orbit UI senders only, and internal pages' channels accept only a tab's main frame showing an `orbit:` page, and only the commands listed for that page. UI renderers can't navigate or open windows. Permission prompts are per origin. Tweak JS (user-authored, per site) is injected only through `webFrame.executeJavaScript` in an isolated world, never with Node. Extensions use Electron's built-in extension support plus Orbit's own (MIT) API shims (D3: no GPL dependency).
 
 ## 11. Packaging and updates
 
