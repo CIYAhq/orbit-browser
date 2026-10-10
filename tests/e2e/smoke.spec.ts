@@ -54,6 +54,30 @@ test('opens a page from the command bar into a real web view', async () => {
   expect(Object.keys(s.tabs)).toHaveLength(1)
 })
 
+test('stays offline: no host name but localhost resolves, in any profile (PR #10 review F2)', async () => {
+  const { profiles } = await state(orbit.app)
+  const partitions = Object.values(profiles).map((p) => p.partition)
+  const lookups = await orbit.app.evaluate(async ({ session }, parts) => {
+    const sessions = [session.defaultSession, ...parts.map((p) => session.fromPartition(p))]
+    const lookUp = (s: Electron.Session, host: string) =>
+      s.resolveHost(host).then(
+        (r) => r.endpoints.map((e) => e.address).join(' '),
+        (e: Error) => e.message,
+      )
+    // An address needs no lookup, so only the rules refuse 127.0.0.2, and no query can leave the
+    // machine even when the rules are missing (a host name would then be looked up; PR #19 review F5).
+    return Promise.all(
+      sessions.map(async (s) => ({ mapped: await lookUp(s, '127.0.0.2'), local: await lookUp(s, 'localhost') })),
+    )
+  }, partitions)
+  expect(lookups.length).toBeGreaterThan(1)
+  for (const { mapped, local } of lookups) {
+    // Refused by the resolver rules at once, as every host but localhost is.
+    expect(mapped).toContain('ERR_NAME_NOT_RESOLVED')
+    expect(local).toMatch(/127\.0\.0\.1|::1/)
+  }
+})
+
 test('[FL-01] every CSS animation in the shell and the overlay names keyframes defined in that page', async () => {
   for (const view of ['shell', 'overlay'] as const) {
     const page = await viewPage(orbit.app, view)

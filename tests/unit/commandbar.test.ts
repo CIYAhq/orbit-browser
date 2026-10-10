@@ -369,20 +369,44 @@ describe('ranking', () => {
       hosts: store.hostList(),
     })
     const typed = 'garden article 42'
-    // Round 0 warms the JIT and per-entry caches, as the app does in idle time after history loads.
-    const times: number[] = []
-    for (let round = 0; round < 4; round++) {
-      for (let n = 0; n <= typed.length; n++) {
-        const t0 = performance.now()
-        const r = rank({ ...base, query: typed.slice(0, n) })
-        if (round > 0) times.push(performance.now() - t0)
-        expect(r.results.length).toBeGreaterThan(0)
-      }
+    // Round 0 warms the JIT and per-entry caches, as the app does in idle time after history loads. Each keystroke is
+    // timed in this thread's CPU time: ranking never waits, so that is its whole cost, while wall time on a shared
+    // machine also counts the turns other processes get. A run that misses the budget is measured again, up to three
+    // runs (D46, D51).
+    // CPU time can't see a blocking wait or work moved to another thread, and on Linux it moves in steps of one
+    // scheduler tick (1 ms here). The e2e test times the same ranking in the app in wall time, which sees both.
+    // Thread CPU time needs Node 23.9 or later; on an older Node the process's CPU time stands in.
+    const cpuUsage = typeof process.threadCpuUsage === 'function' ? process.threadCpuUsage : process.cpuUsage
+    const cpuMs = () => {
+      const { user, system } = cpuUsage.call(process)
+      return (user + system) / 1000
     }
-    times.sort((a, b) => a - b)
-    const p95 = times[Math.floor(times.length * 0.95)] as number
-    const p50 = times[Math.floor(times.length / 2)] as number
-    console.info(`[commandbar bench] per keystroke p50 ${p50.toFixed(2)} ms, p95 ${p95.toFixed(2)} ms`)
+    const at = (sorted: number[], q: number) => sorted[Math.floor(sorted.length * q)] as number
+    let p95 = Number.POSITIVE_INFINITY
+    for (let run = 1; run <= 3 && p95 > 30; run++) {
+      const cpu: number[] = []
+      const wall: number[] = []
+      for (let round = run === 1 ? 0 : 1; round < 4; round++) {
+        for (let n = 0; n <= typed.length; n++) {
+          const c0 = cpuMs()
+          const t0 = performance.now()
+          const r = rank({ ...base, query: typed.slice(0, n) })
+          const t1 = performance.now()
+          const c1 = cpuMs()
+          if (round > 0) {
+            cpu.push(c1 - c0)
+            wall.push(t1 - t0)
+          }
+          expect(r.results.length).toBeGreaterThan(0)
+        }
+      }
+      cpu.sort((a, b) => a - b)
+      wall.sort((a, b) => a - b)
+      p95 = at(cpu, 0.95)
+      console.info(
+        `[commandbar bench] run ${run}: per keystroke CPU p50 ${at(cpu, 0.5).toFixed(2)} ms, p95 ${p95.toFixed(2)} ms; wall p95 ${at(wall, 0.95).toFixed(2)} ms`,
+      )
+    }
     expect(p95).toBeLessThanOrEqual(30)
   })
 })

@@ -370,6 +370,73 @@ test('[TB-22] a tab closed while its history is restoring leaves no rejection be
   }
 })
 
+test('[TB-22] app.close() asks Orbit to quit between tasks, never part-way through a timer (D28)', async () => {
+  // Main is busy in one timer for 1.5 s as the test closes it, so an ask through the inspector lands
+  // inside it. A quit handler run there that clears the timer Node is about to call makes Node throw
+  // (helpers.ts, askQuit).
+  await orbit.app.evaluate(({ app }) => {
+    const g = globalThis as unknown as { inTimer?: boolean }
+    app.on('before-quit', () => console.error(`[test] quit handler inside a timer: ${g.inTimer === true}`))
+    setTimeout(() => {
+      g.inTimer = true
+      const end = Date.now() + 1500
+      while (Date.now() < end) {
+        // busy
+      }
+      g.inTimer = false
+    }, 0)
+  })
+  await orbit.app.close()
+  const log = mainLog.join('')
+  expect(log).toContain('[test] quit handler inside a timer: false')
+  expect(log).not.toContain('[test] quit handler inside a timer: true')
+})
+
+test("[TB-22] a quit Orbit cancels fails the test: Playwright's own quit doesn't finish it (D28, PR #16 review M1)", async () => {
+  // Orbit cancels the first quit, as a "quit anyway?" question or a swallowed quit would. app.close()
+  // must find it still running, kill it and fail the test.
+  test.fail()
+  await orbit.app.evaluate(({ app }) => {
+    let cancelled = false
+    app.on('before-quit', (event) => {
+      if (cancelled) return
+      cancelled = true
+      event.preventDefault()
+    })
+  })
+  await orbit.app.close()
+})
+
+test('[TB-22] main-process evaluates and handles run between tasks, method shorthands too (PR #10 review F4)', async () => {
+  // Main stays busy in timers, so an evaluate through the inspector lands inside one unless it
+  // waits for a task of its own (helpers.ts, evaluateBetweenTasks).
+  await orbit.app.evaluate(() => {
+    const g = globalThis as unknown as { inTimer?: boolean }
+    for (let i = 0; i < 10; i++) {
+      setInterval(() => {
+        g.inTimer = true
+        const end = Date.now() + 10
+        while (Date.now() < end) {
+          // busy
+        }
+        g.inTimer = false
+      }, 0)
+    }
+  })
+  const inTimer = () => (globalThis as unknown as { inTimer?: boolean }).inTimer === true
+  for (let i = 0; i < 5; i++) {
+    expect(await orbit.app.evaluate(inTimer)).toBe(false)
+    expect(await (await orbit.app.evaluateHandle(inTimer)).jsonValue()).toBe(false)
+  }
+  // A method shorthand is a function too, as in Playwright's own evaluate.
+  const calc = {
+    add(_electron: unknown, n: number) {
+      return n + 1
+    },
+  }
+  expect(await orbit.app.evaluate(calc.add, 1)).toBe(2)
+})
+
 test('[TB-02] opening tabs keeps every UI mirror in step without resyncs (review M2, F4)', async () => {
   const errors: string[] = []
   orbit.shell.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
