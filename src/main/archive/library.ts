@@ -21,6 +21,15 @@ interface LibraryWindow {
   hideTimer?: ReturnType<typeof setTimeout>
 }
 
+/**
+ * A view's page while it is alive. `view.webContents` is undefined once the page is gone (its
+ * window closed), so it is checked before `isDestroyed()` is called on it (D28).
+ */
+function pageOf(view: WebContentsView | undefined): Electron.WebContents | undefined {
+  const contents = view?.webContents
+  return contents && !contents.isDestroyed() ? contents : undefined
+}
+
 const round = (r: Rect): Rect => ({
   x: Math.round(r.x),
   y: Math.round(r.y),
@@ -55,7 +64,7 @@ export class LibraryHost {
       if (frame && frame.width > 0 && frame.height > 0) this.frames.set(windowId, frame)
       this.radii.set(windowId, radius)
       const w = this.wins.get(windowId)
-      if (!w?.open || !w.view || w.view.webContents.isDestroyed()) return
+      if (!w?.open || !w.view || !pageOf(w.view)) return
       w.view.setBounds(this.bounds(windowId))
       w.view.setBorderRadius(radius)
       this.place(windowId)
@@ -94,6 +103,9 @@ export class LibraryHost {
     if (!windowId || !win || win.isDestroyed() || state.windows[windowId]?.kind !== 'main') return false
     this.ctx.perf.mark('library:open:start')
     const w = this.stateOf(windowId)
+    const view = w.view ?? this.createView(windowId, w)
+    const page = pageOf(view)
+    if (!page) return false
     clearTimeout(w.hideTimer)
     const section = args.section || this.sections.last()
     if (section !== this.sections.last()) this.sections.remember(section)
@@ -103,14 +115,13 @@ export class LibraryHost {
     w.space = state.windows[windowId]?.spaceId
     w.overlay = (state.windows[windowId]?.overlay.kind ?? 'none') !== 'none'
     w.show = { section, nonce: ++this.nonce, ...(args.confirmClear ? { confirmClear: true } : {}), entering }
-    const view = w.view ?? this.createView(windowId, w)
     view.setBounds(this.bounds(windowId))
     view.setBorderRadius(this.radii.get(windowId) ?? DEFAULT_RADIUS)
     this.place(windowId)
     view.setVisible(true)
-    view.webContents.send('orbit:library:show', w.show)
+    page.send('orbit:library:show', w.show)
     // With the command bar still up, focus comes here when it closes (onState).
-    if (!w.overlay) view.webContents.focus()
+    if (!w.overlay) page.focus()
     this.onChange?.(windowId, true, section)
     return true
   }
@@ -121,11 +132,12 @@ export class LibraryHost {
     if (!windowId || !w?.open) return
     w.open = false
     const view = w.view
-    if (view && !view.webContents.isDestroyed()) {
-      view.webContents.send('orbit:library:hide', {})
+    const page = pageOf(view)
+    if (view && page) {
+      page.send('orbit:library:hide', {})
       clearTimeout(w.hideTimer)
       w.hideTimer = setTimeout(() => {
-        if (!w.open && !view.webContents.isDestroyed()) view.setVisible(false)
+        if (!w.open && pageOf(view)) view.setVisible(false)
       }, EXIT_MS)
     }
     const win = this.ctx.windows.get(windowId)
@@ -163,16 +175,16 @@ export class LibraryHost {
   /** Sends a message to the Library view of a window (when it is open). */
   send(windowId: WindowId | undefined, channel: string, payload: unknown = {}): boolean {
     const w = windowId ? this.wins.get(windowId) : undefined
-    const contents = w?.open ? w.view?.webContents : undefined
-    if (!contents || contents.isDestroyed()) return false
-    contents.send(`orbit:${channel}`, payload)
+    const page = w?.open ? pageOf(w.view) : undefined
+    if (!page) return false
+    page.send(`orbit:${channel}`, payload)
     return true
   }
 
   focus(windowId: WindowId | undefined): void {
     const w = windowId ? this.wins.get(windowId) : undefined
-    const contents = w?.open ? w.view?.webContents : undefined
-    if (contents && !contents.isDestroyed()) contents.focus()
+    const page = w?.open ? pageOf(w.view) : undefined
+    page?.focus()
   }
 
   /** Where the view is, for tests: bounds, whether it is shown, above every tab view and focused. */
@@ -185,7 +197,8 @@ export class LibraryHost {
   } {
     const w = windowId ? this.wins.get(windowId) : undefined
     const view = w?.view
-    if (!windowId || !w || !view || view.webContents.isDestroyed()) {
+    const page = pageOf(view)
+    if (!windowId || !w || !view || !page) {
       return { open: false, visible: false, aboveTabs: false, focused: false }
     }
     const win = this.ctx.windows.get(windowId)
@@ -195,7 +208,7 @@ export class LibraryHost {
       visible: view.getVisible(),
       bounds: view.getBounds(),
       aboveTabs: children.includes(view) && children.indexOf(view) > this.topTabIndex(children, view),
-      focused: view.webContents.isFocused(),
+      focused: page.isFocused(),
     }
   }
 
@@ -223,7 +236,7 @@ export class LibraryHost {
     const state = this.ctx.store.state
     let top = -1
     children.forEach((child, i) => {
-      if (child === except || !(child instanceof WebContentsView)) return
+      if (child === except || !(child instanceof WebContentsView) || !child.webContents) return
       const tabId = this.ctx.tabs.tabIdFor(child.webContents)
       if (tabId && state.tabs[tabId] && !state.tabs[tabId]?.floating) top = i
     })
@@ -235,7 +248,7 @@ export class LibraryHost {
     const w = this.wins.get(windowId)
     const view = w?.view
     const win = this.ctx.windows.get(windowId)
-    if (!w?.open || !view || !win || win.isDestroyed() || view.webContents.isDestroyed()) return
+    if (!w?.open || !view || !win || win.isDestroyed() || !pageOf(view)) return
     const parent = win.contentView
     const children = parent.children
     const top = this.topTabIndex(children, view)
@@ -250,8 +263,8 @@ export class LibraryHost {
     setImmediate(() => {
       const windowId = this.ctx.windows.windowOfTab(tabId)
       const w = windowId ? this.wins.get(windowId) : undefined
-      const contents = w?.open ? w.view?.webContents : undefined
-      if (!windowId || !contents || contents.isDestroyed() || contents.isFocused()) return
+      const contents = w?.open ? pageOf(w.view) : undefined
+      if (!windowId || !contents || contents.isFocused()) return
       const state = this.ctx.store.state
       if (!state.tabs[tabId] || state.tabs[tabId]?.floating) return
       const overlay = state.windows[windowId]?.overlay
@@ -287,8 +300,8 @@ export class LibraryHost {
   private refocus(windowId: WindowId): void {
     setImmediate(() => {
       const w = this.wins.get(windowId)
-      const contents = w?.open ? w.view?.webContents : undefined
-      if (!contents || contents.isDestroyed() || contents.isFocused()) return
+      const contents = w?.open ? pageOf(w.view) : undefined
+      if (!contents || contents.isFocused()) return
       const win = this.ctx.windows.get(windowId)
       if (!win || win.isDestroyed() || !win.isFocused()) return
       if ((this.ctx.store.state.windows[windowId]?.overlay.kind ?? 'none') !== 'none') return

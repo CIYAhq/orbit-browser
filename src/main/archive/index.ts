@@ -210,6 +210,7 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
     lastMenu = items
     if (ctx.e2e) return
     const win = windowId ? windows.get(windowId) : undefined
+    if (win?.isDestroyed()) return
     Menu.buildFromTemplate(items).popup(win ? { window: win } : undefined)
   })
 
