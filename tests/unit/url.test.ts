@@ -32,6 +32,18 @@ describe('displayHost / siteOf', () => {
     expect(displayHost('https://www.github.com/orbit')).toBe('github.com')
     expect(displayHost('http://localhost:3000/x')).toBe('localhost:3000')
   })
+  it('says what an address without a host is (review A-F2)', () => {
+    expect(displayHost('view-source:http://localhost:3000/page/X')).toBe('view-source:localhost:3000')
+    expect(displayHost('view-source:https://www.github.com/orbit')).toBe('view-source:github.com')
+    expect(displayHost('blob:https://www.example.com/0b6c1d2e-5f00-4c1b-9a2e-3d4e5f607182')).toBe('example.com')
+    expect(displayHost('data:text/html;charset=utf-8,<p>Hello</p>')).toBe('data:text/html')
+    expect(displayHost('data:IMAGE/PNG;base64,iVBORw0KGgo=')).toBe('data:image/png')
+    expect(displayHost('data:,Hello')).toBe('data:text/plain')
+    expect(displayHost('about:blank')).toBe('about:blank')
+    expect(displayHost('file:///tmp/a%20b.html')).toBe('a b.html')
+    expect(displayHost('mailto:someone@example.com')).toBe('mailto:someone@example.com')
+    expect(displayHost(`mailto:${'a'.repeat(60)}@example.com`)).toBe(`mailto:${'a'.repeat(32)}…`)
+  })
   it('finds the registrable site', () => {
     expect(siteOf('https://mail.google.com/a')).toBe('google.com')
     expect(siteOf('https://news.bbc.co.uk/')).toBe('bbc.co.uk')

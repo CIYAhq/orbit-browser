@@ -297,6 +297,15 @@ test('[SB-04][NV-04] while a page is on its way, editing the address starts from
   expect((await state(app)).tabs[id]?.url).toBe(page('Before'))
 })
 
+test('[SB-04][NV-12] an address without a host says what it is: a page’s source, a data: page (review A-F2)', async () => {
+  const { app, shell } = orbit
+  const pill = shell.getByTestId('address-pill')
+  await cmd(app, 'tabs.create', { url: `view-source:${page('Source')}` })
+  await expect(pill).toHaveText(`view-source:localhost:${fx.port}`)
+  await cmd(app, 'tabs.create', { url: 'data:text/html,<title>Data</title>Hello' })
+  await expect(pill).toHaveText('data:text/html')
+})
+
 test('[SB-04] no padlock on pages; plain http to another machine shows a warning', async () => {
   const { app, shell } = orbit
   const address = shell.getByTestId('address')

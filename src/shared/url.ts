@@ -119,13 +119,24 @@ export function parseInput(raw: string, engine: SearchEngineId = 'google'): Pars
   return { kind: 'search', query: text, url: searchUrl(engine, text) }
 }
 
-/** Short, human display of a URL for the sidebar address pill: host without www. */
+/** How much of an address without a host the address pill shows. */
+const HOSTLESS_MAX = 40
+
+/**
+ * Short, human display of a URL for the sidebar address pill: host without www. Addresses without
+ * a host say what they are (review A-F2): a page's source as the page's host, a blob as the host of
+ * the page that made it, a data: page by its type, never its content.
+ */
 export function displayHost(url: string): string {
   try {
     const u = new URL(url)
     if (u.protocol === 'about:') return url
     if (u.protocol === 'file:') return decodeURIComponent(u.pathname.split('/').pop() || 'file')
-    return u.host.replace(/^www\./, '')
+    if (u.protocol === 'view-source:') return `view-source:${displayHost(url.slice(u.protocol.length))}`
+    if (u.protocol === 'blob:') return u.origin === 'null' ? 'blob:' : displayHost(u.origin)
+    if (u.protocol === 'data:') return `data:${u.pathname.split(/[;,]/)[0]?.trim().toLowerCase() || 'text/plain'}`
+    if (u.host) return u.host.replace(/^www\./, '')
+    return url.length > HOSTLESS_MAX ? `${url.slice(0, HOSTLESS_MAX - 1)}…` : url
   } catch {
     return url
   }
