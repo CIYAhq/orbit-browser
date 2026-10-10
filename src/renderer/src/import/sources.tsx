@@ -1,10 +1,12 @@
 import { Lock, RotateCw } from 'lucide-react'
-import type {
-  BrowserKind,
-  ImportDataType,
-  ImportSource,
-  Inspection,
-  SourceExtension,
+import {
+  type BrowserKind,
+  type ImportDataType,
+  type ImportSource,
+  type Inspection,
+  type SourceExtension,
+  skipText,
+  unreadableSkip,
 } from '../../../shared/commands/import'
 
 /** A browser's letter tile colour (no logos: Orbit doesn't ship other browsers' marks). */
@@ -204,6 +206,14 @@ export function TypesPicker({
             !!cookiesUnavailable || locked.has('cookies'),
             'Cookies can sign anyone using this profile in to your accounts. Off unless you choose it.',
           )}
+        {/* A damaged file is named, with what it would have brought (IM-14, F3). */}
+        {inspection.profiles.flatMap((p) =>
+          Object.entries(p.unreadable ?? {}).map(([type, why]) => (
+            <p className="im-note" data-testid="import-unreadable" key={`${p.profileId}:${type}`}>
+              {skipText(unreadableSkip(p.name, type as ImportDataType, why))}
+            </p>
+          )),
+        )}
         {!hasBookmarks && !hasHistory && extensions.size === 0 && !hasCookies && (
           <p className="im-note" data-testid="import-nothing">
             Nothing to import from this profile.

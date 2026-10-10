@@ -1,11 +1,16 @@
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
-import type { BrowserKind, ImportProgressItem, StarterSuggestion } from '../../shared/commands/import'
+import {
+  type BrowserKind,
+  type ImportProgressItem,
+  type StarterSuggestion,
+  unreadableSkip,
+} from '../../shared/commands/import'
 import type { ProfileId } from '../../shared/state'
 import type { HistoryService } from '../history'
 import { hostOf, type ImportedPage, isRecordable, MAX_ENTRIES, MAX_VISITS_PER_ENTRY } from '../history/store'
 import type { FoundProfile, FoundSource } from './browsers'
-import { LockedError, type Scratch, withDatabase, withScratch } from './copy'
+import { LockedError, type Scratch, unreadableReason, withDatabase, withScratch } from './copy'
 import type { ImportJobs, Job, Task } from './jobs'
 
 /**
@@ -326,11 +331,12 @@ export function historyTask(
           } catch (err) {
             // Orbit is quitting: the copy was closed and removed (D58).
             if (job.cancelled) return
-            // A file the browser holds asks for it to be quit (IM-14); a broken one is left out.
+            // A file the browser holds asks for it to be quit (IM-14); a broken one is named in the summary (F3).
             if (err instanceof LockedError) locked = true
             else {
               failed = true
               console.warn(`[import] couldn’t read ${source.name}’s history:`, (err as Error).message)
+              jobs.addSkips(job, [unreadableSkip(profile.name, 'history', unreadableReason(err))])
             }
           }
         }

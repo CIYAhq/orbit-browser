@@ -1,9 +1,9 @@
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, rmSync, statSync, truncateSync, writeFileSync } from 'node:fs'
 import { copyFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { bplist, FIXTURE_ROOT, sampleTree, writeChromium } from '../../scripts/import-fixtures'
+import { bplist, FIXTURE_ROOT, manyPages, sampleTree, writeChromium } from '../../scripts/import-fixtures'
 import {
   type FoundSource,
   findSources,
@@ -287,6 +287,42 @@ describe('[IM-03][IM-04] what a profile holds', () => {
     writeChromium(join(dir, 'chrome'), [{ folder: 'Default', name: 'Me', history: [] }])
     const [empty] = await contents(await source('chrome', join(dir, 'chrome')))
     expect(empty).toEqual({ profileId: 'Default', name: 'Me', locked: [] })
+  })
+})
+
+describe('[IM-14] a damaged file is named, with its types (F3)', () => {
+  const garbage = 'This is not a database. '.repeat(400)
+
+  it('a damaged History: the profile’s other types still come over, and it says history couldn’t be read', async () => {
+    const dir = scratchDir()
+    cpSync(fixture('chrome'), join(dir, 'chrome'), { recursive: true })
+    writeFileSync(join(dir, 'chrome', 'Default', 'History'), garbage)
+    // A History of 5,000 pages, cut in half.
+    writeChromium(join(dir, 'cut'), [{ folder: 'Default', name: 'Cut', history: manyPages(5000) }])
+    const cut = join(dir, 'cut', 'Default', 'History')
+    truncateSync(cut, Math.floor(statSync(cut).size / 2))
+    const [work, personal] = await contents(await source('chrome', join(dir, 'chrome')))
+    expect(work).toMatchObject({ name: 'Work', locked: [], unreadable: { history: 'the file is damaged' } })
+    expect(work?.bookmarks?.count).toBe(6)
+    expect(work?.history).toBeUndefined()
+    expect(personal?.unreadable).toBeUndefined()
+    expect(personal?.history?.count).toBe(1)
+    const [halved] = await contents(await source('chrome', join(dir, 'cut')))
+    expect(halved).toMatchObject({ name: 'Cut', unreadable: { history: 'the file is damaged' } })
+    expect(halved?.history).toBeUndefined()
+  })
+
+  it('Firefox’s damaged places.sqlite: both bookmarks and history couldn’t be read', async () => {
+    const dir = scratchDir()
+    cpSync(fixture('firefox'), join(dir, 'firefox'), { recursive: true })
+    writeFileSync(join(dir, 'firefox', 'abcd1234.default-release', 'places.sqlite'), garbage)
+    const [profile] = await contents(await source('firefox', join(dir, 'firefox')))
+    expect(profile).toEqual({
+      profileId: 'abcd1234.default-release',
+      name: 'default-release',
+      locked: [],
+      unreadable: { bookmarks: 'the file is damaged', history: 'the file is damaged' },
+    })
   })
 })
 

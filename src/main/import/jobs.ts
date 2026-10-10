@@ -375,8 +375,9 @@ export class ImportJobs {
     job.status.skipped.push(...skippedLines(skipped, item.type === 'links' ? ['link', 'links'] : undefined))
   }
 
+  /** Adds summary lines: those with a count of none are left out. */
   addSkips(job: Job, skips: ImportSkip[]): void {
-    job.status.skipped.push(...skips.filter((s) => s.count > 0))
+    job.status.skipped.push(...skips.filter((s) => s.count === undefined || s.count > 0))
   }
 
   /** ⌘Z takes an import back: its folder goes, with every tab in it; ⌘⇧Z puts it back (TB-18). */

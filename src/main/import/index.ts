@@ -11,7 +11,9 @@ import {
   type Inspection,
   MAX_FILE_BYTES,
   type ParsedFile,
+  type ProfileContents,
   TOO_LARGE,
+  unreadableSkip,
 } from '../../shared/commands/import'
 import type { WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
@@ -72,6 +74,8 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
     return source
   }
   commands.register('import.sources', async (): Promise<ImportSource[]> => (await discover()).map(publicSource))
+  // What the last look at each profile couldn't read: the import's summary names it too (F3).
+  const unreadable = new Map<string, NonNullable<ProfileContents['unreadable']>>()
   commands.register('import.inspect', async ({ sourceId, profileIds }): Promise<Inspection> => {
     const source = await sourceOf(sourceId)
     const ids = new Set(Array.isArray(profileIds) ? profileIds : [])
@@ -80,6 +84,7 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
       for (const p of source.profiles) if (ids.has(p.id)) out.push(await inspectProfile(source, p, scratch))
       return out
     })
+    for (const p of profiles) unreadable.set(`${source.id}/${p.profileId}`, p.unreadable ?? {})
     return { sourceId: source.id, browser: source.browser, name: source.name, profiles }
   })
   // A file is read in a worker, never on main's thread (D58).
@@ -206,7 +211,21 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
       }
       if (tasks.length === 0) throw new Error('Nothing to import')
       const names = new Map(chosen.map((x) => [x.profile.id, x.profile.name]))
-      return jobs.start(p, source.name, `Imported from ${source.name}`, tasks, { windowId: browserOf(c) }, names)
+      const id = jobs.start(p, source.name, `Imported from ${source.name}`, tasks, { windowId: browserOf(c) }, names)
+      // The types chosen that a chosen profile couldn't provide, its file damaged: named in the summary (F3).
+      const types = new Set(chosen.flatMap((x) => [...x.types]))
+      const job = jobs.get(id)
+      if (job) {
+        jobs.addSkips(
+          job,
+          chosen.flatMap((x) =>
+            Object.entries(unreadable.get(`${source.id}/${x.profile.id}`) ?? {}).flatMap(([type, why]) =>
+              types.has(type as ImportDataType) ? [unreadableSkip(x.profile.name, type as ImportDataType, why)] : [],
+            ),
+          ),
+        )
+      }
+      return id
     }
     throw new Error('Unknown import')
   })

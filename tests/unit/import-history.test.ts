@@ -1,4 +1,4 @@
-import { chmodSync, cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -278,7 +278,8 @@ describe('[IM-07][IM-14] the import’s history line', () => {
     } as unknown as Job
     const jobs = {
       changed: () => {},
-      addSkips: (_: Job, more: ImportSkip[]) => skipped.push(...more.filter((x) => x.count)),
+      addSkips: (_: Job, more: ImportSkip[]) =>
+        skipped.push(...more.filter((x) => x.count === undefined || x.count > 0)),
     }
     const task = historyTask(jobs, { store } as never, s, s.profiles, (id) => persistent.includes(id))
     await task.read?.(job)
@@ -334,6 +335,17 @@ describe('[IM-07][IM-14] the import’s history line', () => {
       }
     },
   )
+
+  it('[F3] a profile whose history is damaged is named in the summary; the other profile’s still comes over', async () => {
+    const dir = scratchDir()
+    cpSync(join(FIXTURE_ROOT, 'chrome'), join(dir, 'chrome'), { recursive: true })
+    writeFileSync(join(dir, 'chrome', 'Default', 'History'), 'This is not a database. '.repeat(400))
+    const chrome = await source('chrome', join(dir, 'chrome'))
+    const { item, total, skipped } = await runTask(chrome, { Default: 'p-work', 'Profile 1': 'p-work' }, ['p-work'])
+    expect(total).toBe(1)
+    expect(item.done).toBe(1)
+    expect(skipped).toEqual([{ what: 'Work', reason: 'history couldn’t be read (the file is damaged)' }])
+  })
 })
 
 describe('[IM-16] starter suggestions from imported history', () => {

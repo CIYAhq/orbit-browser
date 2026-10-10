@@ -396,3 +396,31 @@ test('[IM-13][IM-14] a quit while bookmarks are being added takes them back: the
     rmSync(userData, { recursive: true, force: true })
   }
 })
+
+test('[IM-14] the summary counts every skipped bookmark, also those in a folder that holds nothing else (F3)', async () => {
+  orbit = await launchImport()
+  const { app } = orbit
+  const html = netscapeHtml([
+    {
+      title: 'Scripts',
+      children: [
+        { title: 'One', url: 'javascript:void(1)' },
+        { title: 'Two', url: 'javascript:void(2)' },
+        { title: 'Three', url: 'javascript:void(3)' },
+      ],
+    },
+    { title: 'Four', url: 'javascript:void(4)' },
+    { title: 'A page', url: 'https://example.com/page/A' },
+  ])
+  const page = await openImport(app)
+  await dropFile(page, '[data-testid="import-flow"]', { name: 'scripts.html', text: html })
+  await expect(page.getByTestId('import-count')).toHaveText('1 of 1 bookmarks selected')
+  const job = await importToCurrentSpace(page)
+  await expect(page.getByTestId('import-skipped').locator('li')).toHaveText([
+    '4 bookmarks: Bookmarklet (a script, not a page)',
+  ])
+  // No folder for the scripts: only the page came over.
+  expect(pinnedShape(await state(app), [job.folders[0]?.folderId as string])).toEqual([
+    { 'Imported bookmarks': ['A page <https://example.com/page/A>'] },
+  ])
+})

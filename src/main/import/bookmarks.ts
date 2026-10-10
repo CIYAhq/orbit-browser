@@ -45,7 +45,10 @@ export interface Placement {
   skipped: Map<string, number>
 }
 
-/** Plans folder `name` holding `nodes` (IM-05). Bookmarks that can't be pinned tabs are only counted. */
+/**
+ * Plans folder `name` holding `nodes` (IM-05). Bookmarks that can't be pinned tabs are only counted,
+ * and a folder with no tab under it (one that held only those) isn't added (F3).
+ */
 export function planPlacement(name: string, nodes: readonly BookmarkNode[]): Placement {
   const plan: Placement = {
     steps: [{ kind: 'folder', key: 0, parent: -1, name }],
@@ -53,14 +56,25 @@ export function planPlacement(name: string, nodes: readonly BookmarkNode[]): Pla
     folders: 0,
     skipped: new Map(),
   }
+  const empty = new Set<PlaceStep>()
   let keys = 0
-  const walk = (list: readonly BookmarkNode[], parent: number) => {
+  /** Plans `list` into folder `parent`; returns how many tabs it holds. */
+  const walk = (list: readonly BookmarkNode[], parent: number): number => {
+    let tabs = 0
     for (const node of list) {
       if (node.children) {
         const key = ++keys
-        plan.steps.push({ kind: 'folder', key, parent, name: node.title.trim().slice(0, 200) || 'Untitled folder' })
-        plan.folders++
-        walk(node.children, key)
+        const step: PlaceStep = {
+          kind: 'folder',
+          key,
+          parent,
+          name: node.title.trim().slice(0, 200) || 'Untitled folder',
+        }
+        plan.steps.push(step)
+        const inside = walk(node.children, key)
+        if (inside === 0) empty.add(step)
+        else plan.folders++
+        tabs += inside
       } else if (node.url) {
         if (node.skip) {
           plan.skipped.set(node.skip, (plan.skipped.get(node.skip) ?? 0) + 1)
@@ -73,10 +87,14 @@ export function planPlacement(name: string, nodes: readonly BookmarkNode[]): Pla
           title: node.title.trim().slice(0, 400) || fallbackTitle(node.url),
         })
         plan.tabs++
+        tabs++
       }
     }
+    return tabs
   }
   walk(nodes, 0)
+  // A folder with no tab under it has only such folders under it: they all go.
+  if (empty.size > 0) plan.steps = plan.steps.filter((step) => !empty.has(step))
   return plan
 }
 

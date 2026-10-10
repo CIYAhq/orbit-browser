@@ -69,6 +69,8 @@ export interface ProfileContents {
   cookies?: { count: number; unavailable?: string }
   /** Types whose files couldn't be copied because the browser holds them (IM-14). */
   locked: ImportDataType[]
+  /** Types whose files are there but couldn't be read, with why ("the file is damaged", IM-14). */
+  unreadable?: Partial<Record<ImportDataType, string>>
 }
 
 export interface Inspection {
@@ -110,11 +112,24 @@ export interface ImportProgressItem {
   note?: string
 }
 
-/** Things left out, with the reason (IM-14). */
+/**
+ * Things left out, with the reason (IM-14): `count` of them ("3 bookmarks: …"), or with no count, a
+ * whole type of one profile ("Work: history couldn’t be read (the file is damaged)").
+ */
 export interface ImportSkip {
   what: string
-  count: number
+  count?: number
   reason: string
+}
+
+/** A profile's type that couldn't be read, as the types step and the summary name it (IM-14). */
+export function unreadableSkip(profile: string, type: ImportDataType, why: string): ImportSkip {
+  return { what: profile, reason: `${type} couldn’t be read (${why})` }
+}
+
+/** A summary line as the import window shows it. */
+export function skipText(s: ImportSkip): string {
+  return s.count === undefined ? `${s.what}: ${s.reason}` : `${s.count.toLocaleString()} ${s.what}: ${s.reason}`
 }
 
 /** A site proposed as a Favorite or pinned tab from imported history (IM-16). */

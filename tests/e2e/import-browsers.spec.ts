@@ -1,4 +1,4 @@
-import { chmodSync, cpSync, mkdtempSync, rmSync } from 'node:fs'
+import { chmodSync, cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
@@ -305,4 +305,40 @@ test('[IM-01][ST-03] the command bar’s Import and Settings → General open th
   page = await importPage(app)
   await expect(page.getByTestId('import-step-source')).toBeVisible()
   await expect(page.getByTestId('import-source-chrome')).toHaveAttribute('aria-checked', 'false')
+})
+
+test('[IM-14][IM-03] a damaged History is named at “What to import” and in the summary; the other profile’s still comes over (F3)', async () => {
+  const chrome = copyOf('chrome')
+  const firefox = copyOf('firefox')
+  const garbage = 'This is not a database. '.repeat(400)
+  writeFileSync(join(chrome, 'Default', 'History'), garbage)
+  writeFileSync(join(firefox, 'abcd1234.default-release', 'places.sqlite'), garbage)
+  orbit = await launchImport({
+    places: [
+      { browser: 'chrome', dir: chrome },
+      { browser: 'firefox', dir: firefox },
+    ],
+  })
+  const { app } = orbit
+  const page = await openImport(app)
+  await chooseBrowser(page, 'chrome', ['Work', 'Personal'])
+  // Personal's one page is offered; Work's history is named, with why.
+  await expect(page.getByTestId('import-type-history')).toContainText('1 page visited')
+  await expect(page.getByTestId('import-unreadable')).toHaveText([
+    'Work: history couldn’t be read (the file is damaged)',
+  ])
+  await page.getByTestId('import-next').click()
+  const job = await importFromBookmarks(page)
+  expect(job.items.find((i) => i.type === 'history')?.done).toBe(1)
+  await expect(page.getByTestId('import-skipped')).toContainText('Work: history couldn’t be read (the file is damaged)')
+  await clickDone(page)
+
+  // Firefox keeps bookmarks and history in one file: both are named, and there's nothing to import.
+  const again = await openImport(app)
+  await chooseBrowser(again, 'firefox')
+  await expect(again.getByTestId('import-unreadable')).toHaveText([
+    'default-release: bookmarks couldn’t be read (the file is damaged)',
+    'default-release: history couldn’t be read (the file is damaged)',
+  ])
+  await expect(again.getByTestId('import-nothing')).toBeVisible()
 })

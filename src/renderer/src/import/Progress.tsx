@@ -1,5 +1,5 @@
 import { AlertTriangle, Check, Circle, Loader2, Minus } from 'lucide-react'
-import type { ImportJob, ImportProgressItem } from '../../../shared/commands/import'
+import { type ImportJob, type ImportProgressItem, skipText } from '../../../shared/commands/import'
 import { useOrbit } from '../store'
 import { TYPE_LABELS } from './sources'
 
@@ -76,9 +76,7 @@ export function Progress({ job }: { job: ImportJob }) {
           <h2>Left out</h2>
           <ul>
             {job.skipped.map((s) => (
-              <li key={`${s.what}:${s.reason}`}>
-                {s.count.toLocaleString()} {s.what}: {s.reason}
-              </li>
+              <li key={`${s.what}:${s.reason}`}>{skipText(s)}</li>
             ))}
           </ul>
         </div>

@@ -8,7 +8,7 @@ import type {
   ProfileContents,
 } from '../../shared/commands/import'
 import { chromiumBookmarks, chromiumProfiles } from './chromium'
-import { LockedError, type Scratch, withDatabase } from './copy'
+import { LockedError, type Scratch, unreadableReason, withDatabase } from './copy'
 import { chromiumExtensions } from './extensions'
 import { firefoxProfiles, readFirefoxBookmarks } from './firefox'
 import { countHistory, historySql } from './history'
@@ -125,7 +125,14 @@ export async function findSources(places: readonly Place[]): Promise<FoundSource
   return out
 }
 
-/** Reads types of a profile from one file: a held file marks them locked (IM-14); a broken one leaves them out. */
+/** Types of a profile that couldn't be read: the types step and the summary name them, with why (F3). */
+function unreadable(out: ProfileContents, source: FoundSource, types: ImportDataType[], err: unknown): void {
+  console.warn(`[import] couldn’t read ${source.name}’s ${types.join(' and ')}:`, (err as Error).message)
+  out.unreadable ??= {}
+  for (const t of types) out.unreadable[t] ??= unreadableReason(err)
+}
+
+/** Reads types of a profile from one file: a held file marks them locked (IM-14); a broken one, unreadable. */
 async function part(
   out: ProfileContents,
   source: FoundSource,
@@ -136,16 +143,21 @@ async function part(
     await read()
   } catch (err) {
     if (err instanceof LockedError) out.locked.push(...types)
-    else console.warn(`[import] couldn’t read ${source.name}’s ${types.join(' and ')}:`, (err as Error).message)
+    else unreadable(out, source, types, err)
   }
 }
 
 /** One type read from a file that was copied: if it's broken, the file's other types are still read. */
-async function quietly(source: FoundSource, type: ImportDataType, read: () => unknown): Promise<void> {
+async function quietly(
+  out: ProfileContents,
+  source: FoundSource,
+  type: ImportDataType,
+  read: () => unknown,
+): Promise<void> {
   try {
     await read()
   } catch (err) {
-    console.warn(`[import] couldn’t read ${source.name}’s ${type}:`, (err as Error).message)
+    unreadable(out, source, [type], err)
   }
 }
 
@@ -169,8 +181,8 @@ export async function inspectProfile(
     // Bookmarks and history share one file: one copy serves both.
     await part(out, source, ['bookmarks', 'history'], () =>
       withDatabase(scratch, file(history.file), async (db) => {
-        await quietly(source, 'bookmarks', () => setBookmarks(readFirefoxBookmarks(db)))
-        await quietly(source, 'history', async () => setHistory(await countHistory(db, history)))
+        await quietly(out, source, 'bookmarks', () => setBookmarks(readFirefoxBookmarks(db)))
+        await quietly(out, source, 'history', async () => setHistory(await countHistory(db, history)))
       }),
     )
     return out

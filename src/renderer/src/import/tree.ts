@@ -20,7 +20,11 @@ export function leafKeys(root: string, nodes: readonly BookmarkNode[], out: stri
   return out
 }
 
-/** The tree as chosen: unselected bookmarks and folders left empty go; skipped ones stay to be counted. */
+/**
+ * The tree as chosen: unselected bookmarks and folders left empty go. Skipped bookmarks can't be
+ * chosen, so they always stay, with their folders, to be counted in the summary (IM-14, F3); main adds
+ * no folder that holds nothing but them.
+ */
 export function filterTree(
   nodes: readonly BookmarkNode[],
   root: string,
@@ -30,7 +34,7 @@ export function filterTree(
   for (const n of nodes) {
     if (n.children) {
       const kids = filterTree(n.children, root, selected)
-      if (kids.some((k) => !k.skip)) out.push({ ...n, children: kids })
+      if (kids.length > 0) out.push({ ...n, children: kids })
     } else if (n.skip || selected.has(leafKey(root, n))) {
       out.push(n)
     }

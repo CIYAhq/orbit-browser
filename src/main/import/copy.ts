@@ -37,6 +37,15 @@ export class LockedError extends Error {
   }
 }
 
+/**
+ * Why a copied file couldn't be read, as the summary says it (IM-14): the system's error reading it,
+ * or anything else (SQLite's "file is not a database", JSON that doesn't parse): a damaged file.
+ */
+export function unreadableReason(err: unknown): string {
+  const code = (err as { code?: unknown } | null)?.code
+  return typeof code === 'string' && /^E[A-Z]+$/.test(code) ? 'the file couldn’t be read' : 'the file is damaged'
+}
+
 /** Errors that mean another program holds the file (Windows reports a sharing violation as EBUSY). */
 const LOCK_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ETXTBSY'])
 

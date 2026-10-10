@@ -211,9 +211,38 @@ describe('[IM-04] choosing bookmarks', () => {
     const chosen = filterTree(tree, 'p', new Set([leafKey('p', first)]))
     const titles = (nodes: BookmarkNode[]): unknown[] =>
       nodes.map((n) => (n.children ? { [n.title]: titles(n.children) } : n.title))
-    expect(titles(chosen)).toEqual([{ 'Bookmarks bar': [{ Work: ['Team calendar'] }] }])
-    expect(filterTree(tree, 'p', new Set())).toEqual([])
+    // Skipped bookmarks can't be chosen or left out: they always stay, to be counted (F3).
+    const skipped = { 'Other bookmarks': ['Make it dark', 'Browser settings'] }
+    expect(titles(chosen)).toEqual([{ 'Bookmarks bar': [{ Work: ['Team calendar'] }] }, skipped])
+    expect(titles(filterTree(tree, 'p', new Set()))).toEqual([skipped])
     // Everything chosen: the whole tree (skipped bookmarks included, to be counted).
     expect(filterTree(tree, 'p', new Set(leafKeys('p', tree)))).toEqual(tree)
+  })
+
+  it('[F3] counts the skipped bookmarks of a folder that holds nothing else, and adds no empty folder for it', () => {
+    const nodes =
+      parseBookmarksHtml(
+        netscapeHtml([
+          {
+            title: 'Scripts',
+            children: [
+              { title: 'One', url: 'javascript:void(1)' },
+              { title: 'Nested', children: [{ title: 'Two', url: 'javascript:void(2)' }] },
+              { title: 'Three', url: 'javascript:void(3)' },
+            ],
+          },
+          { title: 'Four', url: 'javascript:void(4)' },
+          { title: 'A page', url: 'https://example.com/page/A' },
+        ]),
+      ) ?? []
+    const chosen = filterTree(nodes, '', new Set(leafKeys('', nodes)))
+    const { next, placed } = place(createInitialState(NOW), 'Imported bookmarks', chosen)
+    expect(skippedLines(placed.skipped)).toEqual([
+      { what: 'bookmarks', count: 4, reason: 'Bookmarklet (a script, not a page)' },
+    ])
+    expect(pinnedShape(next, [placed.folderId])).toEqual([
+      { 'Imported bookmarks': ['A page <https://example.com/page/A>'] },
+    ])
+    expect(placed.folderIds).toEqual([placed.folderId])
   })
 })
