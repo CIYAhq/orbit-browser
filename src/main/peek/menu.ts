@@ -1,4 +1,5 @@
 import type { MenuItemConstructorOptions } from 'electron'
+import { isPrivateTab } from '../../shared/private'
 import type { TabId } from '../../shared/state'
 import type { MainContext } from '../context'
 import { openMiniWindow } from '../miniwindow'
@@ -10,6 +11,8 @@ import { openLinkInPeek } from '.'
  */
 export function linkPeekMenuItems(ctx: MainContext, tabId: TabId, url: string): MenuItemConstructorOptions[] {
   if (!/^https?:/i.test(url)) return []
+  // A private window has no Peek, and a Mini Window would take the link into a normal profile (NV-11).
+  if (isPrivateTab(ctx.store.state, tabId)) return []
   const floating = ctx.store.state.tabs[tabId]?.floating
   const items: MenuItemConstructorOptions[] = []
   if (!floating) items.push({ label: 'Open Link in Peek', click: () => openLinkInPeek(tabId, url) })

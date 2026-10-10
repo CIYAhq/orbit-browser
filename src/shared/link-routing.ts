@@ -45,6 +45,71 @@ export function isWebUrl(url: string): boolean {
   return /^https?:\/\//i.test(url)
 }
 
+/** A local file's address: `file:`, or the source view of one. */
+export function isLocalFileUrl(url: string): boolean {
+  return /^(view-source:)?file:/i.test(url.trim())
+}
+
+/**
+ * Whether Orbit may itself load or save `url` for the page at `from`: a local file only for a page
+ * that is a local file too, as the engine allows a plain click (D49). `from` is empty when the page
+ * isn't known. Other addresses are left to each route's own rules. The one check on every route where
+ * Orbit loads what a page chose, whatever the engine allows: the page menu, ⌥-click and its frame's
+ * download, a dropped link, and through `framesMayOpen` the windows, tabs and pop-ups a page asks
+ * for, its blocked pop-ups and Save Page As… (round 2 fix check F1).
+ */
+export function pageMayOpen(from: string | undefined, url: string): boolean {
+  return !isLocalFileUrl(url) || /^file:/i.test(from?.trim() ?? '')
+}
+
+/** A page as the main process sees it: every frame in it, the top one too, each with its origin. */
+export interface PageFrames {
+  readonly mainFrame: { readonly framesInSubtree: readonly { readonly origin: string }[] }
+}
+
+/**
+ * `pageMayOpen` for a page that asked for `url` from a frame Orbit can't name: a new window, tab or
+ * pop-up it requested (a modified click, a `target=_blank` link, `window.open`), a pop-up blocked on
+ * it, or a save of it (D49; round 2 fix check M1, F1). A local file only when every frame may open
+ * it, by each frame's origin: any frame whose origin isn't a local file's counts as a web page, a web
+ * page's (F2) or an opaque one (a sandboxed or `data:` frame), even one the page made itself; an
+ * about:blank or srcdoc frame a local page made has the page's origin and counts as local. A page
+ * that went away opens no local file.
+ */
+export function framesMayOpen(page: PageFrames, url: string): boolean {
+  if (pageMayOpen(undefined, url)) return true
+  try {
+    return page.mainFrame.framesInSubtree.every((frame) => pageMayOpen(frame.origin, url))
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The toast for a local file Orbit refused to open for a page (D49): it names the file, so a click
+ * that opens nothing says why (round 3 fix check F1).
+ */
+export function localFileBlockedMessage(url: string): string {
+  return `Local file blocked: ${fileNameOf(url)}`
+}
+
+/** A local file's name, from its address (the last part of its path, decoded). */
+function fileNameOf(url: string): string {
+  let path: string
+  try {
+    path = new URL(url.trim().replace(/^view-source:/i, '')).pathname
+  } catch {
+    return url
+  }
+  const name = path.split('/').filter(Boolean).at(-1)
+  if (!name) return url
+  try {
+    return decodeURIComponent(name)
+  } catch {
+    return name
+  }
+}
+
 /** Same registrable domain (eTLD+1): `mail.example.com` and `docs.example.com` are one site (PK-02). */
 export function sameSite(a: string, b: string): boolean {
   if (!isWebUrl(a) || !isWebUrl(b)) return false

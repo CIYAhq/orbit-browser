@@ -12,6 +12,7 @@ import {
   useState,
 } from 'react'
 import { isFolderId, isTabId } from '../../../../shared/ids'
+import { pageMayOpen } from '../../../../shared/link-routing'
 import type { Space, SpaceId } from '../../../../shared/state'
 import { containerKey, locate, sectionOf, splitOfTab } from '../../../../shared/tree'
 import { engineForSpace, parseInput } from '../../../../shared/url'
@@ -36,12 +37,15 @@ export const SidebarItems = memo(function SidebarItems({
   spaceId,
   header,
   onContextMenu,
+  simple = false,
 }: {
   spaceId: SpaceId
   /** The Space title row (owned by the Spaces lane), drawn at the top of the scrolling list. */
   header?: ReactNode
   /** Right-click on empty list space (rows handle their own menus first). */
   onContextMenu?: (e: ReactMouseEvent) => void
+  /** A private window's list (SB-25): Today only, no Favorites or pinned section. */
+  simple?: boolean
 }) {
   const space = useOrbit((s) => s.spaces[spaceId])
   const active = useOrbit((s) => activeTabId(s))
@@ -82,9 +86,11 @@ export const SidebarItems = memo(function SidebarItems({
   return (
     <MotionConfig reducedMotion="user">
       <div className="sidebar-items" ref={rootRef}>
-        <div className="sidebar-items__favorites" data-favorites-layer>
-          <Favorites ref={favRef} profileId={space.profileId} />
-        </div>
+        {!simple && (
+          <div className="sidebar-items__favorites" data-favorites-layer>
+            <Favorites ref={favRef} profileId={space.profileId} />
+          </div>
+        )}
         <div
           className="sidebar__scroll"
           ref={scrollRef}
@@ -100,8 +106,8 @@ export const SidebarItems = memo(function SidebarItems({
             if (!e.defaultPrevented) onContextMenu?.(e)
           }}
         >
-          <SpaceHeader space={space}>{header}</SpaceHeader>
-          <PinnedSection space={space} />
+          {simple ? header : <SpaceHeader space={space}>{header}</SpaceHeader>}
+          {!simple && <PinnedSection space={space} />}
           <TodayBlock space={space} />
           <ItemList
             key={`today:${space.id}`}
@@ -281,6 +287,10 @@ function onLinkDrop(e: ReactDragEvent, spaceId: string) {
   if (!text) return
   e.preventDefault()
   const parsed = parseInput(text, engineForSpace(getOrbitState(), spaceId))
+  // Where it was dragged from isn't known, and a web page may have offered it: a local file's
+  // address opens only when typed or pasted (D49). The engine gives no address for a file dragged
+  // from the system.
+  if (!pageMayOpen(undefined, parsed.url)) return
   void invoke('tabs.create', { url: parsed.url, spaceId })
 }
 

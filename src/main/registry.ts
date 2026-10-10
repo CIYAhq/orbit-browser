@@ -59,7 +59,9 @@ export class ActionRegistry {
   private handlers = new Map<string, (ctx: ActionContext) => void | Promise<void>>()
   private interceptors: ActionInterceptor[] = []
 
+  /** Throws on an id registered already, as `CommandRegistry` does: a second handler would silently replace the first. */
   register(id: string, handler: (ctx: ActionContext) => void | Promise<void>): void {
+    if (this.handlers.has(id)) throw new Error(`Action already registered: ${id}`)
     this.handlers.set(id, handler)
   }
 

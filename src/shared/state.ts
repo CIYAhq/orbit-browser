@@ -7,6 +7,7 @@
  * s- space, p- profile, w- window. Sidebar containers hold ordered ItemId lists.
  */
 
+import type { PermissionPrompt } from './site'
 import type { UpdateStatus, WhatsNew } from './updates'
 
 export type TabId = string
@@ -49,6 +50,8 @@ export interface Tab {
   icon?: string
   /** Tab whose link opened this tab (TB-19). */
   openerTabId?: TabId
+  /** The page's background colour (#rrggbb) when last seen: fills its card while it draws (SB-19). */
+  pageColor?: string
   createdAt: number
   lastActiveAt: number
   /** Runtime-only fields (not persisted): */
@@ -63,6 +66,15 @@ export interface Tab {
   progress?: number
   /** Set when the page crashed or failed to load. */
   error?: { code: number; description: string }
+  /** Runtime-only: pop-ups the page tried to open without a click since it loaded (NV-09). */
+  blockedPopups?: number
+  /** Runtime-only: the permission prompt waiting for an answer on this tab (NV-15). */
+  permissionPrompt?: PermissionPrompt
+  /**
+   * Runtime-only: where a navigation Orbit started (typed, Back, Reload…) is going before it
+   * commits; the address display shows it (NV-04).
+   */
+  pendingUrl?: string
   /** Runtime-only: the page's media, PiP and tray state (media lane, see shared/media.ts). */
   media?: TabMedia
   /**
@@ -239,7 +251,8 @@ export interface SidebarState {
 
 export interface WindowState {
   id: WindowId
-  kind: 'main' | 'mini'
+  /** `private`: a private window (NV-11), showing a Space of its own with an in-memory profile. */
+  kind: 'main' | 'mini' | 'private'
   spaceId: SpaceId
   /** Active (focused) tab per space, remembered across space switches. */
   activeTab: Record<SpaceId, TabId | null>

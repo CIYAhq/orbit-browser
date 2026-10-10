@@ -1,0 +1,254 @@
+/*
+ * The permission prompt (NV-15): a card under the address display at the top of the sidebar, or
+ * in its own transparent view (view=prompt) over the page's top-left corner while the sidebar is
+ * hidden. It takes the Space's colours; text wraps to the sidebar's width.
+ */
+
+/* Under the address display: over the sidebar's content, as wide as the address. */
+.topbar.has-prompt {
+  position: relative;
+  z-index: 40;
+}
+
+.perm-prompt-anchor {
+  position: absolute;
+  top: calc(100% - 2px);
+  left: 0;
+  right: 0;
+  -webkit-app-region: no-drag;
+}
+
+.perm-prompt {
+  --prompt-line: color-mix(in srgb, var(--text, #1c1c1f) 10%, transparent);
+  --prompt-fill: color-mix(in srgb, var(--text, #1c1c1f) 6%, transparent);
+  --prompt-fill-hover: color-mix(in srgb, var(--text, #1c1c1f) 11%, transparent);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: calc(100vh - 96px);
+  padding: 12px;
+  border-radius: 12px;
+  overflow: auto;
+  background: var(--surface, #fff);
+  color: var(--text, #1c1c1f);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.16),
+    0 10px 28px rgba(0, 0, 0, 0.2),
+    0 2px 6px rgba(0, 0, 0, 0.08);
+  font-size: 13px;
+  line-height: 1.35;
+  cursor: default;
+  user-select: none;
+  -webkit-app-region: no-drag;
+  animation: perm-prompt-in 150ms var(--ease-out, ease-out);
+  transform-origin: 50% 0;
+}
+
+@keyframes perm-prompt-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(-3px);
+  }
+}
+
+.perm-prompt__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.perm-prompt__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.perm-prompt__site {
+  font-weight: 700;
+}
+
+.perm-prompt__close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin: -3px -4px 0 0;
+  border-radius: 6px;
+  color: var(--text-muted, rgba(28, 28, 31, 0.56));
+}
+
+.perm-prompt__close:hover {
+  background: var(--prompt-fill);
+  color: inherit;
+}
+
+.perm-prompt__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.perm-prompt__list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+
+.perm-prompt__list svg {
+  flex: none;
+  margin-top: 1px;
+  opacity: 0.75;
+}
+
+.perm-prompt__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.perm-prompt__actions.is-stacked {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.perm-prompt__choice {
+  flex: 1 1 auto;
+  min-height: 30px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  background: var(--prompt-fill);
+  color: inherit;
+  font-weight: 600;
+  text-align: center;
+  overflow-wrap: anywhere;
+  transition:
+    background var(--dur-fast, 120ms) ease,
+    transform 240ms cubic-bezier(0.3, 1.3, 0.6, 1);
+}
+
+.perm-prompt__actions:not(.is-stacked) .perm-prompt__choice {
+  flex: 0 1 auto;
+}
+
+.perm-prompt__choice:hover:not(:disabled) {
+  background: var(--prompt-fill-hover);
+}
+
+.perm-prompt__choice:active:not(:disabled) {
+  transform: scale(0.97);
+  transition-duration: var(--dur-fast, 120ms), 60ms;
+}
+
+.perm-prompt__choice.is-primary {
+  background: var(--accent, #5865d8);
+  color: #fff;
+}
+
+.perm-prompt__choice.is-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent, #5865d8) 88%, #000);
+}
+
+.perm-prompt__choice:disabled {
+  opacity: 0.5;
+}
+
+.perm-prompt button:focus-visible,
+.perm-prompt [role="option"]:focus-visible {
+  outline: 2px solid var(--accent, #5865d8);
+  outline-offset: 1px;
+}
+
+/* A device or screen to pick. */
+.perm-prompt__picks {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 3px;
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px var(--prompt-line);
+}
+
+.perm-prompt__pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  text-align: left;
+}
+
+.perm-prompt__pick:hover {
+  background: var(--prompt-fill);
+}
+
+.perm-prompt__pick.is-picked {
+  background: color-mix(in srgb, var(--accent, #5865d8) 18%, transparent);
+}
+
+.perm-prompt__pick svg {
+  flex: none;
+  opacity: 0.75;
+}
+
+.perm-prompt__pick-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.perm-prompt__preview {
+  flex: none;
+  width: 56px;
+  height: 35px;
+  border-radius: 4px;
+  background: var(--prompt-fill) center / contain no-repeat;
+}
+
+.perm-prompt__empty {
+  margin: 0;
+  padding: 10px;
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px var(--prompt-line);
+  color: var(--text-muted, rgba(28, 28, 31, 0.56));
+  text-align: center;
+}
+
+/* The prompt's own view while the sidebar is hidden (PROMPT_VIEW: a 12 px margin for the shadow). */
+html[data-view="prompt"] body {
+  background: transparent;
+  overflow: hidden;
+}
+
+.prompt-view {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+}
+
+.prompt-view .perm-prompt {
+  max-height: none;
+  transform-origin: 0 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .perm-prompt {
+    animation: none;
+  }
+  .perm-prompt__choice {
+    transition: none;
+  }
+}

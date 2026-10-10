@@ -35,9 +35,11 @@ test('[OB-02] a fresh install opens a usable browser window with nothing typed; 
   const shell = await viewPage(app, 'shell')
   await expect(shell.getByTestId('sidebar')).toBeVisible()
   await expect.poll(() => app.evaluate(() => (globalThis as unknown as OrbitGlobal).__orbit.windowIds().length)).toBe(1)
-  // No window but the browser window: nothing to sign in to or fill in first.
+  // No window but the browser window: nothing to sign in to or fill in first. Its own views: the
+  // shell, the command bar and the loading indicator's, made as the window shows (chrome round 2, F3).
+  const own = ['shell', 'overlay', 'loading']
   const views = () => app.windows().map((p) => new URL(p.url()).searchParams.get('view'))
-  expect(views().filter((v) => v !== 'shell' && v !== 'overlay')).toEqual([])
+  expect(views().filter((v) => !own.includes(v ?? ''))).toEqual([])
   // The command bar opens, ready to go anywhere.
   await shell.keyboard.press(`${MOD}+T`)
   const overlay = await viewPage(app, 'overlay')

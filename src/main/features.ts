@@ -8,6 +8,7 @@ import { registerHistory } from './history'
 import { registerImport } from './import'
 import { registerMedia } from './media'
 import { registerMiniWindow } from './miniwindow'
+import { registerNav } from './nav'
 import { registerPeek } from './peek'
 import { registerSettings } from './settings'
 import { registerSpaces } from './spaces/commands'
@@ -19,7 +20,8 @@ import { registerUpdates } from './updates'
 /** Every feature module registers its commands, actions and hooks here, in dependency order. */
 export function registerFeatures(ctx: MainContext): void {
   registerCore(ctx)
-  registerTabs(ctx)
+  const { ops } = registerTabs(ctx)
+  registerNav(ctx, ops)
   registerSpaces(ctx)
   const history = registerHistory(ctx)
   registerSearch(ctx, history)

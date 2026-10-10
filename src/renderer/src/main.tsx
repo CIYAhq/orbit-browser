@@ -54,6 +54,46 @@ async function boot(): Promise<void> {
         <MiniApp />
       </StrictMode>,
     )
+  } else if (view === 'sidebar') {
+    // The hidden sidebar's floating card (chrome lane, SB-12): a transparent view at the window's left edge.
+    const { FloatingSidebarApp } = await import('./shell/chrome/FloatingSidebarApp')
+    root.render(
+      <StrictMode>
+        <FloatingSidebarApp />
+      </StrictMode>,
+    )
+  } else if (view === 'tools') {
+    // The page tools over the active page's corner (chrome lane, NV-05, NV-06): find bar and zoom indicator.
+    const { PageToolsApp } = await import('./overlay/find/PageToolsApp')
+    root.render(
+      <StrictMode>
+        <PageToolsApp />
+      </StrictMode>,
+    )
+  } else if (view === 'prompt') {
+    // A site's permission prompt over the page's corner while the sidebar is hidden (chrome lane, NV-15).
+    const { PromptViewApp } = await import('./shell/chrome/PromptViewApp')
+    root.render(
+      <StrictMode>
+        <PromptViewApp />
+      </StrictMode>,
+    )
+  } else if (view === 'loading') {
+    // The page loading indicator at the top of the page card (chrome lane, SB-28).
+    const { LoadingApp } = await import('./shell/chrome/LoadingApp')
+    root.render(
+      <StrictMode>
+        <LoadingApp />
+      </StrictMode>,
+    )
+  } else if (view === 'link') {
+    // The link status pill at the bottom of the page card (chrome lane, SB-27).
+    const { LinkPillApp } = await import('./shell/chrome/LinkPillApp')
+    root.render(
+      <StrictMode>
+        <LinkPillApp />
+      </StrictMode>,
+    )
   } else if (view === 'library') {
     // The Library (archive lane, AR-02): its own view over the page area.
     const { LibraryApp } = (await app) as typeof import('./library/LibraryApp')

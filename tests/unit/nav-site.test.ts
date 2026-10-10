@@ -1,0 +1,418 @@
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { describe, expect, it, vi } from 'vitest'
+import { SitePrefs } from '../../src/main/nav/site-prefs'
+import { makeTab } from '../../src/main/tabs/model'
+import { createInitialState, createWindowState, DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
+import { peekShown, promptTabId, shownTabId } from '../../src/shared/nav'
+import {
+  deviceKey,
+  deviceLabel,
+  isPermissionKind,
+  kindsOf,
+  NOTIFICATION_CLICK_GAP_MS,
+  ONE_TIME_KINDS,
+  PERMISSION_ASK,
+  PERMISSION_NAME,
+  PERMISSION_ORDER,
+  PROMPT_GUARD_MS,
+  PromptGuard,
+  pagePermissionKinds,
+  perKeyGate,
+  permissionOrigin,
+  siteLabel,
+  sortKinds,
+} from '../../src/shared/site'
+import type { OrbitState } from '../../src/shared/state'
+
+describe('engine permissions as the prompt and panel name them (NV-15)', () => {
+  it('splits a media request into camera and microphone', () => {
+    expect(kindsOf('media', ['video'])).toEqual(['camera'])
+    expect(kindsOf('media', ['audio'])).toEqual(['microphone'])
+    expect(kindsOf('media', ['audio', 'video'])).toEqual(['camera', 'microphone'])
+    // A check that doesn't say which is about both.
+    expect(kindsOf('media')).toEqual(['camera', 'microphone'])
+    expect(kindsOf('media', ['unknown'])).toEqual(['camera', 'microphone'])
+  })
+
+  it('maps the other permissions it asks about', () => {
+    expect(kindsOf('geolocation')).toEqual(['location'])
+    expect(kindsOf('geolocation-approximate')).toEqual(['location'])
+    expect(kindsOf('notifications')).toEqual(['notifications'])
+    expect(kindsOf('clipboard-read')).toEqual(['clipboard'])
+    expect(kindsOf('midi')).toEqual(['midi'])
+    expect(kindsOf('midiSysex')).toEqual(['midi'])
+    expect(kindsOf('idle-detection')).toEqual(['idle'])
+    expect(kindsOf('window-management')).toEqual(['windows'])
+    expect(kindsOf('local-fonts')).toEqual(['fonts'])
+    expect(kindsOf('local-network-access')).toEqual(['network'])
+    expect(kindsOf('loopback-network')).toEqual(['network'])
+  })
+
+  it('asks about nothing else', () => {
+    for (const quiet of ['fullscreen', 'pointerLock', 'clipboard-sanitized-write', 'openExternal', 'unknown']) {
+      expect(kindsOf(quiet)).toBeNull()
+    }
+  })
+
+  it('maps the names pages read permissions by', () => {
+    expect(pagePermissionKinds('geolocation')).toEqual(['location'])
+    expect(pagePermissionKinds('notifications')).toEqual(['notifications'])
+    expect(pagePermissionKinds('push')).toEqual(['notifications'])
+    expect(pagePermissionKinds('camera')).toEqual(['camera'])
+    expect(pagePermissionKinds('microphone')).toEqual(['microphone'])
+    expect(pagePermissionKinds('clipboard-read')).toEqual(['clipboard'])
+    expect(pagePermissionKinds('local-fonts')).toEqual(['fonts'])
+    // As Chromium's PermissionStatus names them.
+    expect(pagePermissionKinds('video_capture')).toEqual(['camera'])
+    expect(pagePermissionKinds('audio_capture')).toEqual(['microphone'])
+    expect(pagePermissionKinds('clipboard_read')).toEqual(['clipboard'])
+    expect(pagePermissionKinds('window_management')).toEqual(['windows'])
+    // The engine answers the rest itself.
+    for (const other of ['clipboard-write', 'persistent-storage', 'storage-access', 'accelerometer', '']) {
+      expect(pagePermissionKinds(other)).toBeNull()
+    }
+  })
+
+  it('sorts into one order without repeats', () => {
+    expect(sortKinds(['microphone', 'camera', 'microphone', 'location'])).toEqual(['camera', 'microphone', 'location'])
+    expect(sortKinds([])).toEqual([])
+  })
+
+  it('has a question and a name for every permission, and one-time grants only for camera, microphone and location', () => {
+    for (const kind of PERMISSION_ORDER) {
+      expect(PERMISSION_ASK[kind]).toBeTruthy()
+      expect(PERMISSION_NAME[kind]).toBeTruthy()
+      expect(isPermissionKind(kind)).toBe(true)
+    }
+    expect(isPermissionKind('speaker')).toBe(false)
+    expect(isPermissionKind(3)).toBe(false)
+    expect([...ONE_TIME_KINDS].sort()).toEqual(['camera', 'location', 'microphone'])
+  })
+})
+
+describe('the site a permission belongs to', () => {
+  it('is the page’s origin, port included', () => {
+    expect(permissionOrigin('https://maps.example.com/route?a=1#x')).toBe('https://maps.example.com')
+    expect(permissionOrigin('http://localhost:3341/page/A')).toBe('http://localhost:3341')
+  })
+
+  it('is one entry for every local file, and nothing for pages without an origin', () => {
+    expect(permissionOrigin('file:///home/me/a.html')).toBe('file://')
+    expect(permissionOrigin('about:blank')).toBeNull()
+    expect(permissionOrigin('data:text/html,hi')).toBeNull()
+    expect(permissionOrigin('not a url')).toBeNull()
+    expect(permissionOrigin(undefined)).toBeNull()
+  })
+
+  it('is named by its host, or "This file"', () => {
+    expect(siteLabel('https://maps.example.com')).toBe('maps.example.com')
+    expect(siteLabel('http://localhost:3341')).toBe('localhost:3341')
+    expect(siteLabel('file://')).toBe('This file')
+  })
+})
+
+describe('devices a site may use', () => {
+  it('are known by vendor, product and serial number, or by port', () => {
+    expect(deviceKey('usb', { vendorId: 0x2341, productId: 0x43, serialNumber: 'A1' })).toBe('usb:9025:67:A1')
+    expect(deviceKey('hid', { vendorId: 1, productId: 2 })).toBe('hid:1:2:')
+    expect(deviceKey('serial', { portName: '/dev/ttyUSB0', portId: 'p1' })).toBe('serial:port:/dev/ttyUSB0')
+    expect(deviceKey('serial', { portId: 'p1' })).toBe('serial:port:p1')
+  })
+
+  it('are named for people', () => {
+    expect(deviceLabel('usb', { productName: 'Board', name: 'x' })).toBe('Board')
+    expect(deviceLabel('serial', { portName: 'COM3' })).toBe('COM3')
+    expect(deviceLabel('hid', {})).toBeTruthy()
+  })
+})
+
+describe('site choices on disk (NV-15, NV-16)', () => {
+  const fileIn = () => join(mkdtempSync(join(tmpdir(), 'orbit-site-prefs-')), 'site-prefs.json')
+
+  it('keeps permission choices per profile and origin, and writes them', () => {
+    const file = fileIn()
+    const prefs = new SitePrefs(file)
+    prefs.setPermission(DEFAULT_PROFILE_ID, 'https://a.test', 'camera', 'allow')
+    prefs.setPermission(DEFAULT_PROFILE_ID, 'https://a.test', 'location', 'block')
+    prefs.setPermission('work', 'https://a.test', 'camera', 'block')
+    expect(prefs.permission(DEFAULT_PROFILE_ID, 'https://a.test', 'camera')).toBe('allow')
+    expect(prefs.permission('work', 'https://a.test', 'camera')).toBe('block')
+    expect(prefs.permission(DEFAULT_PROFILE_ID, 'https://b.test', 'camera')).toBeUndefined()
+    prefs.setPermission(DEFAULT_PROFILE_ID, 'https://a.test', 'location', undefined)
+    expect(prefs.permissionsFor(DEFAULT_PROFILE_ID, 'https://a.test')).toEqual({ camera: 'allow' })
+    prefs.flush()
+    const again = new SitePrefs(file)
+    again.load()
+    expect(again.permissionsFor(DEFAULT_PROFILE_ID, 'https://a.test')).toEqual({ camera: 'allow' })
+    expect(again.permissionsFor('work', 'https://a.test')).toEqual({ camera: 'block' })
+  })
+
+  it('keeps a private window’s choices in memory only, until the last private window closes', () => {
+    const file = fileIn()
+    const prefs = new SitePrefs(file)
+    prefs.setPermission('private-1', 'https://a.test', 'camera', 'allow')
+    prefs.grantDevice('private-1', 'https://a.test', { type: 'usb', key: 'usb:1:2:', name: 'Board' })
+    expect(prefs.permission('private-1', 'https://a.test', 'camera')).toBe('allow')
+    prefs.flush()
+    expect(existsSync(file) ? readFileSync(file, 'utf8') : '').not.toContain('a.test')
+    prefs.forgetPrivate()
+    expect(prefs.permission('private-1', 'https://a.test', 'camera')).toBeUndefined()
+    expect(prefs.devicesFor('private-1', 'https://a.test')).toEqual([])
+  })
+
+  it('remembers each device once and forgets it on request', () => {
+    const prefs = new SitePrefs(fileIn())
+    const board = { type: 'usb' as const, key: 'usb:1:2:A', name: 'Board' }
+    prefs.grantDevice(DEFAULT_PROFILE_ID, 'https://a.test', board)
+    prefs.grantDevice(DEFAULT_PROFILE_ID, 'https://a.test', { ...board, name: 'Board again' })
+    expect(prefs.devicesFor(DEFAULT_PROFILE_ID, 'https://a.test')).toEqual([board])
+    prefs.revokeDevice(DEFAULT_PROFILE_ID, 'https://a.test', board.key)
+    expect(prefs.devicesFor(DEFAULT_PROFILE_ID, 'https://a.test')).toEqual([])
+  })
+
+  it('writes on quit what a background write still on its way holds, and that write never undoes it (review A-F9)', async () => {
+    const file = fileIn()
+    const zoomOnDisk = () => (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).zoom : undefined)
+    vi.useFakeTimers()
+    let prefs: SitePrefs
+    try {
+      prefs = new SitePrefs(file)
+      prefs.setZoom(DEFAULT_PROFILE_ID, 'a.test', 1.1)
+      // Half a second on, the background write starts; the app quits before it lands.
+      vi.advanceTimersByTime(500)
+      prefs.flush()
+      expect(zoomOnDisk()).toEqual({ [DEFAULT_PROFILE_ID]: { 'a.test': 1.1 } })
+      // A change while the next write is on its way, then quit: the older write lands after the quit's.
+      prefs.setZoom(DEFAULT_PROFILE_ID, 'a.test', 1.25)
+      vi.advanceTimersByTime(500)
+      prefs.setZoom(DEFAULT_PROFILE_ID, 'a.test', 1.5)
+      prefs.flush()
+    } finally {
+      vi.useRealTimers()
+    }
+    await prefs.written()
+    expect(zoomOnDisk()).toEqual({ [DEFAULT_PROFILE_ID]: { 'a.test': 1.5 } })
+    expect(readdirSync(dirname(file))).toEqual(['site-prefs.json'])
+  })
+
+  it('forgets a deleted profile’s choices and keeps the others’ (review B-F7)', () => {
+    const file = fileIn()
+    const prefs = new SitePrefs(file)
+    const board = { type: 'usb' as const, key: 'usb:1:2:A', name: 'Board' }
+    for (const profile of ['work', DEFAULT_PROFILE_ID]) {
+      prefs.setZoom(profile, 'a.test', 1.25)
+      prefs.setPopupsAllowed(profile, 'a.test', true)
+      prefs.setPermission(profile, 'https://a.test', 'camera', 'allow')
+      prefs.grantDevice(profile, 'https://a.test', board)
+    }
+    prefs.forgetProfile('work')
+    expect(prefs.zoomFor('work', 'a.test')).toBeUndefined()
+    expect(prefs.popupsAllowed('work', 'a.test')).toBe(false)
+    expect(prefs.permissionsFor('work', 'https://a.test')).toEqual({})
+    expect(prefs.devicesFor('work', 'https://a.test')).toEqual([])
+    expect(prefs.zoomFor(DEFAULT_PROFILE_ID, 'a.test')).toBe(1.25)
+    expect(prefs.popupsAllowed(DEFAULT_PROFILE_ID, 'a.test')).toBe(true)
+    expect(prefs.permissionsFor(DEFAULT_PROFILE_ID, 'https://a.test')).toEqual({ camera: 'allow' })
+    expect(prefs.devicesFor(DEFAULT_PROFILE_ID, 'https://a.test')).toEqual([board])
+    prefs.flush()
+    const saved = JSON.parse(readFileSync(file, 'utf8'))
+    for (const key of ['zoom', 'popups', 'permissions', 'devices'])
+      expect(Object.keys(saved[key])).toEqual([DEFAULT_PROFILE_ID])
+  })
+
+  it('drops what it doesn’t understand when loading', () => {
+    const file = fileIn()
+    writeFileSync(
+      file,
+      JSON.stringify({
+        permissions: {
+          default: { 'https://a.test': { camera: 'allow', speaker: 'allow', location: 'maybe' }, 'https://b.test': 5 },
+        },
+        devices: {
+          default: {
+            'https://a.test': [
+              { type: 'usb', key: 'k', name: 'n' },
+              { type: 'bluetooth', key: 'x' },
+            ],
+          },
+        },
+      }),
+    )
+    const prefs = new SitePrefs(file)
+    prefs.load()
+    expect(prefs.permissionsFor('default', 'https://a.test')).toEqual({ camera: 'allow' })
+    expect(prefs.permissionsFor('default', 'https://b.test')).toEqual({})
+    expect(prefs.devicesFor('default', 'https://a.test')).toEqual([{ type: 'usb', key: 'k', name: 'n' }])
+  })
+})
+
+describe('the tab the top row is about (PK-11)', () => {
+  function setup() {
+    const state: OrbitState = createInitialState(0)
+    const spaceId = state.spaceOrder[0] as string
+    const page = makeTab({ spaceId, profileId: DEFAULT_PROFILE_ID, url: 'https://a.test/' }, 0)
+    const peek = makeTab({ spaceId, profileId: DEFAULT_PROFILE_ID, url: 'https://b.test/' }, 0)
+    peek.floating = 'peek'
+    state.tabs[page.id] = page
+    state.tabs[peek.id] = peek
+    state.spaces[spaceId]?.today.push(page.id)
+    const win = createWindowState(spaceId)
+    win.activeTab[spaceId] = page.id
+    state.windows[win.id] = win
+    return { state, win, page, peek }
+  }
+
+  it('is the active tab, or nothing for an unknown window', () => {
+    const { state, win, page } = setup()
+    expect(shownTabId(state, win.id)).toBe(page.id)
+    expect(peekShown(state, win.id)).toBe(false)
+    expect(shownTabId(state, 'w-gone')).toBeNull()
+  })
+
+  it('is the Peek’s page while one shows, and the active tab again while it closes', () => {
+    const { state, win, page, peek } = setup()
+    win.overlay = { kind: 'peek', tabId: peek.id, nonce: 1, sourceTabId: page.id }
+    expect(shownTabId(state, win.id)).toBe(peek.id)
+    expect(peekShown(state, win.id)).toBe(true)
+    win.overlay = { kind: 'peek', tabId: peek.id, nonce: 1, sourceTabId: page.id, phase: 'expanding' }
+    expect(shownTabId(state, win.id)).toBe(peek.id)
+    win.overlay = { kind: 'peek', tabId: peek.id, nonce: 1, sourceTabId: page.id, phase: 'closing' }
+    expect(shownTabId(state, win.id)).toBe(page.id)
+    expect(peekShown(state, win.id)).toBe(false)
+  })
+
+  it('ignores a Peek whose page is already gone', () => {
+    const { state, win, page } = setup()
+    win.overlay = { kind: 'peek', tabId: 't-gone', nonce: 1 }
+    expect(shownTabId(state, win.id)).toBe(page.id)
+    expect(peekShown(state, win.id)).toBe(false)
+  })
+})
+
+describe('the tab whose permission prompt a window shows (NV-15)', () => {
+  it('is the shown tab’s, else a waiting split pane’s; a Peek covers the panes (review B-F3)', () => {
+    const state: OrbitState = createInitialState(0)
+    const spaceId = state.spaceOrder[0] as string
+    const tab = (url: string) => {
+      const t = makeTab({ spaceId, profileId: DEFAULT_PROFILE_ID, url }, 0)
+      state.tabs[t.id] = t
+      return t
+    }
+    const left = tab('https://left.test/')
+    const right = tab('https://right.test/')
+    const peek = tab('https://peek.test/')
+    peek.floating = 'peek'
+    const leaf = (tabId: string) => ({ type: 'leaf' as const, tabId })
+    state.splits['s-1'] = {
+      id: 's-1',
+      layout: { type: 'row', children: [leaf(left.id), leaf(right.id)], sizes: [0.5, 0.5] },
+      createdAt: 0,
+    }
+    state.spaces[spaceId]?.today.push('s-1')
+    const win = createWindowState(spaceId)
+    win.activeTab[spaceId] = right.id
+    state.windows[win.id] = win
+    const asks = (origin: string, id: number) => ({
+      id,
+      type: 'permission' as const,
+      origin,
+      kinds: ['notifications' as const],
+      oneTime: false,
+    })
+
+    expect(promptTabId(state, win.id)).toBeNull()
+    left.permissionPrompt = asks('https://left.test', 1)
+    expect(promptTabId(state, win.id)).toBe(left.id)
+    // The focused pane's own request comes first.
+    right.permissionPrompt = asks('https://right.test', 2)
+    expect(promptTabId(state, win.id)).toBe(right.id)
+    delete right.permissionPrompt
+    // A Peek covers the panes: only its own request shows.
+    win.overlay = { kind: 'peek', tabId: peek.id, nonce: 1, sourceTabId: right.id }
+    expect(promptTabId(state, win.id)).toBeNull()
+    peek.permissionPrompt = asks('https://peek.test', 3)
+    expect(promptTabId(state, win.id)).toBe(peek.id)
+    expect(promptTabId(state, 'w-gone')).toBeNull()
+  })
+})
+
+describe('notification clicks a page reports (NV-15)', () => {
+  it('bring a tab forward once per gap, however fast they come', () => {
+    let now = 1000
+    const pass = perKeyGate<string>(NOTIFICATION_CLICK_GAP_MS, () => now)
+    expect(pass('t1')).toBe(true)
+    // A flood from the same tab changes nothing until the gap has passed.
+    let through = 0
+    for (let i = 0; i < 10_000; i++) {
+      now += 0.01
+      if (pass('t1')) through++
+    }
+    expect(through).toBe(0)
+    // Another tab has its own gap.
+    expect(pass('t2')).toBe(true)
+    now = 1000 + NOTIFICATION_CLICK_GAP_MS
+    expect(pass('t1')).toBe(true)
+    expect(pass('t1')).toBe(false)
+  })
+
+  it('keeps a gap per tab as many tabs come and go', () => {
+    let now = 0
+    const pass = perKeyGate<number>(100, () => now)
+    for (let key = 0; key < 64; key++) expect(pass(key)).toBe(true)
+    now = 100
+    // Once the gap has passed (the 65th key drops the quiet ones), each may pass again, once.
+    expect(pass(64)).toBe(true)
+    expect(pass(0)).toBe(true)
+    expect(pass(0)).toBe(false)
+  })
+})
+
+describe('a permission prompt ignores presses that come too soon (NV-15)', () => {
+  it('takes none until it has been on screen a moment', () => {
+    const guard = new PromptGuard()
+    // Not shown yet: nothing counts.
+    expect(guard.press(0)).toBe(false)
+    guard.shown(1000)
+    expect(guard.press(1000 + PROMPT_GUARD_MS - 1)).toBe(false)
+    expect(guard.allows()).toBe(false)
+    // The press before was too recent; after a pause, a press counts.
+    expect(guard.press(1000 + 2 * PROMPT_GUARD_MS)).toBe(true)
+    expect(guard.allows()).toBe(true)
+  })
+
+  it('keeps ignoring presses while they come quickly, however long', () => {
+    const guard = new PromptGuard()
+    guard.shown(0)
+    for (let t = 50; t < 5000; t += 150) expect(guard.press(t)).toBe(false)
+    expect(guard.readyAt()).toBe(4850 + PROMPT_GUARD_MS)
+    expect(guard.press(4850 + PROMPT_GUARD_MS)).toBe(true)
+  })
+
+  it('lets a double-click take a pick only when its first press counted', () => {
+    const guard = new PromptGuard()
+    guard.shown(0)
+    guard.press(600)
+    guard.press(700)
+    expect(guard.allows()).toBe(false)
+    expect(guard.allows(true)).toBe(true)
+    // Quick clicks as it shows: no pair of them counts.
+    guard.shown(2000)
+    guard.press(2050)
+    guard.press(2200)
+    expect(guard.allows(true)).toBe(false)
+  })
+
+  it('starts again each time it shows, and takes nothing while off screen', () => {
+    const guard = new PromptGuard()
+    guard.shown(0)
+    expect(guard.press(1000)).toBe(true)
+    guard.hidden()
+    expect(guard.press(5000)).toBe(false)
+    expect(guard.readyAt()).toBe(Number.POSITIVE_INFINITY)
+    guard.shown(6000)
+    expect(guard.press(6100)).toBe(false)
+    expect(guard.press(6700)).toBe(true)
+  })
+})

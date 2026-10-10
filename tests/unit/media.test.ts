@@ -167,8 +167,32 @@ describe('tray membership (MD-08, MD-09, MD-10, MD-14)', () => {
         't-d': tab('t-d', at(20)),
         't-e': tab('t-e'),
       },
+      windows: { 'w-1': { id: 'w-1', kind: 'normal', spaceId: 's-1' } },
+      spaces: { 's-1': { id: 's-1', profileId: 'p-default' } },
     } as unknown as OrbitState
-    expect(trayTabIds(state)).toEqual(['t-b', 't-d', 't-a'])
+    expect(trayTabIds(state, 'w-1')).toEqual(['t-b', 't-d', 't-a'])
+  })
+
+  it('a window lists only tabs it may show: no private tab in a normal window, only its own in a private one', () => {
+    const at = (since: number): TabMedia => ({ ...playing, tray: true, since })
+    const state = {
+      tabs: {
+        't-a': tab('t-a', at(10)),
+        't-p': tab('t-p', at(30), { spaceId: 's-p', profileId: 'private-1' }),
+        't-q': tab('t-q', at(20), { spaceId: 's-q', profileId: 'private-2' }),
+      },
+      windows: {
+        'w-1': { id: 'w-1', kind: 'normal', spaceId: 's-1' },
+        'w-p': { id: 'w-p', kind: 'private', spaceId: 's-p' },
+      },
+      spaces: {
+        's-1': { id: 's-1', profileId: 'p-default' },
+        's-p': { id: 's-p', profileId: 'private-1' },
+        's-q': { id: 's-q', profileId: 'private-2' },
+      },
+    } as unknown as OrbitState
+    expect(trayTabIds(state, 'w-1')).toEqual(['t-a'])
+    expect(trayTabIds(state, 'w-p')).toEqual(['t-p'])
   })
 
   it('titles come from the Media Session, then the tab', () => {

@@ -4,6 +4,7 @@
 import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
 import { isMediaBusy } from '../../shared/media'
+import { windowMayShow } from '../../shared/private'
 import { noteSplitFocus, removePane } from '../../shared/split'
 import type { ItemId, OrbitState, Space, SpaceId, Tab, TabId, WindowId } from '../../shared/state'
 import {
@@ -51,6 +52,8 @@ export function activateInDraft(d: OrbitState, windowId: WindowId, tabId: TabId,
   const win = d.windows[windowId]
   const tab = d.tabs[tabId]
   if (!win || !tab) return
+  // A private window shows only its own tabs, and no other window shows them (NV-11).
+  if (!windowMayShow(d, windowId, tabId)) return
   const isFavorite = sectionOf(d, tabId) === 'favorite'
   const currentSpace = d.spaces[win.spaceId]
   // Favorites are shared by all Spaces of a profile: stay in the current Space when it shows them.

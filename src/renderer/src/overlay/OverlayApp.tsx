@@ -6,6 +6,7 @@ import { useWindow } from '../store'
 import { paletteVars, usePalette } from '../theme'
 import { CommandBar } from './CommandBar'
 import { PeekLayer } from './PeekLayer'
+import { SiteControls } from './site/SiteControls'
 
 /**
  * Transparent full-window layer above the tab views. It is only visible while
@@ -54,6 +55,9 @@ export function OverlayApp() {
           </AnimatePresence>
           {overlay?.kind === 'panel' && isSpacePanel(overlay.panel) && (
             <SpacePanels key={overlay.nonce} overlay={overlay} />
+          )}
+          {overlay?.kind === 'panel' && overlay.panel === 'site-controls' && (
+            <SiteControls key={overlay.nonce} overlay={overlay} dark={palette?.dark} />
           )}
           {overlay?.kind === 'peek' && <PeekLayer key={overlay.nonce} overlay={overlay} />}
         </div>

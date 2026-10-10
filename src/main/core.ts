@@ -64,8 +64,9 @@ export function registerCore(ctx: MainContext): void {
       setOverlay(windowId, { kind: 'none' })
       return
     }
-    const tabId = activeTabOf(store.state, windowId)
-    const url = tabId ? (store.state.tabs[tabId]?.url ?? '') : ''
+    const tab = store.state.tabs[activeTabOf(store.state, windowId) ?? '']
+    // What the address shows: where a navigation Orbit started is going, before it commits (NV-04; review A-F3).
+    const url = tab ? (tab.pendingUrl ?? tab.url ?? '') : ''
     // CB-23: with no current page, ⌘L behaves like ⌘T.
     const effective = mode === 'edit-url' && (!url || url === 'about:blank') ? 'new-tab' : mode
     ctx.perf.mark('commandbar:open:start')
@@ -78,10 +79,7 @@ export function registerCore(ctx: MainContext): void {
   }
   actions.register('tab.new', openCommandBar('new-tab'))
   actions.register('url.edit', openCommandBar('edit-url'))
-  actions.register('page.find', (c) => {
-    // Placeholder until the find-in-page bar lands: forward to the command bar lane's find UI when present.
-    ctx.toast(windowOf(c), 'Find in page is coming soon')
-  })
+  // page.find (the find bar, NV-05) is registered by src/main/nav/page-tools.ts.
 
   actions.register('sidebar.toggle', (c) => {
     const windowId = windowOf(c)
@@ -89,6 +87,6 @@ export function registerCore(ctx: MainContext): void {
     if (!win) return
     void commands.run('window.setSidebar', { visible: !win.sidebar.visible }, { windowId })
   })
-  // window.new is registered by the spaces lane (SP-24: same Space, command bar open, cascade).
-  actions.register('app.settings', (c) => ctx.toast(windowOf(c), 'Settings are coming soon'))
+  // window.new is registered by the spaces lane (SP-24: same Space, command bar open, cascade), and
+  // app.settings by the settings module: this placeholder's handler would only be replaced.
 }

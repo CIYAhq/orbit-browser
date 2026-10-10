@@ -1,37 +1,82 @@
 import { type ContextMenuParams, clipboard, Menu, type MenuItemConstructorOptions, type WebContents } from 'electron'
+import { pageMayOpen } from '../../shared/link-routing'
 import type { TabId } from '../../shared/state'
 import { engineFor, searchUrl } from '../../shared/url'
 import type { MainContext } from '../context'
+import {
+  dictionaryItems,
+  keepPageMenu,
+  linkWindowItems,
+  lookUpItems,
+  mediaItems,
+  menuReferrer,
+  openLinkInTab,
+  pageItems,
+  saveLinkItem,
+  searchLabel,
+  writingDirectionItem,
+} from '../nav/page-menu'
 import { linkPeekMenuItems } from '../peek/menu'
 import { linkSplitMenuItem } from '../split/menu'
 
 /** Native right-click menu for web pages. */
 export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: WebContents, params: ContextMenuParams) {
-  // Items other features add (media: Picture in Picture on a video).
-  const items: MenuItemConstructorOptions[] = (ctx.hooks.pageContextMenu ?? []).flatMap((hook) =>
-    hook(tabId, contents, params),
-  )
+  // Video and audio first: Loop and Show Controls, then what other features add (media: Picture in
+  // Picture on a video) (NV-12). The group ends with a separator, whoever added its last item.
+  const items: MenuItemConstructorOptions[] = [
+    ...mediaItems(contents, params),
+    ...(ctx.hooks.pageContextMenu ?? []).flatMap((hook) => hook(tabId, contents, params)),
+  ]
+  if (items.length > 0 && items.at(-1)?.type !== 'separator') items.push({ type: 'separator' })
   const openInNewTab = (url: string, activate: boolean) => {
     const tab = ctx.store.state.tabs[tabId]
     void ctx.commands.run('tabs.create', { url, spaceId: tab?.spaceId, activate }, {})
   }
+  // A link or image from the page: a background tab, with the page as referrer (review B-F1).
+  const referrer = menuReferrer(params)
+  const openFromPage = (url: string) => {
+    if (!openLinkInTab(ctx, tabId, url, referrer)) openInNewTab(url, false)
+  }
+
+  // A local file's link or picture on a page that isn't a local file keeps only its copy items:
+  // Orbit opens or saves it for no web page (D49).
+  const mayOpen = (url: string) => pageMayOpen(referrer.url, url)
+  // A script, a page's source or data is no page to open: the engine names the first two
+  // about:blank#blocked here, and would show data as a page of its own (round 2 fix check F6).
+  // Copying and saving stay.
+  const opensAsPage = (url: string) => !/^\s*(javascript|view-source|data|about):/i.test(url)
 
   if (params.linkURL) {
+    const link = params.linkURL
+    const open: MenuItemConstructorOptions[] =
+      mayOpen(link) && opensAsPage(link)
+        ? [
+            { label: 'Open Link in New Tab', click: () => openFromPage(link) },
+            // A new pane beside the page's pane (SV-08).
+            linkSplitMenuItem(ctx, tabId, link),
+            // Then Peek and Mini Window, new and private windows: the order NV-12 lists.
+            ...linkPeekMenuItems(ctx, tabId, link),
+            ...linkWindowItems(ctx, tabId, link, referrer),
+          ]
+        : []
     items.push(
-      { label: 'Open Link in New Tab', click: () => openInNewTab(params.linkURL, false) },
-      ...linkPeekMenuItems(ctx, tabId, params.linkURL),
-      // A new pane beside the page's pane (SV-08).
-      linkSplitMenuItem(ctx, tabId, params.linkURL),
-      { label: 'Copy Link Address', click: () => clipboard.writeText(params.linkURL) },
+      ...open,
+      { label: 'Copy Link Address', click: () => clipboard.writeText(link) },
+      ...(mayOpen(link) ? [saveLinkItem(contents, link)] : []),
       { type: 'separator' },
     )
   }
   if (params.mediaType === 'image' && params.srcURL) {
+    const image = params.srcURL
+    if (mayOpen(image)) {
+      items.push(
+        { label: 'Open Image in New Tab', click: () => openFromPage(image) },
+        { label: 'Save Image As…', click: () => contents.downloadURL(image) },
+      )
+    }
     items.push(
-      { label: 'Open Image in New Tab', click: () => openInNewTab(params.srcURL, false) },
       { label: 'Copy Image', click: () => contents.copyImageAt(params.x, params.y) },
-      { label: 'Copy Image Address', click: () => clipboard.writeText(params.srcURL) },
-      { label: 'Save Image As…', click: () => contents.downloadURL(params.srcURL) },
+      { label: 'Copy Image Address', click: () => clipboard.writeText(image) },
       { type: 'separator' },
     )
   }
@@ -39,7 +84,9 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
     for (const suggestion of params.dictionarySuggestions.slice(0, 4)) {
       items.push({ label: suggestion, click: () => contents.replaceMisspelling(suggestion) })
     }
-    if (params.dictionarySuggestions.length) items.push({ type: 'separator' })
+    const dictionary = dictionaryItems(contents, params)
+    items.push(...dictionary)
+    if (params.dictionarySuggestions.length || dictionary.length) items.push({ type: 'separator' })
     items.push(
       { role: 'undo', enabled: params.editFlags.canUndo },
       { role: 'redo', enabled: params.editFlags.canRedo },
@@ -47,22 +94,22 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
       { role: 'cut', enabled: params.editFlags.canCut },
       { role: 'copy', enabled: params.editFlags.canCopy },
       { role: 'paste', enabled: params.editFlags.canPaste },
+      { role: 'pasteAndMatchStyle', enabled: params.editFlags.canPaste },
       { role: 'selectAll' },
+      writingDirectionItem(contents),
       { type: 'separator' },
     )
   } else if (params.selectionText) {
-    const text = params.selectionText.trim().slice(0, 40)
+    // The engine of the tab's profile, as for a search typed in its Space (ST-06); the item names it.
+    const state = ctx.store.state
+    const engine = engineFor(state, state.tabs[tabId]?.profileId)
     items.push(
       { role: 'copy' },
       {
-        label: `Search for “${text}${params.selectionText.length > 40 ? '…' : ''}”`,
-        click: () => {
-          // The engine of the tab's profile, as for a search typed in its Space (ST-06).
-          const state = ctx.store.state
-          const engine = engineFor(state, state.tabs[tabId]?.profileId)
-          openInNewTab(searchUrl(engine, params.selectionText.trim()), true)
-        },
+        label: searchLabel(engine, params.selectionText),
+        click: () => openInNewTab(searchUrl(engine, params.selectionText.trim()), true),
       },
+      ...lookUpItems(contents, params.selectionText),
       { type: 'separator' },
     )
   }
@@ -80,10 +127,13 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
       },
       { label: 'Reload', click: () => contents.reload() },
       { type: 'separator' },
+      ...pageItems(ctx, tabId, contents),
+      { type: 'separator' },
       { label: 'Copy Page URL', click: () => clipboard.writeText(contents.getURL()) },
       { type: 'separator' },
     )
   }
   items.push({ label: 'Inspect', click: () => contents.inspectElement(params.x, params.y) })
+  if (keepPageMenu(ctx, tabId, items)) return
   Menu.buildFromTemplate(items).popup()
 }
