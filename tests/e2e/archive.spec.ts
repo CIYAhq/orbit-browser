@@ -1,5 +1,5 @@
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
-import type { ArchivePage, ArchiveRestoreResult, LibraryShow } from '../../src/shared/commands/archive'
+import type { ArchivePage, ArchiveRestoreResult, BackupInfo, LibraryShow } from '../../src/shared/commands/archive'
 import {
   action,
   type Fixtures,
@@ -707,4 +707,82 @@ test('[AR-06] from a preview, Open as Tab opens the page and keeps the entry; Re
   await expect.poll(() => activeId(app)).toBe(opened)
   await expect.poll(async () => (await info(orbit)).open).toBe(false)
   expect(await ids('expanded')).toEqual([expanded])
+})
+
+test('[AR-11] Restore Data lists sidebar backups; the one from before a folder was deleted brings the folder back, and Undo takes the restore back', async () => {
+  const { app } = orbit
+  const sp = await space(app)
+  const stay = await newTab(app, fx.url('/page/Stay'))
+  await waitTab(app, stay, '/page/Stay')
+  const one = await newTab(app, fx.url('/page/One'))
+  await waitTab(app, one, '/page/One')
+  const two = await newTab(app, fx.url('/page/Two'))
+  await waitTab(app, two, '/page/Two')
+  const folderId = (await run(app, 'folders.create', { name: 'Reading', items: [one, two] })) as string
+  await expect.poll(async () => (await state(app)).folders[folderId]?.children.length).toBe(2)
+  const backup = (await run(app, 'backups.take')) as BackupInfo
+  expect(backup.tabs).toBeGreaterThanOrEqual(2)
+  // Since then: the folder deleted (its tabs go to the Archive) and a tab opened.
+  await run(app, 'folders.delete', { folderId })
+  await expect.poll(async () => (await state(app)).folders[folderId]).toBeUndefined()
+  const urls = async () => (await query(orbit)).rows.map((r) => r.url)
+  await expect.poll(urls).toEqual(expect.arrayContaining([fx.url('/page/One'), fx.url('/page/Two')]))
+  const late = await newTab(app, fx.url('/page/Late'))
+  await waitTab(app, late, '/page/Late')
+  await run(app, 'tabs.activate', { tabId: stay })
+  await expect.poll(() => activeId(app)).toBe(stay)
+
+  // Help → Restore Data… on macOS; the command bar everywhere.
+  if (process.platform === 'darwin') {
+    const help = await app.evaluate(({ Menu }) =>
+      Menu.getApplicationMenu()
+        ?.items.find((i) => i.role === 'help')
+        ?.submenu?.items.map((i) => i.label),
+    )
+    expect(help).toContain('Restore Data…')
+  }
+  await openViaCommandBar(orbit, 'Restore Data')
+  const lib = await libraryPage(app)
+  await expect(lib.getByTestId('library')).toHaveAttribute('data-open', 'true')
+  await expect(lib.getByTestId('library-section')).toHaveAttribute('data-section-id', 'backups')
+  const row = lib.locator(`[data-testid="backup-row"][data-id="${backup.id}"]`)
+  await expect(row.getByTestId('backup-row-counts')).toHaveText(
+    `${backup.spaces} ${backup.spaces === 1 ? 'Space' : 'Spaces'} · ${backup.tabs} tabs`,
+  )
+  await expect(lib.getByTestId('backups-day').first()).toHaveText('Today')
+  // Restore… asks first; Cancel has the keys.
+  await row.click()
+  await row.getByTestId('backup-restore').click()
+  const dialog = lib.getByTestId('backup-confirm')
+  await expect(dialog).toContainText('Restore the sidebar from today at')
+  await expect(dialog).toContainText('Tabs opened since go to the Archive.')
+  await expect(lib.getByTestId('backup-confirm-cancel')).toBeFocused()
+  await lib.getByTestId('backup-confirm-ok').click()
+  const toast = lib.getByTestId('library-toast').filter({ hasText: 'Sidebar restored from today at' })
+  await expect(toast).toBeVisible()
+
+  // The folder is back in the pinned section with its tabs, which left the Archive; the tab
+  // opened since went there.
+  await expect
+    .poll(async () => (await state(app)).folders[folderId]?.children.toSorted())
+    .toEqual([one, two].toSorted())
+  const s = await state(app)
+  expect(s.spaces[sp.id]?.pinned).toContain(folderId)
+  expect(s.tabs[one]).toMatchObject({ url: fx.url('/page/One'), asleep: true })
+  expect(s.tabs[late]).toBeUndefined()
+  // The window still shows the tab it showed.
+  expect(await activeId(app)).toBe(stay)
+  await expect.poll(urls).toContain(fx.url('/page/Late'))
+  expect(await urls()).not.toContain(fx.url('/page/One'))
+  // The sidebar as it was just before is a backup of its own, listed above.
+  await expect.poll(async () => ((await run(app, 'backups.list')) as BackupInfo[]).length).toBeGreaterThanOrEqual(2)
+  await expect(lib.getByTestId('backup-row').first()).not.toHaveAttribute('data-id', backup.id)
+
+  // Undo restores that one: the folder goes again and the late tab comes back, same tab.
+  await toast.getByTestId('library-toast-action').click()
+  await expect(lib.getByTestId('library-toast').filter({ hasText: 'Restore undone' })).toBeVisible()
+  await expect.poll(async () => (await state(app)).folders[folderId]).toBeUndefined()
+  await expect.poll(async () => (await state(app)).tabs[late]?.url).toBe(fx.url('/page/Late'))
+  await expect.poll(urls).toEqual(expect.arrayContaining([fx.url('/page/One'), fx.url('/page/Two')]))
+  expect(await urls()).not.toContain(fx.url('/page/Late'))
 })

@@ -763,3 +763,112 @@ html[data-view="library"] body {
   background: var(--hover);
   color: var(--text);
 }
+
+/* ---- Backups (AR-11): a short list, laid out in flow (no virtual list) ---- */
+
+.backups__intro {
+  max-width: 620px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.backups__list {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 12px 24px;
+  outline: none;
+}
+
+.backups__day {
+  display: flex;
+  align-items: flex-end;
+  height: 36px;
+  padding: 0 8px 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.backup-row {
+  display: grid;
+  grid-template-columns: minmax(72px, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  height: 40px;
+  padding: 0 8px;
+  border-radius: var(--radius-row);
+}
+
+.backup-row:hover {
+  background: var(--library-row-hover);
+}
+
+.backup-row.is-highlighted {
+  background: var(--library-row-highlight);
+}
+
+.backup-row__time {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.backup-row__counts {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.backup-row__ago,
+.backup-row__restore {
+  grid-area: 1 / 3;
+  justify-self: end;
+}
+
+.backup-row__ago {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Restore… shows on hover and for the highlighted row, in place of the age (as in the Archive). */
+.backup-row__restore {
+  display: inline-flex;
+  visibility: hidden;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 6px;
+  background: var(--active);
+  box-shadow: var(--active-shadow);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.backup-row:hover .backup-row__restore,
+.backup-row.is-highlighted .backup-row__restore,
+.backup-row__restore:focus-visible {
+  visibility: visible;
+}
+
+.backup-row:hover .backup-row__ago,
+.backup-row.is-highlighted .backup-row__ago {
+  visibility: hidden;
+}
+
+.backup-row__restore:hover {
+  color: var(--accent);
+}
+
+.backup-row__restore:disabled,
+.archive__button:disabled {
+  opacity: 0.5;
+}

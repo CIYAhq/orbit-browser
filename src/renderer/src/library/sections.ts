@@ -13,7 +13,8 @@ export interface LibrarySectionProps {
  * - `id`: a short slug (letters, digits, `.`, `_`, `-`). The Library remembers the section used last
  *   (`settings.librarySection`), and `library.open { section: id }` opens on it.
  * - `label` and `icon` (an icon component such as one from lucide-react) for the list on the left.
- * - `order`: place in that list, lowest first. The Archive is 10; leave gaps (Downloads 20, …).
+ * - `order`: place in that list, lowest first. The Archive is 10, History 15, Backups 90; leave gaps
+ *   (Downloads 20, …).
  * - `component`: the section's content, shown on the right with `LibrarySectionProps`.
  * - `onContextMenu(x, y)` (optional): right-click on the section's entry in the list.
  *
