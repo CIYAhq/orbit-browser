@@ -21,6 +21,7 @@ import {
   tabPage,
   viewPage,
 } from './helpers'
+import { closeWindow, cmdIn, uiPageOf, windowList } from './nav-support'
 import { pressInTab } from './peek-helpers'
 import { openSettings } from './settings-support'
 
@@ -912,54 +913,149 @@ test('[DL-16] downloads from a Peek and a Mini Window are like any other', async
   expect(await activeTabId(orbit.app)).toBe(tabId)
 })
 
-test("[DL-16] a private session's downloads are in no saved list, and leave when its pages close", async () => {
-  // A profile on a non-persistent session behaves like a private window.
-  const priv = (await run(orbit.app, 'profiles.create', { name: 'Private' })) as string
-  await orbit.app.evaluate((_e, p) => {
-    const { ctx } = (globalThis as unknown as { __orbit: { ctx: MainContext } }).__orbit
-    ctx.store.update((d) => {
-      const profile = d.profiles[p]
-      if (profile) profile.partition = `orbit-private-${p}`
-    })
-  }, priv)
-  const normal = (await state(orbit.app)).windows[Object.keys((await state(orbit.app)).windows)[0] as string]
-    ?.spaceId as string
-  const spaceId = (await run(orbit.app, 'spaces.create', {
-    name: 'Private',
-    profileId: priv,
-    activate: true,
-  })) as string
-  const tabId = (await run(orbit.app, 'tabs.create', { url: server.url('/page/Secret'), spaceId })) as string
-  const page = await tabPage(orbit.app, '/page/Secret')
-  await page.locator('#held').click()
-  await expect.poll(async () => (await list(priv)).map((d) => [d.filename, d.private])).toEqual([['big.bin', true]])
-  // Its row shows beside its own profile only.
-  await expect(row('big.bin')).toBeVisible()
-  // The state file is written while it runs, then again (the first write becomes the backup): neither has it.
+test("[DL-16] a private window lists its own session's downloads only, in no saved list, until the last one closes", async () => {
+  await recordFeedback()
+  // A normal window's download, still coming.
+  const { page } = await openPage()
+  await startDownloads(page, `/held/open.bin?size=${MB}`)
+  await expect.poll(async () => (await named('open.bin'))?.state).toBe('progressing')
+  // A private window's page downloads a file still coming, one paused, and a program held back (DL-12).
+  const privateId = await openPrivateWindow()
+  const before = await state(orbit.app)
+  const privateSpace = before.windows[privateId]?.spaceId as string
+  const priv = before.spaces[privateSpace]?.profileId as string
+  const partition = before.profiles[priv]?.partition as string
+  await cmdIn(orbit.app, privateId, 'tabs.create', { url: server.url('/page/Secret') })
+  const secret = await tabPage(orbit.app, '/page/Secret')
+  await expect(secret.locator('#title')).toHaveText('Secret')
+  await startDownloads(
+    secret,
+    `/held/secret.bin?size=${MB}`,
+    `/held/paused.bin?size=${MB}`,
+    '/file/setup.exe?size=2048',
+  )
+  const states = async () =>
+    (await list(priv)).map((d) => `${d.filename} ${d.state}${d.danger ? ' held' : ''}${d.private ? ' private' : ''}`)
+  await expect
+    .poll(async () => (await states()).sort())
+    .toEqual(['paused.bin progressing private', 'secret.bin progressing private', 'setup.exe completed held private'])
+  await run(orbit.app, 'downloads.pause', { id: (await list(priv)).find((d) => d.filename === 'paused.bin')?.id })
+  await expect.poll(async () => (await states()).sort()[0]).toBe('paused.bin paused private')
+  // Each window's sidebar shows its own session's downloads only.
+  const privateShell = await uiPageOf(orbit.app, 'shell', privateId)
+  await expect(privateShell.getByTestId('downloads-tray')).toHaveAttribute('data-count', '3')
+  await expect(orbit.shell.getByTestId('downloads-tray')).toHaveAttribute('data-count', '1')
+  // So does its downloads flyout (DL-14).
+  await cmdIn(orbit.app, privateId, 'downloads.flyout')
+  const flyoutNames = (await uiPageOf(orbit.app, 'overlay', privateId)).getByTestId('flyout-download-name')
+  await expect(flyoutNames).toHaveCount(3)
+  expect((await flyoutNames.allTextContents()).sort()).toEqual(['paused.bin', 'secret.bin', 'setup.exe'])
+  await cmdIn(orbit.app, privateId, 'downloads.flyout')
+  await expect(flyoutNames).toHaveCount(0)
+  // A file Orbit shows, opened from the private window, opens in a tab there (DL-04).
+  await startDownloads(secret, '/file/secret.txt?size=64')
+  await expect.poll(async () => (await list(priv)).find((d) => d.filename === 'secret.txt')?.state).toBe('completed')
+  const tabsBefore = new Set(Object.keys((await state(orbit.app)).tabs))
+  const txt = (await list(priv)).find((d) => d.filename === 'secret.txt') as Download
+  expect(await cmdIn(orbit.app, privateId, 'downloads.open', { id: txt.id })).toBe(true)
+  await expect
+    .poll(async () =>
+      Object.values((await state(orbit.app)).tabs)
+        .filter((t) => !tabsBefore.has(t.id))
+        .map((t) => [t.spaceId === privateSpace, t.profileId === priv, t.url]),
+    )
+    .toEqual([[true, true, pathToFileURL(join(folder(), 'secret.txt')).href]])
+  // The state file is written while one runs, then again (the first write becomes the backup):
+  // neither has them, nor the downloads list.
   await saveStateWhen('progressing')
-  await run(orbit.app, 'spaces.switch', { spaceId: normal })
-  await expect(rows()).toHaveCount(0)
   await saveState()
-  expect(stateFilesMention('big.bin')).toEqual([false, false])
-  await run(orbit.app, 'spaces.switch', { spaceId })
-  await expect(row('big.bin')).toBeVisible()
-  server.release('big.bin')
-  // Nor once it has finished.
-  await saveStateWhen('completed')
-  await expect.poll(async () => (await list(priv))[0]?.state).toBe('completed')
-  // Saved to disk like any other, but in no list on disk.
-  expect(statSync(join(folder(), 'big.bin')).size).toBe(4 * MB)
+  expect(stateFilesMention('secret')).toEqual([false, false])
   await hooks((h) => h.settle())
   const saved = join(orbit.userData, 'downloads.json')
-  expect(existsSync(saved) ? readFileSync(saved, 'utf8') : '').not.toContain('big.bin')
-  await run(orbit.app, 'spaces.switch', { spaceId: normal })
-  await saveState()
-  expect(stateFilesMention('big.bin')).toEqual([false, false])
-  // Its pages close: its list empties; the file stays.
-  await run(orbit.app, 'tabs.close', { tabId })
-  await expect.poll(async () => list(priv)).toEqual([])
-  expect(existsSync(join(folder(), 'big.bin'))).toBe(true)
+  expect(existsSync(saved) ? readFileSync(saved, 'utf8') : '').not.toMatch(/secret|setup/)
+  // Its pages close, the window stays open: its downloads stay listed.
+  for (const t of Object.values((await state(orbit.app)).tabs).filter((t) => t.profileId === priv)) {
+    await cmdIn(orbit.app, privateId, 'tabs.close', { tabId: t.id })
+  }
+  await expect.poll(() => pagesIn(partition)).toBe(0)
+  expect((await windowList(orbit.app)).map((w) => w.kind)).toEqual(['main', 'private'])
+  expect(await listedIn(priv)).toEqual(['paused.bin', 'secret.bin', 'secret.txt', 'setup.exe'])
+  await expect(privateShell.getByTestId('downloads-tray')).toHaveAttribute('data-count', '3')
+  // The last private window closes: its downloads leave every list. Its files stay, but for the
+  // paused one and the program never kept (DL-12); the one still coming is saved, then leaves too.
+  const partials = () => ['paused.bin', 'setup.exe'].map((name) => existsSync(join(folder(), `${name}.crdownload`)))
+  expect(partials()).toEqual([true, true])
+  await closeWindow(orbit.app, privateId)
+  await expect.poll(async () => (await windowList(orbit.app)).map((w) => w.kind)).toEqual(['main'])
+  await expect.poll(() => listedIn(priv)).toEqual(['secret.bin'])
+  await expect.poll(partials).toEqual([false, false])
+  expect(sizeOf(join(folder(), 'secret.txt'))).toBe(64)
+  server.release('secret.bin')
+  await expect.poll(() => listedIn(priv)).toEqual([])
+  expect(sizeOf(join(folder(), 'secret.bin'))).toBe(MB)
+  // The normal window's download carries on, alone in its list and its sidebar.
+  expect(Object.values((await state(orbit.app)).downloads).map((d) => d.filename)).toEqual(['open.bin'])
+  server.release('open.bin')
+  await expect.poll(async () => (await list()).map((d) => `${d.filename} ${d.state}`)).toEqual(['open.bin completed'])
+  // Each start showed in its own window only (DL-02); nothing else was said anywhere.
+  expect(await feedbackSent()).toEqual([
+    'main downloads.started open.bin',
+    'private downloads.started paused.bin',
+    'private downloads.started secret.bin',
+    'private downloads.started secret.txt',
+    'private downloads.started setup.exe',
+  ])
 })
+
+/** Opens a private window (NV-11) and returns its id. */
+async function openPrivateWindow(): Promise<string> {
+  const before = new Set((await windowList(orbit.app)).map((w) => w.id))
+  await action(orbit.app, 'window.newPrivate')
+  await expect.poll(async () => (await windowList(orbit.app)).filter((w) => !before.has(w.id)).length).toBe(1)
+  const win = (await windowList(orbit.app)).find((w) => !before.has(w.id))
+  expect(win?.kind).toBe('private')
+  return win?.id as string
+}
+
+/** The file names in a profile's downloads list, a private session's too (DL-16). */
+const listedIn = (profileId: string) =>
+  orbit.app.evaluate(
+    (_e, p) =>
+      (globalThis as unknown as { __orbitDownloads: { listed: (p: string) => string[] } }).__orbitDownloads
+        .listed(p)
+        .sort(),
+    profileId,
+  )
+
+/** How many pages a session partition has open. */
+const pagesIn = (partition: string) =>
+  orbit.app.evaluate(({ session, webContents }, part) => {
+    const ses = session.fromPartition(part)
+    return webContents.getAllWebContents().filter((wc) => !wc.isDestroyed() && wc.session === ses).length
+  }, partition)
+
+/**
+ * Records what windows are told of downloads from now on (DL-02's start, toasts), as `<window kind>
+ * <channel> <file name or message>`.
+ */
+async function recordFeedback(): Promise<void> {
+  await orbit.app.evaluate(() => {
+    const { ctx } = (globalThis as unknown as { __orbit: { ctx: MainContext } }).__orbit
+    const sent: string[] = []
+    ;(globalThis as unknown as { __feedback: string[] }).__feedback = sent
+    const send = ctx.windows.sendToWindow.bind(ctx.windows)
+    ctx.windows.sendToWindow = (windowId, channel, payload) => {
+      if (channel === 'downloads.started' || channel === 'toast') {
+        const told = payload as { filename?: string; message?: string }
+        sent.push(`${ctx.store.state.windows[windowId]?.kind} ${channel} ${told.filename ?? told.message}`)
+      }
+      send(windowId, channel, payload)
+    }
+  })
+}
+
+const feedbackSent = () =>
+  orbit.app.evaluate(() => [...(globalThis as unknown as { __feedback: string[] }).__feedback].sort())
 
 type StateHandle = { __orbit: { flush: () => void; state: () => OrbitState } }
 

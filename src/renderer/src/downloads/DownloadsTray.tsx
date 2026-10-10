@@ -2,6 +2,7 @@ import { ArrowDownToLine, Check, CircleAlert, Pause, Play, RotateCw, ShieldAlert
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { memo, type ReactNode, useEffect, useRef, useState } from 'react'
 import type { DownloadStarted } from '../../../shared/commands/downloads'
+import { isPrivateWindow } from '../../../shared/private'
 import type { Download, OrbitState, ProfileId, WindowState } from '../../../shared/state'
 import { invoke } from '../api'
 import { QUICK_EASE, SNAPPY } from '../shell/sidebar/motion-tokens'
@@ -16,12 +17,15 @@ const FADE = { duration: 0.12, ease: QUICK_EASE }
 const OPEN_DELAY_MS = 150
 const CLOSE_DELAY_MS = 250
 
-/** The downloads a window's sidebar shows, newest first; a private window's only beside its own profile (DL-16). */
-function shownIds(s: OrbitState, profileId: ProfileId | undefined): string[] {
+/**
+ * The downloads a window's sidebar shows, newest first (DL-16): a private window shows its own
+ * session's only; another window all but a private session's, unless it shows that profile.
+ */
+function shownIds(s: OrbitState, profileId: ProfileId | undefined, privateWindow: boolean): string[] {
   // Started in the same millisecond: the later one (added last) first.
   return Object.values(s.downloads)
     .reverse()
-    .filter((d) => !d.private || d.profileId === profileId)
+    .filter((d) => d.profileId === profileId || (!privateWindow && !d.private))
     .sort((a, b) => b.startedAt - a.startedAt)
     .map((d) => d.id)
 }
@@ -36,7 +40,8 @@ function shownIds(s: OrbitState, profileId: ProfileId | undefined): string[] {
  */
 export const DownloadsTray = memo(function DownloadsTray({ win }: { win: WindowState }) {
   const profileId = useOrbit((s) => s.spaces[win.spaceId]?.profileId)
-  const ids = useOrbitShallow((s) => shownIds(s, profileId))
+  const privateWindow = useOrbit((s) => isPrivateWindow(s, win.id))
+  const ids = useOrbitShallow((s) => shownIds(s, profileId, privateWindow))
   const reduce = useReducedMotion()
   const [hovered, setHovered] = useState(false)
   const [pinned, setPinned] = useState(false)

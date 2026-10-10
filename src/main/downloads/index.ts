@@ -9,11 +9,11 @@ import {
   type MenuItemConstructorOptions,
   type OpenDialogOptions,
   type SaveDialogOptions,
-  type Session,
   type WebContents,
 } from 'electron'
 import { DOWNLOADS_FLYOUT_PANEL } from '../../shared/commands/downloads'
 import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
+import { isPrivateProfile, isPrivateProfileId, isPrivateWindow } from '../../shared/private'
 import type { Profile, ProfileId, Settings, TabId, WindowId } from '../../shared/state'
 import { sectionOf } from '../../shared/tree'
 import type { MainContext } from '../context'
@@ -22,7 +22,7 @@ import { activeTabOf } from '../windows'
 import { type DockHooks, showDownloadsInDock } from './dock'
 import { copyFileToClipboard, type FileActions, systemFiles } from './files'
 import { DownloadsLibrary, dragIcon, isScreenshotId } from './library'
-import { type DownloadFeedback, DownloadManager, type SaveLocation } from './manager'
+import { type DownloadFeedback, DownloadManager, type DownloadNotice, type SaveLocation } from './manager'
 import { downloadMenu, fileMenu } from './menu'
 import { askToQuit, guardQuit, quitQuestion } from './quit'
 import { readMacScreenshotLocation, type ScreenshotFolder, screenshotFolders } from './screenshots'
@@ -46,6 +46,7 @@ import { DownloadStore } from './store'
  *   or null for Cancel; `folderPicks`, where each opened.
  * - `dock`: the Dock and taskbar progress, bounces and notifications (DL-17); `dock.focused` says
  *   whether Orbit is in front.
+ * - `listed`: the file names in a profile's downloads list, a private session's too (DL-16).
  */
 export interface DownloadTestHooks {
   quitAnswer?: 'quit' | 'cancel'
@@ -66,6 +67,7 @@ export interface DownloadTestHooks {
   pickFolder?: string | null
   folderPicks: string[]
   dock: DockHooks
+  listed: (profileId: ProfileId) => string[]
 }
 
 /**
@@ -166,6 +168,7 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
     },
     folderPicks: [],
     dock: { progress: null, bounces: 0, notifications: [] },
+    listed: (profileId) => manager.records(profileId).map((r) => r.filename),
   }
   const files: FileActions = ctx.e2e
     ? {
@@ -182,21 +185,38 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
       }
     : systemFiles
 
-  /** The main window feedback goes to: a Mini Window has no sidebar, its main window shows its downloads. */
-  const mainWindow = (windowId: WindowId | undefined): WindowId | undefined => {
-    const isMain = (id: WindowId | undefined) => !!id && store.state.windows[id]?.kind === 'main'
-    if (isMain(windowId)) return windowId
-    const focused = windows.focusedWindowId()
-    if (isMain(focused)) return focused
-    return windows.ids().filter(isMain).pop()
+  /** The private session a window shows (its profile), or null for a window that isn't private (DL-16). */
+  const privateSessionOf = (windowId: WindowId | undefined): ProfileId | null => {
+    const win = windowId ? store.state.windows[windowId] : undefined
+    return win && isPrivateWindow(store.state, windowId) ? (store.state.spaces[win.spaceId]?.profileId ?? null) : null
   }
-  const feedback = (windowId: WindowId | undefined, event: DownloadFeedback, d: { id: string; filename: string }) => {
-    const target = mainWindow(windowId)
+  /**
+   * The window a download's feedback, toasts and files go to: the window asked about, else the
+   * focused one, else the last one opened, of those with a sidebar (a Mini Window has none: a main
+   * window shows its downloads). A private session's stay in its own windows, and no other download
+   * goes there (DL-16). `session`: the private session the download is from (null for none); by
+   * default, the window asked about's.
+   */
+  const mainWindow = (
+    windowId: WindowId | undefined,
+    session: ProfileId | null = privateSessionOf(windowId),
+  ): WindowId | undefined => {
+    const fits = (id: WindowId | undefined): id is WindowId => {
+      const kind = id ? store.state.windows[id]?.kind : undefined
+      return (kind === 'main' || kind === 'private') && privateSessionOf(id) === session
+    }
+    if (fits(windowId)) return windowId
+    const focused = windows.focusedWindowId()
+    if (fits(focused)) return focused
+    return windows.ids().filter(fits).pop()
+  }
+  const feedback = (windowId: WindowId | undefined, event: DownloadFeedback, d: DownloadNotice) => {
+    const target = mainWindow(windowId, isPrivateProfileId(d.profileId) ? d.profileId : null)
     const win = target ? store.state.windows[target] : undefined
     if (!target || !win) return
     // The sidebar shows downloads (DL-02, DL-03); where it's hidden, a toast says what happened.
     if (win.sidebar.visible || win.sidebar.peeking) {
-      if (event === 'started') windows.sendToWindow(target, 'downloads.started', d)
+      if (event === 'started') windows.sendToWindow(target, 'downloads.started', { id: d.id, filename: d.filename })
       return
     }
     const message =
@@ -210,8 +230,7 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
     ctx.toast(target, message)
   }
   // Right after a download, the Library opens on Downloads (DL-09).
-  const libraryOnDownloads = async (windowId: WindowId | undefined) => {
-    const target = mainWindow(windowId)
+  const libraryOnDownloads = async (target: WindowId | undefined) => {
     if (!target || !commands.has('library.setSection')) return
     const status = await commands.run('library.status', {}, { windowId: target })
     if (!status.open) await commands.run('library.setSection', { section: 'downloads' }, { windowId: target })
@@ -230,8 +249,9 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
         }),
       feedback: (windowId, event, d) => {
         feedback(windowId, event, d)
-        if (event === 'started') void libraryOnDownloads(windowId).catch(() => {})
-        if (event === 'done') dock.finished(manager.get(d.id)?.private ? undefined : d.filename)
+        // A private session's download changes nothing kept, and the Dock doesn't name it (DL-16).
+        if (event === 'started' && !d.private) void libraryOnDownloads(mainWindow(windowId, null)).catch(() => {})
+        if (event === 'done') dock.finished(d.private ? undefined : d.filename)
       },
       notify: (windowId, message) => ctx.toast(mainWindow(windowId), message),
       closeBlankTab: (tabId) => closeBlankTab(ctx, tabId),
@@ -243,9 +263,15 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
     },
   )
   sessions.onSessionCreated((ses, profileId) => manager.attach(ses, profileId))
-  // Sessions that aren't a profile's (a private window's) download too.
+  // Sessions that aren't a profile's download too.
   app.on('session-created', (ses) => manager.attach(ses))
-  trackPrivateSessions(manager)
+  // The last private window closed and its profile went: its session's downloads leave every list (DL-16).
+  store.subscribe((next, prev) => {
+    if (next.profiles === prev.profiles) return
+    for (const [id, profile] of Object.entries(prev.profiles)) {
+      if (!next.profiles[id] && isPrivateProfile(profile)) manager.privateSessionEnded(id)
+    }
+  })
   // Downloads cut off by the last quit: Resume or Retry (DL-15).
   setImmediate(() => manager.restore())
 
@@ -443,29 +469,6 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
   })
   if (ctx.e2e) (globalThis as unknown as { __orbitDownloads: DownloadTestHooks }).__orbitDownloads = hooks
   return manager
-}
-
-/**
- * A private window's downloads are listed until it closes (DL-16). Until Orbit has private windows,
- * a private session's "window" is its pages: when the last one closes, its downloads leave the list.
- */
-function trackPrivateSessions(manager: DownloadManager): void {
-  const pages = new Map<Session, number>()
-  app.on('web-contents-created', (_event, contents) => {
-    const ses = contents.session
-    if (ses.isPersistent()) return
-    pages.set(ses, (pages.get(ses) ?? 0) + 1)
-    manager.privateSessionOpened(ses)
-    contents.once('destroyed', () => {
-      const left = (pages.get(ses) ?? 1) - 1
-      if (left > 0) {
-        pages.set(ses, left)
-        return
-      }
-      pages.delete(ses)
-      manager.privateSessionClosed(ses)
-    })
-  })
 }
 
 /**

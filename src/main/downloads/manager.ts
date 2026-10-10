@@ -62,6 +62,8 @@ interface Live {
   dropped?: boolean
   /** Its place was chosen in the save dialog, which asked before replacing a file there (DL-07). */
   replace?: boolean
+  /** From a private session (DL-16). */
+  private?: boolean
 }
 
 /** Where a profile's downloads go (DL-07). */
@@ -85,6 +87,14 @@ interface PrivateEntry {
 /** What the window a download started from is told (DL-02, DL-03, DL-12). */
 export type DownloadFeedback = 'started' | 'done' | 'failed' | 'held'
 
+/** The download a window is told about: `private` when it is from a private session (DL-16). */
+export interface DownloadNotice {
+  id: string
+  filename: string
+  profileId: ProfileId
+  private: boolean
+}
+
 export interface DownloadManagerOptions {
   /** Where a profile's downloads go (DL-07). */
   location: (profileId: ProfileId) => SaveLocation
@@ -97,11 +107,7 @@ export interface DownloadManagerOptions {
   /** The folder a profile's "Ask every time" dialog saved to: the next one opens there (DL-07). */
   askedIn: (profileId: ProfileId, folder: string) => void
   /** The sidebar's start animation and row, or a toast where no sidebar shows them. */
-  feedback: (
-    windowId: WindowId | undefined,
-    event: DownloadFeedback,
-    download: { id: string; filename: string },
-  ) => void
+  feedback: (windowId: WindowId | undefined, event: DownloadFeedback, download: DownloadNotice) => void
   /** Says something brief on screen (a file that couldn't be opened or moved to the Trash). */
   notify: (windowId: WindowId | undefined, message: string) => void
   /** A tab that was opened only to download a file and never showed a page: close it (DL-01). */
@@ -134,8 +140,6 @@ export class DownloadManager {
   /** Downloads asked to continue after a restart, by partial file: the engine's item comes back through `will-download`. */
   private resuming = new Map<string, { id: string; url: string }>()
   private privates = new Map<string, PrivateEntry>()
-  /** Private sessions whose pages have all closed (DL-16). */
-  private closedSessions = new WeakSet<Session>()
   private quitting = false
 
   constructor(
@@ -520,27 +524,27 @@ export class DownloadManager {
     this.list.flushSync()
   }
 
-  /** A private session has pages again (DL-16). */
-  privateSessionOpened(ses: Session): void {
-    this.closedSessions.delete(ses)
-  }
-
   /**
-   * A private session's last page closed (its window closed, DL-16): its downloads leave every list,
-   * at once when they have ended, when they end otherwise.
+   * A private session ended: its last window closed, and its profile went (DL-16). Its downloads
+   * leave every list. One still running saves its file, then leaves (`finish`); one paused or
+   * stopped, and a program held back (DL-12), is discarded, as nothing could continue or keep it.
    */
-  privateSessionClosed(ses: Session): void {
-    this.closedSessions.add(ses)
-    const ended = [...this.privates].filter(([id, p]) => p.session === ses && !this.live.has(id)).map(([id]) => id)
-    if (ended.length === 0) return
-    const profiles = new Set<ProfileId>()
-    for (const id of ended) {
+  privateSessionEnded(profileId: ProfileId): void {
+    const ids = [...this.privates].filter(([, p]) => p.record.profileId === profileId).map(([id]) => id)
+    const ended: string[] = []
+    for (const id of ids) {
+      const live = this.live.get(id)
+      if (live) {
+        if (live.item.getState() !== 'progressing' || live.item.isPaused()) live.item.cancel()
+        continue
+      }
       const p = this.privates.get(id)
-      if (p) profiles.add(p.record.profileId)
+      if (p?.record.danger) removeFile(partialPath(p.record))
       this.privates.delete(id)
       const timer = this.lingers.get(id)
       if (timer) clearTimeout(timer)
       this.lingers.delete(id)
+      ended.push(id)
     }
     const shown = ended.filter((id) => this.ctx.store.state.downloads[id])
     if (shown.length > 0) {
@@ -548,7 +552,13 @@ export class DownloadManager {
         for (const id of shown) delete d.downloads[id]
       })
     }
-    for (const profileId of profiles) this.opts.changed(profileId)
+    if (ended.length > 0) this.opts.changed(profileId)
+  }
+
+  /** A private download whose session has ended (DL-16): nothing shows it any more. */
+  private sessionEnded(id: string): boolean {
+    const p = this.privates.get(id)
+    return !!p && !this.ctx.store.state.profiles[p.record.profileId]
   }
 
   /** Can continue from its partial file in a new session (after a restart). */
@@ -581,7 +591,16 @@ export class DownloadManager {
     const opener = tab?.openerTabId ? store.state.tabs[tab.openerTabId] : undefined
     const pageUrl = (!blank && page ? page.getURL() : opener?.url) || item.getInitiatorOrigin() || undefined
     const windowId = (tabId ? windows.windowOfTab(tabId) : undefined) ?? windows.focusedWindowId()
-    const live: Live = { id: newId('d'), item, profileId, finalPath: '', tempPath: '', windowId, lastPush: 0 }
+    const live: Live = {
+      id: newId('d'),
+      item,
+      profileId,
+      finalPath: '',
+      tempPath: '',
+      windowId,
+      lastPush: 0,
+      private: !ses.isPersistent(),
+    }
     this.live.set(live.id, live)
     this.listen(live)
     const name = safeFilename(item.getFilename())
@@ -626,7 +645,7 @@ export class DownloadManager {
       d.downloads[id] = { ...record }
     })
     this.opts.changed(profileId)
-    this.opts.feedback(live.windowId, 'started', { id, filename: record.filename })
+    this.opts.feedback(live.windowId, 'started', notice(live, record.filename))
   }
 
   /**
@@ -743,7 +762,7 @@ export class DownloadManager {
       })
       const timer = setTimeout(() => {
         if (this.live.get(live.id) === live && this.ctx.store.state.downloads[live.id]?.state === 'interrupted') {
-          this.opts.feedback(live.windowId, 'failed', { id: live.id, filename: basename(live.finalPath) })
+          this.opts.feedback(live.windowId, 'failed', notice(live, basename(live.finalPath)))
         }
       }, FAILURE_GRACE_MS)
       timer.unref?.()
@@ -840,7 +859,7 @@ export class DownloadManager {
         receivedBytes: item.getReceivedBytes(),
         resume: undefined,
       })
-      this.opts.feedback(live.windowId, 'failed', { id: live.id, filename: basename(live.finalPath) })
+      this.opts.feedback(live.windowId, 'failed', notice(live, basename(live.finalPath)))
       return
     }
     const received = item.getReceivedBytes()
@@ -867,7 +886,7 @@ export class DownloadManager {
         canResume: undefined,
         resume: undefined,
       })
-      this.opts.feedback(live.windowId, 'held', { id: live.id, filename: basename(live.finalPath) })
+      this.opts.feedback(live.windowId, 'held', notice(live, basename(live.finalPath)))
       return
     }
     const savePath = await this.place(live)
@@ -886,7 +905,7 @@ export class DownloadManager {
       file,
     })
     if (origin) void this.mark(live.id, savePath, origin, file)
-    this.opts.feedback(live.windowId, 'done', { id: live.id, filename: basename(savePath) })
+    this.opts.feedback(live.windowId, 'done', notice(live, basename(savePath)))
   }
 
   /**
@@ -910,12 +929,12 @@ export class DownloadManager {
   /**
    * Final state: written to the list; the sidebar shows a finished download for a few seconds
    * (DL-03), a failed one until it is retried or dismissed, a cancelled one no more. A private
-   * download whose window has closed leaves every list (DL-16).
+   * download whose session has ended (its last window closed) leaves every list, and a program
+   * held back (DL-12) is discarded, as nothing could keep it (DL-16).
    */
   private finish(id: string, profileId: ProfileId, fields: Partial<DownloadRecord>): void {
     const { resume: _resume, file: _file, ...shown } = fields
-    const p = this.privates.get(id)
-    const closed = !!p && this.closedSessions.has(p.session)
+    const closed = this.sessionEnded(id)
     const hide = fields.state === 'cancelled' || closed
     this.ctx.store.update((d) => {
       const entry = d.downloads[id]
@@ -927,6 +946,8 @@ export class DownloadManager {
       }
     })
     if (closed) {
+      const record = this.privates.get(id)?.record
+      if (record && fields.danger) removeFile(partialPath(record))
       this.privates.delete(id)
       this.opts.changed(profileId)
       return
@@ -973,6 +994,11 @@ export class DownloadManager {
  */
 function canContinue(item: DownloadItem): boolean {
   return item.canResume() && !!(item.getETag() || item.getLastModifiedTime()) && item.getReceivedBytes() > 0
+}
+
+/** What a window is told about a download (DL-16: whether it is a private session's). */
+function notice(live: Live, filename: string): DownloadNotice {
+  return { id: live.id, filename, profileId: live.profileId, private: !!live.private }
 }
 
 /** A page that never showed anything: a new tab whose only navigation became this download. */
