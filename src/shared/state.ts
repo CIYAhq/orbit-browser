@@ -333,6 +333,21 @@ export interface Download {
   receivedBytes: number
   totalBytes: number
   startedAt: number
+  /** The profile whose session downloaded it (downloads lane, DL-01). */
+  profileId: ProfileId
+  /** When it completed, failed or was cancelled. */
+  endedAt?: number
+  /** Why an interrupted download stopped, e.g. "Network error". */
+  error?: string
+  /** Bytes per second while it runs (runtime only). */
+  speed?: number
+  /** An interrupted download that can continue where it stopped (DL-15). */
+  canResume?: boolean
+  mimeType?: string
+  /** The page it was downloaded from. */
+  pageUrl?: string
+  /** Downloaded in a private window: never written to disk (DL-16). */
+  private?: boolean
 }
 
 /** Per-site customisation ("Tweak"): CSS/JS applied to matching hosts. */

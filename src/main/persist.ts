@@ -144,10 +144,30 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
     win.sidebar = { ...win.sidebar, peeking: false }
     if (!state.spaces[win.spaceId]) win.spaceId = state.spaceOrder[0] as string
   }
-  for (const d of Object.values(state.downloads)) {
-    if (d.state === 'progressing' || d.state === 'paused') d.state = 'interrupted'
-  }
+  normalizeDownloads(state)
   return state
+}
+
+/**
+ * Downloads the sidebar shows (DL-01, DL-03). One that was running or paused at quit comes back
+ * interrupted, so it can be resumed or retried; finished, cancelled and private ones are dropped
+ * (the downloads list keeps the rest), and so are malformed entries.
+ */
+function normalizeDownloads(state: OrbitState): void {
+  for (const [id, d] of Object.entries(state.downloads)) {
+    const named = typeof d.url === 'string' && typeof d.filename === 'string' && typeof d.savePath === 'string'
+    if (!named || d.private === true || d.state === 'completed' || d.state === 'cancelled') {
+      delete state.downloads[id]
+      continue
+    }
+    d.id = id
+    d.state = 'interrupted'
+    d.receivedBytes = time(d.receivedBytes)
+    d.totalBytes = time(d.totalBytes)
+    d.startedAt = time(d.startedAt)
+    if (!state.profiles[d.profileId]) d.profileId = DEFAULT_PROFILE_ID
+    delete d.speed
+  }
 }
 
 /**
@@ -414,7 +434,7 @@ function repairReferences(state: OrbitState): void {
 const RUNTIME_ONLY: Record<string, ReadonlySet<string>> = {
   tabs: new Set(['loading', 'audible', 'asleep', 'progress', 'error', 'canGoBack', 'canGoForward', 'media']),
   windows: new Set(['focused', 'fullscreen', 'overlay']),
-  downloads: new Set(['receivedBytes']),
+  downloads: new Set(['receivedBytes', 'speed']),
 }
 
 /** True when a patch only changes runtime-only fields, so the saved file stays the same. */

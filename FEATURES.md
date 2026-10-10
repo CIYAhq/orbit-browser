@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 146 built (57 partial) · 208 tested · 0 feel right.
+**Totals:** 485 spec’d · 147 built (57 partial) · 209 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 101 | 127 |
+| P0 | 174 | 102 | 128 |
 | P1 | 221 | 40 | 75 |
 | P2 | 83 | 5 | 6 |
 
@@ -511,7 +511,7 @@ Spec: `spec/downloads.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| DL-01 | Downloading a file (baseline) | P0 | – | – | – |  |
+| DL-01 | Downloading a file (baseline) | P0 | ✅ | ✅ e2e+unit | – | per-profile sessions save to the profile's folder (OS Downloads), name (1) on collisions, .crdownload until done; a blank tab opened for a download closes; toasts for start/finish; outlives its page; quitting asks while downloads run |
 | DL-02 | Download start animation | P1 | – | – | – |  |
 | DL-03 | In-progress indicator at the bottom of the sidebar | P1 | – | – | – |  |
 | DL-04 | Open a finished download, or show it in its folder | P1 | – | – | – |  |

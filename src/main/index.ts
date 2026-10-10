@@ -94,7 +94,9 @@ function start(): void {
   app.on('activate', () => {
     if (windows.ids().length === 0) windows.open()
   })
-  app.on('before-quit', () => {
+  app.on('before-quit', (event) => {
+    // A feature asking first (downloads in progress, DL-01) stopped this quit: nothing is quitting.
+    if (event.defaultPrevented) return
     // The e2e harness times a quit from here: Playwright does work of its own before it asks (D28).
     if (e2e) console.error('[orbit] quit requested')
     windows.quitting = true

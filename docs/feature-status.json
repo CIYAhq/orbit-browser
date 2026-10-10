@@ -201,5 +201,6 @@
   "MW-11": {"built": "yes", "note": "settings.miniWindowForExternalLinks off: tabs in the most recent or chosen Space (externalLinksSpace)"},
   "MW-12": {"built": "partial", "note": "fullscreen video fills the window, copy URL, devtools, downloads via the session; no captures"},
   "MW-14": {"built": "partial", "note": "all platforms with Ctrl+Alt+N / Ctrl+O / Ctrl+Alt+O; Windows jump list: New Mini Window, Show/Hide All; no Linux tray (MW-13) or launcher actions"},
-  "MW-15": {"built": "yes", "note": "warm spare window takes keys at once, page loads before the window shows; Open in… shrinks to 92% and fades (140 ms, macOS/Windows) as the row enters Today"}
+  "MW-15": {"built": "yes", "note": "warm spare window takes keys at once, page loads before the window shows; Open in… shrinks to 92% and fades (140 ms, macOS/Windows) as the row enters Today"},
+  "DL-01": {"built": "yes", "note": "per-profile sessions save to the profile's folder (OS Downloads), name (1) on collisions, .crdownload until done; a blank tab opened for a download closes; toasts for start/finish; outlives its page; quitting asks while downloads run"}
 }

@@ -767,7 +767,9 @@ export function registerMiniWindow(ctx: MainContext): void {
       })
     })
   })
-  app.on('before-quit', () => {
+  app.on('before-quit', (event) => {
+    // Stopped by a feature that asks first (downloads in progress, DL-01): not quitting yet.
+    if (event.defaultPrevented) return
     quitting = true
     dropSpare()
   })
