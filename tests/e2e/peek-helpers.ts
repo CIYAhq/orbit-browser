@@ -1,9 +1,8 @@
 import { createServer, type Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
 import type { ElectronApplication, Page } from '@playwright/test'
 import type { MainContext } from '../../src/main/context'
 import type { OrbitState, WindowState } from '../../src/shared/state'
-import { state } from './helpers'
+import { listenInRange, state } from './helpers'
 
 /** The main process's test handle (src/main/test-hooks.ts), for app.evaluate() bodies. */
 export type OrbitGlobal = { __orbit: { ctx: MainContext } }
@@ -96,17 +95,8 @@ export async function startSites(): Promise<Sites> {
       )
     })
   })
-  // Ports 3350-3399 (helpers.ts's fixtures use 3300-3349).
-  const base = 3350 + (Number(process.env.TEST_PARALLEL_INDEX ?? 0) % 50)
-  await new Promise<void>((resolve, reject) => {
-    let p = base
-    server.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE' && p < 3399) server.listen(++p, '127.0.0.1')
-      else reject(err)
-    })
-    server.listen(p, '127.0.0.1', () => resolve())
-  })
-  port = (server.address() as AddressInfo).port
+  // From 3350 up (helpers.ts's fixtures start at 3300).
+  port = await listenInRange(server, 3350 + (Number(process.env.TEST_PARALLEL_INDEX ?? 0) % 50))
   return {
     url: (path) => `http://localhost:${port}${path}`,
     other: (path) => `http://127.0.0.1:${port}${path}`,
