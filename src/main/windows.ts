@@ -69,7 +69,13 @@ interface WindowRecord {
    * top-right corner, started a little after the window opens and placed only while it shows something.
    */
   tools?: WebContentsView
+  /** The page tools are wanted on screen: from showTools() to hideTools(). */
   toolsShown: boolean
+  /**
+   * The page tools' page has loaded. Only then does their view go into the window: a view placed
+   * while its page loads takes the keyboard from the page (round 2 fix check, M3).
+   */
+  toolsReady: boolean
   toolsPrewarm?: ReturnType<typeof setTimeout>
   /**
    * A permission prompt over the active page's top-left corner while the sidebar is hidden (NV-15;
@@ -206,6 +212,7 @@ export class WindowManager {
   private attached = new Map<TabId, Attachment>()
   private layoutListeners: ((windowId: WindowId) => void)[] = []
   private createdListeners: ((windowId: WindowId, win: BrowserWindow) => void)[] = []
+  private toolsReadyListeners: ((windowId: WindowId) => void)[] = []
   /** Tabs whose page closed its own web contents (window.close()): not reopened until selected again. */
   private selfClosed = new Set<TabId>()
   private floatingOwners: ((tabId: TabId) => WindowId | undefined)[] = []
@@ -400,6 +407,7 @@ export class WindowManager {
       overlayShown: false,
       floatingShown: false,
       toolsShown: false,
+      toolsReady: false,
       promptShown: false,
       promptReady: false,
       uiViews: new Set(),
@@ -668,6 +676,11 @@ export class WindowManager {
     this.createdListeners.push(listener)
   }
 
+  /** Runs once a window's page tools have loaded their page: from then on showTools() places them. */
+  onToolsReady(listener: (windowId: WindowId) => void): void {
+    this.toolsReadyListeners.push(listener)
+  }
+
   /** The page tools' web contents (NV-05, NV-06), started if it wasn't yet. */
   toolsContents(windowId: WindowId): WebContents | undefined {
     const rec = this.records.get(windowId)
@@ -675,13 +688,18 @@ export class WindowManager {
     return viewContents(this.ensureTools(rec))
   }
 
-  /** Places the page tools at `bounds` (window coordinates): above the pages, under the floating sidebar and the overlay. */
-  showTools(windowId: WindowId, bounds: Rect): void {
+  /**
+   * Places the page tools at `bounds` (window coordinates): above the pages, under the floating
+   * sidebar and the overlay. Not before their page has loaded (round 2 fix check, M3): the nav
+   * module shows them again then (onToolsReady). Returns whether they are in the window.
+   */
+  showTools(windowId: WindowId, bounds: Rect): boolean {
     const rec = this.records.get(windowId)
-    if (!rec || rec.win.isDestroyed()) return
+    if (!rec || rec.win.isDestroyed()) return false
     const view = this.ensureTools(rec)
     view.setBounds(roundRect(bounds))
     rec.toolsShown = true
+    if (!rec.toolsReady) return false
     const parent = rec.win.contentView
     const children = parent.children
     const at = children.indexOf(view)
@@ -695,26 +713,31 @@ export class WindowManager {
       parent.addChildView(view, at >= 0 && at < ceiling ? ceiling - 1 : ceiling)
     }
     view.setVisible(true)
+    return true
   }
 
-  /** Takes the page tools out of the window; keyboard focus in them goes back to the page. */
+  /**
+   * Takes the page tools out of the window. The keyboard goes back to the page when they had it,
+   * or when nothing has it in the focused window (round 2 fix check, M3).
+   */
   hideTools(windowId: WindowId): void {
     const rec = this.records.get(windowId)
     const view = rec?.tools
     if (!rec || !view || !rec.toolsShown) return
     rec.toolsShown = false
     const contents = viewContents(view)
-    const focused = !!contents && webContents.getFocusedWebContents() === contents
-    if (focused && !rec.overlayShown && rec.win.isFocused()) this.focusActiveTab(rec.id)
+    const focused = webContents.getFocusedWebContents()
+    if ((!focused || focused === contents) && !rec.overlayShown && rec.win.isFocused()) this.focusActiveTab(rec.id)
     this.removeChild(rec, view)
   }
 
-  /** Test/debug view of a window's page tools. */
-  toolsInfo(windowId: WindowId): { exists: boolean; placed: boolean; bounds?: Rect } {
+  /** Test/debug view of a window's page tools; `ready`: their page has loaded. */
+  toolsInfo(windowId: WindowId): { exists: boolean; ready: boolean; placed: boolean; bounds?: Rect } {
     const rec = this.records.get(windowId)
     const view = rec?.tools
-    if (!rec || !view || !viewContents(view)) return { exists: false, placed: false }
-    return { exists: true, placed: rec.win.contentView.children.includes(view), bounds: view.getBounds() }
+    if (!rec || !view || !viewContents(view)) return { exists: false, ready: false, placed: false }
+    const placed = rec.win.contentView.children.includes(view)
+    return { exists: true, ready: rec.toolsReady, placed, bounds: view.getBounds() }
   }
 
   /**
@@ -1399,6 +1422,13 @@ export class WindowManager {
     loadRenderer(view.webContents, 'tools')
     rec.tools = view
     rec.toolsShown = false
+    rec.toolsReady = false
+    // Into the window once its page has loaded (round 2 fix check, M3), when the nav module shows it.
+    view.webContents.once('did-finish-load', () => {
+      if (rec.tools !== view || rec.win.isDestroyed()) return
+      rec.toolsReady = true
+      for (const listener of this.toolsReadyListeners) listener(rec.id)
+    })
     return view
   }
 

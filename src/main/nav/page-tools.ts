@@ -21,6 +21,10 @@ import type { SitePrefs } from './site-prefs'
 export const ZOOM_INDICATOR_MS = 1500
 /** Pinch-to-zoom reaches Chromium's own limit (NV-06). */
 const PINCH_MAX = 5
+/** Keys typed for a find bar that never takes the keyboard are let go after this long (F4). */
+const HOLD_MS = 5000
+/** Keys other than text that are held for the find bar (F4): it acts on them as it would. */
+const HELD_KEYS = new Set(['Backspace', 'Enter', 'Escape'])
 
 const SELECTION = `String(getSelection() || '')`
 
@@ -61,11 +65,34 @@ interface WindowTools {
   sent?: string
 }
 
+/** A key typed for the find bar before its field had the keyboard (F4). */
+interface HeldKey {
+  key: string
+  shift: boolean
+}
+
+/**
+ * Keys held for a window's find bar from ⌘F until its field has the keyboard (round 2 fix check,
+ * F4). `nonce`: the focus request the field must say it took, once the bar is in the window and
+ * has been given the keyboard; null before then.
+ */
+interface HeldKeys {
+  tabId: TabId
+  nonce: number | null
+  keys: HeldKey[]
+  timer?: NodeJS.Timeout
+}
+
+/** Where a window's page tools are after a refresh: in the window, waiting for their page to load, or out. */
+type ToolsShown = 'placed' | 'loading' | 'hidden'
+
 export interface PageToolsInfo {
   find: FindState
   zoom: ZoomIndicator | null
   /** The pointer is on the zoom indicator (it stays while it is). */
   hovered: boolean
+  /** The page tools' page has loaded: they can go into the window. */
+  ready: boolean
   placed: boolean
   bounds?: Rectangle
 }
@@ -141,12 +168,17 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
     return { tabId, open, query, active, matches, searched, focus }
   }
 
-  /** Shows, moves or hides a window's page tools to match what they hold. */
-  const refresh = (windowId: WindowId) => {
+  /**
+   * Shows, moves or hides a window's page tools to match what they hold. They go into the window
+   * only once their page has loaded (round 2 fix check, M3): until then this says 'loading', and
+   * the view's page hears what to show when it asks.
+   */
+  const refresh = (windowId: WindowId): ToolsShown => {
     if (!windows.get(windowId)) {
       clearTimeout(tools.get(windowId)?.zoomTimer)
       tools.delete(windowId)
-      return
+      dropKeys(windowId)
+      return 'hidden'
     }
     const t = tools.get(windowId)
     const find = findState(windowId)
@@ -156,10 +188,11 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
       // Nothing is under the pointer once the view has gone.
       if (t) t.hovered = false
       windows.hideTools(windowId)
-      return
+      return 'hidden'
     }
     const contents = windows.toolsContents(windowId)
-    if (!contents) return
+    if (!contents) return 'hidden'
+    watchKeys(windowId, contents)
     const state = toolsOf(windowId)
     const payload = { find, zoom }
     const json = JSON.stringify(payload)
@@ -167,7 +200,76 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
       state.sent = json
       contents.send('orbit:pageTools', payload)
     }
-    windows.showTools(windowId, toolsBounds(page, find.open, !!zoom))
+    return windows.showTools(windowId, toolsBounds(page, find.open, !!zoom)) ? 'placed' : 'loading'
+  }
+
+  // ---------- Keys typed before the find bar can take them (round 2 fix check, F4) ----------
+
+  const held = new Map<WindowId, HeldKeys>()
+  /** The page tools' web contents whose keys are watched. */
+  const watched = new WeakSet<WebContents>()
+
+  const dropKeys = (windowId: WindowId) => {
+    clearTimeout(held.get(windowId)?.timer)
+    held.delete(windowId)
+  }
+
+  /** Starts holding (or goes on holding) keys for the find bar of a window's tab. */
+  const holdKeys = (windowId: WindowId, tabId: TabId): HeldKeys => {
+    let h = held.get(windowId)
+    if (!h || h.tabId !== tabId) {
+      dropKeys(windowId)
+      h = { tabId, nonce: null, keys: [] }
+      held.set(windowId, h)
+    }
+    const holding = h
+    clearTimeout(holding.timer)
+    holding.timer = setTimeout(() => {
+      if (held.get(windowId) === holding) held.delete(windowId)
+    }, HOLD_MS)
+    return holding
+  }
+
+  /**
+   * Holds a key typed in the page or the page tools while the find bar waits for the keyboard:
+   * text, Backspace, Enter and Escape, without ⌘ or Ctrl (shortcuts go on as ever). True when held.
+   */
+  const holdKey = (windowId: WindowId | undefined, tabId: TabId | null, input: Electron.Input): boolean => {
+    const h = windowId ? held.get(windowId) : undefined
+    if (!h || (tabId !== null && tabId !== h.tabId)) return false
+    if (input.control || input.meta || input.isComposing) return false
+    if (input.alt && process.platform !== 'darwin') return false
+    const text = [...input.key].length === 1
+    if (!text && !HELD_KEYS.has(input.key)) return false
+    if (input.type === 'keyDown') h.keys.push({ key: input.key, shift: input.shift })
+    return true
+  }
+
+  const watchKeys = (windowId: WindowId, contents: WebContents) => {
+    if (watched.has(contents)) return
+    watched.add(contents)
+    contents.on('before-input-event', (event, input) => {
+      if (holdKey(windowId, null, input)) event.preventDefault()
+    })
+  }
+
+  /** Types a held key into the page tools, as the keyboard would have. */
+  const typeKey = (contents: WebContents, { key, shift }: HeldKey) => {
+    if ([...key].length === 1) {
+      contents.sendInputEvent({ type: 'keyDown', keyCode: key })
+      contents.sendInputEvent({ type: 'char', keyCode: key })
+      contents.sendInputEvent({ type: 'keyUp', keyCode: key })
+      return
+    }
+    const modifiers: 'shift'[] = shift ? ['shift'] : []
+    contents.sendInputEvent({ type: 'keyDown', keyCode: key, modifiers })
+    contents.sendInputEvent({ type: 'keyUp', keyCode: key, modifiers })
+  }
+
+  /** The find bar is in the window: it takes the keyboard, and its field says when it has it (find.focused). */
+  const giveBarKeyboard = (windowId: WindowId, h: HeldKeys, s: FindSession) => {
+    h.nonce = s.focus
+    windows.toolsContents(windowId)?.focus()
   }
 
   const refreshTab = (tabId: TabId) => {
@@ -207,10 +309,17 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
     }
   }
 
-  const focusBar = (windowId: WindowId, s: FindSession) => {
+  /**
+   * The find bar takes the keyboard, its text selected. Not before it is in the window (round 2 fix
+   * check, M3): until then the page keeps the keyboard, and keys typed for the bar meanwhile are
+   * held for it (F4).
+   */
+  const focusBar = (windowId: WindowId, tabId: TabId, s: FindSession) => {
     s.focus = ++focusNonce
-    refresh(windowId)
-    windows.toolsContents(windowId)?.focus()
+    const shown = refresh(windowId)
+    if (shown === 'hidden') return
+    const h = holdKeys(windowId, tabId)
+    if (shown === 'placed') giveBarKeyboard(windowId, h, s)
   }
 
   /**
@@ -228,13 +337,13 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
     if (!findable(windowId) || !tabId || !contents) return
     const s = sessionOf(tabId)
     if (s.open) {
-      focusBar(windowId, s)
+      focusBar(windowId, tabId, s)
       return
     }
     s.open = true
     clearMatches(s)
     if (s.query) search(contents, s, true)
-    focusBar(windowId, s)
+    focusBar(windowId, tabId, s)
     // Selected text on the page starts a new search instead (asked after the bar is up, so no key is lost).
     const edits = s.edits
     contents
@@ -244,7 +353,7 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
         if (!text || text === s.query || !s.open || s.edits !== edits || finds.get(tabId) !== s) return
         s.query = text
         search(contents, s, true)
-        if (activeOf(windowId) === tabId) focusBar(windowId, s)
+        if (activeOf(windowId) === tabId) focusBar(windowId, tabId, s)
       })
       .catch(() => {})
   }
@@ -263,7 +372,7 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
       s.open = true
       clearMatches(s)
       search(contents, s, true)
-      focusBar(windowId, s)
+      focusBar(windowId, tabId, s)
       return
     }
     search(contents, s, !s.searched && s.request === 0, forward)
@@ -273,6 +382,7 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
     const tabId = activeOf(windowId)
     const s = tabId ? finds.get(tabId) : undefined
     if (!windowId || !tabId || !s?.open) return
+    dropKeys(windowId)
     s.open = false
     clearMatches(s)
     pageOf(tabId)?.stopFindInPage('keepSelection')
@@ -303,6 +413,15 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
     if (!query) refresh(windowId)
   })
   commands.register('find.step', ({ forward }, c) => step(windowOf(c), forward))
+  // The bar's field has the keyboard: the keys held for it are typed into it, in order (F4).
+  commands.register('find.focused', ({ focus }, c) => {
+    const windowId = windowOf(c)
+    const h = windowId ? held.get(windowId) : undefined
+    if (!windowId || !h || h.nonce === null || focus < h.nonce) return
+    dropKeys(windowId)
+    const contents = windows.toolsContents(windowId)
+    if (contents) for (const key of h.keys) typeKey(contents, key)
+  })
   commands.register('find.close', (_args, c) => closeFind(windowOf(c)))
 
   // ---------- Page zoom (NV-06) ----------
@@ -320,8 +439,10 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
     const t = toolsOf(windowId)
     t.zoom = { percent: zoomPercent(factor), nonce: ++zoomNonce }
     clearTimeout(t.zoomTimer)
-    t.zoomTimer = t.hovered ? undefined : setTimeout(() => hideZoom(windowId), ZOOM_INDICATOR_MS)
-    refresh(windowId)
+    t.zoomTimer = undefined
+    // Its time starts once it is in the window: a new window's page tools may still be loading.
+    if (refresh(windowId) === 'loading') return
+    if (!t.hovered) t.zoomTimer = setTimeout(() => hideZoom(windowId), ZOOM_INDICATOR_MS)
   }
 
   /** Chromium zooms every tab of the host in the profile's session; Orbit also keeps it for next time. */
@@ -398,11 +519,36 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
   windows.onLayout((windowId) => {
     const t = tools.get(windowId)
     const tabId = activeOf(windowId)
+    // Keys held for another tab's bar aren't for this one.
+    if (held.get(windowId)?.tabId !== tabId) dropKeys(windowId)
     if (t?.zoom || (tabId && finds.get(tabId)?.open) || windows.toolsInfo(windowId).placed) refresh(windowId)
+  })
+
+  // The page tools' page has loaded, so they can go into the window (round 2 fix check, M3): the zoom
+  // indicator shows for its full time from now, and an open find bar takes the keyboard.
+  windows.onToolsReady((windowId) => {
+    const t = tools.get(windowId)
+    if (t?.zoom && !t.hovered) {
+      clearTimeout(t.zoomTimer)
+      t.zoomTimer = setTimeout(() => hideZoom(windowId), ZOOM_INDICATOR_MS)
+    }
+    const tabId = activeOf(windowId)
+    const s = tabId ? finds.get(tabId) : undefined
+    const h = held.get(windowId)
+    if (!s?.open || h?.tabId !== tabId) {
+      refresh(windowId)
+      return
+    }
+    s.focus = ++focusNonce
+    if (refresh(windowId) === 'placed') giveBarKeyboard(windowId, h, s)
   })
 
   ctx.hooks.tabCreated.push((tabId, contents) => {
     allowPinch(contents)
+    // Keys typed for the find bar before it has the keyboard wait for it, not reach the page (F4).
+    contents.on('before-input-event', (event, input) => {
+      if (holdKey(windows.windowOfTab(tabId), tabId, input)) event.preventDefault()
+    })
     contents.on('found-in-page', (_event, result) => {
       const s = finds.get(tabId)
       if (!s?.open || result.requestId !== s.request) return
@@ -448,6 +594,7 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
         find: findState(windowId),
         zoom: tools.get(windowId)?.zoom ?? null,
         hovered: tools.get(windowId)?.hovered ?? false,
+        ready: placed.ready,
         placed: placed.placed,
         bounds: placed.placed ? placed.bounds : undefined,
       }

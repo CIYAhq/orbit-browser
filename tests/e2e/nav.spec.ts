@@ -12,6 +12,7 @@ import {
   shellRoundTrip,
   sideButton,
   startNavFixtures,
+  type ToolsInfo,
   toolsInfo,
   toolsPage,
   visit,
@@ -647,4 +648,231 @@ test('[NV-06] Ctrl and the mouse wheel zoom the page under the pointer (Windows,
   await expect.poll(() => zoomOf(app, '/page/Wheel')).toBeCloseTo(1.1)
   await wheel(-120)
   await expect.poll(() => zoomOf(app, '/page/Wheel')).toBeCloseTo(1)
+})
+
+// ---- A new window's page tools and the keyboard (round 2 fix check, M3 and F4) ----
+
+/** A window's page tools, as main sees them. */
+function toolsIn(windowId: string): Promise<ToolsInfo & { ready: boolean }> {
+  return orbit.app.evaluate(
+    (_e, w) =>
+      (
+        globalThis as unknown as { __orbitNav: { tools: (w: string) => ToolsInfo & { ready: boolean } } }
+      ).__orbitNav.tools(w),
+    windowId,
+  )
+}
+
+/** Where a key typed with nothing holding the keyboard goes, as `typeAnywhere` says. */
+const NOWHERE = '(nothing has the keyboard)'
+/** As `typeAnywhere` says of a web contents whose page hasn't loaded yet (it has no address). */
+const LOADING = '(a page still loading)'
+
+/**
+ * Types each of `keys` (a character, or a key such as 'Backspace') wherever the keyboard is, as the
+ * keyboard does. Returns the address of what took each key, or NOWHERE, or LOADING.
+ */
+function typeAnywhere(keys: string[]): Promise<string[]> {
+  return orbit.app.evaluate(
+    ({ webContents }, [list, nowhere, loading]) =>
+      list.map((key) => {
+        const contents = webContents.getFocusedWebContents()
+        if (!contents) return nowhere
+        contents.sendInputEvent({ type: 'keyDown', keyCode: key })
+        if ([...key].length === 1) contents.sendInputEvent({ type: 'char', keyCode: key })
+        contents.sendInputEvent({ type: 'keyUp', keyCode: key })
+        return contents.getURL() || loading
+      }),
+    [keys, NOWHERE, LOADING] as const,
+  )
+}
+
+/**
+ * Records each web contents that takes the keyboard (its `focus` event). Read by address, once
+ * known: a view's page may not have loaded when it takes the keyboard.
+ */
+async function watchKeyboard(): Promise<() => Promise<string[]>> {
+  await orbit.app.evaluate(({ app: electronApp, webContents }) => {
+    const g = globalThis as unknown as { __tookKeyboard: number[] }
+    g.__tookKeyboard = []
+    const watch = (contents: Electron.WebContents) => contents.on('focus', () => g.__tookKeyboard.push(contents.id))
+    for (const contents of webContents.getAllWebContents()) watch(contents)
+    electronApp.on('web-contents-created', (_e, contents) => watch(contents))
+  })
+  return () =>
+    orbit.app.evaluate(({ webContents }) =>
+      (globalThis as unknown as { __tookKeyboard: number[] }).__tookKeyboard.map(
+        (id) => webContents.fromId(id)?.getURL() ?? '',
+      ),
+    )
+}
+
+/** What a window's zoom indicator says on screen: in the window, and its text. */
+function zoomShown(windowId: string): Promise<{ placed: boolean; text: string | null }> {
+  return orbit.app.evaluate(async (_e, w) => {
+    const windows = (
+      globalThis as unknown as {
+        __orbit: {
+          ctx: {
+            windows: {
+              toolsInfo: (w: string) => { placed: boolean }
+              toolsContents: (w: string) => Electron.WebContents
+            }
+          }
+        }
+      }
+    ).__orbit.ctx.windows
+    const text: string | null = await windows
+      .toolsContents(w)
+      .executeJavaScript(`document.querySelector('[data-testid=zoom-percent]')?.textContent ?? null`)
+    return { placed: windows.toolsInfo(w).placed, text }
+  }, windowId)
+}
+
+interface FreshWindow {
+  windowId: string
+  tabId: string
+  /** How long after the window showed `act` came. */
+  at: number
+  /** The page tools' page had loaded by then. */
+  toolsReady: boolean
+  /** Where each key typed right after `act` went, as `typeAnywhere` says. */
+  typedInto: string[]
+}
+
+/**
+ * As fast as a person could, in main: opens a window as ⌘N does, opens `url` there in a new tab,
+ * closes the command bar and puts the keyboard in the page's text field (#box). Then does `act`,
+ * ⌘+ or ⌘F as pressed in the page, and types `keys` wherever the keyboard is, at once.
+ */
+function freshWindow(url: string, act: 'zoom' | 'find', keys: string[]): Promise<FreshWindow> {
+  return orbit.app.evaluate(
+    async ({ webContents }, [address, what, list, modifier, nowhere, loading]) => {
+      type Orbit = {
+        action: (id: string, w?: string) => Promise<void>
+        run: (name: string, args: unknown, w?: string) => Promise<unknown>
+        windowIds: () => string[]
+        ctx: {
+          windows: {
+            get: (w: string) => Electron.BrowserWindow | undefined
+            toolsInfo: (w: string) => { ready: boolean }
+          }
+          tabs: { contents: (id: string) => Electron.WebContents | undefined }
+        }
+      }
+      const o = (globalThis as unknown as { __orbit: Orbit }).__orbit
+      const before = o.windowIds()
+      await o.action('window.new', before[0])
+      const windowId = o.windowIds().find((w) => !before.includes(w))
+      const win = windowId ? o.ctx.windows.get(windowId) : undefined
+      if (!windowId || !win) throw new Error('no new window')
+      const shownAt = await new Promise<number>((resolve) => {
+        if (win.isVisible()) resolve(Date.now())
+        else win.once('show', () => resolve(Date.now()))
+      })
+      const tabId = String(await o.run('tabs.create', { url: address }, windowId))
+      await o.run('overlay.close', {}, windowId)
+      let page = o.ctx.tabs.contents(tabId)
+      for (let i = 0; i < 500 && (!page || page.getURL() !== address || page.isLoading()); i++) {
+        await new Promise((r) => setTimeout(r, 10))
+        page = o.ctx.tabs.contents(tabId)
+      }
+      if (!page) throw new Error(`no page for ${tabId}`)
+      page.focus()
+      await page.executeJavaScript(`document.getElementById('box').focus()`)
+      const at = Date.now() - shownAt
+      const toolsReady = o.ctx.windows.toolsInfo(windowId).ready
+      if (what === 'zoom') {
+        await o.action('page.zoomIn', windowId)
+      } else {
+        page.sendInputEvent({ type: 'keyDown', keyCode: 'F', modifiers: [modifier] })
+        page.sendInputEvent({ type: 'keyUp', keyCode: 'F', modifiers: [modifier] })
+      }
+      const typedInto = list.map((key) => {
+        const contents = webContents.getFocusedWebContents()
+        if (!contents) return nowhere
+        contents.sendInputEvent({ type: 'keyDown', keyCode: key })
+        if ([...key].length === 1) contents.sendInputEvent({ type: 'char', keyCode: key })
+        contents.sendInputEvent({ type: 'keyUp', keyCode: key })
+        return contents.getURL() || loading
+      })
+      return { windowId, tabId, at, toolsReady, typedInto }
+    },
+    [url, act, keys, mod, NOWHERE, LOADING] as const,
+  )
+}
+
+/** The first of up to three fresh windows (D46) where `act` came before the page tools' page had loaded. */
+async function earlyWindow(url: string, act: 'zoom' | 'find', keys: string[]): Promise<FreshWindow> {
+  const tries: number[] = []
+  for (let n = 0; n < 3; n++) {
+    const fresh = await freshWindow(url, act, keys)
+    if (!fresh.toolsReady) return fresh
+    tries.push(fresh.at)
+    await orbit.app.evaluate((_e, w) => {
+      ;(
+        globalThis as unknown as { __orbit: { ctx: { windows: { get: (w: string) => Electron.BrowserWindow } } } }
+      ).__orbit.ctx.windows
+        .get(w)
+        ?.close()
+    }, fresh.windowId)
+  }
+  throw new Error(`the page tools were ready before ${act} in 3 windows (at ${tries.join(', ')} ms)`)
+}
+
+/** The value of a tab's text field (#box). */
+function fieldValue(tabId: string): Promise<string | null> {
+  return orbit.app.evaluate(
+    (_e, id) =>
+      (
+        globalThis as unknown as {
+          __orbit: { ctx: { tabs: { contents: (id: string) => Electron.WebContents | undefined } } }
+        }
+      ).__orbit.ctx.tabs
+        .contents(id)
+        ?.executeJavaScript(`document.getElementById('box').value`) ?? null,
+    tabId,
+  )
+}
+
+test('[NV-06] zoom in a new window’s first moments never takes the keyboard: keys reach the page’s field before, while and after the indicator shows (round 2 fix check, M3)', async () => {
+  const tookKeyboard = await watchKeyboard()
+  const fresh = await earlyWindow(page('Fresh'), 'zoom', ['a', 'b'])
+  expect(fresh.typedInto).toEqual([page('Fresh'), page('Fresh')])
+  // The indicator shows once its page has loaded.
+  await expect.poll(() => zoomShown(fresh.windowId)).toEqual({ placed: true, text: '110%' })
+  expect(await typeAnywhere(['c', 'd'])).toEqual([page('Fresh'), page('Fresh')])
+  await expect.poll(async () => (await toolsIn(fresh.windowId)).placed, { timeout: 10_000 }).toBe(false)
+  expect(await typeAnywhere(['e', 'f'])).toEqual([page('Fresh'), page('Fresh')])
+  await expect.poll(() => fieldValue(fresh.tabId)).toBe('abcdef')
+  expect((await tookKeyboard()).filter((url) => url.includes('view=tools'))).toEqual([])
+})
+
+test('[NV-05] keys typed right after ⌘F in a new window’s first moments reach the find bar once it is in, not the page (round 2 fix check, M3 and F4)', async () => {
+  const fresh = await earlyWindow(findPage('Early'), 'find', ['o', 'r', 'x', 'Backspace', 'b'])
+  // The page keeps the keyboard until the bar is in the window; what is typed for the bar meanwhile waits for it.
+  expect(fresh.typedInto).toEqual(Array(5).fill(findPage('Early')))
+  await expect.poll(async () => (await toolsIn(fresh.windowId)).find).toMatchObject({ open: true, query: 'orb' })
+  await expect.poll(() => focusedUrl(orbit.app)).toContain('view=tools')
+  const input = () =>
+    orbit.app.evaluate(
+      (_e, w) =>
+        (
+          globalThis as unknown as {
+            __orbit: { ctx: { windows: { toolsContents: (w: string) => Electron.WebContents } } }
+          }
+        ).__orbit.ctx.windows
+          .toolsContents(w)
+          .executeJavaScript(`document.querySelector('[data-testid=find-input]')?.value ?? null`),
+      fresh.windowId,
+    )
+  await expect.poll(input).toBe('orb')
+  // Typing goes on in the bar; the page heard none of it.
+  expect(await typeAnywhere(['i', 't'])).toEqual([
+    expect.stringContaining('view=tools'),
+    expect.stringContaining('view=tools'),
+  ])
+  await expect.poll(input).toBe('orbit')
+  await expect.poll(async () => (await toolsIn(fresh.windowId)).find).toMatchObject({ query: 'orbit', matches: 3 })
+  expect(await fieldValue(fresh.tabId)).toBe('')
 })

@@ -69,6 +69,8 @@ function FindBar({ state }: { state: FindState }) {
       setEmpty(state.query === '')
       el.focus()
       el.select()
+      // Keys typed for the bar before it had the keyboard come now.
+      void invoke('find.focused', { focus: state.focus })
     } else if (document.activeElement !== el && el.value !== state.query) {
       el.value = state.query
       setEmpty(state.query === '')

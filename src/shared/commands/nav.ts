@@ -69,6 +69,11 @@ export interface NavCommands {
   /** Closes the find bar: highlights go, the page keeps the last match selected and gets focus. */
   'find.close': { args: Record<string, never>; result: void }
   /**
+   * The find bar's field took the keyboard for focus request `focus` (FindState.focus): keys typed
+   * for it before then are typed into it now.
+   */
+  'find.focused': { args: { focus: number }; result: void }
+  /**
    * The address display's blocked pop-ups button: a menu at a point in window coordinates to open
    * the active tab's blocked pop-ups or always allow them on its site (NV-09).
    */
