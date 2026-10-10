@@ -286,7 +286,7 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
   // The hidden sidebar's hover reveal (SB-12, FL-03).
   const reveal = registerSidebarReveal(ctx)
   registerPageColor(ctx)
-  // Find in page and page zoom (NV-05, NV-06). Registered after the tabs lane, so its zoom actions are replaced.
+  // Find in page and page zoom (NV-05, NV-06).
   const pageTools = registerPageTools(ctx, prefs)
   // Private windows (NV-11).
   const privateWindows: PrivateWindows = registerPrivate(ctx, ops, prefs)

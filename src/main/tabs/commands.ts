@@ -729,24 +729,12 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     send(windowId, 'sidebar:focus', {})
   })
 
-  // Page actions on the active tab. Back, Forward, Reload and Stop live in src/main/nav/.
+  // Page actions on the active tab. Back, Forward, Reload, Stop and zoom live in src/main/nav/.
   const onContents = (fn: (contents: Electron.WebContents) => void) =>
     withActive((tabId) => {
       const contents = tabs.contents(tabId)
       if (contents) fn(contents)
     })
-  actions.register(
-    'page.zoomIn',
-    onContents((w) => w.setZoomLevel(Math.min(w.getZoomLevel() + 0.5, 5))),
-  )
-  actions.register(
-    'page.zoomOut',
-    onContents((w) => w.setZoomLevel(Math.max(w.getZoomLevel() - 0.5, -5))),
-  )
-  actions.register(
-    'page.zoomReset',
-    onContents((w) => w.setZoomLevel(0)),
-  )
   actions.register(
     'page.print',
     onContents((w) => w.print()),

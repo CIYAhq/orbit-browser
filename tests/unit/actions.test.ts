@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   ACTIONS,
@@ -123,5 +125,20 @@ describe('keymap', () => {
   it('formats shortcuts for display', () => {
     expect(formatAccelerator('Cmd+Shift+T', 'darwin')).toBe('⇧⌘T')
     expect(formatAccelerator('Ctrl+Shift+T', 'linux')).toBe('Ctrl+Shift+T')
+  })
+})
+
+describe('action handlers', () => {
+  it('registers each action once: a later handler would silently replace the first (review A-F7)', () => {
+    const counts = new Map<string, number>()
+    const main = join(__dirname, '../../src/main')
+    for (const file of readdirSync(main, { recursive: true, encoding: 'utf8' })) {
+      if (!file.endsWith('.ts')) continue
+      for (const [, id] of readFileSync(join(main, file), 'utf8').matchAll(/actions\.register\(\s*'([^']+)'/g)) {
+        counts.set(id as string, (counts.get(id as string) ?? 0) + 1)
+      }
+    }
+    expect(counts.size).toBeGreaterThan(50)
+    expect([...counts].filter(([, n]) => n > 1).map(([id]) => id)).toEqual([])
   })
 })
