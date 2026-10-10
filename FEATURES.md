@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 147 built (47 partial) · 202 tested · 0 feel right.
+**Totals:** 485 spec’d · 148 built (49 partial) · 204 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
 | P0 | 174 | 101 | 121 |
-| P1 | 221 | 42 | 76 |
+| P1 | 221 | 43 | 78 |
 | P2 | 83 | 4 | 5 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -544,10 +544,10 @@ Spec: `spec/settings.md`
 | ST-06 | Per-profile: default search engine and custom engines | P0 | ✅ | ✅ e2e+unit | – | per-profile default engine (8 built-ins), custom engines with keyword and %s URL, Make default from the row menu; no extension override in Electron, so that row does not exist |
 | ST-07 | Per-profile: download location, new-document app, data shortcuts | P1 | – | – | – |  |
 | ST-08 | Shortcuts section (remapping) | P1 | – | – | – |  |
-| ST-09 | Links section | P1 | – | ✅ unit | – |  |
-| ST-10 | Advanced section | P1 | – | – | – |  |
+| ST-09 | Links section | P1 | ✅ | ✅ e2e+unit | – | links from other apps open in a Mini Window (default), the most recent Space or one Space; routing rules (address contains / is exactly → a Space; first match wins; add, edit, reorder, remove); Peek options |
+| ST-10 | Advanced section | P1 | 🟡 partial | ✅ e2e+unit | – | tab sleep timer (TB-16), picture in picture, graphics acceleration; no site customizations, full-URL toggle, sounds or haptics, or edge-drag settings because those features don't exist yet |
 | ST-11 | Appearance section | P1 | – | ✅ e2e | – |  |
-| ST-12 | Privacy & security, and clearing browsing data | P1 | – | – | – |  |
+| ST-12 | Privacy & security, and clearing browsing data | P1 | 🟡 partial | ✅ e2e+unit | – | privacy promise (Orbit sends nothing); Clear browsing data per profile (⌘⇧⌫ / Ctrl+Shift+Delete): history by time range, cookies, site data and cache for all time only (Electron has no range); Secure DNS (Automatic, Off, Cloudflare, Google, Quad9); graphics acceleration lives in Advanced. No HTTPS-first or Safe Browsing (not in Electron), no per-site clearing here |
 | ST-13 | Site settings (permissions) page | P1 | – | – | – |  |
 | ST-14 | Languages, spell check and translation | P2 | – | – | – |  |
 | ST-15 | Passwords and autofill settings | P1 | – | – | – |  |
