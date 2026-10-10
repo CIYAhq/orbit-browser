@@ -8,6 +8,8 @@
  * - "Tested" is derived: a unit or e2e test file mentions the ID (put IDs in test titles).
  * - "Built" and "Feels right" come from docs/feature-status.json, updated by build lanes
  *   ("built": "yes" | "partial") and by the lead after a feel review ("feel": true).
+ * - Out of scope: rows the spec marks `Priority: OOS`, and rows the lead has ruled out
+ *   ("scope": "out" with a note saying why). They are listed but left out of the totals.
  *
  * Usage: node scripts/features.mjs [specDir]
  */
@@ -70,7 +72,7 @@ for (const file of files) {
     if (!m) continue
     let priority = '?'
     for (let j = i + 1; j < Math.min(lines.length, i + 6); j++) {
-      const p = /^Priority:\s*(P\d)/.exec(lines[j])
+      const p = /^Priority:\s*(P\d|OOS)\b/.exec(lines[j])
       if (p) {
         priority = p[1]
         break
@@ -103,7 +105,7 @@ walk(join(root, 'tests/e2e'), 'e2e')
 const statusFile = join(root, 'docs/feature-status.json')
 const status = existsSync(statusFile) ? JSON.parse(readFileSync(statusFile, 'utf8')) : {}
 
-const totals = { all: 0, built: 0, partial: 0, tested: 0, feel: 0 }
+const totals = { all: 0, built: 0, partial: 0, tested: 0, feel: 0, outOfScope: 0 }
 const byPriority = {}
 const cell = (v) => v || '–'
 const out = []
@@ -112,6 +114,13 @@ for (const s of sections) {
   out.push('| ID | Feature | P | Built | Tested | Feels right | Notes |', '|---|---|---|---|---|---|---|')
   for (const it of s.items) {
     const st = status[it.id] ?? {}
+    if (it.priority === 'OOS' || st.scope === 'out') {
+      totals.outOfScope++
+      out.push(
+        `| ${it.id} | ${it.title} | ${it.priority} | ⛔ out of scope | – | – | ${st.note ?? 'the spec leaves it out'} |`,
+      )
+      continue
+    }
     const kinds = tested.get(it.id)
     const built = st.built === 'yes' ? '✅' : st.built === 'partial' ? '🟡 partial' : ''
     const test = kinds ? `✅ ${[...kinds].sort().join('+')}` : ''
@@ -141,7 +150,7 @@ const header = [
   '',
   'Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).',
   '',
-  `**Totals:** ${totals.all} spec’d · ${totals.built} built (${totals.partial} partial) · ${totals.tested} tested · ${totals.feel} feel right.`,
+  `**Totals:** ${totals.all} spec’d · ${totals.built} built (${totals.partial} partial) · ${totals.tested} tested · ${totals.feel} feel right. ${totals.outOfScope} more are out of scope and not counted.`,
   '',
   '| Priority | Spec’d | Built | Tested |',
   '|---|---|---|---|',
