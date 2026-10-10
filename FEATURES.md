@@ -270,7 +270,7 @@ Spec: `spec/peek.md`
 | PK-08 | Open a Peek in Split View | P1 | ✅ | ✅ e2e | – | the card slides to the right half, then split.addTab makes the source and the live Peek page one split in the source's place (a pinned source gives a pinned split), the page focused; from a full split the Peek stays open and the SV-25 toast shows |
 | PK-09 | Close a Peek | P0 | ✅ | ✅ e2e+unit | – | Esc (after fullscreen), ⌘W, ×, click outside; archived as from 'peek' |
 | PK-10 | Reopen a Peek closed by mistake | P1 | ✅ | ✅ e2e | – | ⌘Z right after closing, or ⌘⇧T, reopens on the same page with history |
-| PK-11 | Navigating and acting inside a Peek | P1 | 🟡 partial | ✅ e2e+unit | – | links, back/forward, reload, zoom, copy URL, devtools act on the Peek; the sidebar address shows the Peek host; ⌘L makes it a tab and edits it; find in page waits for the find bar (core placeholder) |
+| PK-11 | Navigating and acting inside a Peek | P1 | 🟡 partial | ✅ e2e+unit | – | links, back/forward, reload, zoom, copy URL, devtools act on the Peek; the sidebar address shows the Peek host; ⌘L makes it a tab and edits it; no find in a Peek yet: ⌘F, ⌘G and F3 do nothing while one is open, so the keyboard stays in it (NV-05) |
 | PK-12 | Peek settings | P1 | 🟡 partial | ✅ e2e+unit | – | settings.peekExternalLinks / peekShiftClick honoured; toggles UI belongs to the settings lane |
 | PK-13 | Peek and the sidebar | P0 | ✅ | ✅ e2e | – | no sidebar row; sidebar stays usable; selecting another tab, Space or window dismisses (reopenable) |
 | PK-14 | Canvases, notes and Library items open in Peek | P2 | – | – | – |  |

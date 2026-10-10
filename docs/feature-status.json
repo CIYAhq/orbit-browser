@@ -224,7 +224,7 @@
   "PK-08": {"built": "yes", "note": "the card slides to the right half, then split.addTab makes the source and the live Peek page one split in the source's place (a pinned source gives a pinned split), the page focused; from a full split the Peek stays open and the SV-25 toast shows"},
   "PK-09": {"built": "yes", "note": "Esc (after fullscreen), ⌘W, ×, click outside; archived as from 'peek'"},
   "PK-10": {"built": "yes", "note": "⌘Z right after closing, or ⌘⇧T, reopens on the same page with history"},
-  "PK-11": {"built": "partial", "note": "links, back/forward, reload, zoom, copy URL, devtools act on the Peek; the sidebar address shows the Peek host; ⌘L makes it a tab and edits it; find in page waits for the find bar (core placeholder)"},
+  "PK-11": {"built": "partial", "note": "links, back/forward, reload, zoom, copy URL, devtools act on the Peek; the sidebar address shows the Peek host; ⌘L makes it a tab and edits it; no find in a Peek yet: ⌘F, ⌘G and F3 do nothing while one is open, so the keyboard stays in it (NV-05)"},
   "PK-12": {"built": "partial", "note": "settings.peekExternalLinks / peekShiftClick honoured; toggles UI belongs to the settings lane"},
   "PK-13": {"built": "yes", "note": "no sidebar row; sidebar stays usable; selecting another tab, Space or window dismisses (reopenable)"},
   "PK-15": {"built": "yes", "note": "no hover-to-Peek trigger: hovering links or pinned rows never opens a Peek (hover cards are TB-21)"},
