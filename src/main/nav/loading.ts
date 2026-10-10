@@ -8,6 +8,11 @@ export const LOADING_SHOW_AFTER_MS = 150
 /** The indicator's finish (a short fill, then a fade; loading.css) before its view goes: within 200 ms (FL-23). */
 const LOADING_FINISH_MS = 180
 /**
+ * Each window's indicator view is made this long after the window shows, out of the window, so its
+ * page has loaded by the window's first slow load (fix check A, F1).
+ */
+const LOADING_PREWARM_MS = 1000
+/**
  * The indicator's view: a small pill centred just inside the page card's top edge, with room for its
  * shadow. Kept small, as it sits over the page (a view takes the clicks under it).
  */
@@ -18,6 +23,8 @@ export type LoadingState = 'loading' | 'done'
 export interface LoadingInfo {
   tabId: TabId | null
   visible: boolean
+  /** Its view exists and its page has loaded, so it can show (fix check A, F1). */
+  ready: boolean
   state: LoadingState | null
   bounds?: Electron.Rectangle
   /** How many times it has been shown in this window (tests: a quick load never shows it). */
@@ -28,6 +35,11 @@ export interface LoadingInfo {
 
 interface WindowLoading {
   view?: WebContentsView
+  /**
+   * The view's page has loaded. Only then does the view go into the window: a view placed while its
+   * page loads takes the keyboard (fix check A, F1).
+   */
+  ready: boolean
   /** The tab the indicator is out for. */
   tabId: TabId | null
   state: LoadingState | null
@@ -53,7 +65,7 @@ export function registerLoading(ctx: MainContext): { info: (windowId: WindowId) 
     if (s) return s
     const win = windows.get(windowId)
     if (!win || win.isDestroyed()) return undefined
-    s = { tabId: null, state: null, shown: 0 }
+    s = { tabId: null, state: null, shown: 0, ready: false }
     perWindow.set(windowId, s)
     const record = s
     win.once('closed', () => {
@@ -92,20 +104,36 @@ export function registerLoading(ctx: MainContext): { info: (windowId: WindowId) 
     if (live(s.view)) windows.hideUiView(windowId, s.view)
   }
 
+  /** The window's indicator view, made out of the window if it hasn't one; `ready` once its page has loaded. */
+  const viewFor = (windowId: WindowId, s: WindowLoading): WebContentsView | undefined => {
+    if (live(s.view)) return s.view
+    s.ready = false
+    const view = windows.createUiView(windowId, 'loading')
+    s.view = view
+    viewContents(view)?.once('did-finish-load', () => {
+      if (s.view !== view) return
+      s.ready = true
+      // A slow load that waited for it shows it now.
+      if (perWindow.get(windowId) === s) evaluate(windowId)
+    })
+    return view
+  }
+
   const show = (windowId: WindowId, s: WindowLoading, tabId: TabId) => {
     const bounds = boundsFor(tabId)
     if (!bounds) {
       hide(windowId, s)
       return
     }
+    const view = viewFor(windowId, s)
+    // Not before its page has loaded (fix check A, F1): evaluate() comes back here when it has.
+    if (!view || !s.ready) return
     clearTimeout(s.hideTimer)
     s.hideTimer = undefined
-    if (!live(s.view)) s.view = windows.createUiView(windowId, 'loading')
-    if (!s.view) return
     const fresh = s.tabId !== tabId || s.state !== 'loading'
     s.tabId = tabId
     send(s, 'loading')
-    windows.showUiView(windowId, s.view, bounds)
+    windows.showUiView(windowId, view, bounds)
     if (fresh) s.shown++
   }
 
@@ -178,6 +206,16 @@ export function registerLoading(ctx: MainContext): { info: (windowId: WindowId) 
     })
   })
 
+  // Each window's view is made once the window has settled, so the first slow load finds it ready.
+  windows.onWindowCreated((windowId, win) => {
+    win.once('ready-to-show', () => {
+      setTimeout(() => {
+        const s = stateOf(windowId)
+        if (s) viewFor(windowId, s)
+      }, LOADING_PREWARM_MS)
+    })
+  })
+
   // Another tab shown (tab switch, Space switch, split focus), or the page card moved.
   store.subscribe((next, prev) => {
     for (const windowId of perWindow.keys()) {
@@ -204,6 +242,7 @@ export function registerLoading(ctx: MainContext): { info: (windowId: WindowId) 
       return {
         tabId: s?.tabId ?? null,
         visible: !!view?.getVisible(),
+        ready: !!view && !!s?.ready,
         state: s?.state ?? null,
         bounds: view?.getBounds(),
         shown: s?.shown ?? 0,

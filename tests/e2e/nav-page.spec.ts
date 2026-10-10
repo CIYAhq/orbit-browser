@@ -2,6 +2,8 @@ import { type ElectronApplication, expect, type Page, test } from '@playwright/t
 import { action, launchOrbit, type Orbit, run, state, tabPage } from './helpers'
 import {
   cmd,
+  cmdIn,
+  focusedUrl,
   type NavFixtures,
   openTab,
   pageMouse,
@@ -39,6 +41,7 @@ const page = (title: string) => fx.url(`/page/${title}`)
 interface LoadingInfo {
   tabId: string | null
   visible: boolean
+  ready: boolean
   state: 'loading' | 'done' | null
   bounds?: { x: number; y: number; width: number; height: number }
   shown: number
@@ -57,11 +60,13 @@ interface LinkPillInfo {
 }
 
 type NavHooks = {
+  __orbit: { windowIds: () => string[] }
   __orbitNav: { loading: (windowId?: string) => LoadingInfo; linkPill: (windowId?: string) => LinkPillInfo }
 }
 
-function loading(app: ElectronApplication): Promise<LoadingInfo> {
-  return app.evaluate(() => (globalThis as unknown as NavHooks).__orbitNav.loading())
+/** A window's loading indicator (the first window's by default). */
+function loading(app: ElectronApplication, windowId?: string): Promise<LoadingInfo> {
+  return app.evaluate((_e, id) => (globalThis as unknown as NavHooks).__orbitNav.loading(id), windowId)
 }
 
 function linkPill(app: ElectronApplication): Promise<LinkPillInfo> {
@@ -234,6 +239,67 @@ test('[SB-28][FL-23] a load shorter than the delay never shows the indicator; sw
   await cmd(app, 'tabs.activate', { tabId: id })
   await expect.poll(async () => (await loading(app)).tabId).toBe(id)
   await expect.poll(async () => (await loading(app)).visible).toBe(true)
+})
+
+test('[SB-28] a window’s first loading indicator never takes the keyboard: a new window’s command bar keeps it while a slow page loads (fix check A, F1)', async () => {
+  const { app } = orbit
+  // Each web contents that takes the keyboard, as it does (a view's own page may not be in yet).
+  await app.evaluate(({ app: electronApp, webContents }) => {
+    const g = globalThis as unknown as { __tookKeyboard: number[] }
+    g.__tookKeyboard = []
+    const watch = (contents: Electron.WebContents) => contents.on('focus', () => g.__tookKeyboard.push(contents.id))
+    for (const contents of webContents.getAllWebContents()) watch(contents)
+    electronApp.on('web-contents-created', (_e, contents) => watch(contents))
+  })
+  const indicatorsThatTookKeyboard = () =>
+    app.evaluate(({ webContents }) =>
+      (globalThis as unknown as { __tookKeyboard: number[] }).__tookKeyboard
+        .map((id) => webContents.fromId(id)?.getURL() ?? '')
+        .filter((url) => url.includes('view=loading')),
+    )
+  const indicatorPagesIn = () =>
+    app.evaluate(({ webContents }) =>
+      webContents
+        .getAllWebContents()
+        .filter((c) => c.getURL().includes('view=loading'))
+        .every((c) => !c.isLoading()),
+    )
+  /** A window opened from the first one, as ⌘N does: its command bar opens with the keyboard. */
+  const newWindow = async () => {
+    const ids = () => app.evaluate(() => (globalThis as unknown as NavHooks).__orbit.windowIds())
+    const before = await ids()
+    await action(app, 'window.new')
+    let id = ''
+    await expect
+      .poll(async () => {
+        id = (await ids()).find((w) => !before.includes(w)) ?? ''
+        return id
+      })
+      .not.toBe('')
+    await expect.poll(() => focusedUrl(app)).toContain('view=overlay')
+    return id
+  }
+  // Slow pages load in new windows at once, as ones links open there do. The page comes when the
+  // test lets it: the indicator shows, and its view's page is in.
+  for (const n of [1, 2, 3]) {
+    const windowId = await newWindow()
+    const path = `/slow/First${n}`
+    await cmdIn(app, windowId, 'tabs.create', { url: fx.url(path) })
+    await expect.poll(async () => (await loading(app, windowId)).visible).toBe(true)
+    await expect.poll(indicatorPagesIn).toBe(true)
+    // The keyboard stays in the command bar.
+    expect(await indicatorsThatTookKeyboard()).toEqual([])
+    expect(await focusedUrl(app)).toContain('view=overlay')
+    fx.release(path)
+  }
+  // A window open a moment has its indicator ready, out of the window, before its first load.
+  const windowId = await newWindow()
+  await expect.poll(() => loading(app, windowId)).toMatchObject({ ready: true, visible: false, shown: 0 })
+  await cmdIn(app, windowId, 'tabs.create', { url: fx.url('/slow/Later') })
+  await expect.poll(async () => (await loading(app, windowId)).visible).toBe(true)
+  expect(await indicatorsThatTookKeyboard()).toEqual([])
+  expect(await focusedUrl(app)).toContain('view=overlay')
+  fx.release('/slow/Later')
 })
 
 test('[SB-28][NV-20] the loading indicator stays off a page in HTML full screen and its view leaves the window: the page is top-most under the overlay; it comes back after (review A-M1)', async () => {
