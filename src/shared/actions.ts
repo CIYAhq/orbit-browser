@@ -65,6 +65,11 @@ export interface ActionDef {
    * the key ("prefer Orbit", the default). Users choose per action in Settings → Shortcuts.
    */
   preferWebsites?: boolean | 'other'
+  /**
+   * With "prefer Orbit", the keys still go first to a page whose text field has focus, and the
+   * action runs only when the page leaves them alone (Back and Forward's ⌘[ and ⌘], KS-16).
+   */
+  pageFirstInFields?: boolean
 }
 
 const numbered = (
@@ -218,6 +223,8 @@ export const ACTIONS: ActionDef[] = [
     mac: ['Cmd+['],
     other: ['Alt+Left'],
     macOutsideText: ['Cmd+Left'],
+    // A text field's page may use ⌘[ / Alt+← (an editor's outdent): it goes there first (KS-16).
+    pageFirstInFields: true,
   },
   {
     id: 'nav.forward',
@@ -226,6 +233,8 @@ export const ACTIONS: ActionDef[] = [
     mac: ['Cmd+]'],
     other: ['Alt+Right'],
     macOutsideText: ['Cmd+Right'],
+    // A text field's page may use ⌘] / Alt+→ (an editor's indent): it goes there first (KS-16).
+    pageFirstInFields: true,
   },
   { id: 'nav.reload', title: 'Reload Page', category: 'Navigation', mac: ['Cmd+R'], other: ['Ctrl+R', 'F5'] },
   {

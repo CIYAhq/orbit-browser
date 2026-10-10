@@ -10,6 +10,7 @@ import {
   unbind,
 } from '../../src/main/keys/bindings'
 import {
+  ACTIONS,
   ACTIONS_BY_ID,
   actionForAccelerator,
   actionForInput,
@@ -231,5 +232,14 @@ describe('[KS-02] who gets an action’s keys first', () => {
     expect(normalizePriorities({ 'tab.new': 'orbit', 'tab.close': 'websites', x: 'orbit' }, 'linux')).toEqual({
       'tab.close': 'websites',
     })
+  })
+})
+
+describe('[KS-16] keys a page’s text field may use', () => {
+  it('Back and Forward go to a focused text field first; no other action does', () => {
+    expect(ACTIONS.filter((a) => a.pageFirstInFields).map((a) => a.id)).toEqual(['nav.back', 'nav.forward'])
+    // They prefer Orbit: outside text fields the page never has them first.
+    expect(priorityFor(action('nav.back'), 'darwin')).toBe('orbit')
+    expect(priorityFor(action('nav.forward'), 'linux')).toBe('orbit')
   })
 })

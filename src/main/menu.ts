@@ -4,6 +4,7 @@ import { editsText } from '../shared/keymap'
 import { keepForMenu } from './archive/menus'
 import { recentlyClosedItems } from './archive/recently-closed'
 import type { MainContext } from './context'
+import { keyRouter } from './keys/router'
 
 /**
  * The macOS menu bar, built from the shared action list so menu labels and
@@ -27,6 +28,8 @@ export function installMenu(ctx: MainContext): void {
       // fields, and the menu must not take it from one.
       ...(accel && editsText(accel, 'darwin') ? { registerAccelerator: false } : {}),
       click: () => {
+        // A key let through to a page that left it alone reaches the menu too: it runs once (KS-02).
+        if (!keyRouter.menuRuns(id)) return
         const windowId = ctx.windows.focusedWindowId()
         // With a page's popup or detached DevTools focused, Close Tab closes that window instead.
         if (!windowId && (id === 'tab.close' || id === 'window.close') && ctx.windows.closeFocusedForeign()) return

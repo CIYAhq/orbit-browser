@@ -1067,6 +1067,10 @@ export class WindowManager {
         this.runOutsideText(contents, input)
         return
       }
+      // A web page may get the action's keys first (keys lane, KS-02, KS-16).
+      if (keyRouter.leaveToPage(contents, input, action, () => this.windowIdFor(contents) ?? this.focusedWindowId())) {
+        return
+      }
       event.preventDefault()
       const windowId = this.windowIdFor(contents) ?? this.focusedWindowId()
       // Close Tab in a window that isn't an Orbit window (a page's popup) closes that window.
