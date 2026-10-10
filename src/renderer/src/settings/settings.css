@@ -593,6 +593,13 @@ html[data-platform="darwin"] .settings__page {
   gap: 8px;
 }
 
+/* Words between a form's controls ("opens in"), on the controls' line. */
+.st-form__words {
+  color: var(--text-muted);
+  line-height: 28px;
+  white-space: nowrap;
+}
+
 .st-icon-button {
   display: grid;
   place-items: center;
@@ -838,4 +845,14 @@ html[data-platform="darwin"] .settings__page {
 
 .st-dialog__actions .st-button--danger:hover:not(:disabled) {
   background: #bb2f2f;
+}
+
+/* A link routing rule (ST-09): the words stay on one line; a long address wraps after them. */
+.st-rule {
+  min-width: 0;
+  line-height: 20px;
+}
+
+.st-rule .st-key {
+  overflow-wrap: anywhere;
 }

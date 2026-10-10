@@ -1,5 +1,5 @@
 import type { ActionDef } from '../actions'
-import type { ProfileId, Settings, SpaceId, WindowId } from '../state'
+import type { LinkRule, ProfileId, Settings, SpaceId, WindowId } from '../state'
 
 /**
  * Owned by the settings lane: the Settings window (ST-*), the global appearance (AP-01),
@@ -80,6 +80,13 @@ export const SETTINGS_ACTIONS: SettingsActionDef[] = [
     category: 'App',
     settings: { section: 'appearance' },
     keywords: ['theme', 'dark mode', 'light mode', 'match system'],
+  },
+  {
+    id: 'settings.links',
+    title: 'Link Settings',
+    category: 'App',
+    settings: { section: 'links' },
+    keywords: ['links from other apps', 'external links', 'link routing', 'routing rules', 'peek', 'mini window'],
   },
   {
     id: 'settings.about',
@@ -189,6 +196,11 @@ export interface SettingsCommands {
    * profile other than Default to follow the Default profile's.
    */
   'settings.setArchiveAfter': { args: { profileId: ProfileId; ms: number | null }; result: void }
+  /**
+   * Replaces the link routing rules (ST-09), in order: the first that matches wins. Rules for a Space
+   * that is gone are dropped; a malformed list changes nothing.
+   */
+  'settings.setLinkRules': { args: { rules: LinkRule[] }; result: void }
   /** Whether Orbit is the default browser (ST-03). */
   'settings.defaultBrowser': { args: Record<string, never>; result: DefaultBrowserStatus }
   /** Asks the OS to make Orbit the default browser (ST-03, OB-07). */

@@ -452,3 +452,101 @@ test('[ST-06] a custom engine can be added, made the default, and removed', asyn
   await expect(page.getByTestId(`search-engine-${DEFAULT_PROFILE_ID}`)).toHaveValue('google')
   expect((await state(orbit.app)).profiles[DEFAULT_PROFILE_ID]?.searchEngine).toBeUndefined()
 })
+
+// ---- Links (ST-09) ----
+
+/** Another app asks Orbit to open a URL (macOS open-url; the other platforms share the route). */
+async function openFromOtherApp(url: string): Promise<void> {
+  await orbit.app.evaluate(({ app }, u) => app.emit('open-url', { preventDefault() {} }, u), url)
+}
+
+/** The URLs of a Space's Today tabs. */
+async function todayUrls(spaceId: string): Promise<string[]> {
+  const s = await state(orbit.app)
+  return (s.spaces[spaceId]?.today ?? []).map((id) => s.tabs[id]?.url ?? '')
+}
+
+test('[ST-09][MW-11] Links: links from other apps open in a Mini Window, the most recent Space or a chosen one', async () => {
+  const first = (await state(orbit.app)).spaceOrder[0] as string
+  const firstName = (await state(orbit.app)).spaces[first]?.name as string
+  const work = (await run(orbit.app, 'spaces.create', { name: 'Work', activate: false })) as string
+  const page = await openSettings(orbit.app, { section: 'links' })
+  const choice = page.getByTestId('external-links')
+  await expect(choice).toHaveValue('mini')
+  await expect(choice.locator('option')).toHaveText(['A Mini Window', 'The most recent Space', firstName, 'Work'])
+  const links = async () => {
+    const s = (await state(orbit.app)).settings
+    return [s.miniWindowForExternalLinks, s.externalLinksSpace]
+  }
+
+  await choice.selectOption({ label: 'Work' })
+  await expect.poll(links).toEqual([false, work])
+  await openFromOtherApp(fx.url('/page/FromMail'))
+  await expect.poll(() => todayUrls(work)).toContain(fx.url('/page/FromMail'))
+
+  await choice.selectOption({ label: 'The most recent Space' })
+  await expect.poll(links).toEqual([false, null])
+  await choice.selectOption({ label: 'A Mini Window' })
+  await expect.poll(async () => (await links())[0]).toBe(true)
+
+  // Peek options (PK-12, PK-03): both on by default.
+  for (const [testId, key] of [
+    ['peek-external-links', 'peekExternalLinks'],
+    ['peek-shift-click', 'peekShiftClick'],
+  ] as const) {
+    await expect(page.getByTestId(testId)).toHaveAttribute('aria-checked', 'true')
+    await page.getByTestId(testId).click()
+    await expect.poll(async () => (await state(orbit.app)).settings[key]).toBe(false)
+  }
+})
+
+test('[ST-09] link routing rules: add, reorder, edit and remove; a link that matches opens in the rule’s Space', async () => {
+  const first = (await state(orbit.app)).spaceOrder[0] as string
+  const work = (await run(orbit.app, 'spaces.create', { name: 'Work', activate: false })) as string
+  const page = await openSettings(orbit.app, { section: 'links' })
+  const rules = async () => (await state(orbit.app)).settings.linkRules
+  const addRule = async (match: 'contains' | 'exact', value: string, space: string) => {
+    await page.getByTestId('link-rule-add').click()
+    await page.getByTestId('link-rule-match').selectOption(match)
+    await page.getByTestId('link-rule-value').fill(value)
+    await page.getByTestId('link-rule-space').selectOption({ label: space })
+    await page.getByTestId('link-rule-save').click()
+    await expect(page.getByTestId('link-rule-form')).toHaveCount(0)
+  }
+
+  // An empty rule is refused in place.
+  await page.getByTestId('link-rule-add').click()
+  await page.getByTestId('link-rule-save').click()
+  await expect(page.getByRole('alert')).toHaveText('Enter part of an address, such as a domain')
+  await page.getByTestId('link-rule-value').press('Escape')
+  await expect(page.getByTestId('link-rule-form')).toHaveCount(0)
+
+  await addRule('contains', 'localhost', 'Work')
+  const firstName = (await state(orbit.app)).spaces[first]?.name as string
+  await addRule('exact', fx.url('/page/Exact'), firstName)
+  await expect.poll(rules).toEqual([
+    { match: 'contains', value: 'localhost', spaceId: work },
+    { match: 'exact', value: fx.url('/page/Exact'), spaceId: first },
+  ])
+  await expect(page.getByTestId('setting-link-rule-0')).toContainText('Opens in Work')
+
+  // The first rule that matches wins: the exact one moves up.
+  await page.getByTestId('link-rule-menu-1').click()
+  await page.getByTestId('link-rule-up').click()
+  await expect.poll(async () => (await rules()).map((r) => r.match)).toEqual(['exact', 'contains'])
+  await openFromOtherApp(fx.url('/page/Exact'))
+  await expect.poll(() => todayUrls(first)).toContain(fx.url('/page/Exact'))
+  // With Mini Windows on, a link a rule matches still opens in its Space.
+  await openFromOtherApp(fx.url('/page/Routed'))
+  await expect.poll(() => todayUrls(work)).toContain(fx.url('/page/Routed'))
+
+  await page.getByTestId('link-rule-menu-1').click()
+  await page.getByTestId('link-rule-edit').click()
+  await page.getByTestId('link-rule-value').fill('figma.com')
+  await page.getByTestId('link-rule-save').click()
+  await expect.poll(async () => (await rules())[1]?.value).toBe('figma.com')
+
+  await page.getByTestId('link-rule-menu-0').click()
+  await page.getByTestId('link-rule-remove').click()
+  await expect.poll(rules).toEqual([{ match: 'contains', value: 'figma.com', spaceId: work }])
+})

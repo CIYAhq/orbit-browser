@@ -29,7 +29,7 @@ import type { ComponentType } from 'react'
  *   that), and Settings reopens at the section shown last (`settings.settingsSection`).
  * - `label`: the sidebar entry and the page title.
  * - `icon`: a lucide-react icon, or any component that takes `size`.
- * - `order`: the sidebar position, low first. Orbit's sections: General 10, Profiles 20,
+ * - `order`: the sidebar position, low first. Orbit's sections: General 10, Profiles 20, Search 25,
  *   Appearance 30, Shortcuts 40 (keys lane), Links 50, Privacy & security 60, Site settings 65,
  *   Advanced 70, About 90. Pick a number between two to slot in.
  * - `component`: the page, rendered without props. Build it from `./controls` (`SettingGroup`,

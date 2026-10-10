@@ -5,6 +5,7 @@ import type { WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
 import { stubDefaultBrowser, systemDefaultBrowser } from './default-browser'
+import { registerLinkSettings } from './links'
 import { registerProfileSettings } from './profiles'
 import { registerSearchSettings } from './search'
 import { applySettingsPatch } from './validate'
@@ -34,6 +35,7 @@ export function registerSettings(ctx: MainContext): void {
 
   registerSearchSettings(ctx)
   registerProfileSettings(ctx)
+  registerLinkSettings(ctx)
 
   commands.register('settings.openUrl', async ({ url }) => {
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return
