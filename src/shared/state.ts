@@ -222,6 +222,10 @@ export interface Settings {
   /** Size and position of the last Mini Window the user moved or resized (MW-04). */
   miniWindowBounds?: { x: number; y: number; width: number; height: number }
   onboarded: boolean
+  /** The Settings window's section shown last: Settings reopens there (ST-01). */
+  settingsSection: string
+  /** The Settings window's size when last resized (ST-01). */
+  settingsWindowSize?: { width: number; height: number }
   /** Command bar site searches (CB-11); edited in Settings (ST-06). */
   siteSearch: SiteSearchEngine[]
   /** Ask the search engine for suggestions while typing in the command bar (CB-15). Off by default: it sends keystrokes to the engine. */

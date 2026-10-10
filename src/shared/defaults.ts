@@ -33,6 +33,7 @@ export const DEFAULT_SETTINGS: Settings = {
   miniWindowArchiveAfterMs: 6 * 60 * 60 * 1000,
   miniWindowProfiles: {},
   onboarded: false,
+  settingsSection: 'general',
   siteSearch: DEFAULT_SITE_SEARCH,
   searchSuggestions: false,
   searchTopResult: false,
