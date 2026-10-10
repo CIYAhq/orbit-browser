@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 154 built (51 partial) · 210 tested · 0 feel right.
+**Totals:** 485 spec’d · 158 built (57 partial) · 219 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
 | P0 | 174 | 101 | 121 |
-| P1 | 221 | 47 | 82 |
+| P1 | 221 | 51 | 91 |
 | P2 | 83 | 6 | 7 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -538,7 +538,7 @@ Spec: `spec/settings.md`
 |---|---|---|---|---|---|---|
 | ST-01 | Settings window | P0 | ✅ | ✅ e2e+unit | – | own window (⌘, / Ctrl+,): opens or focuses one; remembers section and size; takes the opener Space's colours; sections come from a registry (src/renderer/src/settings/registry.ts); search filters rows |
 | ST-02 | Settings reachable and searchable from the command bar | P1 | ✅ | ✅ e2e | – | sections and common settings are command-bar actions (settings.*) that open Settings at the row; the keys lane adds Shortcuts |
-| ST-03 | General section | P1 | 🟡 partial | ✅ e2e | – | default browser row and menu action (only an installed build can register; e2e uses a stub), Mini Window archive timing, Import button when the import lane registers import.open; update rows wait for UP |
+| ST-03 | General section | P1 | 🟡 partial | ✅ e2e | – | default browser row, app-menu item and command-bar action (only an installed build can register; e2e uses a stub); Mini Window archive timing; Import button once the import lane registers import.open; Updates group: automatic checks switch, Check Now and the update feed address. Not built: UP-04's install-while-idle, hover-preview toggles (OT-26, P2), Open PDFs (P2) |
 | ST-04 | Profiles section (list, rename, delete) | P1 | ✅ | ✅ e2e | – | list with Default first, rename any profile, New Profile…, delete with confirmation (off while a Space uses it, and says why) |
 | ST-05 | Per-profile: auto-archive timing | P1 | ✅ | ✅ e2e+unit | – | 12 hours (default), 24 hours, 7 days, 30 days per profile; no Never; other profiles follow Default until set |
 | ST-06 | Per-profile: default search engine and custom engines | P0 | ✅ | ✅ e2e+unit | – | per-profile default engine (8 built-ins), custom engines with keyword and %s URL, Make default from the row menu; no extension override in Electron, so that row does not exist |
@@ -546,13 +546,13 @@ Spec: `spec/settings.md`
 | ST-08 | Shortcuts section (remapping) | P1 | – | – | – |  |
 | ST-09 | Links section | P1 | ✅ | ✅ e2e+unit | – | links from other apps open in a Mini Window (default), the most recent Space or one Space; routing rules (address contains / is exactly → a Space; first match wins; add, edit, reorder, remove); Peek options |
 | ST-10 | Advanced section | P1 | 🟡 partial | ✅ e2e+unit | – | tab sleep timer (TB-16), picture in picture, graphics acceleration; no site customizations, full-URL toggle, sounds or haptics, or edge-drag settings because those features don't exist yet |
-| ST-11 | Appearance section | P1 | – | ✅ e2e | – |  |
+| ST-11 | Appearance section | P1 | 🟡 partial | ✅ e2e | – | Theme mode: Light / Dark / Match system (AP-01). Not built: window material (AP-10, Windows), app icon (AP-09), page defaults (P2) |
 | ST-12 | Privacy & security, and clearing browsing data | P1 | 🟡 partial | ✅ e2e+unit | – | privacy promise (Orbit sends nothing); Clear browsing data per profile (⌘⇧⌫ / Ctrl+Shift+Delete): history by time range, cookies, site data and cache for all time only (Electron has no range); Secure DNS (Automatic, Off, Cloudflare, Google, Quad9); graphics acceleration lives in Advanced. No HTTPS-first or Safe Browsing (not in Electron), no per-site clearing here |
 | ST-13 | Site settings (permissions) page | P1 | – | – | – |  |
 | ST-14 | Languages, spell check and translation | P2 | – | – | – |  |
 | ST-15 | Passwords and autofill settings | P1 | – | – | – |  |
 | ST-16 | Session restore on launch | P1 | – | – | – |  |
-| ST-17 | About Orbit | P1 | – | – | – |  |
+| ST-17 | About Orbit | P1 | ✅ | ✅ e2e | – | Settings → About: logo, version (a click copies it), build date, Chromium and Electron versions, system, Check for updates, release notes, licence, open-source credits, Copy build info |
 | ST-18 | Account, sign-in and sync sections | ? | – | – | – |  |
 | ST-19 | AI features section | ? | – | – | – |  |
 | ST-20 | Which settings are global and which are per profile | P1 | 🟡 partial | ✅ e2e+unit | – | per-profile rows carry the profile's name; download location, passwords and site permissions don't exist yet |
@@ -600,7 +600,7 @@ Spec: `spec/onboarding.md`
 | OB-10 | Getting-started guide | P1 | – | – | – |  |
 | OB-11 | Contextual tips and one-time hints | P1 | – | – | – |  |
 | OB-12 | Essential keyboard shortcuts sheet | P1 | – | – | – |  |
-| OB-13 | Help and feedback entry points | P1 | – | – | – |  |
+| OB-13 | Help and feedback entry points | P1 | 🟡 partial | ✅ e2e+unit | – | command-bar Help, Report a Bug, What's New and Copy Build Info; macOS Help menu (Orbit Help, Report a Bug…, Release Notes, Troubleshooting → Copy Build Info). Help opens the project README; Report a Bug opens a new issue on the public tracker with the build info filled in. The shortcut sheet entry comes with OB-12 (keys lane) |
 | OB-14 | Skip, resume and reset onboarding | P2 | ✅ | ✅ e2e+unit | – | Skip setup on every step but the last; the step is saved, so a quit part-way resumes there; Reset Onboarding (command bar only) runs the flow again over the open windows and deletes nothing. Decision: Skip keeps what earlier steps set (colours as picked, Favorites once continued past), so skipping at the start gives the default first window the spec describes |
 | OB-15 | AI features opt-in step | ? | – | – | – |  |
 | OB-16 | Personal welcome card | P2 | – | – | – |  |
@@ -611,18 +611,18 @@ Spec: `spec/updates.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| UP-01 | Background update checks | P1 | – | – | – |  |
-| UP-02 | "Update ready" banner in the sidebar → relaunch | P1 | – | – | – |  |
-| UP-03 | Manual "Check for updates…" | P1 | – | – | – |  |
+| UP-01 | Background update checks | P1 | 🟡 partial | ✅ e2e+unit | – | checks a release feed at launch (after 30 s) and about every 4 h ± 30 min, after wake if overdue; silent, failures retried at the next check; a private in-memory session that sends only Orbit's version, system and processor type (no cookies). Nothing is checked until a feed is set in Settings → General (empty by default; test and dev builds accept only a feed on this computer). Not built: background download (builds are unsigned, so UP-10's stub) |
+| UP-02 | "Update ready" banner in the sidebar → relaunch | P1 | 🟡 partial | ✅ e2e | – | sidebar banner above the Space switcher, in the Space's colours: a pill that opens on hover with a gradient button; ✕ hides it for 24 h or until the next launch. UP-10 form: "New version available" opens the release page in a tab; no relaunch until signed builds |
+| UP-03 | Manual "Check for updates…" | P1 | 🟡 partial | ✅ e2e | – | command bar and macOS app menu "Check for Updates…" open Settings → About (not a separate window) and check: Checking…, up to date, available, or the failure; Download opens the release page (UP-10); a click on the version copies it. Not built: download progress and Relaunch, the Turn on offer (UP-04), a ☰ entry on Windows/Linux |
 | UP-04 | Automatic installation while idle (opt-in) | P2 | – | – | – |  |
 | UP-05 | Relaunch behaviour | P1 | – | – | – |  |
-| UP-06 | "What's new" after an update and release notes in-app | P1 | – | – | – |  |
-| UP-07 | About window and version info | P1 | – | – | – |  |
+| UP-06 | "What's new" after an update and release notes in-app | P1 | 🟡 partial | ✅ e2e+unit | – | after a version change the sidebar shows "Updated to Orbit X" with See what's new, which opens that version's GitHub release notes in a tab; ends when opened, dismissed or after 3 days; command bar "What's New" and Help → Release Notes. Not built: the release's one-line summary in the banner |
+| UP-07 | About window and version info | P1 | ✅ | ✅ e2e+unit | – | About Orbit (app menu) opens Settings → About: logo, version, engine, Electron, build date (set at build time), licence, open-source credits, Copy build info; Help → Troubleshooting → Copy Build Info and the command-bar action copy version, build date, engine, OS and processor |
 | UP-08 | Beta update channel | P2 | – | – | – |  |
 | UP-09 | OS support notices | P2 | – | – | – |  |
-| UP-10 | Orbit update stub (unsigned builds) | P1 | – | – | – |  |
+| UP-10 | Orbit update stub (unsigned builds) | P1 | ✅ | ✅ e2e+unit | – | reads Orbit's JSON feed ({version, url, summary, security}) or a GitHub releases API answer (latest, or a list: newest non-draft, non-pre-release); a newer version shows "New version available" and opens its page in a tab. No feed is set up yet: the address is empty by default |
 | UP-11 | Update failure handling | P2 | – | – | – |  |
-| UP-12 | Engine security updates cadence | P1 | – | – | – |  |
+| UP-12 | Engine security updates cadence | P1 | ✅ | ✅ e2e+unit | – | a release marked [security] in its GitHub name or notes, or security: true in Orbit's feed, shows "Important security update" in the banner and Settings |
 
 ## Canvases and Notes
 
