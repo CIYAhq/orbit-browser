@@ -847,6 +847,36 @@ html[data-platform="darwin"] .settings__page {
   background: #bb2f2f;
 }
 
+.st-dialog__field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* ---------- Privacy (ST-12) ---------- */
+
+.st-promise {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 22px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+  line-height: 1.45;
+}
+
+.st-promise svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--accent);
+}
+
+.st-promise p {
+  margin: 0;
+}
+
 /* A link routing rule (ST-09): the words stay on one line; a long address wraps after them. */
 .st-rule {
   min-width: 0;

@@ -1,4 +1,4 @@
-import type { SettingsPatch } from '../../shared/commands/settings'
+import { SECURE_DNS_CHOICES, type SettingsPatch } from '../../shared/commands/settings'
 import type { OrbitState, Settings } from '../../shared/state'
 import { SECTION_ID_RE } from './normalize'
 
@@ -24,6 +24,10 @@ const CHECKS: { [K in keyof Required<SettingsPatch>]: Check } = {
   autoPip: bool,
   searchSuggestions: bool,
   searchTopResult: bool,
+  // 0 = never (TB-16); otherwise a minute to a day.
+  sleepAfterMs: (v) => typeof v === 'number' && Number.isInteger(v) && (v === 0 || (v >= 60_000 && v <= DAY)),
+  hardwareAcceleration: bool,
+  secureDns: (v) => (SECURE_DNS_CHOICES as readonly unknown[]).includes(v),
 }
 
 /**

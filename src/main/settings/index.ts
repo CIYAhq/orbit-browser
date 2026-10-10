@@ -8,6 +8,7 @@ import { stubDefaultBrowser, systemDefaultBrowser } from './default-browser'
 import { registerLinkSettings } from './links'
 import { registerProfileSettings } from './profiles'
 import { registerSearchSettings } from './search'
+import { registerSystemSettings } from './system'
 import { applySettingsPatch } from './validate'
 import { SETTINGS_WINDOW_ID, SettingsWindow } from './window'
 
@@ -36,6 +37,7 @@ export function registerSettings(ctx: MainContext): void {
   registerSearchSettings(ctx)
   registerProfileSettings(ctx)
   registerLinkSettings(ctx)
+  registerSystemSettings(ctx)
 
   commands.register('settings.openUrl', async ({ url }) => {
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return

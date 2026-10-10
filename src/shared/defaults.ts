@@ -39,6 +39,8 @@ export const DEFAULT_SETTINGS: Settings = {
   searchTopResult: false,
   countFavoritesInShortcuts: true,
   lastTabOnCmd9: true,
+  hardwareAcceleration: true,
+  secureDns: 'automatic',
 }
 
 /** Favorites per profile (FV-02). */

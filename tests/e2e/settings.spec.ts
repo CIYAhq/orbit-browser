@@ -550,3 +550,109 @@ test('[ST-09] link routing rules: add, reorder, edit and remove; a link that mat
   await page.getByTestId('link-rule-remove').click()
   await expect.poll(rules).toEqual([{ match: 'contains', value: 'figma.com', spaceId: work }])
 })
+
+// ---- Advanced (ST-10) and Privacy & security (ST-12) ----
+
+test('[ST-10][TB-16] Advanced: when inactive tabs sleep, and picture in picture', async () => {
+  const page = await openSettings(orbit.app, { section: 'advanced' })
+  const sleep = page.getByTestId('sleep-after')
+  await expect(sleep.locator('option')).toHaveText(['15 minutes', '30 minutes', '1 hour', '2 hours', 'Never'])
+  await expect(sleep).toHaveValue(String(30 * 60_000))
+  await sleep.selectOption({ label: '2 hours' })
+  await expect.poll(async () => (await state(orbit.app)).settings.sleepAfterMs).toBe(2 * 3_600_000)
+  await sleep.selectOption({ label: 'Never' })
+  await expect.poll(async () => (await state(orbit.app)).settings.sleepAfterMs).toBe(0)
+
+  await expect(page.getByTestId('auto-pip')).toHaveAttribute('aria-checked', 'true')
+  await page.getByTestId('auto-pip').click()
+  await expect.poll(async () => (await state(orbit.app)).settings.autoPip).toBe(false)
+})
+
+test('[ST-12][ST-10] graphics acceleration can be turned off; it applies from the next start', async () => {
+  const userData = orbit.userData
+  const page = await openSettings(orbit.app, { section: 'advanced' })
+  const row = page.getByTestId('setting-hardware-acceleration')
+  await expect(page.getByTestId('hardware-acceleration')).toHaveAttribute('aria-checked', 'true')
+  await expect(row).toContainText('Turn this off if pages flicker')
+  await page.getByTestId('hardware-acceleration').click()
+  await expect(row).toContainText('Restart Orbit to apply this.')
+  // A test run never restarts Orbit itself.
+  await expect(page.getByTestId('relaunch')).toHaveCount(0)
+
+  await orbit.app.close()
+  orbit = await launchOrbit({ userData })
+  expect(await orbit.app.evaluate(({ app }) => app.isHardwareAccelerationEnabled())).toBe(false)
+  expect(await run(orbit.app, 'settings.systemStatus', {})).toMatchObject({ hardwareAcceleration: false })
+  const again = await openSettings(orbit.app, { section: 'advanced' })
+  await expect(again.getByTestId('hardware-acceleration')).toHaveAttribute('aria-checked', 'false')
+  await expect(again.getByTestId('setting-hardware-acceleration')).not.toContainText('Restart')
+  await again.getByTestId('hardware-acceleration').click()
+  await expect(again.getByTestId('setting-hardware-acceleration')).toContainText('Restart Orbit to apply this.')
+
+  // Back on from the next start (whether it is used also depends on the machine's GPU).
+  await orbit.app.close()
+  orbit = await launchOrbit({ userData })
+  expect(await run(orbit.app, 'settings.systemStatus', {})).toMatchObject({ hardwareAcceleration: true })
+  const last = await openSettings(orbit.app, { section: 'advanced' })
+  await expect(last.getByTestId('hardware-acceleration')).toHaveAttribute('aria-checked', 'true')
+  await expect(last.getByTestId('setting-hardware-acceleration')).not.toContainText('Restart')
+})
+
+test('[ST-12] Privacy: Orbit says what it sends (nothing); Secure DNS can be turned off or pinned to a provider', async () => {
+  const page = await openSettings(orbit.app, { section: 'privacy' })
+  await expect(page.getByTestId('privacy-promise')).toContainText('Orbit has no servers and no accounts')
+  const dns = page.getByTestId('secure-dns')
+  await expect(dns).toHaveValue('automatic')
+  await dns.selectOption({ label: 'Off' })
+  await expect.poll(async () => (await state(orbit.app)).settings.secureDns).toBe('off')
+  await dns.selectOption({ label: 'Automatic' })
+  await expect.poll(async () => (await state(orbit.app)).settings.secureDns).toBe('automatic')
+})
+
+test('[ST-12][KS-12] Clear browsing data: ⌘⇧⌫ opens it; history and site data go, the cache stays when unticked', async () => {
+  const url = fx.url('/page/Cookie')
+  await run(orbit.app, 'tabs.create', { url })
+  const site = await tabPage(orbit.app, '/page/Cookie')
+  await site.waitForLoadState('domcontentloaded')
+  await site.evaluate(async () => {
+    type CookieStore = { set: (c: { name: string; value: string; expires: number }) => Promise<void> }
+    await (globalThis as unknown as { cookieStore: CookieStore }).cookieStore.set({
+      name: 'orbit',
+      value: '1',
+      expires: Date.now() + 3_600_000,
+    })
+    localStorage.setItem('orbit', '1')
+  })
+  const visits = () => run(orbit.app, 'history.visits', { profileId: DEFAULT_PROFILE_ID }) as Promise<unknown[]>
+  const partition = (await state(orbit.app)).profiles[DEFAULT_PROFILE_ID]?.partition as string
+  const cookies = () =>
+    orbit.app.evaluate(
+      async ({ session }, p) => (await session.fromPartition(p).cookies.get({})).map((c) => c.name),
+      partition,
+    )
+  await expect.poll(async () => (await visits()).length).toBeGreaterThan(0)
+  await expect.poll(cookies).toContain('orbit')
+
+  await focusBrowserWindow(orbit.app)
+  await expect.poll(() => browserFocused(orbit.app)).toBe(true)
+  await orbit.shell.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+Backspace' : 'Control+Shift+Delete')
+  const page = await pageOfView(orbit.app, 'settings')
+  const dialog = page.getByTestId('clear-data-dialog')
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toContainText('From the profile “Default”.')
+  await expect(page.getByTestId('clear-data-range')).toHaveValue('hour')
+  await page.getByTestId('clear-data-cache').click()
+  await page.getByTestId('clear-data-confirm').click()
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByTestId('clear-data-status')).toHaveText('Deleted from Default')
+  await expect.poll(async () => (await visits()).length).toBe(0)
+  await expect.poll(cookies).not.toContain('orbit')
+  await site.reload()
+  expect(await site.evaluate(() => localStorage.getItem('orbit'))).toBeNull()
+
+  // Coming back to Privacy doesn't open the dialog again.
+  await page.getByTestId('settings-tab-general').click()
+  await page.getByTestId('settings-tab-privacy').click()
+  await expect(page.getByTestId('setting-clear-data')).toBeVisible()
+  await expect(dialog).toHaveCount(0)
+})

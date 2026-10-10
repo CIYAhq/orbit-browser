@@ -1,3 +1,4 @@
+import { SECURE_DNS_CHOICES } from '../../shared/commands/settings'
 import { DEFAULT_SETTINGS } from '../../shared/defaults'
 import type { OrbitState } from '../../shared/state'
 import { engineById, isBuiltInEngine } from '../../shared/url'
@@ -23,6 +24,8 @@ export function normalizeSettingsPrefs(state: OrbitState): void {
   if (!(typeof s.settingsSection === 'string' && SECTION_ID_RE.test(s.settingsSection))) {
     s.settingsSection = DEFAULT_SETTINGS.settingsSection
   }
+  if (typeof s.hardwareAcceleration !== 'boolean') s.hardwareAcceleration = DEFAULT_SETTINGS.hardwareAcceleration
+  if (!SECURE_DNS_CHOICES.includes(s.secureDns)) s.secureDns = DEFAULT_SETTINGS.secureDns
   const size: unknown = s.settingsWindowSize
   if (isRecord(size) && saneSize(size.width) && saneSize(size.height)) {
     s.settingsWindowSize = { width: Math.round(size.width), height: Math.round(size.height) }

@@ -1,10 +1,11 @@
 import { CircleCheck, SlidersHorizontal } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { DefaultBrowserStatus, SettingsCapabilities } from '../../../../shared/commands/settings'
 import { invoke } from '../../api'
 import { useOrbit } from '../../store'
 import { Button, type Option, Select, SettingGroup, SettingRow } from '../controls'
 import { HOUR, withCurrent } from '../format'
+import { useMainValue } from '../hooks'
 import type { SettingsSection } from '../registry'
 
 /** Mini Windows left alone close after this long (MW-09, ST-03); "Never" is an option. */
@@ -15,28 +16,6 @@ const MINI_WINDOW_ARCHIVE: Option<number>[] = [
   { value: 24 * HOUR, label: '24 hours' },
   { value: 0, label: 'Never' },
 ]
-
-/**
- * Reads something main doesn't keep in state again whenever Settings comes to the front or main says
- * it changed (`settings.refresh`): the user may have changed it outside Orbit.
- */
-export function useMainValue<T>(read: () => Promise<T>): [T | undefined, (value: T) => void] {
-  const [value, setValue] = useState<T>()
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `read` is fixed per caller
-  useEffect(() => {
-    let live = true
-    const load = () => void read().then((v) => live && setValue(v))
-    load()
-    const off = window.orbit.on('settings.refresh', load)
-    window.addEventListener('focus', load)
-    return () => {
-      live = false
-      off()
-      window.removeEventListener('focus', load)
-    }
-  }, [])
-  return [value, setValue]
-}
 
 const readDefaultBrowser = () => invoke('settings.defaultBrowser', {})
 const readCapabilities = () => invoke('settings.capabilities', {})

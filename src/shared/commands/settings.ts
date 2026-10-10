@@ -1,5 +1,5 @@
 import type { ActionDef } from '../actions'
-import type { LinkRule, ProfileId, Settings, SpaceId, WindowId } from '../state'
+import type { LinkRule, ProfileId, SecureDnsChoice, Settings, SpaceId, WindowId } from '../state'
 
 /**
  * Owned by the settings lane: the Settings window (ST-*), the global appearance (AP-01),
@@ -89,6 +89,29 @@ export const SETTINGS_ACTIONS: SettingsActionDef[] = [
     keywords: ['links from other apps', 'external links', 'link routing', 'routing rules', 'peek', 'mini window'],
   },
   {
+    id: 'settings.privacy',
+    title: 'Privacy and Security Settings',
+    category: 'App',
+    settings: { section: 'privacy' },
+    keywords: ['secure dns', 'dns over https', 'cookies', 'privacy'],
+  },
+  {
+    id: 'settings.clearBrowsingData',
+    title: 'Clear Browsing Data…',
+    category: 'App',
+    mac: ['Cmd+Shift+Backspace'],
+    other: ['Ctrl+Shift+Delete'],
+    settings: { section: 'privacy', item: 'clear-data' },
+    keywords: ['delete history', 'clear history', 'clear cookies', 'clear cache'],
+  },
+  {
+    id: 'settings.advanced',
+    title: 'Advanced Settings',
+    category: 'App',
+    settings: { section: 'advanced' },
+    keywords: ['graphics acceleration', 'hardware acceleration', 'picture in picture', 'tab sleeping', 'memory'],
+  },
+  {
     id: 'settings.about',
     // Not "About Orbit": typing the app's own name in the command bar shouldn't add a row.
     title: 'About',
@@ -122,6 +145,9 @@ export type SettingsPatch = Partial<
     | 'autoPip'
     | 'searchSuggestions'
     | 'searchTopResult'
+    | 'sleepAfterMs'
+    | 'hardwareAcceleration'
+    | 'secureDns'
   >
 >
 
@@ -145,6 +171,32 @@ const HOUR = 60 * 60 * 1000
  * turned off.
  */
 export const ARCHIVE_AFTER_CHOICES: readonly number[] = [12 * HOUR, 24 * HOUR, 7 * 24 * HOUR, 30 * 24 * HOUR]
+
+/** Secure DNS choices, in the order Settings lists them (ST-12). */
+export const SECURE_DNS_CHOICES: readonly SecureDnsChoice[] = ['automatic', 'off', 'cloudflare', 'google', 'quad9']
+
+/** "Put inactive tabs to sleep after" choices (TB-16): 30 minutes is the default; 0 is Never. */
+export const SLEEP_AFTER_CHOICES: readonly number[] = [15 * 60_000, 30 * 60_000, HOUR, 2 * HOUR, 0]
+
+/** What is cleared by Clear browsing data (ST-12). */
+export type ClearDataKind = 'history' | 'siteData' | 'cache'
+
+/** Clear browsing data's time ranges (ST-12). Site data and the cache only clear for all time. */
+export type ClearDataRange = 'hour' | 'day' | 'week' | 'month' | 'all'
+
+export interface ClearDataRequest {
+  profileId: ProfileId
+  range: ClearDataRange
+  kinds: ClearDataKind[]
+}
+
+/** Engine state Settings shows next to the settings it depends on (ST-12). */
+export interface SystemStatus {
+  /** The graphics acceleration setting this run started with (it applies from the next start). */
+  hardwareAcceleration: boolean
+  /** Whether Settings may offer "Restart Orbit" (not in test runs). */
+  canRelaunch: boolean
+}
 
 /** Whether Orbit is the OS default browser (ST-03, OB-07). */
 export interface DefaultBrowserStatus {
@@ -201,6 +253,11 @@ export interface SettingsCommands {
    * that is gone are dropped; a malformed list changes nothing.
    */
   'settings.setLinkRules': { args: { rules: LinkRule[] }; result: void }
+  /** Clears a profile's browsing data (ST-12): history for the range, site data and cache for all time. */
+  'settings.clearData': { args: ClearDataRequest; result: void }
+  'settings.systemStatus': { args: Record<string, never>; result: SystemStatus }
+  /** Restarts Orbit (to apply graphics acceleration); refused in test runs. */
+  'settings.relaunch': { args: Record<string, never>; result: boolean }
   /** Whether Orbit is the default browser (ST-03). */
   'settings.defaultBrowser': { args: Record<string, never>; result: DefaultBrowserStatus }
   /** Asks the OS to make Orbit the default browser (ST-03, OB-07). */

@@ -9,6 +9,7 @@ import { Perf } from './perf'
 import { loadState, Persistence } from './persist'
 import { ActionRegistry, CommandRegistry, EventRegistry } from './registry'
 import { Sessions } from './sessions'
+import { applyStartupSwitches } from './settings/system'
 import { Store } from './store'
 import { TabRuntime } from './tabs/runtime'
 import { exposeTestHooks } from './test-hooks'
@@ -24,6 +25,8 @@ process.on('uncaughtException', (err) => console.error('[orbit] uncaught excepti
 // Tests and perf runs isolate their profile data.
 if (process.env.ORBIT_USER_DATA) app.setPath('userData', process.env.ORBIT_USER_DATA)
 const e2e = process.env.ORBIT_E2E === '1'
+// Settings that only apply from start-up, such as graphics acceleration (ST-12).
+applyStartupSwitches()
 
 app.setName('Orbit')
 

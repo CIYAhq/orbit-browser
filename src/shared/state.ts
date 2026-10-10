@@ -241,7 +241,14 @@ export interface Settings {
   countFavoritesInShortcuts: boolean
   /** ⌘9 selects the last tab (true) or the 9th item (false) (TB-04). */
   lastTabOnCmd9: boolean
+  /** Use graphics acceleration when available (ST-12). Takes effect at the next start. */
+  hardwareAcceleration: boolean
+  /** Secure DNS (ST-12): the engine's automatic upgrade, off, or always one DNS-over-HTTPS provider. */
+  secureDns: SecureDnsChoice
 }
+
+/** Secure DNS choices (ST-12): providers are src/main/settings/system.ts's DOH_SERVERS. */
+export type SecureDnsChoice = 'automatic' | 'off' | 'cloudflare' | 'google' | 'quad9'
 
 /** "URL contains …" or "URL is exactly …" → a Space (ST-09 link routing). */
 export interface LinkRule {
