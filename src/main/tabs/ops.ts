@@ -8,6 +8,7 @@ import { isFolderId, isTabId, newId } from '../../shared/ids'
 import { isMediaBusy } from '../../shared/media'
 import { isPendingPane, layoutLeaves, paneAfterClose, SPLIT_FULL_MESSAGE } from '../../shared/split'
 import type {
+  ArchivedSplit,
   ArchivedTab,
   ContainerRef,
   Folder,
@@ -37,6 +38,7 @@ import {
   splitOfTab,
   tabsInItem,
 } from '../../shared/tree'
+import { noteArchiveHistory, provideSidebarUndo } from '../archive/inbox'
 import type { MainContext } from '../context'
 import {
   addPaneInDraft,
@@ -94,7 +96,10 @@ export class TabOps {
   constructor(
     private ctx: MainContext,
     private now: () => number = Date.now,
-  ) {}
+  ) {
+    // Restore Data is a step on this stack too (AR-11): ⌘Z takes it back, ⌘⇧Z restores again.
+    provideSidebarUndo(this.undo)
+  }
 
   private get state(): OrbitState {
     return this.ctx.store.state
@@ -198,9 +203,19 @@ export class TabOps {
     tab: Tab,
     reason: ArchivedTab['reason'],
     section: 'today' | 'pinned',
+    unit?: SplitUnit,
   ): string | undefined {
     if (!tab.url || tab.url === 'about:blank') return undefined
     const id = newId('a')
+    // A whole split going at once comes back from the Archive as one unit (SV-19, SV-24).
+    const split: ArchivedSplit | undefined = unit
+      ? {
+          id: unit.id,
+          layout: unit.layout,
+          ...(unit.name ? { name: unit.name } : {}),
+          ...(unit.focus ? { focus: unit.focus } : {}),
+        }
+      : undefined
     // Appended (newest last): an unshift would rewrite every entry's patch path.
     d.archive.push({
       id,
@@ -212,6 +227,10 @@ export class TabOps {
       archivedAt: this.now(),
       reason,
       section,
+      // The tab's id (a restore reuses it) and its Space's name, kept if the Space goes (AR-01).
+      tabId: tab.id,
+      spaceName: d.spaces[tab.spaceId]?.name,
+      ...(split ? { split } : {}),
     })
     // Trim the oldest entries in chunks so the full-list rewrite happens rarely.
     if (d.archive.length > MAX_ARCHIVE + ARCHIVE_TRIM_CHUNK) d.archive.splice(0, d.archive.length - MAX_ARCHIVE)
@@ -251,6 +270,11 @@ export class TabOps {
       closedAt,
       ...splitInfo.get(id),
     }))
+    // The tabs main windows were showing: undo shows them there again (⌘Z reopens, AR-09).
+    const shownBefore = Object.values(state.windows).flatMap((w) => {
+      const active = w.kind === 'main' ? w.activeTab[w.spaceId] : undefined
+      return active && removing.includes(active) ? [{ windowId: w.id, tabId: active }] : []
+    })
     const todayTabs = (spaceId: SpaceId) =>
       new Set((state.spaces[spaceId]?.today ?? []).flatMap((id) => tabsInItem(state, id)))
     const pick =
@@ -269,7 +293,7 @@ export class TabOps {
         const tab = d.tabs[rec.tab.id]
         if (!tab) continue
         const section = sectionOf(d, tab.id) === 'today' ? 'today' : 'pinned'
-        rec.archiveId = this.archiveEntry(d, tab, reason, section)
+        rec.archiveId = this.archiveEntry(d, tab, reason, section, rec.unit)
       }
       for (const rec of records) {
         detachFromSplit(d, rec.tab.id)
@@ -287,6 +311,8 @@ export class TabOps {
         delete tab.error
       }
     })
+    // The Archive keeps each tab's back/forward history outside OrbitState (AR-01).
+    for (const rec of records) noteArchiveHistory(rec.archiveId, rec.history)
     for (const rec of records) this.ctx.tabs.destroy(rec.tab.id)
     for (const id of unloading) {
       this.ctx.tabs.sleep(id)
@@ -309,6 +335,16 @@ export class TabOps {
         label,
         () => {
           const back = this.restoreClosed(records, { select: false })
+          const reshow = shownBefore.filter((s) => back.includes(s.tabId))
+          if (reshow.length > 0) {
+            const now = this.now()
+            this.ctx.store.update((d) => {
+              for (const { windowId, tabId } of reshow) {
+                const win = d.windows[windowId]
+                if (win && d.tabs[tabId]?.spaceId === win.spaceId) activateInDraft(d, windowId, tabId, now)
+              }
+            })
+          }
           return () => this.closeTabs(back, reason, { remove: opts.remove, reselect: opts.reselect, undoLabel: label })
         },
         this.now(),
@@ -528,6 +564,8 @@ export class TabOps {
       .filter((s) => !!s)
       .map((s) => structuredClone(s))
     const all = new Set(tabIds)
+    // Its split views go whole: each comes back from the Archive as one unit (SV-19, SV-24).
+    const splitInfo = splitCloseInfo(state, all)
     this.ctx.store.update((d) => {
       reselectAway(
         d,
@@ -537,13 +575,14 @@ export class TabOps {
       )
       for (const rec of [...records].reverse()) {
         const tab = d.tabs[rec.tab.id]
-        if (tab) rec.archiveId = this.archiveEntry(d, tab, 'closed', 'pinned')
+        if (tab) rec.archiveId = this.archiveEntry(d, tab, 'closed', 'pinned', splitInfo.get(rec.tab.id)?.unit)
       }
       removeItem(d, folderId)
       for (const f of folders) delete d.folders[f.id]
       for (const s of splits) delete d.splits[s.id]
       for (const tid of tabIds) delete d.tabs[tid]
     })
+    for (const rec of records) noteArchiveHistory(rec.archiveId, rec.history)
     for (const tid of tabIds) this.ctx.tabs.destroy(tid)
     this.undo.push('Delete Folder', () => {
       for (const rec of records) if (rec.history) this.ctx.tabs.savedHistory.set(rec.tab.id, rec.history)
@@ -559,6 +598,9 @@ export class TabOps {
           }
         }
         insertItem(d, loc.container, loc.index, folderId)
+        // Its Space may have changed profile meanwhile: the tabs take that profile, and history
+        // from the old profile's session stays behind (PR-05).
+        for (const moved of this.fixupTabs(d, tabIds, loc.container)) this.ctx.tabs.savedHistory.delete(moved)
       })
     })
   }

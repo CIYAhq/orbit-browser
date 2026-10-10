@@ -121,6 +121,12 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
     .map((s) => ({ id: String(s.id || s.keyword), name: String(s.name || s.keyword), keyword: s.keyword, url: s.url }))
   if (typeof state.settings.searchSuggestions !== 'boolean') state.settings.searchSuggestions = false
   if (typeof state.settings.searchTopResult !== 'boolean') state.settings.searchTopResult = false
+  // The Library section used last (AR-02): a section id, else the Archive.
+  const section = state.settings.librarySection
+  if (!(typeof section === 'string' && /^[\w.-]{1,64}$/.test(section))) state.settings.librarySection = 'archive'
+  // Archive retention in days (AR-08): a whole number, 0 for forever; else the default.
+  const keep = state.settings.archiveKeepDays
+  if (!(Number.isInteger(keep) && keep >= 0 && keep <= 36_500)) state.settings.archiveKeepDays = 30
   // spaceOrder must list exactly the existing spaces.
   state.spaceOrder = [...new Set(state.spaceOrder)].filter((id) => state.spaces[id])
   for (const id of Object.keys(state.spaces)) if (!state.spaceOrder.includes(id)) state.spaceOrder.push(id)

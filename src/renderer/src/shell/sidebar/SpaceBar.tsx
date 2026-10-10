@@ -13,11 +13,12 @@ import { DEFAULT_PROFILE_ID } from '../../../../shared/defaults'
 import type { SpaceId, WindowState } from '../../../../shared/state'
 import { primaryColor } from '../../../../shared/theme'
 import { invoke } from '../../api'
+import { LibraryButton } from '../../library/LibraryButton'
 import { useOrbit } from '../../store'
 import { switcher } from '../spaces/switcher'
 import { openSpaceMenu, openSpacePanel } from '../spaces/TitleRow'
 
-/** Bottom bar (SB-09): the Space switcher in the centre and the "+" menu at the right. */
+/** Bottom bar (SB-09): the Library button at the left, Space switcher in the centre, "+" menu at the right. */
 export function SpaceBar({ win }: { win: WindowState }) {
   return <SpaceBarInner spaceId={win.spaceId} />
 }
@@ -27,7 +28,7 @@ const SpaceBarInner = memo(function SpaceBarInner({ spaceId }: { spaceId: SpaceI
   const many = order.length > 1
   return (
     <nav className="spacebar" data-testid="spacebar">
-      <div className="spacebar__lead" />
+      <LibraryButton />
       {many ? <Switcher order={order} activeId={spaceId} /> : <div className="spacebar__spaces" />}
       <button
         type="button"
