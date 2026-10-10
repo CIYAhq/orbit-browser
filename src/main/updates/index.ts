@@ -198,6 +198,9 @@ class Updater {
         headers: { Accept: 'application/vnd.github+json, application/json;q=0.9' },
         credentials: 'omit',
         cache: 'no-store',
+        // The feed rules (https, or this computer; this computer only in test and dev builds) are
+        // checked on the address set, so a redirect could take the check anywhere: follow none.
+        redirect: 'error',
         signal: controller.signal,
       })
       if (!res.ok) throw new FeedError(`The feed answered ${res.status}.`)
@@ -213,6 +216,9 @@ class Updater {
       return release ?? undefined
     } catch (err) {
       if (controller.signal.aborted) throw new FeedError('The feed did not answer in time.')
+      if (err instanceof Error && /redirect/i.test(err.message)) {
+        throw new FeedError('The feed redirects elsewhere; set the address it moved to.')
+      }
       throw err
     } finally {
       clearTimeout(timeout)

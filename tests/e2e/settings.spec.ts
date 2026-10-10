@@ -673,19 +673,33 @@ interface Feed {
   page: (path: string) => string
   /** What the feed answers from now on. */
   answer: (status: number, body?: unknown) => void
+  /** From now on the feed redirects to `path` on its own site, which answers `body`. */
+  redirect: (path: string, body: unknown) => void
   requests: IncomingHttpHeaders[]
+  /** The other paths asked of the feed's site, in order. */
+  visited: string[]
   close: () => Promise<void>
 }
 
 async function startFeed(): Promise<Feed> {
   let reply = { status: 200, body: '{}' }
+  let moved: { path: string; body: string } | undefined
   const requests: IncomingHttpHeaders[] = []
+  const visited: string[] = []
   const server = createServer((req, res) => {
     if (req.url === '/feed.json') {
       requests.push(req.headers)
       // A cookie the feed tries to set must never come back (UP-01: no personal data).
-      res.writeHead(reply.status, { 'content-type': 'application/json', 'set-cookie': 'seen=1; Path=/' })
-      res.end(reply.body)
+      const cookie = { 'set-cookie': 'seen=1; Path=/' }
+      if (moved) res.writeHead(302, { ...cookie, location: moved.path })
+      else res.writeHead(reply.status, { ...cookie, 'content-type': 'application/json' })
+      res.end(moved ? '' : reply.body)
+      return
+    }
+    visited.push(req.url ?? '')
+    if (moved && req.url === moved.path) {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(moved.body)
       return
     }
     res.writeHead(200, { 'content-type': 'text/html' })
@@ -697,8 +711,13 @@ async function startFeed(): Promise<Feed> {
     page: (path) => `${base}${path}`,
     answer: (status, body = {}) => {
       reply = { status, body: JSON.stringify(body) }
+      moved = undefined
+    },
+    redirect: (path, body) => {
+      moved = { path, body: JSON.stringify(body) }
     },
     requests,
+    visited,
     close: () =>
       new Promise((r) => {
         server.closeAllConnections()
@@ -754,6 +773,25 @@ test('[UP-01][ST-03] General → Updates: no feed, no checks; a feed set there i
     await page.getByTestId('updates-check').click()
     await expect.poll(() => feed.requests.length).toBe(2)
     expect(feed.requests[1]).not.toHaveProperty('cookie')
+  } finally {
+    await feed.close()
+  }
+})
+
+test('[UP-01] a check follows no redirect, which could lead anywhere: the feed moves only by being set again', async () => {
+  const feed = await startFeed()
+  try {
+    const next = newerThan(await appVersion())
+    // The address it redirects to is on this computer and would offer a newer version.
+    feed.redirect('/moved.json', { version: next, url: feed.page(`/release/${next}`) })
+    await run(orbit.app, 'updates.setFeed', { url: feed.url })
+    const page = await openSettings(orbit.app, { section: 'general', item: 'update-feed' })
+    await expect(page.getByTestId('updates-status')).toHaveText(
+      "Couldn't check: The feed redirects elsewhere; set the address it moved to. Orbit tries again later.",
+    )
+    expect(feed.requests).toHaveLength(1)
+    expect(feed.visited).toEqual([])
+    expect((await state(orbit.app)).updates?.latest).toBeUndefined()
   } finally {
     await feed.close()
   }
