@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { type ElectronApplication, _electron as electron, expect, type Page } from '@playwright/test'
 import type { MainContext } from '../../src/main/context'
-import { checkQuit, evaluateBetweenTasks, run } from './helpers'
+import { checkQuit, evaluateBetweenTasks, offlineArgs, run } from './helpers'
 
 /** The main process's test handle (src/main/test-hooks.ts), for app.evaluate() bodies. */
 export type OrbitGlobal = { __orbit: { ctx: MainContext; windowIds: () => string[] } }
@@ -91,15 +91,15 @@ export interface FirstRun {
 }
 
 /**
- * Starts Orbit as launchOrbit does (offline, behind the same dead proxy; isolated profile), and also
- * records every network request Chromium makes from the first moment, for OB-02.
+ * Starts Orbit as launchOrbit does (offline: the same dead proxy and resolver rules; isolated
+ * profile), and also records every network request Chromium makes from the first moment, for OB-02.
  */
 export async function launchFirstRun(
   opts: { userData?: string; env?: Record<string, string> } = {},
 ): Promise<FirstRun> {
   const userData = opts.userData ?? mkdtempSync(join(tmpdir(), 'orbit-e2e-'))
   const netLog = join(mkdtempSync(join(tmpdir(), 'orbit-netlog-')), 'netlog.json')
-  const args = ['--proxy-server=http://127.0.0.1:9', `--log-net-log=${netLog}`, resolve('out/main/index.js')]
+  const args = [...offlineArgs(), `--log-net-log=${netLog}`, resolve('out/main/index.js')]
   if (process.platform === 'linux') args.unshift('--no-sandbox')
   const app = await electron.launch({
     args,

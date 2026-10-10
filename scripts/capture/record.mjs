@@ -219,6 +219,8 @@ function makeToolkit(app, shell, fx) {
  * while loopback, where the fixture pages are served, bypasses proxies.
  */
 const OFFLINE_PROXY = '127.0.0.1:9'
+/** And no host name resolves but localhost: Chromium looks up a link's host before anyone clicks it (PR #10 review F2). */
+const NO_LOOKUPS = '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1'
 
 /**
  * Puts every session Orbit has, and every one it makes later, on the dead proxy, and cancels any request
@@ -254,7 +256,12 @@ let saved = false
 try {
   log('launching Orbit')
   app = await electron.launch({
-    args: [...(process.platform === 'linux' ? ['--no-sandbox'] : []), `--proxy-server=http://${OFFLINE_PROXY}`, main],
+    args: [
+      ...(process.platform === 'linux' ? ['--no-sandbox'] : []),
+      `--proxy-server=http://${OFFLINE_PROXY}`,
+      NO_LOOKUPS,
+      main,
+    ],
     env: { ...process.env, ORBIT_E2E: '1', ORBIT_USER_DATA: userData },
   })
   let shell
