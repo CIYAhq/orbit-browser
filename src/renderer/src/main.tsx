@@ -10,6 +10,20 @@ async function boot(): Promise<void> {
   // Settings (settings lane): a window of its own, without the browser shell's code.
   if (isSettingsLaneView(window.orbit.view)) return bootSettingsLaneView()
   const view = window.orbit.view
+  // The floating player's controls (media lane): a small view of its own, without the app's shortcuts.
+  if (view === 'pip') {
+    const app = import('./pip/PipApp')
+    await initStore()
+    document.documentElement.dataset.view = view
+    document.documentElement.dataset.platform = window.orbit.platform
+    const { PipApp } = await app
+    createRoot(document.getElementById('root') as HTMLElement).render(
+      <StrictMode>
+        <PipApp />
+      </StrictMode>,
+    )
+    return
+  }
   // Load the view's code while the state snapshot arrives.
   const app =
     view === 'overlay'

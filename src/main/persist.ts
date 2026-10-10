@@ -13,6 +13,7 @@ import {
   MIN_SIDEBAR_WIDTH,
 } from '../shared/defaults'
 import { isFolderId, isSplitId, isTabId } from '../shared/ids'
+import { normalizeMediaSettings } from '../shared/media'
 import type { ItemId, OrbitState, ProfileId, SpaceId, SplitLayout, TabId } from '../shared/state'
 import { STATE_SCHEMA } from '../shared/state'
 import { normalizeSpaceTheme } from '../shared/theme'
@@ -103,6 +104,7 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
     tweaks: record(input.tweaks),
   }
   if (!['system', 'light', 'dark'].includes(state.settings.appearance)) state.settings.appearance = 'system'
+  normalizeMediaSettings(state.settings, Date.now())
   seedAppearanceFromOldThemes(state)
   normalizeEntities(state, base)
   // Site searches (CB-11): keep well-formed http(s) entries; a missing list gets the defaults.
@@ -134,6 +136,7 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
     tab.canGoBack = tab.canGoBack ?? false
     tab.canGoForward = tab.canGoForward ?? false
     tab.muted = tab.muted ?? false
+    delete tab.media
   }
   for (const win of Object.values(state.windows)) {
     win.focused = false
@@ -411,7 +414,7 @@ function repairReferences(state: OrbitState): void {
  * touch nothing else (loading flips, focus, audio, download progress…) don't cause a write.
  */
 const RUNTIME_ONLY: Record<string, ReadonlySet<string>> = {
-  tabs: new Set(['loading', 'audible', 'asleep', 'progress', 'error', 'canGoBack', 'canGoForward']),
+  tabs: new Set(['loading', 'audible', 'asleep', 'progress', 'error', 'canGoBack', 'canGoForward', 'media']),
   windows: new Set(['focused', 'fullscreen', 'overlay']),
   downloads: new Set(['receivedBytes']),
 }

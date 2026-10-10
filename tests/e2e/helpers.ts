@@ -34,10 +34,17 @@ export interface Orbit {
 const DEAD_PROXY = '127.0.0.1:9'
 const OFFLINE = `--proxy-server=http://${DEAD_PROXY}`
 
-/** Launches the built app (out/) with an isolated profile directory. */
-export async function launchOrbit(opts: { userData?: string; env?: Record<string, string> } = {}): Promise<Orbit> {
+/**
+ * Launches the built app (out/) with an isolated profile directory. `args` are extra Chromium
+ * switches. Like Playwright's pages, the main process sees no reduced-motion preference unless
+ * `reducedMotion` asks for one: some CI images (GitHub's macOS runner) turn the system setting on.
+ */
+export async function launchOrbit(
+  opts: { userData?: string; env?: Record<string, string>; reducedMotion?: boolean; args?: string[] } = {},
+): Promise<Orbit> {
   const userData = opts.userData ?? mkdtempSync(join(tmpdir(), 'orbit-e2e-'))
-  const args = [OFFLINE, resolve('out/main/index.js')]
+  const motion = opts.reducedMotion ? '--force-prefers-reduced-motion' : '--force-prefers-no-reduced-motion'
+  const args = [OFFLINE, motion, ...(opts.args ?? []), resolve('out/main/index.js')]
   // Linux CI/dev boxes often lack the setuid sandbox helper; macOS runs fully sandboxed.
   if (process.platform === 'linux') args.unshift('--no-sandbox')
   const app = await electron.launch({
