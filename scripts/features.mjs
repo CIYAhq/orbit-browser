@@ -10,6 +10,8 @@
  *   ("built": "yes" | "partial") and by the lead after a feel review ("feel": true).
  * - Out of scope: rows the spec marks `Priority: OOS`, and rows the lead has ruled out
  *   ("scope": "out" with a note saying why). They are listed but left out of the totals.
+ * - Warnings (printed, not fatal): an out-of-scope row that is also marked built or felt, or that a
+ *   test names; a row ruled out with no note; a status entry whose ID matches no spec row.
  *
  * Usage: node scripts/features.mjs [specDir]
  */
@@ -106,6 +108,8 @@ const statusFile = join(root, 'docs/feature-status.json')
 const status = existsSync(statusFile) ? JSON.parse(readFileSync(statusFile, 'utf8')) : {}
 
 const totals = { all: 0, built: 0, partial: 0, tested: 0, feel: 0, outOfScope: 0 }
+/** Entries the checklist ignores or can't place; printed after writing, so they don't go unnoticed. */
+const warnings = []
 const byPriority = {}
 const cell = (v) => v || '–'
 const out = []
@@ -116,9 +120,15 @@ for (const s of sections) {
     const st = status[it.id] ?? {}
     if (it.priority === 'OOS' || st.scope === 'out') {
       totals.outOfScope++
-      out.push(
-        `| ${it.id} | ${it.title} | ${it.priority} | ⛔ out of scope | – | – | ${st.note ?? 'the spec leaves it out'} |`,
-      )
+      const ignored = [
+        st.built && `"built": "${st.built}"`,
+        st.feel && '"feel"',
+        tested.has(it.id) && 'a test naming it',
+      ]
+      for (const what of ignored.filter(Boolean)) warnings.push(`${it.id} is out of scope, so ${what} is ignored.`)
+      if (it.priority !== 'OOS' && !st.note) warnings.push(`${it.id} is ruled out with no note saying why.`)
+      const note = st.note ?? (it.priority === 'OOS' ? 'the spec leaves it out' : 'ruled out by the lead')
+      out.push(`| ${it.id} | ${it.title} | ${it.priority} | ⛔ out of scope | – | – | ${note} |`)
       continue
     }
     const kinds = tested.get(it.id)
@@ -140,6 +150,11 @@ for (const s of sections) {
     )
   }
   out.push('')
+}
+
+const specIds = new Set(sections.flatMap((s) => s.items.map((it) => it.id)))
+for (const id of Object.keys(status)) {
+  if (!specIds.has(id)) warnings.push(`docs/feature-status.json has ${id}, which matches no spec row.`)
 }
 
 const pending = ORDER.filter((f) => !found.includes(f))
@@ -169,3 +184,4 @@ if (pending.length) {
 }
 writeFileSync(join(root, 'FEATURES.md'), `${[...header, ...out].join('\n').trimEnd()}\n`)
 console.log(`FEATURES.md: ${totals.all} features from ${sections.length} spec files (${pending.length} pending).`)
+for (const w of warnings) console.warn(`warning: ${w}`)
