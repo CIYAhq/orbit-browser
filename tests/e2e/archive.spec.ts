@@ -1,5 +1,5 @@
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
-import type { ArchivePage, LibraryShow } from '../../src/shared/commands/archive'
+import type { ArchivePage, ArchiveRestoreResult, LibraryShow } from '../../src/shared/commands/archive'
 import {
   action,
   type Fixtures,
@@ -13,6 +13,7 @@ import {
   state,
   tabPage,
 } from './helpers'
+import { overlayOf, pressInTab, viewInfo } from './peek-helpers'
 import { activeId, newTab, space, waitTab } from './tabs-support'
 
 let fx: Fixtures
@@ -346,8 +347,8 @@ test('[AR-05] the row menu restores, opens in a new tab or deletes; ↓ and Ente
   await run(app, 'archive.testMenu', { click: 'Delete from Archive' })
   await expect.poll(() => countOf(lib)).toBe(5)
   await expect(lib.getByTestId('archive-row-title').filter({ hasText: new RegExp(`^${firstTitle}$`) })).toHaveCount(0)
-  // Two selected (⌘-click): one menu for both.
-  await rows.nth(0).click()
+  // Two selected (⌘-click; a plain click previews, AR-06): one menu for both.
+  await rows.nth(0).click({ modifiers: [MOD === 'Meta' ? 'Meta' : 'Control'] })
   await rows.nth(1).click({ modifiers: [MOD === 'Meta' ? 'Meta' : 'Control'] })
   await expect(lib.getByTestId('archive-selection')).toContainText('2 selected')
   await rows.nth(1).click({ button: 'right' })
@@ -586,4 +587,124 @@ test('[AR-10] ⌘Y / Ctrl+H lists the profile’s visits newest first in the Lib
   await shell.keyboard.press(HISTORY_KEY)
   await expect(lib.getByTestId('history-empty')).toContainText('No history yet')
   await expect(lib.getByTestId('history-row')).toHaveCount(0)
+})
+
+/** Closes a tab so it becomes the newest Archive entry, and returns that entry's id. */
+async function archived(o: Orbit, path: string): Promise<string> {
+  const t = await newTab(o.app, fx.url(path))
+  await waitTab(o.app, t, path)
+  await run(o.app, 'tabs.close', { tabId: t })
+  await expect.poll(async () => (await query(o)).rows[0]?.url).toBe(fx.url(path))
+  return (await query(o)).rows[0]?.id as string
+}
+
+/** The window's open Peek (its tab), once one is up. */
+async function peekTab(app: ElectronApplication, except: string[] = []): Promise<string> {
+  let tabId = ''
+  await expect
+    .poll(async () => {
+      const overlay = await overlayOf(app)
+      tabId = overlay.kind === 'peek' && !overlay.phase && !except.includes(overlay.tabId) ? overlay.tabId : ''
+      return tabId
+    })
+    .not.toBe('')
+  return tabId
+}
+
+test('[AR-06] a row click previews the page in a Peek over the Library; ⌘W and Esc close only the preview, which adds no second entry', async () => {
+  const { app } = orbit
+  const keep = await newTab(app, fx.url('/page/Underneath'))
+  await waitTab(app, keep, '/page/Underneath')
+  const id = await archived(orbit, '/page/Previewed')
+  const entries = async () => (await query(orbit, { text: 'previewed' })).rows.map((r) => r.id)
+  const lib = await openLibrary(orbit)
+  const row = lib.getByTestId('archive-row').filter({ hasText: 'Previewed' })
+  await row.click()
+  // The page shows in a Peek card over the Library, which stays open under it; nothing is restored.
+  const first = await peekTab(app)
+  expect(await overlayOf(app)).toMatchObject({ archiveEntry: id })
+  await expect.poll(async () => (await state(app)).tabs[first]?.url).toBe(fx.url('/page/Previewed'))
+  await expect.poll(async () => (await viewInfo(app, first)).aboveOverlay).toBe(true)
+  expect((await info(orbit)).open).toBe(true)
+  expect(await activeId(app)).toBe(keep)
+  expect(await entries()).toEqual([id])
+  // ⌘W closes the preview only: the Library is still open and has the keys.
+  await pressInTab(app, first, 'Mod+W')
+  await expect.poll(async () => (await overlayOf(app)).kind).toBe('none')
+  await expect.poll(async () => (await info(orbit)).focused).toBe(true)
+  expect((await info(orbit)).open).toBe(true)
+  await expect.poll(async () => (await state(app)).tabs[first]).toBeUndefined()
+  expect(await entries()).toEqual([id])
+  // Esc closes it too.
+  await row.click()
+  const second = await peekTab(app, [first])
+  await pressInTab(app, second, 'Escape')
+  await expect.poll(async () => (await overlayOf(app)).kind).toBe('none')
+  expect((await info(orbit)).open).toBe(true)
+  await expect.poll(async () => (await state(app)).tabs[second]).toBeUndefined()
+  // ⌘⇧T reopens the closed preview over the Library, still a preview: closing it adds nothing either.
+  await action(app, 'tab.reopenClosed')
+  const reopened = await peekTab(app, [first, second])
+  await expect.poll(() => overlayOf(app)).toMatchObject({ kind: 'peek', tabId: reopened, archiveEntry: id })
+  await pressInTab(app, reopened, 'Escape')
+  await expect.poll(async () => (await state(app)).tabs[reopened]).toBeUndefined()
+  expect(await entries()).toEqual([id])
+  // The search field kept the keys: Enter restores the row previewed and shows it.
+  await expect.poll(async () => (await info(orbit)).focused).toBe(true)
+  await expect(lib.getByTestId('archive-search')).toBeFocused()
+  await lib.keyboard.press('Enter')
+  await expect.poll(async () => (await info(orbit)).open).toBe(false)
+  await expect.poll(entries).toEqual([])
+  const shown = await activeId(app)
+  expect((await state(app)).tabs[shown ?? '']?.url).toBe(fx.url('/page/Previewed'))
+})
+
+test('[AR-06] from a preview, Open as Tab opens the page and keeps the entry; Restore puts it back; with no tab under it, a click opens a tab', async () => {
+  const { app } = orbit
+  const sp = await space(app)
+  const keep = await newTab(app, fx.url('/page/Base'))
+  await waitTab(app, keep, '/page/Base')
+  const expanded = await archived(orbit, '/page/Expanded')
+  const restored = await archived(orbit, '/page/Restored')
+  const ids = async (text: string) => (await query(orbit, { text })).rows.map((r) => r.id)
+  const lib = await openLibrary(orbit)
+  const row = (title: string) => lib.getByTestId('archive-row').filter({ hasText: title })
+  // Open as Tab (⌘O): the page becomes the selected Today tab, the Library makes way, the entry stays.
+  await row('Expanded').click()
+  const card = await peekTab(app)
+  await expect.poll(async () => (await state(app)).tabs[card]?.url).toBe(fx.url('/page/Expanded'))
+  await pressInTab(app, card, 'Mod+O')
+  await expect
+    .poll(async () => (await state(app)).tabs[(await activeId(app)) ?? '']?.url)
+    .toBe(fx.url('/page/Expanded'))
+  await expect.poll(async () => (await info(orbit)).open).toBe(false)
+  await expect.poll(async () => (await overlayOf(app)).kind).toBe('none')
+  expect(await ids('expanded')).toEqual([expanded])
+  // Restore from the preview: the Peek goes, the tab is back at the top of its Space's Today, the
+  // entry leaves the Archive and the Library stays.
+  await openLibrary(orbit)
+  await row('Restored').click()
+  const preview = await peekTab(app, [card])
+  const result = (await run(app, 'archive.restorePreview')) as ArchiveRestoreResult
+  expect(result.ids).toEqual([restored])
+  await expect.poll(async () => (await overlayOf(app)).kind).toBe('none')
+  await expect.poll(async () => (await state(app)).tabs[preview]).toBeUndefined()
+  await expect.poll(() => ids('restored')).toEqual([])
+  const s = await state(app)
+  expect(s.spaces[sp.id]?.today[0]).toBe(result.tabIds[0])
+  expect(s.tabs[result.tabIds[0] ?? '']?.url).toBe(fx.url('/page/Restored'))
+  expect((await info(orbit)).open).toBe(true)
+  await expect(row('Restored')).toHaveCount(0)
+  // An empty Space has no tab to preview over: the click opens the page in a new tab there.
+  const empty = (await run(app, 'spaces.create', { name: 'Empty' })) as string
+  await expect.poll(async () => Object.values((await state(app)).windows)[0]?.spaceId).toBe(empty)
+  expect(await activeId(app)).toBeNull()
+  await openLibrary(orbit)
+  await row('Expanded').click()
+  await expect.poll(async () => (await state(app)).spaces[empty]?.today.length).toBe(1)
+  const opened = (await state(app)).spaces[empty]?.today[0] as string
+  await waitTab(app, opened, '/page/Expanded')
+  await expect.poll(() => activeId(app)).toBe(opened)
+  await expect.poll(async () => (await info(orbit)).open).toBe(false)
+  expect(await ids('expanded')).toEqual([expanded])
 })

@@ -95,7 +95,6 @@ interface RowProps {
   selected: boolean
   leaving: boolean
   onRowClick: (offset: number, row: ArchiveRow, e: MouseEvent) => void
-  onRowDoubleClick: (row: ArchiveRow) => void
   onRestore: (row: ArchiveRow) => void
   onRowMenu: (offset: number, row: ArchiveRow, e: MouseEvent) => void
 }
@@ -129,8 +128,11 @@ function LoadedRow(props: RowProps & { row: ArchiveRow; style: CSSProperties }) 
       data-testid="archive-row"
       data-entry-id={row.id}
       data-offset={offset}
+      // The search field keeps the keys: Enter after a preview restores this row.
+      onMouseDown={(e) => {
+        if (e.button === 0) e.preventDefault()
+      }}
       onClick={(e) => props.onRowClick(offset, row, e)}
-      onDoubleClick={() => props.onRowDoubleClick(row)}
       onContextMenu={(e) => props.onRowMenu(offset, row, e)}
       onKeyDown={undefined}
       title={row.url}
@@ -172,7 +174,6 @@ function LoadedRow(props: RowProps & { row: ArchiveRow; style: CSSProperties }) 
           e.stopPropagation()
           props.onRestore(row)
         }}
-        onDoubleClick={(e) => e.stopPropagation()}
       >
         <ArchiveRestore size={14} />
         <span>Restore</span>
@@ -399,9 +400,20 @@ export function ArchiveSection({ show }: LibrarySectionProps) {
         run: () => void (tabId ? invoke('tabs.activate', { tabId }) : invoke('spaces.switch', { spaceId: target })),
       })
     })
+    // Entries deleted from the row menu leave the selection.
+    const offDeleted = window.orbit.on('archive:deleted', (payload) => {
+      const ids = (payload as { ids: string[] }).ids
+      setSelected((set) => {
+        if (!ids.some((id) => set.has(id))) return set
+        const next = new Set(set)
+        for (const id of ids) next.delete(id)
+        return next
+      })
+    })
     return () => {
       offChanged()
       offRestored()
+      offDeleted()
     }
   }, [model, leave])
 
@@ -440,10 +452,18 @@ export function ArchiveSection({ show }: LibrarySectionProps) {
       }
       anchor.current = offset
       setSelected(new Set([row.id]))
+      // A click previews the page over the Library (AR-06); the Restore button puts it back. The
+      // second click of a double click is not another preview.
+      if (e.detail > 1) return
+      const failed = () => libraryToast('This tab can’t be previewed here')
+      invoke('archive.preview', { id: row.id })
+        .then((shown) => {
+          if (shown === null) failed()
+        })
+        .catch(failed)
     },
     [model],
   )
-  const onRowDoubleClick = useCallback((row: ArchiveRow) => restore([row.id], true), [restore])
   const onRestore = useCallback((row: ArchiveRow) => restore(selectionIds(row), false), [restore, selectionIds])
   const onRowMenu = useCallback(
     (offset: number, row: ArchiveRow, e: MouseEvent) => {
@@ -641,7 +661,6 @@ export function ArchiveSection({ show }: LibrarySectionProps) {
                   return !!id && leaving.has(id)
                 })()}
                 onRowClick={onRowClick}
-                onRowDoubleClick={onRowDoubleClick}
                 onRestore={onRestore}
                 onRowMenu={onRowMenu}
               />

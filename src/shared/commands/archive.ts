@@ -123,6 +123,14 @@ export interface ArchiveCommands {
    * matches (AR-05, PR-05). Entries already restored are skipped, so repeated clicks never restore twice.
    */
   'archive.restore': { args: ArchiveRestoreArgs; result: ArchiveRestoreResult }
+  /**
+   * Previews an entry without restoring it (AR-06): its page opens in a Peek over the calling
+   * window's Library (`peek: true`), or in a new tab when there is no tab to preview over. The entry
+   * stays archived. Null when the entry is gone or of another profile than the window's Space.
+   */
+  'archive.preview': { args: { id: string }; result: { tabId: TabId; peek: boolean } | null }
+  /** Restores the entry the calling window's Peek previews and closes the Peek (AR-06). */
+  'archive.restorePreview': { args: Record<string, never>; result: ArchiveRestoreResult }
   /** Removes entries without restoring them (AR-07, row menu). Returns how many went. */
   'archive.delete': { args: { ids: string[] }; result: number }
   /**

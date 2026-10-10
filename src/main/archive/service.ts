@@ -36,6 +36,11 @@ export class ArchiveSync {
   /** Ids this service took out of state itself: moved to the store only, or already deleted there. */
   private ownRemovals = new Set<string>()
   private started = false
+  /**
+   * New entries to leave out of the Archive (taken out of state again), beside private ones: a
+   * preview's page coming back as its Peek closes (AR-06, preview.ts).
+   */
+  skip?: (state: OrbitState, entry: ArchivedTab) => boolean
 
   constructor(
     private ctx: Pick<MainContext, 'store'>,
@@ -138,13 +143,13 @@ export class ArchiveSync {
     this.spill(next)
   }
 
-  /** Adds entries to the store; private ones are taken out of state instead. */
+  /** Adds entries to the store; private ones (and `skip`'s) are taken out of state instead. */
   private ingest(state: OrbitState, entries: readonly ArchivedTab[]): void {
     const keep: ArchivedTab[] = []
     const drop: string[] = []
     const histories = new Map<string, ArchiveHistory>()
     for (const e of entries) {
-      if (isPrivateOrGone(state, e.profileId)) {
+      if (isPrivateOrGone(state, e.profileId) || this.skip?.(state, e)) {
         drop.push(e.id)
         takeArchiveHistory(e.id)
         continue

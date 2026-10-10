@@ -158,6 +158,8 @@ export type OverlayState =
       phase?: 'closing' | 'expanding' | 'splitting'
       /** The page's background colour, for the card that fades out when the Peek closes. */
       background?: string
+      /** The Archive entry the Peek previews from the Library (AR-06): the card can offer `archive.restorePreview`. */
+      archiveEntry?: string
     }
   | { kind: 'panel'; panel: string; nonce: number; params?: Record<string, string | number | boolean> }
 

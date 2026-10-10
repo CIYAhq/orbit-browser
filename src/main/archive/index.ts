@@ -12,6 +12,7 @@ import { findMenuItem, menuLabels } from '../tabs/menus'
 import { historyMenuItems, historyQuery, historyRows } from './history-view'
 import { LibraryHost } from './library'
 import { archiveSectionItems, setKeepDays } from './menus'
+import { ArchivePreviews } from './preview'
 import { recentlyClosedItems, refreshRecentlyClosed, watchRecentlyClosed } from './recently-closed'
 import { restoreEntries } from './restore'
 import { keepDaysOf, scheduleRetention } from './retention'
@@ -195,6 +196,41 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
     return restore(list, windowOf(c), { open: open === true, here: here === true, stay: stay === true })
   })
 
+  // ---- Preview (AR-06): a row's page in a Peek over the Library ----
+
+  const previews = new ArchivePreviews(ctx, store, (windowId) => library.isOpen(windowId))
+  sync.skip = (s, e) => previews.isEcho(s, e)
+  commands.register('archive.preview', async ({ id }, c) => {
+    const windowId = windowOf(c)
+    if (!windowId || typeof id !== 'string') return null
+    await store.load()
+    const entry = store.get(id)
+    const s = state.state
+    const win = s.windows[windowId]
+    if (!entry || win?.kind !== 'main') return null
+    // The Peek's page takes the window's profile: never another profile's entry there (PR-05).
+    if (s.spaces[win.spaceId]?.profileId !== entry.profileId) return null
+    const overlay = win.overlay
+    // A second click while it opens: the preview is up already.
+    if (previews.entryOf(windowId) === id && overlay.kind === 'peek') return { tabId: overlay.tabId, peek: true }
+    const tabId = await commands.run('peek.open', { url: entry.url }, { windowId })
+    if (tabId) {
+      previews.track(windowId, entry, tabId)
+      return { tabId, peek: true }
+    }
+    // Nothing to preview over (an empty Space): the page opens in a new tab and the entry stays.
+    return { tabId: await commands.run('tabs.create', { url: entry.url }, { windowId }), peek: false }
+  })
+  commands.register('archive.restorePreview', async (_args, c) => {
+    const windowId = windowOf(c)
+    const id = previews.entryOf(windowId)
+    if (!windowId || !id) return { ids: [], tabIds: [], spaceIds: [] }
+    await store.load()
+    // The Peek closes first (its page is still archived, so the close adds no entry), then the entry goes back.
+    await commands.run('peek.close', {}, { windowId })
+    return restore([id], windowId, {})
+  })
+
   // ---- Row menu (AR-05, AR-07) ----
 
   let lastMenu: MenuItemConstructorOptions[] = []
@@ -247,7 +283,11 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
       { type: 'separator' },
       {
         label: many ? `Delete ${entries.length} from Archive` : 'Delete from Archive',
-        click: () => sync.remove(entries.map((e) => e.id)),
+        click: () => {
+          const ids = sync.remove(entries.map((e) => e.id))
+          // They leave the Library's selection too.
+          library.send(windowId, 'archive:deleted', { ids })
+        },
       },
     )
     lastMenu = items
