@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -17,6 +18,7 @@ import {
   type NavFixtures,
   openTab,
   pageMenu,
+  sendToPage,
   startNavFixtures,
   visit,
   waitLoaded,
@@ -354,6 +356,84 @@ test('[NV-08][SV-08] ⌥-click opens the link under the click, though the pointe
   const [, right] = await splitTabs(app, id)
   expect(await urlOf(app, right)).toBe(page('Busy-next'))
   await expect.poll(downloads, { timeout: 10_000 }).toEqual([{ url: page('Busy-next'), cancelled: true }])
+})
+
+/** The real X pointer and keyboard on the test's display (xdotool, Linux), or null where there are none. */
+const xdotool = (() => {
+  if (process.platform !== 'linux' || !process.env.DISPLAY) return null
+  try {
+    execFileSync('xdotool', ['version'], { stdio: 'ignore' })
+  } catch {
+    return null
+  }
+  return (...args: string[]) => execFileSync('xdotool', args, { encoding: 'utf8' })
+})()
+
+/** Where a point of a tab's page (in CSS pixels at 100%) is on the screen. */
+function onScreen(app: ElectronApplication, tabId: string, x: number, y: number): Promise<{ x: number; y: number }> {
+  return app.evaluate(
+    (_e, [id, px, py]) => {
+      type Windows = {
+        windowOfTab: (id: string) => string | undefined
+        get: (id: string) => Electron.BrowserWindow | undefined
+        tabViewBounds: (id: string) => Electron.Rectangle | undefined
+      }
+      const { windows } = (globalThis as unknown as { __orbit: { ctx: { windows: Windows } } }).__orbit.ctx
+      const win = windows.get(windows.windowOfTab(id) ?? '')
+      const view = windows.tabViewBounds(id)
+      if (!win || !view) throw new Error(`tab ${id} isn't on screen`)
+      const content = win.getContentBounds()
+      return { x: content.x + view.x + px, y: content.y + view.y + py }
+    },
+    [tabId, x, y] as const,
+  )
+}
+
+test('[NV-08][SV-08] ⌥-click on a link in a frame from another site opens that link, not the page’s link at the frame’s own point (round 2 fix check, M2)', async () => {
+  test.skip(!xdotool, 'the press has to come from the real pointer: test input never reaches a frame from another site')
+  const x = xdotool as NonNullable<typeof xdotool>
+  const { app } = orbit
+  // The page on 127.0.0.1; its frame on localhost, another site, so in a process of its own.
+  const top = fx.urlOn('127.0.0.1', '/page/AltTop')
+  const decoy = fx.urlOn('127.0.0.1', '/page/AltDecoy')
+  const target = page('AltTarget')
+  const id = await openTab(app, top)
+  const downloads = await watchDownloads(app, top)
+  const box = 'position:absolute;display:block;left:40px;top:70px;width:80px;height:40px'
+  const frame = 'position:absolute;left:100px;top:100px;width:400px;height:300px;border:0'
+  const fill = (html: string) =>
+    `document.body.style.cssText = 'margin:0;padding:0'; document.body.innerHTML = ${JSON.stringify(html)}`
+  // The page's own link sits at (80, 90): where the frame's link is in the frame's own coordinates.
+  await inFrame(
+    app,
+    id,
+    '/page/AltTop',
+    fill(
+      `<a id="decoy" href="${decoy}" style="${box}">Decoy</a><iframe src="${page('AltInner')}" style="${frame}"></iframe>`,
+    ),
+  )
+  await expect.poll(() => inFrame(app, id, '/page/AltInner', 'document.readyState')).toBe('complete')
+  await inFrame(app, id, '/page/AltInner', fill(`<a id="target" href="${target}" style="${box}">Target</a>`))
+  // The frame's link, at (80, 90) in the frame and (180, 190) in the page.
+  const at = await onScreen(app, id, 180, 190)
+  const [, startX = '0', startY = '0'] = /X=(\d+)\s+Y=(\d+)/.exec(x('getmouselocation', '--shell')) ?? []
+  try {
+    x('mousemove', String(at.x), String(at.y))
+    await expect
+      .poll(() => inFrame(app, id, '/page/AltInner', `document.getElementById('target').matches(':hover')`))
+      .toBe(true)
+    x('keydown', 'alt')
+    x('click', '1')
+  } finally {
+    x('keyup', 'alt')
+    x('mousemove', startX, startY)
+  }
+  await expect.poll(() => splitTabs(app, id)).toHaveLength(2)
+  const [, right] = await splitTabs(app, id)
+  expect(await urlOf(app, right)).toBe(target)
+  // The engine's own download of the frame's link said which, and was cancelled.
+  await expect.poll(downloads, { timeout: 10_000 }).toEqual([{ url: target, cancelled: true }])
+  expect(fx.hits('/page/AltDecoy')).toBe(0)
 })
 
 test('[NV-09] a target=_blank link opens a new tab at the top of Today and selects it', async () => {
@@ -719,6 +799,60 @@ test('[NV-12][NV-08] a local file page still opens its links to local files: Ope
   await expect.poll(() => splitTabs(app, id)).toHaveLength(2)
   const [, right] = await splitTabs(app, id)
   expect(await urlOf(app, right)).toBe(second)
+})
+
+/** Records the links a page's pointer goes over (`update-target-url`), latest last. */
+async function watchTargets(app: ElectronApplication, pageUrl: string): Promise<() => Promise<string | undefined>> {
+  await app.evaluate(({ webContents }, url) => {
+    const g = globalThis as unknown as { __targets: string[] }
+    g.__targets = []
+    const contents = webContents.getAllWebContents().find((w) => w.getURL() === url)
+    if (!contents) throw new Error(`no page ${url}`)
+    contents.on('update-target-url', (_e, target) => g.__targets.push(target))
+  }, pageUrl)
+  return () => app.evaluate(() => (globalThis as unknown as { __targets: string[] }).__targets.at(-1))
+}
+
+test('[NV-08] ⌥-click on a local file’s link in a frame never opens it beside the page, even in a local page: the engine’s download goes ahead, as a frame counts as a web page (D49, round 2 fix check F2)', async () => {
+  const { app } = orbit
+  const local = localFiles()
+  const folder = new URL(local.folder.endsWith('/') ? local.folder : `${local.folder}/`)
+  const outer = new URL('outer.html', folder).href
+  writeFileSync(
+    new URL(outer),
+    '<!doctype html><title>Outer</title><body style="margin:0"><iframe src="inner.html" style="position:absolute;left:100px;top:100px;width:300px;height:200px;border:0"></iframe>',
+  )
+  writeFileSync(
+    new URL('inner.html', folder),
+    `<!doctype html><title>Inner</title><body style="margin:0"><a id="link" href="${local.text}" style="position:absolute;left:20px;top:20px;width:120px;height:40px;display:block">Local</a>`,
+  )
+  const id = await openTab(app, outer)
+  await expect.poll(() => inFrame(app, id, 'inner.html', 'document.readyState')).toBe('complete')
+  const loads = await watchLoads(app, local.folder)
+  const downloads = await watchDownloads(app, outer)
+  const target = await watchTargets(app, outer)
+  /** ⌥-clicks the frame's link at (x, y) in the page once the pointer is over it. */
+  const altClick = async (x: number, url: string) => {
+    await sendToPage(app, outer, [{ type: 'mouseMove', x, y: 140 }])
+    await expect.poll(target).toBe(url)
+    await sendToPage(app, outer, clickEvents(x, 140, ['alt']))
+  }
+  await altClick(180, local.text)
+  // The engine downloads the link it was ⌥-clicked on. Orbit lets that go ahead as a download and
+  // opens nothing.
+  await expect.poll(downloads).toEqual([{ url: local.text, cancelled: false }])
+  // A web link in the same frame opens beside the page, so the ⌥-click before it was seen.
+  await inFrame(app, id, 'inner.html', `document.getElementById('link').href = ${JSON.stringify(page('FramedWeb'))}`)
+  await altClick(181, page('FramedWeb'))
+  await expect.poll(() => splitTabs(app, id)).toHaveLength(2)
+  const [, right] = await splitTabs(app, id)
+  expect(await urlOf(app, right)).toBe(page('FramedWeb'))
+  expect(Object.values((await state(app)).tabs).filter((t) => t.url === local.text)).toEqual([])
+  expect((await loads()).filter((u) => u.includes('orbit-local.txt'))).toEqual([])
+  await expect.poll(downloads, { timeout: 10_000 }).toEqual([
+    { url: local.text, cancelled: false },
+    { url: page('FramedWeb'), cancelled: true },
+  ])
 })
 
 test('[TB-02] a local file’s address dropped on the sidebar opens nothing, as a link or as text; a web link dropped after it opens (D49)', async () => {

@@ -17,15 +17,27 @@ const BLOCKED_SHOWN = 5
 
 /**
  * The link at a point of the page's main frame, in CSS pixels (through open shadow roots), as
- * `{ href, policy }`; `{ frame: true }` when the point is over a frame or something Orbit can't
+ * `{ href, policy }`; `{ frame: true }` when the press was on a frame or something Orbit can't
  * look into (the link may be inside); null over anything else. `policy` is the referrer policy the
  * link sets for itself (`rel=noreferrer`, `referrerpolicy`) or else the page's
  * `<meta name="referrer">`; a policy the page sets in its response headers is out of reach.
  *
  * The click's own point, not the page's `:hover`: the page's hover follows the pointer it was last
- * told about, which can change between the press and this lookup (fix check B, F1).
+ * told about, which can change between the press and this lookup (fix check B, F1). Except over a
+ * frame: a press there comes in the frame's own coordinates when the frame is from another site,
+ * which would name whatever of the page's sits at that point. So when the page's hover ends on a
+ * frame, the press counts as the frame's (round 2 fix check, M2).
  */
 const linkAt = (x: number, y: number) => `(() => {
+  const isFrame = (el) => ['iframe', 'frame', 'object', 'embed'].includes(el.localName)
+  let hovered = null
+  for (let root = document, i = 0; root && i < 16; i++) {
+    const list = root.querySelectorAll(':hover')
+    if (!list.length) break
+    hovered = list[list.length - 1]
+    root = hovered.shadowRoot
+  }
+  if (hovered && isFrame(hovered)) return { frame: true }
   let root = document, el = null
   for (let i = 0; i < 16; i++) {
     const hit = root.elementFromPoint(${x}, ${y})
@@ -45,8 +57,7 @@ const linkAt = (x: number, y: number) => `(() => {
     const own = n.relList && n.relList.contains('noreferrer') ? 'no-referrer' : n.referrerPolicy || n.getAttribute('referrerpolicy') || ''
     return { href, policy: own || meta }
   }
-  const tag = el.localName
-  return tag === 'iframe' || tag === 'frame' || tag === 'object' || tag === 'embed' || el.shadowRoot ? { frame: true } : null
+  return isFrame(el) || el.shadowRoot ? { frame: true } : null
 })()`
 
 interface PageLink {
@@ -173,8 +184,9 @@ export function registerLinks(ctx: MainContext, deps: LinksDeps): LinksTestHooks
       altClicks.set(tabId, { url: found.href, until, split: false })
       // Sent with the page as referrer, as the link's policy or the page's allows (review B-F1).
       openInSplit(tabId, found.href, { url: page, policy: referrerPolicyName(found.policy) })
-    } else if (found?.frame && openable(fallback) && pageMayOpen(page, fallback)) {
-      // A link in a frame: the engine's download of it says which, and opens the split.
+    } else if (found?.frame && openable(fallback) && pageMayOpen(undefined, fallback)) {
+      // A link in a frame: the engine's download of it says which, and opens the split. The frame
+      // counts as a web page, whatever the page is: a local file opens from no frame (round 2, F2).
       altClicks.set(tabId, { url: fallback, until, split: true })
     }
   }
