@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { SitePrefs } from '../../src/main/nav/site-prefs'
 import { makeTab } from '../../src/main/tabs/model'
 import { createInitialState, createWindowState, DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
-import { peekShown, shownTabId } from '../../src/shared/nav'
+import { peekShown, promptTabId, shownTabId } from '../../src/shared/nav'
 import {
   deviceKey,
   deviceLabel,
@@ -288,6 +288,53 @@ describe('the tab the top row is about (PK-11)', () => {
     win.overlay = { kind: 'peek', tabId: 't-gone', nonce: 1 }
     expect(shownTabId(state, win.id)).toBe(page.id)
     expect(peekShown(state, win.id)).toBe(false)
+  })
+})
+
+describe('the tab whose permission prompt a window shows (NV-15)', () => {
+  it('is the shown tab’s, else a waiting split pane’s; a Peek covers the panes (review B-F3)', () => {
+    const state: OrbitState = createInitialState(0)
+    const spaceId = state.spaceOrder[0] as string
+    const tab = (url: string) => {
+      const t = makeTab({ spaceId, profileId: DEFAULT_PROFILE_ID, url }, 0)
+      state.tabs[t.id] = t
+      return t
+    }
+    const left = tab('https://left.test/')
+    const right = tab('https://right.test/')
+    const peek = tab('https://peek.test/')
+    peek.floating = 'peek'
+    const leaf = (tabId: string) => ({ type: 'leaf' as const, tabId })
+    state.splits['s-1'] = {
+      id: 's-1',
+      layout: { type: 'row', children: [leaf(left.id), leaf(right.id)], sizes: [0.5, 0.5] },
+      createdAt: 0,
+    }
+    state.spaces[spaceId]?.today.push('s-1')
+    const win = createWindowState(spaceId)
+    win.activeTab[spaceId] = right.id
+    state.windows[win.id] = win
+    const asks = (origin: string, id: number) => ({
+      id,
+      type: 'permission' as const,
+      origin,
+      kinds: ['notifications' as const],
+      oneTime: false,
+    })
+
+    expect(promptTabId(state, win.id)).toBeNull()
+    left.permissionPrompt = asks('https://left.test', 1)
+    expect(promptTabId(state, win.id)).toBe(left.id)
+    // The focused pane's own request comes first.
+    right.permissionPrompt = asks('https://right.test', 2)
+    expect(promptTabId(state, win.id)).toBe(right.id)
+    delete right.permissionPrompt
+    // A Peek covers the panes: only its own request shows.
+    win.overlay = { kind: 'peek', tabId: peek.id, nonce: 1, sourceTabId: right.id }
+    expect(promptTabId(state, win.id)).toBeNull()
+    peek.permissionPrompt = asks('https://peek.test', 3)
+    expect(promptTabId(state, win.id)).toBe(peek.id)
+    expect(promptTabId(state, 'w-gone')).toBeNull()
   })
 })
 

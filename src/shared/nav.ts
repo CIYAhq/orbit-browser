@@ -4,6 +4,7 @@
  */
 
 import type { OrbitState, TabId, WindowId } from './state'
+import { splitLeaves, splitOfTab } from './tree'
 
 /**
  * The tab a window's top row and address display are about: an open Peek's page (PK-11: while a
@@ -24,6 +25,21 @@ export function shownTabId(state: OrbitState, windowId: WindowId): TabId | null 
 export function peekShown(state: OrbitState, windowId: WindowId): boolean {
   const overlay = state.windows[windowId]?.overlay
   return overlay?.kind === 'peek' && overlay.phase !== 'closing' && !!state.tabs[overlay.tabId]
+}
+
+/**
+ * The tab whose permission prompt a window shows (NV-15): the one its address display shows, else
+ * another pane of its split view that waits for an answer, so a request from a pane without the
+ * focus never waits unseen (review B-F3). A Peek covers the panes.
+ */
+export function promptTabId(state: OrbitState, windowId: WindowId): TabId | null {
+  const shown = shownTabId(state, windowId)
+  if (!shown) return null
+  if (state.tabs[shown]?.permissionPrompt) return shown
+  if (peekShown(state, windowId)) return null
+  const splitId = splitOfTab(state, shown)
+  const split = splitId ? state.splits[splitId] : undefined
+  return (split && splitLeaves(split.layout).find((id) => !!state.tabs[id]?.permissionPrompt)) || null
 }
 
 /** How the address display describes a page's connection (SB-04). */

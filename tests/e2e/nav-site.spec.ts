@@ -472,6 +472,34 @@ test('[NV-15] clicking a notification brings its tab forward, on its Space; a cl
   expect(quietId).not.toBe(id)
 })
 
+test('[NV-15][SV-01] in split view the pane without the focus shows its prompt too; with the sidebar hidden, at its own corner (review B-F3)', async () => {
+  const { app, shell } = orbit
+  const { id: left, p } = await open(app, page('LeftAsks'))
+  const right = await openTab(app, elsewhere('Right'))
+  await cmd(app, 'split.create', { tabIds: [left, right], focus: right })
+  await expect(shell.getByTestId('address-pill')).toHaveText(`127.0.0.1:${fx.port}`)
+  const prompt = shell.getByTestId('permission-prompt')
+  await ask(p, 'notifications')
+  await expect(prompt).toContainText('Show notifications')
+  await expect(prompt.getByTestId('permission-site')).toHaveText(host())
+  // In the sidebar, not a dialog: the pane is a tab in the Space.
+  expect(await permissionDialogs(app)).toEqual([])
+  // The focus stays where it was.
+  const win = await windowState(app)
+  expect(win.activeTab[win.spaceId]).toBe(right)
+  // With the sidebar hidden it waits over the corner of the pane that asks.
+  await action(app, 'sidebar.toggle')
+  await expect.poll(async () => (await windowState(app)).sidebar.visible).toBe(false)
+  const shown = await settledPage(app, left)
+  await expect.poll(async () => (await promptView(app)).placed).toBe(true)
+  const bounds = (await promptView(app)).bounds
+  expect(bounds && { x: bounds.x, y: bounds.y }).toEqual({ x: shown.x - 2, y: shown.y - 2 })
+  const card = (await promptPage(app)).getByTestId('permission-prompt')
+  await card.getByTestId('permission-allow').click()
+  await expect.poll(() => answerOf(p, 'notifications')).toBe('granted')
+  await expect.poll(async () => (await promptView(app)).placed).toBe(false)
+})
+
 test('[NV-15] with the sidebar hidden the prompt shows over the page’s top-left corner', async () => {
   const { app } = orbit
   const { id, p } = await open(app, page('Corner'))

@@ -9,7 +9,7 @@ import {
   type Rectangle,
   type WebContents,
 } from 'electron'
-import { peekShown } from '../../shared/nav'
+import { peekShown, promptTabId } from '../../shared/nav'
 import {
   type DeviceKind,
   deviceKey,
@@ -28,10 +28,9 @@ import {
   sortKinds,
 } from '../../shared/site'
 import type { ProfileId, TabId, WindowId } from '../../shared/state'
-import { locate } from '../../shared/tree'
+import { locate, splitOfTab } from '../../shared/tree'
 import type { MainContext } from '../context'
 import type { PermissionHandler, PermissionRequestDetails } from '../sessions'
-import { activeTabOf } from '../windows'
 import type { SitePrefs } from './site-prefs'
 
 /**
@@ -207,11 +206,14 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
     )
   }
 
-  /** A tab that shows its prompt in a window's sidebar (or the page's corner): one in a Space, not Peek or a Mini Window. */
+  /**
+   * A tab that shows its prompt in a window's sidebar (or the page's corner): one in a Space, a pane
+   * of a split view in one included (its Space lists the split; review B-F3), not Peek or a Mini Window.
+   */
   const promptable = (tabId: TabId | undefined): tabId is TabId => {
     if (!tabId) return false
     const state = store.state
-    return !!state.tabs[tabId] && !!locate(state, tabId)
+    return !!state.tabs[tabId] && !!locate(state, splitOfTab(state, tabId) ?? tabId)
   }
 
   // ---------- The queue on each tab ----------
@@ -654,7 +656,8 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
   const place = (windowId: WindowId) => {
     const state = store.state
     const win = state.windows[windowId]
-    const tabId = activeTabOf(state, windowId)
+    // Over the corner of the pane whose page asks (review B-F3).
+    const tabId = promptTabId(state, windowId)
     const prompt = tabId ? state.tabs[tabId]?.permissionPrompt : undefined
     const page = tabId ? windows.tabViewBounds(tabId) : undefined
     // The sidebar shows it (docked, or the floating card while that is out over the corner); a

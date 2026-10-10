@@ -26,7 +26,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import { shownTabId } from '../../../../shared/nav'
+import { promptTabId } from '../../../../shared/nav'
 import {
   DEVICE_ASK,
   type DeviceKind,
@@ -57,10 +57,13 @@ export const PERMISSION_ICON: Record<PermissionKind, LucideIcon> = {
 
 export const DEVICE_ICON: Record<DeviceKind, LucideIcon> = { serial: Cable, usb: Usb, hid: Gamepad2 }
 
-/** The permission prompt waiting on the tab a window's address display shows (NV-15), if any. */
+/**
+ * The permission prompt a window shows (NV-15), if any: the one waiting on the tab its address
+ * display shows, else on another pane of its split view (review B-F3).
+ */
 export function useActivePrompt(windowId: string): Prompt | undefined {
   return useOrbit((s) => {
-    const id = shownTabId(s, windowId)
+    const id = promptTabId(s, windowId)
     return id ? s.tabs[id]?.permissionPrompt : undefined
   })
 }
