@@ -9,11 +9,13 @@ import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
 import type { TabOps } from '../tabs/ops'
 import { type LinksTestHooks, registerLinks } from './links'
+import { type LoadingInfo, registerLoading } from './loading'
 import { openUrlInNewWindow } from './new-window'
 import { registerPageBridge } from './page-bridge'
 import { registerPageColor } from './page-color'
 import { type PageMenuTestHooks, pageMenuTestHooks, setLinkOpeners } from './page-menu'
 import { type PageToolsInfo, registerPageTools } from './page-tools'
+import { registerPendingUrl } from './pending-url'
 import { registerPermissions } from './permissions'
 import { type PrivateWindows, registerPrivate } from './private'
 import { type RevealHoldInfo, registerSidebarReveal } from './sidebar-reveal'
@@ -40,6 +42,8 @@ export interface NavTestHooks extends LinksTestHooks, PageMenuTestHooks {
     bounds?: { x: number; y: number; width: number; height: number }
     hold: RevealHoldInfo | null
   }
+  /** A window's page loading indicator (default: the first) (SB-28). */
+  loading: (windowId?: WindowId) => LoadingInfo
 }
 
 interface ShownMenu {
@@ -80,10 +84,15 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
     if (windowId && !store.state.windows[windowId]?.sidebar.visible) ctx.toast(windowId, 'Opened in a new tab')
   }
 
+  // The address while a page is on its way or failed (NV-04, NV-13), and the loading indicator (SB-28).
+  const pending = registerPendingUrl(ctx)
+  const loading = registerLoading(ctx)
+
   const go = (tabId: TabId, button: NavButton) => {
     if (button === 'back') return commands.run('tabs.back', { tabId })
     if (button === 'forward') return commands.run('tabs.forward', { tabId })
     if (button === 'reload') return commands.run('tabs.reload', { tabId })
+    pending.markStopped(tabId)
     return commands.run('tabs.stop', { tabId })
   }
 
@@ -304,6 +313,7 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
       if (!store.state.tabs[tabId]?.loading) return
       const windowId = windows.windowOfTab(tabId)
       if (windowId && store.state.windows[windowId]?.overlay.kind !== 'none') return
+      pending.markStopped(tabId)
       contents.stop()
     })
     // The mouse's back/forward buttons over a page need nothing here: the page itself goes back or
@@ -338,6 +348,7 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
         const id = windowId ?? windows.ids()[0] ?? ''
         return { ...windows.floatingInfo(id), hold: reveal.hold(id) ?? null }
       },
+      loading: (windowId) => loading.info(windowId ?? windows.ids()[0] ?? ''),
     }
     ;(globalThis as unknown as { __orbitNav: NavTestHooks }).__orbitNav = hooks
   }

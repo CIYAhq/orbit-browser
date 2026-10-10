@@ -77,6 +77,11 @@ interface WindowRecord {
    */
   prompt?: WebContentsView
   promptShown: boolean
+  /**
+   * Other modules' small views over the pages (createUiView): the loading indicator (SB-28), the
+   * link pill (SB-27), page dialogs (NV-24). Kept above the pages, closed with the window.
+   */
+  uiViews: Set<WebContentsView>
 }
 
 /** A tab view placed in a window. */
@@ -369,6 +374,7 @@ export class WindowManager {
       floatingShown: false,
       toolsShown: false,
       promptShown: false,
+      uiViews: new Set(),
     }
     this.records.set(id, rec)
     // macOS: the traffic lights live in the sidebar's top row (SB-20).
@@ -450,6 +456,8 @@ export class WindowManager {
       if (rec.floating && !rec.floating.webContents.isDestroyed()) rec.floating.webContents.close()
       if (rec.tools && !rec.tools.webContents.isDestroyed()) rec.tools.webContents.close()
       if (rec.prompt && !rec.prompt.webContents.isDestroyed()) rec.prompt.webContents.close()
+      for (const view of rec.uiViews) if (!view.webContents.isDestroyed()) view.webContents.close()
+      rec.uiViews.clear()
       this.records.delete(id)
       for (const [tabId, entry] of [...this.attached]) {
         if (entry.windowId === id) {
@@ -713,6 +721,55 @@ export class WindowManager {
     return { exists: true, placed: rec.win.contentView.children.includes(view), bounds: view.getBounds() }
   }
 
+  /**
+   * A small transparent Orbit UI view for another module (the loading indicator, SB-28; the link
+   * pill, SB-27; page dialogs, NV-24): hidden until showUiView(), kept above the window's pages
+   * (under the overlay and the floating sidebar) and closed with the window.
+   */
+  createUiView(windowId: WindowId, view: RendererView): WebContentsView | undefined {
+    const rec = this.records.get(windowId)
+    if (!rec || rec.win.isDestroyed()) return undefined
+    const created = new WebContentsView({ webPreferences: uiWebPreferences(rec.id, view) })
+    created.setBackgroundColor('#00000000')
+    created.setVisible(false)
+    this.registerUi(created.webContents, rec.id)
+    this.reloadUiOnCrash(created.webContents, view)
+    this.attachShortcuts(created.webContents)
+    this.hardenUi(created.webContents)
+    loadRenderer(created.webContents, view)
+    rec.uiViews.add(created)
+    return created
+  }
+
+  /** Shows a createUiView() view at `bounds` (window coordinates); `focus` gives it the keyboard. */
+  showUiView(windowId: WindowId, view: WebContentsView, bounds: Rect, focus = false): void {
+    const rec = this.records.get(windowId)
+    if (!rec || rec.win.isDestroyed() || !rec.uiViews.has(view) || view.webContents.isDestroyed()) return
+    const next = roundRect(bounds)
+    const current = view.getBounds()
+    if (
+      current.x !== next.x ||
+      current.y !== next.y ||
+      current.width !== next.width ||
+      current.height !== next.height
+    ) {
+      view.setBounds(next)
+    }
+    this.placeAbovePages(rec, view)
+    if (!view.getVisible()) view.setVisible(true)
+    if (focus) view.webContents.focus()
+  }
+
+  /** Hides a createUiView() view; keyboard focus in it goes back to the page. */
+  hideUiView(windowId: WindowId, view: WebContentsView): void {
+    const rec = this.records.get(windowId)
+    if (!rec || rec.win.isDestroyed() || !rec.uiViews.has(view) || view.webContents.isDestroyed()) return
+    if (!view.getVisible()) return
+    const focused = webContents.getFocusedWebContents() === view.webContents
+    view.setVisible(false)
+    if (focused && !rec.overlayShown && rec.win.isFocused()) this.focusActiveTab(rec.id)
+  }
+
   /** Puts a small view above every page, under the overlay and the floating sidebar; leaves it be when it already is. */
   private placeAbovePages(rec: WindowRecord, view: WebContentsView): void {
     const parent = rec.win.contentView
@@ -959,9 +1016,9 @@ export class WindowManager {
     const parent = rec.win.contentView
     const children = parent.children
     const at = children.indexOf(view)
-    // The overlay, the floating sidebar (SB-12), the page tools (NV-05) and a permission prompt
-    // (NV-15) stay above every page.
-    const above = [rec.overlay, rec.floating, rec.tools, rec.prompt]
+    // The overlay, the floating sidebar (SB-12), the page tools (NV-05), a permission prompt
+    // (NV-15) and other modules' small views (createUiView) stay above every page.
+    const above = [rec.overlay, rec.floating, rec.tools, rec.prompt, ...rec.uiViews]
       .map((v) => (v ? children.indexOf(v) : -1))
       .filter((i) => i >= 0)
     const overlayAt = above.length > 0 ? Math.min(...above) : -1

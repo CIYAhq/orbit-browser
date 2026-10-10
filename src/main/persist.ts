@@ -133,6 +133,7 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
     tab.error = undefined
     tab.blockedPopups = undefined
     tab.permissionPrompt = undefined
+    tab.pendingUrl = undefined
     tab.canGoBack = tab.canGoBack ?? false
     tab.canGoForward = tab.canGoForward ?? false
     tab.muted = tab.muted ?? false
@@ -423,6 +424,7 @@ const RUNTIME_ONLY: Record<string, ReadonlySet<string>> = {
     'canGoForward',
     'blockedPopups',
     'permissionPrompt',
+    'pendingUrl',
   ]),
   windows: new Set(['focused', 'fullscreen', 'overlay']),
   downloads: new Set(['receivedBytes']),

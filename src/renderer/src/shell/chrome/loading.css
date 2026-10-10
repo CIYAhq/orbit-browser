@@ -1,0 +1,73 @@
+/* The page loading indicator (SB-28, FL-23): its own small transparent view over the page card. */
+html[data-view="loading"] body {
+  background: transparent;
+  overflow: hidden;
+}
+
+.loading-view {
+  display: flex;
+  justify-content: center;
+  padding-top: 4px;
+  height: 100%;
+  pointer-events: none;
+}
+
+.loading-view__pill {
+  position: relative;
+  width: 48px;
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent, #6b7cff) 24%, var(--surface, #fff));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--surface, #fff) 70%, transparent),
+    0 1px 4px rgba(0, 0, 0, 0.22);
+}
+
+.loading-view__sweep {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  border-radius: inherit;
+  background: var(--accent, #6b7cff);
+  animation: loading-sweep 1.2s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+/* The load ended: the sweep fills the pill (80 ms), then the pill fades (150 ms); main takes the
+   view away 180 ms after the load ended (LOADING_FINISH_MS). A new load shows it again at once. */
+.loading-view.is-done .loading-view__sweep {
+  animation: none;
+  width: 100%;
+  transition: width 80ms ease-out;
+}
+
+.loading-view.is-done .loading-view__pill {
+  opacity: 0;
+  transition: opacity 150ms ease-out 30ms;
+}
+
+@keyframes loading-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+/* Reduced motion: no sweep, a slow pulse of the whole pill (FL-28). */
+@media (prefers-reduced-motion: reduce) {
+  .loading-view__sweep {
+    width: 100%;
+    animation: loading-pulse 1.2s ease-in-out infinite alternate;
+  }
+
+  @keyframes loading-pulse {
+    from {
+      opacity: 0.35;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}

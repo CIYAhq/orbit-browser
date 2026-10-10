@@ -166,7 +166,10 @@ type Hooks = {
     run: (n: string, a: unknown, w?: string) => Promise<unknown>
     windowIds: () => string[]
     flush: () => unknown
-    ctx: { windows: { get: (id: string) => Electron.BrowserWindow | undefined } }
+    ctx: {
+      windows: { get: (id: string) => Electron.BrowserWindow | undefined }
+      tabs: { contents: (id: string) => Electron.WebContents | undefined }
+    }
   }
   __orbitNav: {
     menu: () => { windowId: string; direction: 'back' | 'forward'; labels: string[]; icons: boolean[] } | null
@@ -494,7 +497,16 @@ export async function waitLoaded(app: ElectronApplication, tabId: string, url: s
     .poll(async () => {
       const t = (await state(app)).tabs[tabId]
       // Until the page's <title> arrives, Chromium titles the tab with its address.
-      return !!t && t.url === url && !t.loading && !t.asleep && !!t.title && !t.title.includes('/')
+      if (!t || t.url !== url || t.loading || t.asleep || !t.title || t.title.includes('/')) return false
+      // A tab that has just woken still has its stored address and a host-name title before its load
+      // starts: the page itself has to be there too.
+      return app.evaluate(
+        (_e, [id, u]) => {
+          const page = (globalThis as unknown as Hooks).__orbit.ctx.tabs.contents(id)
+          return !!page && !page.isDestroyed() && page.getURL() === u && !page.isLoading()
+        },
+        [tabId, url] as const,
+      )
     })
     .toBe(true)
 }

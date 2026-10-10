@@ -61,7 +61,18 @@ export interface Rect {
 }
 
 /** Which UI a renderer instance is showing. */
-export type RendererView = 'shell' | 'overlay' | 'mini' | 'settings' | 'strip' | 'sidebar' | 'tools' | 'prompt'
+export type RendererView =
+  | 'shell'
+  | 'overlay'
+  | 'mini'
+  | 'settings'
+  | 'strip'
+  | 'sidebar'
+  | 'tools'
+  | 'prompt'
+  /** The page loading indicator (SB-28) and the link status pill (SB-27), chrome lane. */
+  | 'loading'
+  | 'link'
 
 /** The API the preload exposes on `window.orbit` to Orbit's own UI renderers. */
 export interface OrbitBridge {

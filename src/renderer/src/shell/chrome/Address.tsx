@@ -19,10 +19,12 @@ const COPIED_MS = 1200
  */
 export function Address({ windowId }: { windowId: string }) {
   // Only the URL: the display re-renders on navigations, not on title, favicon or progress changes.
-  // While a Peek shows, it is the Peek's page (PK-11).
+  // While a Peek shows, it is the Peek's page (PK-11). A navigation Orbit started shows where it is
+  // going before it commits, and after the user stopped it (NV-04).
   const url = useOrbit((s) => {
     const id = shownTabId(s, windowId)
-    return id ? (s.tabs[id]?.url ?? '') : ''
+    const tab = id ? s.tabs[id] : undefined
+    return tab ? (tab.pendingUrl ?? tab.url ?? '') : ''
   })
   const blockedPopups = useOrbit((s) => {
     const id = shownTabId(s, windowId)

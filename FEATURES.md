@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 162 built (45 partial) · 214 tested · 0 feel right.
+**Totals:** 485 spec’d · 166 built (44 partial) · 217 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
 | P0 | 174 | 117 | 140 |
-| P1 | 221 | 41 | 69 |
+| P1 | 221 | 45 | 72 |
 | P2 | 83 | 4 | 5 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -41,14 +41,14 @@ Spec: `spec/sidebar.md`
 | SB-18 | Developer-mode tab chrome | P2 | – | – | – |  |
 | SB-19 | Inset rounded page frame ("card" look) | P0 | ✅ | ✅ e2e | – | 8 px margins (6 px with the sidebar hidden), 10 px corners on every page and pane while loading, hidden or floating; fine edge and shadow; native and video full screen drop the frame; the card and the page view take the page background colour so resizes show no white |
 | SB-20 | Top-of-window behaviour and window dragging | P1 | 🟡 partial | – | – | macOS: traffic lights hidden with the sidebar, shown (moved in) with the floating card; the rest of the hidden-sidebar chrome is not built |
-| SB-21 | Dim the sidebar when the window is inactive | P1 | – | – | – |  |
+| SB-21 | Dim the sidebar when the window is inactive | P1 | ✅ | ✅ e2e | – | an inactive window's sidebar (and its floating card) fades to 84% over 150 ms on blur and is back at once on focus; no fade with reduced motion |
 | SB-22 | Keyboard focus and navigation inside the sidebar | P2 | ✅ | ✅ e2e | – | Cmd/Ctrl+Shift+E focuses the sidebar; arrows, Enter, Escape, F2 |
 | SB-23 | Scrolling, auto-reveal of the active tab and overflow indicator | P1 | ✅ | ✅ e2e | – | selected tab scrolled into view (smooth, then settles); pill points to it while it is out of view; rows use content-visibility |
 | SB-24 | Sidebar colouring follows the Space theme | P0 | 🟡 partial | ✅ e2e+unit | – | theme gradient + grain on sidebar and frame, tinted selection; the neutral theme is a solid soft grey/near-black, not a translucent material yet |
 | SB-25 | Incognito window sidebar | P1 | ✅ | ✅ e2e | – | private window sidebar: top bar and address, a Private label with icon and a plain note, then only its own tabs; no Spaces, Favorites or pinned tabs (and their actions do nothing); + and Cmd/Ctrl+T open the command bar, which a new private window starts with |
 | SB-26 | Platform notes (Windows / Linux) | P2 | – | – | – |  |
 | SB-27 | Link status pill | P1 | – | – | – |  |
-| SB-28 | Page loading indicator | P1 | – | – | – |  |
+| SB-28 | Page loading indicator | P1 | ✅ | ✅ e2e | – | loading indicator at the top centre of the shown page card (the focused pane; Mini Windows too), in its own view over the page, after 150 ms; shows in full screen; tab rows keep their favicon loading ring |
 
 ## Tabs, Pinned tabs, Favorites, Today tabs & auto-archive, Folders
 
@@ -232,7 +232,7 @@ Spec: `spec/navigation.md`
 | NV-01 | Back and forward | P0 | ✅ | ✅ e2e+unit | – | buttons and keys (Cmd+Left/Right only outside text fields), history menu with favicons that closes on tab switch, Cmd/middle-click opens the entry in a background tab with its history; mouse side buttons are Chromium's; Backspace inert |
 | NV-02 | Trackpad two-finger swipe back/forward | P1 | – | – | – |  |
 | NV-03 | Reload and hard reload | P0 | ✅ | ✅ e2e+unit | – | Cmd/Ctrl+R, F5; hard reload Cmd+Shift+R, Ctrl+Shift+R, Shift+F5, Ctrl+F5; Cmd/middle-click Reload duplicates with history; keyboard focus goes to the page |
-| NV-04 | Stop loading | P1 | 🟡 partial | ✅ e2e+unit | – | Esc in the page while loading (overlays take it first), Cmd+. on macOS, double-click Reload, Stop (x) state; the address does not show a pending URL yet |
+| NV-04 | Stop loading | P1 | ✅ | ✅ e2e+unit | – | Esc in the page while loading (overlays take it first), Cmd+. on macOS, double-click Reload, Stop (x) state; a typed address, Back/Forward or Reload shows where it is going at once and stays when stopped; the loading indicator goes |
 | NV-05 | Find in page | P0 | ✅ | ✅ e2e+unit | – | floating bar over the active page's top-right corner; finds as you type, n/m count, No matches; Enter/Cmd+G/F3 next, Shift+Enter/Shift+Cmd+G/Shift+F3 previous, buttons; Esc closes and keeps the match selected; per tab (hidden on switch, back with text and place); starts from the selection, else the last search; IME commits; Cmd+J jumps to the selection (macOS); Edit > Find menu |
 | NV-06 | Page zoom | P0 | ✅ | ✅ e2e+unit | – | Chromium steps 25-500% on Cmd+=/Cmd+-/Cmd+0 and Ctrl+wheel (Win/Linux); per host in each profile (all its tabs), remembered across launches; indicator with Reset over the page for 1.5 s (longer while hovered); pinch is visual zoom and Cmd+0 undoes it too |
 | NV-07 | Print | P1 | – | – | – |  |
@@ -396,7 +396,7 @@ Spec: `spec/feel.md`
 | FL-20 | Favorites tiles | P1 | – | – | – |  |
 | FL-21 | Sidebar scrolling and large-sidebar performance | P0 | – | ✅ e2e | – |  |
 | FL-22 | Toasts | P1 | – | – | – |  |
-| FL-23 | Page loading indicator | P1 | – | – | – |  |
+| FL-23 | Page loading indicator | P1 | ✅ | ✅ e2e | – | after 150 ms, a 48x4 theme-accent pill sweeping on a 1.2 s cycle (a pulse with reduced motion); on load end it fills (80 ms) and fades (150 ms), gone 180 ms after; never moves page content |
 | FL-24 | Library and Archive motion | P2 | – | – | – |  |
 | FL-25 | Menus, popovers and tooltips | P1 | – | – | – |  |
 | FL-26 | Recent-tab switcher (Ctrl+Tab) | P1 | – | – | – |  |

@@ -57,6 +57,14 @@ async function boot(): Promise<void> {
         <PromptViewApp />
       </StrictMode>,
     )
+  } else if (view === 'loading') {
+    // The page loading indicator at the top of the page card (chrome lane, SB-28).
+    const { LoadingApp } = await import('./shell/chrome/LoadingApp')
+    root.render(
+      <StrictMode>
+        <LoadingApp />
+      </StrictMode>,
+    )
   } else if (view === 'strip') {
     // Split view pane strip (split lane, SV-12): a tiny transparent view over a pane's top edge.
     const { PaneStripApp } = await import('./shell/split/PaneStripApp')

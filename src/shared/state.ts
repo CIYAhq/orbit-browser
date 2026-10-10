@@ -70,6 +70,11 @@ export interface Tab {
   /** Runtime-only: the permission prompt waiting for an answer on this tab (NV-15). */
   permissionPrompt?: PermissionPrompt
   /**
+   * Runtime-only: where a navigation Orbit started (typed, Back, Reload…) is going before it
+   * commits; the address display shows it (NV-04).
+   */
+  pendingUrl?: string
+  /**
    * Set while the tab lives outside the sidebar: the page of a Peek card or of a Mini Window.
    * Such a tab sits in no container (and is not persisted) until it is expanded or moved into a Space.
    */
