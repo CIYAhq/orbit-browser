@@ -951,6 +951,20 @@ test('[SP-21][TB-09] a tab dropped right after an edge-dwell Space switch lands 
   for (let i = 0; i < 3; i++) inB.push(await newTab(app, fx.url(`/page/InB${i}`), { spaceId: b, activate: false }))
   const mover = await newTab(app, fx.url('/page/Mover'))
   await settled(shell)
+  // A row that has just finished growing in takes no presses for a frame or two: its slot goes
+  // back to `content-visibility: auto` and hit testing skips the row (PR #10 review M2).
+  await expect
+    .poll(() =>
+      shell.evaluate((id) => {
+        const slot = document.querySelector<HTMLElement>(`.row-slot[data-key="${id}"]`)
+        const row = slot?.querySelector<HTMLElement>('[data-testid="tab-row"]')
+        const b = row?.getBoundingClientRect()
+        if (!slot || !row || !b || slot.classList.contains('is-growing')) return false
+        const hit = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2)
+        return hit?.closest('[data-testid="tab-row"]') === row
+      }, mover),
+    )
+    .toBe(true)
   const rowOf = (id: string) => shell.locator(`[data-testid="tab-row"][data-tab-id="${id}"]`)
   const start = await rowOf(mover).boundingBox()
   const sidebar = await shell.getByTestId('sidebar').boundingBox()

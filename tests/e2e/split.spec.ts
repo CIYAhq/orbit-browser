@@ -37,6 +37,8 @@ test.afterEach(async () => {
 })
 
 type Box = { x: number; y: number; width: number; height: number }
+/** What the SV-26 test's in-page sampler records about a pane growing in. */
+type GrowProbe = { insertedAt: number; ticks: number; samples: { t: number; w: number }[]; done: boolean }
 
 async function openTab(app: ElectronApplication, name: string, bg?: string): Promise<string> {
   const url = fx.url(`/page/${name}${bg ? `?bg=${encodeURIComponent(bg)}` : ''}`)
@@ -542,6 +544,32 @@ test('[SV-25][SV-04] a tab dropped on a full split is refused with a toast', asy
   await expect(orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${extra}"]`)).toHaveCount(1)
 })
 
+test('[SV-25][SV-05] a full split row shows no drop target: a tab resting on it gets no half to take', async () => {
+  const extra = await openTab(orbit.app, 'Extra')
+  const ids = [await openTab(orbit.app, 'Q4'), await openTab(orbit.app, 'Q3'), await openTab(orbit.app, 'Q2')]
+  const first = await openTab(orbit.app, 'Q1')
+  const splitId = (await run(orbit.app, 'split.create', { tabIds: [first, ...ids], focus: first })) as string
+  await expect(orbit.shell.getByTestId('split-row')).toHaveCount(1)
+  await settled(orbit.shell)
+  const a = await orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${extra}"]`).boundingBox()
+  const to = await orbit.shell.getByTestId('split-row').boundingBox()
+  if (!a || !to) throw new Error('rows')
+  await orbit.shell.mouse.move(a.x + 30, a.y + a.height / 2)
+  await orbit.shell.mouse.down()
+  await orbit.shell.mouse.move(a.x + 40, a.y + a.height / 2 - 6, { steps: 2 })
+  await orbit.shell.mouse.move(to.x + to.width * 0.75, to.y + to.height * 0.5, { steps: 10 })
+  // Well past the rest that makes a split on a row with room (400 ms).
+  await orbit.shell.waitForTimeout(900)
+  expect(await orbit.shell.locator('.row-slot.is-split-target').count()).toBe(0)
+  await orbit.shell.mouse.up()
+  await settled(orbit.shell)
+  // Nothing joins the split: the tab is still its own row (the press selected it, so the page shows it).
+  const layout = JSON.stringify((await state(orbit.app)).splits[splitId]?.layout)
+  for (const id of [first, ...ids]) expect(layout).toContain(id)
+  expect(layout).not.toContain(extra)
+  await expect(orbit.shell.locator(`[data-testid="tab-row"][data-tab-id="${extra}"]`)).toHaveCount(1)
+})
+
 test('[SV-22][SV-21] a split can be named; the name replaces the pane titles', async () => {
   const b = await openTab(orbit.app, 'Docs')
   const a = await openTab(orbit.app, 'Mail')
@@ -717,37 +745,50 @@ test('[SV-26] a new pane grows in with a spring and a closed one fades out', asy
   const b = await openTab(orbit.app, 'Grow2')
   const a = await openTab(orbit.app, 'Grow1')
   await expect.poll(async () => (await tabView(orbit.app, a))?.visible).toBe(true)
-  // Sample the new pane's card width every frame from the moment it appears.
-  const sampling = orbit.shell.evaluate(
-    (id) =>
-      new Promise<{ t: number; w: number }[]>((resolve) => {
-        const samples: { t: number; w: number }[] = []
-        let start = 0
-        const tick = (now: number) => {
-          const el = document.querySelector<HTMLElement>(`[data-testid="split-pane"][data-tab-id="${id}"]`)
-          if (el) {
-            if (!start) start = now
-            samples.push({ t: now - start, w: el.getBoundingClientRect().width })
-          }
-          if (start && now - start > 900) resolve(samples)
-          else requestAnimationFrame(tick)
-        }
-        requestAnimationFrame(tick)
-      }),
-    b,
-  )
-  await run(orbit.app, 'split.addTab', { tabId: b, target: a, side: 'right' })
-  const samples = await sampling
+  // Sample the new pane's card width every frame, timed from when the card enters the page. The
+  // sampler runs before the pane is added: started alongside the command it could begin late and
+  // miss the growth (CI saw a first sample at 94 %). It stops by itself, so it can't hang the test.
+  await orbit.shell.evaluate((id) => {
+    const probe: GrowProbe = { insertedAt: 0, ticks: 0, samples: [], done: false }
+    ;(window as unknown as { __grow: GrowProbe }).__grow = probe
+    const started = performance.now()
+    const card = () => document.querySelector<HTMLElement>(`[data-testid="split-pane"][data-tab-id="${id}"]`)
+    const seen = new MutationObserver(() => {
+      if (!card()) return
+      probe.insertedAt = performance.now()
+      seen.disconnect()
+    })
+    seen.observe(document.body, { subtree: true, childList: true })
+    const tick = () => {
+      probe.ticks++
+      const now = performance.now()
+      const el = card()
+      if (el && probe.insertedAt) probe.samples.push({ t: now - probe.insertedAt, w: el.getBoundingClientRect().width })
+      if (probe.insertedAt ? now - probe.insertedAt > 900 : now - started > 8000) probe.done = true
+      else requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  }, b)
+  expect(await run(orbit.app, 'split.addTab', { tabId: b, target: a, side: 'right' })).toBeTruthy()
+  const probe = () => orbit.shell.evaluate(() => (window as unknown as { __grow: GrowProbe }).__grow)
+  await expect
+    .poll(async () => {
+      const p = await probe()
+      return p.done ? 'done' : `${p.ticks} frames, card ${p.insertedAt ? 'in' : 'not in'} the page`
+    })
+    .toBe('done')
+  const { samples, insertedAt, ticks } = await probe()
+  expect(insertedAt, `the new pane never appeared (${ticks} frames)`).toBeGreaterThan(0)
   const final = samples[samples.length - 1]?.w ?? 0
   // It starts small and grows over several frames (a spring, not a jump), settles within 1 px
-  // in well under a second (about 300 ms on an idle machine), without visible overshoot.
-  // Thresholds leave room for dropped frames when CI runs two apps at once.
-  // On the macOS CI VM a frame can take 100–200 ms (D17): its first frame may already show most of
-  // the spring, so the shape is checked where frames are timely and the end state everywhere.
-  if (FRAME_SLACK === 1) {
-    expect(samples[0]?.w ?? final).toBeLessThan(final * 0.8)
+  // in well under a second (about 330 ms on an idle machine), without visible overshoot.
+  // The spring runs on the clock, so a frame that comes late already shows more of it: the shape
+  // is checked on frames that came in time (here, at 100 ms, it is about half grown). On the macOS
+  // CI VM a frame can take 100–200 ms (D17), so there only the end state is checked.
+  const early = samples.filter((s) => s.t <= 100)
+  if (FRAME_SLACK === 1 && early[0]) expect(early[0].w).toBeLessThan(final * 0.8)
+  if (FRAME_SLACK === 1 && samples.filter((s) => s.t <= 300).length >= 8)
     expect(samples.filter((s) => s.w > 1 && s.w < final - 1).length).toBeGreaterThan(1)
-  }
   const settledAt = samples.find((s) => Math.abs(s.w - final) <= 1)
   expect(settledAt?.t ?? 1000).toBeLessThan(FRAME_SLACK === 1 ? 650 : 900)
   expect(Math.max(...samples.map((s) => s.w))).toBeLessThan(final + 4)
@@ -856,6 +897,66 @@ test('[SV-02][SV-23] a split made from a Favorite stays in the Favorites grid', 
   const tile = orbit.shell.locator('[data-testid="favorite-tile"][data-split-id]')
   await expect(tile).toHaveCount(1)
   await expect(orbit.shell.getByTestId('split-pane')).toHaveCount(2)
+})
+
+test('[FV-02][SV-23] a Favorite split never comes apart past 12 Favorites: Separate and Move Out are refused (lead review F1)', async () => {
+  const panes = [await openTab(orbit.app, 'P3'), await openTab(orbit.app, 'P2'), await openTab(orbit.app, 'P1')]
+  const s = await state(orbit.app)
+  const spaceId = s.tabs[panes[0] as string]?.spaceId as string
+  const profileId = s.spaces[spaceId]?.profileId as string
+  const favorites = { kind: 'favorites', profileId }
+  for (let i = 0; i < 11; i++) {
+    const id = await run(orbit.app, 'tabs.create', { url: fx.url(`/page/F${i}`), activate: false })
+    expect(await run(orbit.app, 'tabs.move', { id, to: favorites, index: i }), `Favorite ${i}`).toBe(true)
+  }
+  const splitId = (await run(orbit.app, 'split.create', { tabIds: panes })) as string
+  await run(orbit.app, 'tabs.move', { id: splitId, to: favorites, index: 11 })
+  const tiles = async () => (await state(orbit.app)).profiles[profileId]?.favorites ?? []
+  await expect.poll(async () => (await tiles()).length).toBe(12)
+  // Separating would make 14 tiles and moving one pane out 13: both are refused, and nothing changes.
+  await run(orbit.app, 'split.separate', { splitId })
+  await expect(orbit.shell.getByTestId('toast').last()).toContainText('Favorites are full (12 max)')
+  await run(orbit.app, 'split.popOut', { tabId: panes[0] })
+  expect(await tiles()).toHaveLength(12)
+  const layout = JSON.stringify((await state(orbit.app)).splits[splitId]?.layout)
+  for (const id of panes) expect(layout).toContain(id)
+  // With room for one more tile, a pane moves out as usual.
+  await run(orbit.app, 'tabs.move', { id: (await tiles())[0], to: { kind: 'today', spaceId }, index: 0 })
+  await run(orbit.app, 'split.popOut', { tabId: panes[0] })
+  await expect.poll(async () => (await tiles()).length).toBe(12)
+  expect(JSON.stringify((await state(orbit.app)).splits[splitId]?.layout)).not.toContain(panes[0])
+})
+
+test('[FV-02][SV-23] Duplicate and Open in Split View never make a 13th Favorite from a Favorite split (PR #10 review M1)', async () => {
+  const panes = [await openTab(orbit.app, 'P3'), await openTab(orbit.app, 'P2'), await openTab(orbit.app, 'P1')]
+  const s = await state(orbit.app)
+  const spaceId = s.tabs[panes[0] as string]?.spaceId as string
+  const profileId = s.spaces[spaceId]?.profileId as string
+  const favorites = { kind: 'favorites', profileId }
+  for (let i = 0; i < 11; i++) {
+    const id = await run(orbit.app, 'tabs.create', { url: fx.url(`/page/F${i}`), activate: false })
+    expect(await run(orbit.app, 'tabs.move', { id, to: favorites, index: i }), `Favorite ${i}`).toBe(true)
+  }
+  const splitId = (await run(orbit.app, 'split.create', { tabIds: panes })) as string
+  await run(orbit.app, 'tabs.move', { id: splitId, to: favorites, index: 11 })
+  const tiles = async () => (await state(orbit.app)).profiles[profileId]?.favorites ?? []
+  await expect.poll(async () => (await tiles()).length).toBe(12)
+  // A copy of the split would be a 13th tile beside it.
+  expect(await run(orbit.app, 'split.duplicate', { splitId })).toBeNull()
+  await expect(orbit.shell.getByTestId('toast').last()).toContainText('Favorites are full (12 max)')
+  expect(await tiles()).toHaveLength(12)
+  // A pane split with a Today tab would leave its split as a new tile, also a 13th.
+  const today = await openTab(orbit.app, 'Today')
+  expect(await run(orbit.app, 'split.create', { tabIds: [panes[0], today] })).toBeNull()
+  expect(await tiles()).toHaveLength(12)
+  expect(JSON.stringify((await state(orbit.app)).splits[splitId]?.layout)).toContain(panes[0])
+  // With room for one more tile, both work as usual.
+  await run(orbit.app, 'tabs.move', { id: (await tiles())[0], to: { kind: 'today', spaceId }, index: 0 })
+  expect(await run(orbit.app, 'split.duplicate', { splitId })).toBeTruthy()
+  await expect.poll(async () => (await tiles()).length).toBe(12)
+  await run(orbit.app, 'tabs.move', { id: (await tiles())[0], to: { kind: 'today', spaceId }, index: 0 })
+  expect(await run(orbit.app, 'split.create', { tabIds: [panes[0], today] })).toBeTruthy()
+  await expect.poll(async () => (await tiles()).length).toBe(12)
 })
 
 test('[SV-17] a reopened pane returns to its exact spot beside a stacked pair', async () => {

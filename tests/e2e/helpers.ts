@@ -22,19 +22,68 @@ export interface Orbit {
   userData: string
 }
 
+/**
+ * Tests stay offline. Orbit runs behind a dead local proxy, which loopback (where the fixture pages
+ * are served) bypasses, so a search or a link to a real site gets its URL but loads nothing.
+ */
+const DEAD_PROXY = '127.0.0.1:9'
+const OFFLINE = `--proxy-server=http://${DEAD_PROXY}`
+
 /** Launches the built app (out/) with an isolated profile directory. */
 export async function launchOrbit(opts: { userData?: string; env?: Record<string, string> } = {}): Promise<Orbit> {
   const userData = opts.userData ?? mkdtempSync(join(tmpdir(), 'orbit-e2e-'))
-  const args = [resolve('out/main/index.js')]
+  const args = [OFFLINE, resolve('out/main/index.js')]
   // Linux CI/dev boxes often lack the setuid sandbox helper; macOS runs fully sandboxed.
   if (process.platform === 'linux') args.unshift('--no-sandbox')
   const app = await electron.launch({
     args,
     env: { ...process.env, ORBIT_E2E: '1', ORBIT_USER_DATA: userData, ...opts.env } as Record<string, string>,
   })
+  evaluateBetweenTasks(app)
   const shell = await viewPage(app, 'shell')
   await shell.getByTestId('sidebar').waitFor()
+  await waitOffline(app)
   return { app, shell, userData }
+}
+
+/**
+ * Waits until every profile's session sends web requests to the dead proxy. A session picks up the
+ * command line's proxy a moment after it's made: here, about 50 ms after the sidebar shows.
+ */
+async function waitOffline(app: ElectronApplication): Promise<void> {
+  const deadline = Date.now() + 10_000
+  for (;;) {
+    const routes = await app.evaluate(async ({ session }) => {
+      const { profiles } = (globalThis as unknown as { __orbit: { state: () => OrbitState } }).__orbit.state()
+      const sessions = [
+        session.defaultSession,
+        ...Object.values(profiles).map((p) => session.fromPartition(p.partition)),
+      ]
+      return Promise.all(sessions.map((s) => s.resolveProxy('https://example.com/')))
+    })
+    if (routes.every((r) => r === `PROXY ${DEAD_PROXY}`)) return
+    if (Date.now() > deadline) throw new Error(`Orbit would reach the network: ${routes.join(', ')}`)
+    await new Promise((r) => setTimeout(r, 20))
+  }
+}
+
+/**
+ * Playwright runs main-process evaluates through the inspector, which can interrupt main-process
+ * code part-way, even inside a store update. A change made there is lost when that update finishes:
+ * a background tab a test had just created vanished. Each evaluate starts in a task of its own instead.
+ */
+function evaluateBetweenTasks(app: ElectronApplication): void {
+  const evaluate = app.evaluate.bind(app)
+  app.evaluate = ((fn: unknown, arg?: unknown) => {
+    if (typeof fn !== 'function') return evaluate(fn as never, arg as never)
+    return evaluate(
+      async (electron, [source, a]) => {
+        await new Promise((resolve) => setImmediate(resolve))
+        return new Function(`return (${source})`)()(electron, a)
+      },
+      [fn.toString(), arg] as const,
+    )
+  }) as ElectronApplication['evaluate']
 }
 
 /** Finds an Orbit UI page (shell/overlay) by its ?view= query. */
@@ -159,18 +208,28 @@ export async function startFixtures(): Promise<Fixtures> {
     res.writeHead(404, { 'content-type': 'text/plain' })
     res.end('not found')
   })
-  const base = 3300 + (Number(process.env.TEST_PARALLEL_INDEX ?? 0) % 50)
-  await new Promise<void>((resolveListen, reject) => {
-    let port = base
-    server.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE' && port < 3399) server.listen(++port, '127.0.0.1')
-      else reject(err)
-    })
-    server.listen(port, '127.0.0.1', () => resolveListen())
-  })
-  const { port } = server.address() as AddressInfo
+  const port = await listenInRange(server, 3300 + (Number(process.env.TEST_PARALLEL_INDEX ?? 0) % 50))
   return {
     url: (path) => `http://localhost:${port}${path}`,
     close: () => new Promise((r) => server.close(() => r())),
   }
+}
+
+/**
+ * Listens on loopback at the first free port from `base` up: Orbit keeps to ports 3300–3399 (the
+ * brief's range), and several suites or agents may be using some of them at once.
+ */
+export function listenInRange(server: Server, base = 3300): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let port = base
+    const retry = (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE' && port < 3399) server.listen(++port, '127.0.0.1')
+      else reject(err)
+    }
+    server.on('error', retry)
+    server.listen(port, '127.0.0.1', () => {
+      server.off('error', retry)
+      resolve(port)
+    })
+  })
 }

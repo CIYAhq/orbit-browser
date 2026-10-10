@@ -3,7 +3,7 @@
  * drag-and-drop and the maintenance timers all go through these so the rules
  * (selection after close, archive, undo, pinned URL bookkeeping) live in one place.
  */
-import { createWindowState, MAX_FAVORITES } from '../../shared/defaults'
+import { createWindowState, FAVORITES_FULL_MESSAGE, MAX_FAVORITES } from '../../shared/defaults'
 import { isFolderId, isTabId, newId } from '../../shared/ids'
 import { isPendingPane, layoutLeaves, paneAfterClose, SPLIT_FULL_MESSAGE } from '../../shared/split'
 import type {
@@ -39,6 +39,7 @@ import {
 import type { MainContext } from '../context'
 import {
   addPaneInDraft,
+  favoritesFull,
   isFailure,
   type PaneAnchor,
   restorePaneInDraft,
@@ -151,7 +152,7 @@ export class TabOps {
     if (!spaceObj) throw new Error(`Unknown space ${space}`)
     const target: ContainerRef = opts.container ?? { kind: 'today', spaceId: space }
     if (target.kind === 'favorites' && this.favoriteCount(target.profileId) >= MAX_FAVORITES) {
-      this.ctx.toast(opts.windowId, `Favorites are full (${MAX_FAVORITES} max)`)
+      this.ctx.toast(opts.windowId, FAVORITES_FULL_MESSAGE)
       throw new Error('Favorites are full')
     }
     const profileId = profileOfContainer(state, target) ?? spaceObj.profileId
@@ -366,7 +367,11 @@ export class TabOps {
         }
         if (!d.spaces[tab.spaceId]) tab.spaceId = d.spaceOrder[0] as string
         d.tabs[tab.id] = tab
-        const where = rec.location && containerItems(d, rec.location.container) ? rec.location : undefined
+        // Its old place, unless that is a full Favorites grid (FV-02): then Today.
+        const where =
+          rec.location && containerItems(d, rec.location.container) && !favoritesFull(d, rec.location.container)
+            ? rec.location
+            : undefined
         let landed: ContainerRef | undefined
         // A pane goes back into its split, in this same update (no frame shows it on its own).
         const intoSplit = rec.pane ? restorePaneInDraft(d, tab.id, rec.pane) : undefined
@@ -774,7 +779,7 @@ export class TabOps {
         return !from || containerKey(from.container) !== target
       }).length
       if (incoming > 0 && this.favoriteCount(to.profileId) + incoming > MAX_FAVORITES) {
-        this.ctx.toast(opts.windowId, `Favorites are full (${MAX_FAVORITES} max)`)
+        this.ctx.toast(opts.windowId, FAVORITES_FULL_MESSAGE)
         return false
       }
     }
