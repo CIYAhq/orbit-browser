@@ -24,13 +24,9 @@ export default defineConfig({
       // Sandboxed preloads must be a single CommonJS file with no node_modules imports.
       externalizeDeps: false,
       rollupOptions: {
-        // shell: Orbit's own views. page: every web page (src/main/nav/page-bridge.ts registers it).
-        // internal: the bridge of Orbit's internal pages (DT-13), run in every page of a profile.
-        input: {
-          shell: resolve('src/preload/shell.ts'),
-          page: resolve('src/preload/page.ts'),
-          internal: resolve('src/preload/internal.ts'),
-        },
+        // shell: Orbit's own views. page: every web page (src/main/nav/page-bridge.ts registers it),
+        // and the bridge of Orbit's internal pages (DT-13, D53).
+        input: { shell: resolve('src/preload/shell.ts'), page: resolve('src/preload/page.ts') },
         output: { format: 'cjs', entryFileNames: '[name].cjs' },
       },
     },

@@ -14,6 +14,7 @@ import {
 } from 'electron'
 import { INTERNAL_SCHEME } from '../../shared/commands/devtools'
 import type { CommandName } from '../../shared/rpc'
+import { PAGE_CHANNEL } from '../../shared/site'
 import type { MainContext } from '../context'
 import { rendererEntry } from '../windows'
 import { AwaitedPages, INTERNAL_DOCUMENT_CSP, internalFile, internalPageMayRun, isInternalUrl } from './internal-urls'
@@ -30,10 +31,10 @@ import { AwaitedPages, INTERNAL_DOCUMENT_CSP, internalFile, internalPageMayRun, 
  * - Every profile session serves `orbit://<page>/…` from the built renderer: the document is the
  *   renderer's index.html, its scripts and styles come from the same origin (`internalFile`). In
  *   development the renderer's dev server answers instead.
- * - A preload on every profile session (`src/preload/internal.ts`) gives an `orbit:` page's main
- *   frame the same `window.orbit` bridge Orbit's UI has, on channels of its own. Main answers only
- *   a tab's main frame showing an `orbit:` page, and sends state changes and broadcasts only there.
- *   A web page gets no bridge.
+ * - The one preload pages get (`src/preload/page.ts`, D40, D53) gives an `orbit:` page's main
+ *   frame the same `window.orbit` bridge Orbit's UI has, on the preload's own channels
+ *   (`PAGE_CHANNEL.internal*`). Main answers only a tab's main frame showing an `orbit:` page, and
+ *   sends state changes and broadcasts only there. A web page gets no bridge.
  * - Each page runs only the commands listed for it (`INTERNAL_PAGE_COMMANDS` in internal-urls.ts)
  *   and sends no events (D53); its document runs only its own scripts (`script-src 'self'`). A
  *   script that got into a page, say through text from the web it shows, can do no more than it.
@@ -119,10 +120,6 @@ function server(awaited: AwaitedPages): (request: Request) => Promise<Response> 
   }
 }
 
-function preloadPath(): string {
-  return join(import.meta.dirname, '../preload/internal.cjs')
-}
-
 /** A tab's main frame showing an internal page: the only frames main answers or sends to. */
 function internalFrame(frame: WebFrameMain | null | undefined): frame is WebFrameMain {
   return !!frame && !frame.parent && isInternalUrl(frame.url)
@@ -135,8 +132,8 @@ export function registerInternalPages(ctx: MainContext): void {
   const awaited = new AwaitedPages()
   const serve = server(awaited)
   sessions.onSessionCreated((ses: Session) => {
+    // The bridge comes from the web page preload, which every profile session runs (D53).
     ses.protocol.handle(INTERNAL_SCHEME, serve)
-    ses.registerPreloadScript({ type: 'frame', id: 'orbit-internal-pages', filePath: preloadPath() })
   })
 
   // ---- The bridge ----
@@ -152,17 +149,17 @@ export function registerInternalPages(ctx: MainContext): void {
         continue
       }
       try {
-        frame.send(channel, ...args)
+        frame.send(PAGE_CHANNEL.internalEvent, channel, ...args)
       } catch {
         live.delete(contents)
       }
     }
   }
 
-  ipcMain.on('orbit:internal:hello', (event) => {
+  ipcMain.on(PAGE_CHANNEL.internalHello, (event) => {
     event.returnValue = allowed(event) ? { windowId: windows.windowIdFor(event.sender) ?? '' } : null
   })
-  ipcMain.handle('orbit:internal:getState', (event) => {
+  ipcMain.handle(PAGE_CHANNEL.internalState, (event) => {
     if (!allowed(event)) throw new Error('Forbidden')
     if (!live.has(event.sender)) {
       live.add(event.sender)
@@ -171,7 +168,7 @@ export function registerInternalPages(ctx: MainContext): void {
     return store.snapshot()
   })
   // Only the commands listed for the page (D53). It sends no events: those are for Orbit's own UI.
-  ipcMain.handle('orbit:internal:invoke', (event, name: CommandName, args: unknown) => {
+  ipcMain.handle(PAGE_CHANNEL.internalInvoke, (event, name: CommandName, args: unknown) => {
     if (!allowed(event) || !internalPageMayRun(event.senderFrame?.url, name)) throw new Error('Forbidden')
     return commands.run(name, args as never, { windowId: windows.windowIdFor(event.sender), sender: event.sender })
   })

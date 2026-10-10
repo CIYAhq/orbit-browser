@@ -171,7 +171,7 @@ export function pagePermissionKinds(name: string): PermissionKind[] | null {
 /** A permission's state as a page sees it: "prompt" until the user decides, as in Chromium. */
 export type PagePermissionState = 'granted' | 'denied' | 'prompt'
 
-/** Messages from the web page preload (src/preload/page.ts) to main (src/main/nav/page-bridge.ts). */
+/** Messages between the web page preload (src/preload/page.ts) and main (src/main/nav/page-bridge.ts). */
 export const PAGE_CHANNEL = {
   /** sendSync(name): the PagePermissionState for a permission name, or null for the engine's answer. */
   permission: 'orbit-page:permission',
@@ -180,6 +180,18 @@ export const PAGE_CHANNEL = {
    * site with the notification permission, and at most once per NOTIFICATION_CLICK_GAP_MS per tab.
    */
   notificationClick: 'orbit-page:notification-click',
+  /**
+   * Internal pages only (DT-13, D53; main side: src/main/devtools/internal-pages.ts). Main answers
+   * these only from a tab's main frame showing an `orbit:` page.
+   * sendSync(): `{ windowId }` for such a frame, the window its tab is in; null for any other.
+   */
+  internalHello: 'orbit-page:internal-hello',
+  /** invoke(): the store's state; its changes then come on `internalEvent`. */
+  internalState: 'orbit-page:internal-state',
+  /** invoke(name, args): a command, only one of those listed for the page (INTERNAL_PAGE_COMMANDS). */
+  internalInvoke: 'orbit-page:internal-invoke',
+  /** Main → page: (channel, ...args) of a state change or broadcast Orbit's UI gets. */
+  internalEvent: 'orbit-page:internal-event',
 } as const
 
 /** A tab comes forward for its notifications' clicks at most this often (a flood can't stall the shell). */

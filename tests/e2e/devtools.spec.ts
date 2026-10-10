@@ -618,6 +618,17 @@ test('[DT-13] typing orbit://pages opens the internal pages in a tab; its links 
   expect(await page.evaluate(() => (window as unknown as { orbit: { windowId: string } }).orbit.windowId)).toBe(
     windowId,
   )
+  // From the one preload pages get, the web page one (D40, D53).
+  const preloads = await orbit.app.evaluate(
+    (_e, id) =>
+      (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs
+        .contents(id)
+        ?.session.getPreloadScripts()
+        .filter((s) => s.type === 'frame')
+        .map((s) => s.filePath.split(/[\\/]/).pop()),
+    tabId,
+  )
+  expect(preloads).toEqual(['page.cjs'])
   // A link opens a page in the same tab.
   await page.getByTestId('internal-page-link').filter({ hasText: 'orbit://version/' }).click()
   await expect(root).toHaveAttribute('data-page', 'version')
