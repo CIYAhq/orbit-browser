@@ -710,18 +710,28 @@ test('[DT-13] a web page reaches no internal page: no link, frame, new tab, redi
   // A link.
   await clickInTab(orbit.app, tabId, LINK_AT.internal)
   await expect.poll(navigations).toContain('page stopped orbit://pages/')
-  // A link to a new tab: the first word on new tabs and windows (before Peek's) says no.
-  await orbit.app.evaluate(() => {
+  // A link to a new tab: the page's window-open handler says no (D53), before any feature's hook
+  // (Peek's, the tabs') hears of it.
+  await orbit.app.evaluate((_e, id) => {
+    type Handler = (details: Electron.HandlerDetails) => Electron.WindowOpenHandlerResponse
     const g = globalThis as unknown as OrbitGlobal & { __opens: string[] }
     g.__opens = []
     const hooks = g.__orbit.ctx.hooks.windowOpen
-    const first = hooks[0]
-    hooks[0] = (openerTabId, details) => {
-      const response = first?.(openerTabId, details)
-      g.__opens.push(`${response?.action ?? 'passed'} ${details.url}`)
+    for (const [i, hook] of hooks.entries()) {
+      hooks[i] = (openerTabId, details) => {
+        g.__opens.push(`hook ${details.url}`)
+        return hook(openerTabId, details)
+      }
+    }
+    // Where Electron keeps the handler a page's opens go to.
+    const contents = g.__orbit.ctx.tabs.contents(id) as unknown as { _windowOpenHandler: Handler }
+    const handler = contents._windowOpenHandler
+    contents._windowOpenHandler = (details) => {
+      const response = handler(details)
+      g.__opens.push(`${response.action} ${details.url}`)
       return response
     }
-  })
+  }, tabId)
   await clickInTab(orbit.app, tabId, LINK_AT.internalBlank)
   await expect
     .poll(() => orbit.app.evaluate(() => (globalThis as unknown as { __opens: string[] }).__opens))

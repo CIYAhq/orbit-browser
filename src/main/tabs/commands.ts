@@ -8,7 +8,7 @@ import {
   type WebContentsViewConstructorOptions,
 } from 'electron'
 import { isFolderId, isTabId, newId } from '../../shared/ids'
-import { framesMayOpen, localFileBlockedMessage } from '../../shared/link-routing'
+import { framesMayOpen, isLocalFileUrl, localFileBlockedMessage } from '../../shared/link-routing'
 import { isPrivateTab, privateTabMenu } from '../../shared/private'
 import type { ContainerRef, Folder, FolderId, ItemId, TabId, WindowId } from '../../shared/state'
 import {
@@ -511,7 +511,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     })
     wc.setWindowOpenHandler((details) => {
       // As for a tab's page: a local file opens for no web page, and a toast names it (D49, round 2
-      // fix check F1, round 3 fix check F1).
+      // fix check F1, round 3 fix check F1); nor does an internal page (D53).
       if (!framesMayOpen(wc, details.url)) {
         localFileRefused(openerTabId, details.url)
         return { action: 'deny' }
@@ -546,6 +546,8 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
    */
   const refusedAt = new Map<TabId, { url: string; at: number }>()
   const localFileRefused = (tabId: TabId, url: string) => {
+    // An internal page refused (D53) says nothing: to a web page, `orbit:` is a scheme that isn't there.
+    if (!isLocalFileUrl(url)) return
     const now = Date.now()
     const last = refusedAt.get(tabId)
     if (last?.url === url && now - last.at < 3000) return

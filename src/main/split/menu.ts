@@ -1,4 +1,5 @@
 import type { MenuItemConstructorOptions } from 'electron'
+import { pageMayOpen } from '../../shared/link-routing'
 import { MAX_PANES, SPLIT_FULL_MESSAGE } from '../../shared/split'
 import type { OrbitState, TabId, WindowId } from '../../shared/state'
 import { splitOfTab } from '../../shared/tree'
@@ -52,15 +53,27 @@ export function tabSplitMenuItems(
   ]
 }
 
-/** For a page's link context menu (SV-08): open the link in a new pane beside the page's pane. */
-export function linkSplitMenuItem(ctx: MainContext, tabId: TabId, url: string): MenuItemConstructorOptions {
+/**
+ * For a page's link context menu (SV-08): open the link in a new pane beside the page's pane.
+ * `from` is the page (or frame) the link is in: none for a link it may not open, a local file for a
+ * web page (D49) or an internal page for any but another (D53).
+ */
+export function linkSplitMenuItems(
+  ctx: MainContext,
+  tabId: TabId,
+  url: string,
+  from: string | undefined,
+): MenuItemConstructorOptions[] {
+  if (!url || !pageMayOpen(from, url)) return []
   const windowId = ctx.windows.windowOfTab(tabId)
   const full = leavesOf(ctx.store.state, splitOfTab(ctx.store.state, tabId)).length >= MAX_PANES
-  return {
-    label: 'Open Link in Split View',
-    enabled: !full && !!url,
-    click: () => void ctx.commands.run('split.openUrl', { url, target: tabId, side: 'right' }, { windowId }),
-  }
+  return [
+    {
+      label: 'Open Link in Split View',
+      enabled: !full,
+      click: () => void ctx.commands.run('split.openUrl', { url, target: tabId, side: 'right' }, { windowId }),
+    },
+  ]
 }
 
 /** For the sidebar "+" menu or a title-bar split button (SV-07). */

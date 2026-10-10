@@ -17,7 +17,7 @@ import {
   writingDirectionItem,
 } from '../nav/page-menu'
 import { linkPeekMenuItems } from '../peek/menu'
-import { linkSplitMenuItem } from '../split/menu'
+import { linkSplitMenuItems } from '../split/menu'
 
 /** Native right-click menu for web pages. */
 export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: WebContents, params: ContextMenuParams) {
@@ -38,8 +38,8 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
     if (!openLinkInTab(ctx, tabId, url, referrer)) openInNewTab(url, false)
   }
 
-  // A local file's link or picture on a page that isn't a local file keeps only its copy items:
-  // Orbit opens or saves it for no web page (D49).
+  // A local file's link or picture on a page that isn't a local file, or an internal page's on a page
+  // that isn't one, keeps only its copy items: Orbit opens or saves it for no web page (D49, D53).
   const mayOpen = (url: string) => pageMayOpen(referrer.url, url)
   // A script, a page's source or data is no page to open: the engine names the first two
   // about:blank#blocked here, and would show data as a page of its own (round 2 fix check F6).
@@ -53,7 +53,7 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
         ? [
             { label: 'Open Link in New Tab', click: () => openFromPage(link) },
             // A new pane beside the page's pane (SV-08).
-            linkSplitMenuItem(ctx, tabId, link),
+            ...linkSplitMenuItems(ctx, tabId, link, referrer.url),
             // Then Peek and Mini Window, new and private windows: the order NV-12 lists.
             ...linkPeekMenuItems(ctx, tabId, link),
             ...linkWindowItems(ctx, tabId, link, referrer),

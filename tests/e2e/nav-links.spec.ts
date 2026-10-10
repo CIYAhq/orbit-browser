@@ -1037,6 +1037,93 @@ test('[NV-09] a pop-up blocked on a web page is offered to open later unless it 
     .toEqual([`[Pop-ups blocked on ${host}]`, `Open ${page('Surprise')}`, `Always Allow Pop-ups from ${host}`])
 })
 
+test('[DT-13][NV-08][NV-09][NV-12] a web page has Orbit open no internal page: not from its menu (Split View included), ⌥-click, a new tab, window or pop-up, its pop-up, a blocked pop-up or a drop (D53)', async () => {
+  const { app, shell } = orbit
+  const internal = 'orbit://version/'
+  const loads = await watchLoads(app, 'orbit:')
+  const web = fx.url(`/page/Web?away=${encodeURIComponent(internal)}`)
+  const id = await openTab(app, web)
+  const tab = await tabPage(app, '/page/Web')
+  await tab.evaluate(() => {
+    document.body.insertAdjacentHTML(
+      'afterbegin',
+      '<img id="internal" src="orbit://pages/" alt="Pages" width="48" height="48">',
+    )
+  })
+  const orbitTabs = async () =>
+    Object.values((await state(app)).tabs)
+      .filter((t) => t.url.toLowerCase().startsWith('orbit:'))
+      .map((t) => t.url)
+
+  // The page menu on the link and on the picture.
+  await clickInPage(app, web, '#away', [], 'right')
+  await expect.poll(async () => (await pageMenu(app))?.tabId).toBe(id)
+  const linkMenu = (await pageMenu(app))?.labels ?? []
+  expect(linkMenu).toContain('Copy Link Address')
+  await clickInPage(app, web, '#internal', [], 'right')
+  await expect.poll(async () => (await pageMenu(app))?.labels ?? []).toContain('Copy Image Address')
+  const imageMenu = (await pageMenu(app))?.labels ?? []
+  // ⌥-click on the link.
+  await clickInPage(app, web, '#away', ['alt'])
+  // New tabs, windows and pop-ups it asks for: a pop-up without a click (to block), ⌘-click, ⌘⌥-click
+  // (a Mini Window), ⇧⌘-click, ⇧-click (a window) and a pop-up with a click.
+  const popup = 'width=300,height=200'
+  const answers = [
+    await askToOpen(app, web, internal, 'new-window', { features: popup, click: false }),
+    await askToOpen(app, web, internal, 'background-tab'),
+    await askToOpen(app, web, internal, 'background-tab', { modifiers: [mod, 'alt'] }),
+    await askToOpen(app, web, internal, 'foreground-tab'),
+    await askToOpen(app, web, internal, 'new-window'),
+    await askToOpen(app, web, internal, 'new-window', { features: popup }),
+  ]
+  // A pop-up the page opened asks too.
+  await clickInPage(app, web, '#popup')
+  await expect.poll(() => loadedTitle(app, page('Popup-Web'))).toBe('Popup-Web')
+  answers.push(await askToOpen(app, page('Popup-Web'), internal, 'foreground-tab'))
+  // Dropped on the sidebar, as a link or as text; a web link dropped after them opens.
+  const drop = async (type: string, text: string) => {
+    const dt = await shell.evaluateHandle(
+      ([t, u]) => {
+        const d = new DataTransfer()
+        d.setData(t, u)
+        return d
+      },
+      [type, text] as const,
+    )
+    await shell.getByTestId('sidebar-scroll').dispatchEvent('dragover', { dataTransfer: dt })
+    await shell.getByTestId('sidebar-scroll').dispatchEvent('drop', { dataTransfer: dt })
+  }
+  await drop('text/uri-list', internal)
+  await drop('text/plain', internal)
+  await drop('text/uri-list', page('DroppedAfter'))
+  await expect.poll(async () => urlOf(app, (await today(app))[0])).toBe(page('DroppedAfter'))
+  // A local file asked for last: its toast, when it shows, is the only one (an internal page's says nothing).
+  const local = localFiles()
+  expect(await askToOpen(app, web, local.text, 'background-tab')).toBe('deny')
+  const toasts = shell.getByTestId('toast')
+  await expect(toasts.filter({ hasText: 'Local file blocked: orbit-local.txt' })).toBeVisible()
+
+  expect({
+    linkMenu: linkMenu.filter((l) => OPEN_OR_SAVE.includes(l)),
+    imageMenu: imageMenu.filter((l) => OPEN_OR_SAVE.includes(l)),
+    answers,
+    split: await splitTabs(app, id),
+    blocked: (await state(app)).tabs[id]?.blockedPopups,
+    tabs: await orbitTabs(),
+    loads: await loads(),
+    toasts: await toasts.count(),
+  }).toEqual({
+    linkMenu: [],
+    imageMenu: [],
+    answers: ['deny', 'deny', 'deny', 'deny', 'deny', 'deny', 'deny'],
+    split: [],
+    blocked: undefined,
+    tabs: [],
+    loads: [],
+    toasts: 1,
+  })
+})
+
 test('[NV-12] a script, a page’s source or a data link offers no way to open it; copying it stays (round 2 fix check F6)', async () => {
   const { app } = orbit
   const web = page('Odd')
