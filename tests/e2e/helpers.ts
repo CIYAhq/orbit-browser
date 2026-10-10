@@ -109,9 +109,12 @@ function checkQuit(app: ElectronApplication): () => string {
       if (thrown.length < 4000) thrown += String(chunk)
       return
     }
-    recent = (recent + String(chunk)).slice(-4000)
-    const at = recent.indexOf(UNCAUGHT)
-    if (at >= 0) thrown = recent.slice(at)
+    // Look for the marker before trimming: one write can be longer than what is kept. The tail
+    // kept is just long enough to find a marker split across two writes.
+    const text = recent + String(chunk)
+    const at = text.indexOf(UNCAUGHT)
+    if (at >= 0) thrown = text.slice(at, at + 4000)
+    else recent = text.slice(-UNCAUGHT.length)
   })
   const outputDone = new Promise((resolve) => (proc.stderr ? proc.stderr.once('close', resolve) : resolve(null)))
   const close = app.close.bind(app)
