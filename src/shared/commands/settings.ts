@@ -83,7 +83,8 @@ export const SETTINGS_ACTIONS: SettingsActionDef[] = [
   },
   {
     id: 'settings.about',
-    title: 'About Orbit',
+    // Not "About Orbit": typing the app's own name in the command bar shouldn't add a row.
+    title: 'About',
     category: 'App',
     settings: { section: 'about' },
     keywords: ['version', 'build info', 'licence', 'license', 'credits'],
