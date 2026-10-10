@@ -120,6 +120,21 @@ const promptView = (app: ElectronApplication) =>
     return g.__orbitNav.prompt()
   })
 
+/**
+ * Where the prompt view sits from a tab page's top-left corner, both read at once; null while the
+ * view isn't placed. The view follows the page as the layout settles.
+ */
+const promptFromCorner = (app: ElectronApplication, tabId: string) =>
+  app.evaluate((_e, id) => {
+    const g = globalThis as unknown as {
+      __orbit: { ctx: { windows: { tabViewBounds: (t: string) => Electron.Rectangle | undefined } } }
+      __orbitNav: { prompt: () => { placed: boolean; bounds?: Electron.Rectangle } }
+    }
+    const view = g.__orbitNav.prompt()
+    const page = g.__orbit.ctx.windows.tabViewBounds(id)
+    return view.placed && view.bounds && page ? { x: view.bounds.x - page.x, y: view.bounds.y - page.y } : null
+  }, tabId)
+
 /** The prompt view's own page (view=prompt), once it has started. */
 async function promptPage(app: ElectronApplication): Promise<Page> {
   const deadline = Date.now() + 20_000
@@ -508,13 +523,11 @@ test('[NV-15][SV-01] in split view the pane without the focus shows its prompt t
   // The focus stays where it was.
   const win = await windowState(app)
   expect(win.activeTab[win.spaceId]).toBe(right)
-  // With the sidebar hidden it waits over the corner of the pane that asks.
+  // With the sidebar hidden it waits over the corner of the pane that asks. The panes move as the
+  // sidebar slides away and the split settles: the view follows the pane's corner.
   await action(app, 'sidebar.toggle')
   await expect.poll(async () => (await windowState(app)).sidebar.visible).toBe(false)
-  const shown = await settledPage(app, left)
-  await expect.poll(async () => (await promptView(app)).placed).toBe(true)
-  const bounds = (await promptView(app)).bounds
-  expect(bounds && { x: bounds.x, y: bounds.y }).toEqual({ x: shown.x - 2, y: shown.y - 2 })
+  await expect.poll(() => promptFromCorner(app, left)).toEqual({ x: -2, y: -2 })
   const card = (await promptPage(app)).getByTestId('permission-prompt')
   await card.getByTestId('permission-allow').click()
   await expect.poll(() => answerOf(p, 'notifications')).toBe('granted')
