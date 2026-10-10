@@ -1292,6 +1292,19 @@ export class WindowManager {
     const panes = tabId && frame ? fastSwitchPanes(state, prev, tabId, before, frame) : null
     if (panes) {
       rec.minPaneSeq = this.ctx.store.seq + 1
+      if (panes.some((p) => !this.liveContents(p.tabId))) {
+        // A sleeping tab's page takes longer than a frame to wake: it wakes just after this change
+        // has gone out, so the sidebar draws the new selection first (FL-29: ⌘W → next tab selected
+        // in a frame; the card shows the page's background meanwhile).
+        const shown = rec.panes
+        setImmediate(() => {
+          if (rec.win.isDestroyed() || rec.panes !== shown || activeTabOf(this.ctx.store.state, rec.id) !== tabId)
+            return
+          this.applyPanes(rec.id, panes, rec.radius)
+          if (tabId && !rec.overlayShown) this.liveContents(tabId)?.focus()
+        })
+        return
+      }
       this.applyPanes(rec.id, panes, rec.radius)
     } else if (!tabId) {
       rec.minPaneSeq = this.ctx.store.seq + 1
