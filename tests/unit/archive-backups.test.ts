@@ -366,6 +366,43 @@ describe('Sidebar backups (AR-11)', () => {
     expect(readdirSync(dir).sort()).toEqual([first.id, second.id, third.id].map((id) => `${id}.json`).sort())
   })
 
+  it('[AR-11] backups whose file can’t be read are listed as unreadable; one is never the answer for the same sidebar (review F6)', async () => {
+    const w = await world()
+    const dir = mkdtempSync(join(tmpdir(), 'orbit-backups-'))
+    dirs.push(dir)
+    const backups = new BackupStore(dir)
+    const good = await backups.take(w.store.state, at(0, 9))
+    const hash = good.hash
+    // Cut short, empty, from another version, not a backup at all.
+    const bad = {
+      cut: `${at(0, 8)}-2-1-${hash}`,
+      empty: `${at(0, 7)}-2-1-${hash}`,
+      other: `${at(0, 6)}-2-1-${hash}`,
+      garbage: `${at(0, 5)}-2-1-${hash}`,
+    }
+    const text = readFileSync(join(dir, `${good.id}.json`), 'utf8')
+    writeFileSync(join(dir, `${bad.cut}.json`), text.slice(0, text.length / 2))
+    writeFileSync(join(dir, `${bad.empty}.json`), '')
+    writeFileSync(join(dir, `${bad.other}.json`), text.replace('"v":1', '"v":99'))
+    writeFileSync(join(dir, `${bad.garbage}.json`), '\u0000\u0001 not json')
+    const listed = await backups.list()
+    expect(listed.map((b) => [b.id, b.unreadable === true])).toEqual([
+      [good.id, false],
+      [bad.cut, true],
+      [bad.empty, true],
+      [bad.other, true],
+      [bad.garbage, true],
+    ])
+    // A file that changes is checked again.
+    writeFileSync(join(dir, `${bad.empty}.json`), text)
+    expect((await backups.list()).find((b) => b.id === bad.empty)?.unreadable).toBeUndefined()
+    // The newest backup holds the same sidebar but can't be read: a new one is written.
+    writeFileSync(join(dir, `${good.id}.json`), '{"v":1,"at":')
+    const again = await backups.take(w.store.state, at(0, 10))
+    expect(again.id).not.toBe(good.id)
+    expect(await backups.read(again.id)).toBeDefined()
+  })
+
   it('[AR-11] a deleted profile leaves the backups too: its Favorites, its Spaces and their tabs (review M5, PR-08)', async () => {
     const w = await world()
     const dir = mkdtempSync(join(tmpdir(), 'orbit-backups-'))

@@ -140,6 +140,8 @@ export interface BackupInfo {
   /** How many Spaces and tabs it holds. */
   spaces: number
   tabs: number
+  /** Its file can't be read (cut short, damaged, or from another version of Orbit): it can't be restored. */
+  unreadable?: boolean
 }
 
 /** What Restore Data did (AR-11). */
@@ -263,7 +265,7 @@ export interface ArchiveCommands {
     }
   }
 
-  /** Sidebar backups, newest first (AR-11). */
+  /** Sidebar backups, newest first (AR-11); those whose file can't be read are marked `unreadable`. */
   'backups.list': { args: Record<string, never>; result: BackupInfo[] }
   /**
    * Puts the sidebar back as it was in a backup (AR-11): Spaces, Favorites, pinned and Today tabs,

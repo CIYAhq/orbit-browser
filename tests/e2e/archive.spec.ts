@@ -1,3 +1,5 @@
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 import type { ArchivePage, ArchiveRestoreResult, BackupInfo, LibraryShow } from '../../src/shared/commands/archive'
 import {
@@ -848,6 +850,8 @@ test('[AR-11] Restore Data lists sidebar backups; the one from before a folder w
   await lib.getByTestId('backup-confirm-ok').click()
   const toast = lib.getByTestId('library-toast').filter({ hasText: 'Sidebar restored from today at' })
   await expect(toast).toBeVisible()
+  // Under the pointer the toast stays (FL-22) while the checks below run.
+  await toast.hover()
 
   // The folder is back in the pinned section with its tabs, which left the Archive; the tab
   // opened since went there.
@@ -882,4 +886,28 @@ test('[AR-11] Restore Data lists sidebar backups; the one from before a folder w
   await lib.keyboard.press(`${mod}+Z`)
   await expect.poll(async () => (await state(app)).folders[folderId]).toBeUndefined()
   await expect.poll(async () => (await state(app)).tabs[late]?.url).toBe(fx.url('/page/Late'))
+})
+
+test('[AR-11] a backup whose file can’t be read is listed as unreadable, without Restore…', async () => {
+  const { app, userData } = orbit
+  const t = await newTab(app, fx.url('/page/Backed'))
+  await waitTab(app, t, '/page/Backed')
+  const good = (await run(app, 'backups.take')) as BackupInfo
+  // A backup from an hour before, cut short.
+  const cut = `${good.at - 3_600_000}-1-1-0badf00d`
+  writeFileSync(join(userData, 'backups', `${cut}.json`), '{"v":1,"at":')
+  await openViaCommandBar(orbit, 'Restore Data')
+  const lib = await libraryPage(app)
+  await expect(lib.getByTestId('library-section')).toHaveAttribute('data-section-id', 'backups')
+  const bad = lib.locator(`[data-testid="backup-row"][data-id="${cut}"]`)
+  await expect(bad).toHaveAttribute('data-unreadable', 'true')
+  await expect(bad.getByTestId('backup-row-counts')).toHaveText('Can’t be read')
+  await expect(bad.getByTestId('backup-restore')).toBeDisabled()
+  // Enter on it asks nothing; the good one still restores.
+  await bad.click()
+  await lib.keyboard.press('Enter')
+  await expect(lib.getByTestId('backup-confirm')).toHaveCount(0)
+  const row = lib.locator(`[data-testid="backup-row"][data-id="${good.id}"]`)
+  await expect(row).not.toHaveAttribute('data-unreadable')
+  await expect(row.getByTestId('backup-restore')).toBeEnabled()
 })

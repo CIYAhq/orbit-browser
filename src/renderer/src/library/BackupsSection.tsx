@@ -125,7 +125,7 @@ export function BackupsSection({ show }: LibrarySectionProps) {
     }
     if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
       const b = rows[highlight]
-      if (!b || busy) return
+      if (!b || busy || b.unreadable) return
       e.preventDefault()
       setAsk(b)
     }
@@ -189,27 +189,32 @@ export function BackupsSection({ show }: LibrarySectionProps) {
             <div key={b.id} role="presentation">
               {heading}
               <div
-                className={`backup-row${highlighted ? ' is-highlighted' : ''}`}
+                className={`backup-row${highlighted ? ' is-highlighted' : ''}${b.unreadable ? ' is-unreadable' : ''}`}
                 role="option"
                 aria-selected={highlighted}
                 data-testid="backup-row"
                 data-id={b.id}
                 data-offset={i}
+                data-unreadable={b.unreadable ? 'true' : undefined}
                 onClick={() => setHighlight(i)}
                 onDoubleClick={() => {
-                  if (!busy) setAsk(b)
+                  if (!busy && !b.unreadable) setAsk(b)
                 }}
               >
                 <span className="backup-row__time">{timeFormat.format(b.at)}</span>
-                <span className="backup-row__counts" data-testid="backup-row-counts">
-                  {counts(b)}
+                <span
+                  className="backup-row__counts"
+                  data-testid="backup-row-counts"
+                  title={b.unreadable ? 'The file is cut short, damaged or from another version of Orbit' : undefined}
+                >
+                  {b.unreadable ? 'Can’t be read' : counts(b)}
                 </span>
                 <span className="backup-row__ago">{ago(b.at, now)}</span>
                 <button
                   type="button"
                   className="backup-row__restore"
                   data-testid="backup-restore"
-                  disabled={busy}
+                  disabled={busy || b.unreadable}
                   onClick={(e) => {
                     e.stopPropagation()
                     setHighlight(i)

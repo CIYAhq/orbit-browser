@@ -1,4 +1,4 @@
-import { mkdir, open, readdir, readFile, rename, rm } from 'node:fs/promises'
+import { mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { BackupInfo } from '../../shared/commands/archive'
 import type { OrbitState, ProfileId } from '../../shared/state'
@@ -92,6 +92,8 @@ async function writeAtomic(file: string, data: string): Promise<void> {
 export class BackupStore {
   private queue: Promise<unknown> = Promise.resolve()
   private cleaned = false
+  /** Whether each backup's file can be restored, as checked, with the size and time it had then. */
+  private checked = new Map<string, { size: number; mtimeMs: number; ok: boolean }>()
   /** Called after backups were added or removed. */
   onChange?: () => void
 
@@ -103,9 +105,40 @@ export class BackupStore {
     return run
   }
 
-  /** Every backup, newest first. */
+  /** Every backup, newest first; one whose file can't be restored is marked `unreadable`. */
   list(): Promise<StoredBackup[]> {
-    return this.serial(() => this.readList())
+    return this.serial(async () => {
+      const list = await this.readList()
+      const out: StoredBackup[] = []
+      for (const b of list) out.push((await this.readable(b.id)) ? b : { ...b, unreadable: true })
+      const listed = new Set(list.map((b) => b.id))
+      for (const id of this.checked.keys()) if (!listed.has(id)) this.checked.delete(id)
+      return out
+    })
+  }
+
+  /**
+   * Whether backup `id`'s file holds a sidebar this version can restore: it reads whole and parses.
+   * Each file is read once, and again only when its size or time changes.
+   */
+  private async readable(id: string): Promise<boolean> {
+    const file = join(this.dir, `${id}.json`)
+    let seen: { size: number; mtimeMs: number }
+    try {
+      seen = await stat(file)
+    } catch {
+      return false
+    }
+    const known = this.checked.get(id)
+    if (known && known.size === seen.size && known.mtimeMs === seen.mtimeMs) return known.ok
+    let ok: boolean
+    try {
+      ok = !!parseSnapshot(JSON.parse(await readFile(file, 'utf8')))
+    } catch {
+      ok = false
+    }
+    this.checked.set(id, { size: seen.size, mtimeMs: seen.mtimeMs, ok })
+    return ok
   }
 
   private async readList(): Promise<StoredBackup[]> {
@@ -138,7 +171,8 @@ export class BackupStore {
     return this.serial(async () => {
       const list = await this.readList()
       const newest = list[0]
-      if (newest && newest.hash === hash) return newest
+      // The same sidebar as the newest backup: that one is the answer, if it can be restored.
+      if (newest && newest.hash === hash && (await this.readable(newest.id))) return newest
       const { spaces, tabs } = snapshotCounts(snap)
       const id = `${now}-${spaces}-${tabs}-${hash}`
       const info: StoredBackup = { id, at: now, spaces, tabs, hash }

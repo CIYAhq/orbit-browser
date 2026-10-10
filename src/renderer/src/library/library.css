@@ -879,3 +879,17 @@ html[data-view="library"] body {
 .archive__button:disabled {
   opacity: 0.5;
 }
+
+/* A backup whose file can't be read stays listed, dimmed, with no Restore… (AR-11). */
+.backup-row.is-unreadable .backup-row__time {
+  color: var(--text-muted);
+}
+
+.backup-row.is-unreadable .backup-row__restore {
+  display: none;
+}
+
+.backup-row.is-unreadable:hover .backup-row__ago,
+.backup-row.is-unreadable.is-highlighted .backup-row__ago {
+  visibility: visible;
+}

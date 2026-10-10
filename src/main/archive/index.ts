@@ -340,7 +340,13 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
 
   // ---- Sidebar backups and Restore Data (AR-11) ----
 
-  const info = (b: BackupInfo): BackupInfo => ({ id: b.id, at: b.at, spaces: b.spaces, tabs: b.tabs })
+  const info = (b: BackupInfo): BackupInfo => ({
+    id: b.id,
+    at: b.at,
+    spaces: b.spaces,
+    tabs: b.tabs,
+    ...(b.unreadable ? { unreadable: true } : {}),
+  })
   commands.register('backups.list', async () => (await backups.list()).map(info))
   commands.register('backups.take', async () => {
     try {
