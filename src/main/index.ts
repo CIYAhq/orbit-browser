@@ -45,7 +45,12 @@ function start(): void {
   perf.mark('app:ready')
   const userData = app.getPath('userData')
   const stateFile = join(userData, 'orbit-state.json')
-  const { state } = loadState(stateFile)
+  const { state, firstRun } = loadState(stateFile)
+  // Installs from before onboarding existed never set `onboarded`: they are not first runs (OB-01).
+  // A first run records its step as soon as onboarding opens, so one quit part-way still resumes.
+  if (!firstRun && !state.settings.onboarded && state.settings.onboardingStep === undefined) {
+    state.settings.onboarded = true
+  }
   perf.mark('state:loaded')
   const store = new Store(state)
   const persistence = new Persistence(store, stateFile)

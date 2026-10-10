@@ -139,6 +139,13 @@ class Onboarding {
   }
 
   private open(): void {
+    // Recorded at once, so a quit on the welcome step resumes there rather than counting as done
+    // (an install with no step and onboarded false is from before onboarding: see index.ts).
+    if (this.ctx.store.state.settings.onboardingStep === undefined) {
+      this.ctx.store.update((d) => {
+        d.settings.onboardingStep = 'welcome'
+      })
+    }
     const win = new BrowserWindow({
       ...this.bounds(),
       minWidth: MIN_SIZE.width,

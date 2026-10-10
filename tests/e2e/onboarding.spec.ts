@@ -223,6 +223,12 @@ test('[OB-14][OB-01] onboarding resumes where a quit left it; Skip setup opens a
   const { userData } = orbit
   const neutral = await firstSpaceTheme(app)
   let page = await onboardingPage(app, 'welcome')
+  // Quit on the very first step: the next start shows onboarding again, at the welcome step.
+  expect((await state(app)).settings.onboardingStep).toBe('welcome')
+  await app.close()
+  orbit = await launchWithOnboarding(userData)
+  app = orbit.app
+  page = await onboardingPage(app, 'welcome')
   await next(page, 'import')
   await next(page, 'theme')
   await expect.poll(async () => (await state(app)).settings.onboardingStep).toBe('theme')
@@ -256,6 +262,38 @@ test('[OB-14][OB-01] onboarding resumes where a quit left it; Skip setup opens a
   await expect((await viewPage(app, 'shell')).getByTestId('sidebar')).toBeVisible()
   expect(await onboardingOpen(app)).toBe(false)
   expect(await browserWindowIds(app)).toHaveLength(1)
+})
+
+test('[OB-01] an existing install never gets onboarding: its window comes back at launch and when reopened with none open', async () => {
+  // A state file as Orbit wrote it before onboarding existed: onboarded false, no step, one window.
+  orbit = await launchFirstRun()
+  let { app } = orbit
+  const { userData } = orbit
+  await expect((await viewPage(app, 'shell')).getByTestId('sidebar')).toBeVisible()
+  await app.close()
+  const saved = JSON.parse(readFileSync(join(userData, 'orbit-state.json'), 'utf8'))
+  expect(saved.settings.onboarded).toBe(false)
+  expect(saved.settings).not.toHaveProperty('onboardingStep')
+  const [windowId] = Object.keys(saved.windows)
+  expect(Object.keys(saved.windows)).toHaveLength(1)
+
+  orbit = await launchWithOnboarding(userData)
+  app = orbit.app
+  await expect((await viewPage(app, 'shell')).getByTestId('sidebar')).toBeVisible()
+  expect((await state(app)).settings.onboarded).toBe(true)
+
+  // macOS: closing the last window keeps Orbit running, and a Dock click (activate) reopens it.
+  await app.evaluate(({ app: electronApp, BrowserWindow }) => {
+    electronApp.removeAllListeners('window-all-closed')
+    electronApp.on('window-all-closed', () => {})
+    for (const win of BrowserWindow.getAllWindows()) win.close()
+  })
+  await expect.poll(() => browserWindowIds(app)).toEqual([])
+  await app.evaluate(({ app: electronApp }) => {
+    electronApp.emit('activate')
+  })
+  await expect.poll(() => browserWindowIds(app)).toEqual([windowId])
+  expect(await onboardingOpen(app)).toBe(false)
 })
 
 test('[OB-14] Reset Onboarding runs it again over the open window and keeps everything; browser keys rest meanwhile', async () => {
