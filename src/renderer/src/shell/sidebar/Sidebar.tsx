@@ -7,6 +7,7 @@ import {
 import { DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH } from '../../../../shared/defaults'
 import type { WindowState } from '../../../../shared/state'
 import { invoke } from '../../api'
+import { DownloadsTray } from '../../downloads/DownloadsTray'
 import { UpdateBanner } from '../../settings/UpdateBanner'
 import { useOrbit } from '../../store'
 import { PrivateSidebar } from '../chrome/PrivateSidebar'
@@ -37,7 +38,11 @@ export function Sidebar({ win, floating = false }: { win: WindowState; floating?
     >
       <TopBar win={win} floating={floating} />
       {isPrivate ? (
-        <PrivateSidebar spaceId={win.spaceId} />
+        <>
+          <PrivateSidebar spaceId={win.spaceId} />
+          {/* Downloads lane: the private window's own downloads, and only those (DL-03, DL-16). */}
+          <DownloadsTray win={win} />
+        </>
       ) : (
         <>
           <SpaceStrip windowId={win.id} spaceId={win.spaceId} />
@@ -46,6 +51,8 @@ export function Sidebar({ win, floating = false }: { win: WindowState; floating?
           <UpdateBanner />
           {/* Media lane: transient media tray above the bottom bar (SB-10, MD-09). */}
           <MediaTray windowId={win.id} />
+          {/* Downloads lane: running downloads, just above the bottom bar (DL-03). */}
+          <DownloadsTray win={win} />
           <SpaceBar win={win} />
         </>
       )}

@@ -26,6 +26,20 @@ async function boot(): Promise<void> {
     )
     return
   }
+  // An internal page (DT-13): Orbit's UI in a normal tab. Keys go to it as to any page.
+  if (view === 'internal') {
+    const app = import('./internal/InternalApp')
+    await initStore()
+    document.documentElement.dataset.view = view
+    document.documentElement.dataset.platform = window.orbit.platform
+    const { InternalApp } = await app
+    createRoot(document.getElementById('root') as HTMLElement).render(
+      <StrictMode>
+        <InternalApp />
+      </StrictMode>,
+    )
+    return
+  }
   // Load the view's code while the state snapshot arrives.
   const app =
     view === 'overlay'

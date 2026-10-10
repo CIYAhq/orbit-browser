@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   decideLink,
   framesMayOpen,
+  isInternalPageUrl,
   isLocalFileUrl,
   isMeetingLink,
   type LinkSettings,
@@ -192,6 +193,36 @@ describe('local files a page may have Orbit open (D49)', () => {
     expect(localFileBlockedMessage('file:///home/me/')).toBe('Local file blocked: me')
     expect(localFileBlockedMessage('file:///tmp/100%.txt')).toBe('Local file blocked: 100%.txt')
     expect(localFileBlockedMessage('file:///')).toBe('Local file blocked: file:///')
+  })
+  it('[DT-13] an internal page only for another internal page: no web, local, blank or unknown page opens one (D53)', () => {
+    const internal = 'orbit://version/'
+    for (const from of [
+      'https://example.com/a',
+      'file:///tmp/orbit/index.html',
+      'about:blank',
+      'data:text/html,<a>x</a>',
+      `view-source:${internal}`,
+      '',
+      undefined,
+    ]) {
+      expect(pageMayOpen(from, internal), String(from)).toBe(false)
+      expect(pageMayOpen(from, 'ORBIT://pages/'), String(from)).toBe(false)
+      expect(pageMayOpen(from, ` view-source:${internal}`), String(from)).toBe(false)
+    }
+    expect(pageMayOpen('orbit://pages/', internal)).toBe(true)
+    expect(pageMayOpen('orbit://pages', internal)).toBe(true)
+    // An internal page opens web pages, and no local file.
+    expect(pageMayOpen('orbit://pages/', 'https://example.org/b')).toBe(true)
+    expect(pageMayOpen('orbit://pages/', file)).toBe(false)
+    // Asked from a frame Orbit can't name: only when every frame is an internal page's.
+    const framed = (...origins: string[]) => ({ mainFrame: { framesInSubtree: origins.map((origin) => ({ origin })) } })
+    expect(framesMayOpen(framed('https://example.com'), internal)).toBe(false)
+    expect(framesMayOpen(framed('file://'), internal)).toBe(false)
+    expect(framesMayOpen(framed('orbit://pages', 'https://example.com'), internal)).toBe(false)
+    expect(framesMayOpen(framed('orbit://pages'), internal)).toBe(true)
+    expect(isInternalPageUrl(internal)).toBe(true)
+    expect(isInternalPageUrl('https://example.com/orbit://x')).toBe(false)
+    expect(isInternalPageUrl('orbitx://y')).toBe(false)
   })
   it('which addresses are local files', () => {
     expect(isLocalFileUrl(file)).toBe(true)

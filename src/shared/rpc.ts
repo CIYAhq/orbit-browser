@@ -11,6 +11,7 @@
 import type { ArchiveCommands } from './commands/archive'
 import type { CommandBarCommands } from './commands/commandbar'
 import type { CoreCommands, CoreEvents } from './commands/core'
+import type { DevtoolsCommands } from './commands/devtools'
 import type { DownloadCommands } from './commands/downloads'
 import type { ExtensionCommands } from './commands/extensions'
 import type { HistoryCommands } from './commands/history'
@@ -37,6 +38,7 @@ export interface OrbitCommands
     ExtensionCommands,
     SettingsCommands,
     DownloadCommands,
+    DevtoolsCommands,
     ImportCommands,
     NavCommands,
     MediaCommands {}
@@ -83,6 +85,8 @@ export type RendererView =
   | 'onboarding'
   /** Import lane: the import window (IM-01). */
   | 'import'
+  /** Downloads lane: an internal page, `orbit://<page>/` in a tab (DT-13). */
+  | 'internal'
 
 /** The API the preload exposes on `window.orbit` to Orbit's own UI renderers. */
 export interface OrbitBridge {

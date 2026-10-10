@@ -61,7 +61,9 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
   const stopBackups = scheduleBackups(ctx, backups)
   // A deleted profile's data leaves the backups, as it leaves the Archive (PR-08).
   const stopProfileDrops = dropDeletedProfiles(ctx, backups)
-  app.on('before-quit', () => {
+  app.on('before-quit', (event) => {
+    // Stopped by a feature that asks first (downloads in progress, DL-01): the Archive keeps running.
+    if (event.defaultPrevented) return
     stopRetention()
     stopBackups()
     stopProfileDrops()

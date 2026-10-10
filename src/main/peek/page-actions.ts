@@ -2,6 +2,7 @@ import { clipboard, type WebContents } from 'electron'
 import { sameZoom, zoomPercent, zoomStep } from '../../shared/nav'
 import { cleanUrl, markdownLink } from '../../shared/tabs'
 import { fallbackTitle } from '../../shared/url'
+import { runDevtoolsAction } from '../devtools/control'
 
 /** Zooms a page one step in (1) or out (-1), or back to 100% (0), and returns its new zoom factor. */
 export type PageZoom = (contents: WebContents, direction: 1 | -1 | 0) => number
@@ -52,10 +53,11 @@ export function runPageAction(id: string, contents: WebContents, toast: (message
     case 'page.print':
       contents.print()
       return true
+    // DevTools dock inside the page's own view, as for a tab (DT-01).
     case 'devtools.toggle':
-      if (contents.isDevToolsOpened()) contents.closeDevTools()
-      else contents.openDevTools({ mode: 'detach' })
-      return true
+    case 'devtools.console':
+    case 'devtools.inspect':
+      return runDevtoolsAction(id, contents)
     // Copies like a tab's: tracking parameters dropped (TB-20).
     case 'tab.copyUrl':
     case 'tab.copyUrlMarkdown': {

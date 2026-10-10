@@ -48,6 +48,8 @@ export const DEFAULT_SETTINGS: Settings = {
   updateChecks: true,
   librarySection: 'archive',
   archiveKeepDays: 30,
+  recentFiles: { downloads: true, screenshots: false },
+  libraryScreenshots: false,
 }
 
 /** Favorites per profile (FV-02). */
