@@ -114,7 +114,7 @@ Spec: `spec/tabs.md`
 | FD-07 | Folder icon | P1 | 🟡 partial | ✅ e2e | – | emoji icon via Change Icon; open/closed glyphs; not full-colour |
 | FD-08 | Folder hover preview and search | P1 | ✅ | ✅ e2e | – | magnifier on folder hover opens a search popover (custom names, first match selected, Enter opens and peeks) |
 | FD-09 | Folder context menu | P1 | 🟡 partial | ✅ e2e | – | Rename, Change Icon, Duplicate, Copy All Links, Paste URL, Move to, Delete; no Open [Folder] command |
-| FD-10 | Delete a folder | P1 | ✅ | ✅ e2e | – | confirm when non-empty, contents to Archive, Cmd+Z restores all |
+| FD-10 | Delete a folder | P1 | ✅ | ✅ e2e+unit | – | confirm when non-empty, contents to Archive, Cmd+Z restores all |
 | FD-11 | Auto-updating folders | P2 | – | – | – |  |
 
 ## Spaces and Profiles (prefixes SP, PR)
@@ -519,7 +519,7 @@ Spec: `spec/downloads.md`
 | DL-06 | Drag a download out (and into web pages) | P1 | – | – | – |  |
 | DL-07 | Download location setting (per profile) | P1 | – | – | – |  |
 | DL-08 | Remove, clear and delete downloads | P1 | – | – | – |  |
-| DL-09 | The Library (container view) | P1 | 🟡 partial | ✅ e2e | – | Library container (archive lane): section list on the left with the Archive, History (AR-10) and Backups (AR-11) sections; other lanes add theirs (Media, Downloads, Canvases & Notes, Spaces, Site customizations) through the registry. Reopens to the last section; Esc/⌘W close and the previous tab comes back. Its view is made once Orbit is idle after launch, so even the first open is quick (about 70 ms at 10,000 entries; later opens 10–50 ms) |
+| DL-09 | The Library (container view) | P1 | 🟡 partial | ✅ e2e+unit | – | Library container (archive lane): section list on the left with the Archive, History (AR-10) and Backups (AR-11) sections; other lanes add theirs (Media, Downloads, Canvases & Notes, Spaces, Site customizations) through the registry. Reopens to the last section; Esc/⌘W close and the previous tab comes back. Its view is made once Orbit is idle after launch, so even the first open is quick (about 70 ms at 10,000 entries; later opens 10–50 ms) |
 | DL-10 | Library → Downloads section | P1 | – | – | – |  |
 | DL-11 | Library → Media section | P2 | – | – | – |  |
 | DL-12 | Download safety | P1 | – | – | – |  |
