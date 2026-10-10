@@ -620,14 +620,17 @@ test('[DT-13] typing orbit://pages opens the internal pages in a tab; its links 
   // A link opens a page in the same tab.
   await page.getByTestId('internal-page-link').filter({ hasText: 'orbit://version/' }).click()
   await expect(root).toHaveAttribute('data-page', 'version')
-  const versions = await orbit.app.evaluate(({ app }) => ({
-    orbit: app.getVersion(),
+  // The build info About shows, and copies.
+  const { version } = JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as { version: string }
+  const engine = await orbit.app.evaluate(() => ({
     electron: process.versions.electron,
-    chromium: process.versions.chrome,
+    chrome: process.versions.chrome,
   }))
-  await expect(page.getByTestId('version-orbit')).toHaveText(versions.orbit)
-  await expect(page.getByTestId('version-electron')).toHaveText(versions.electron)
-  await expect(page.getByTestId('version-chromium')).toHaveText(versions.chromium)
+  await expect(page.getByTestId('version-version')).toHaveText(version)
+  await expect(page.getByTestId('version-electron')).toHaveText(engine.electron)
+  await expect(page.getByTestId('version-chrome')).toHaveText(engine.chrome)
+  await page.getByTestId('version-copy').click()
+  await expect.poll(() => orbit.app.evaluate(({ clipboard }) => clipboard.readText())).toContain(`Orbit ${version}`)
   await expect.poll(async () => (await state(orbit.app)).tabs[tabId]?.title).toBe('Version')
   expect((await state(orbit.app)).tabs[tabId]).toMatchObject({ url: 'orbit://version/' })
   // It follows the app's state: dark when Orbit is.

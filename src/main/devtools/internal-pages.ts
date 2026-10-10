@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises'
-import { type as osType, release } from 'node:os'
 import { extname, join } from 'node:path'
 import {
   app,
@@ -13,7 +12,7 @@ import {
   type WebFrameMain,
   webContents,
 } from 'electron'
-import { INTERNAL_SCHEME, type VersionInfo } from '../../shared/commands/devtools'
+import { INTERNAL_SCHEME } from '../../shared/commands/devtools'
 import type { CommandName, EventName, OrbitEvents } from '../../shared/rpc'
 import type { MainContext } from '../context'
 import { rendererEntry } from '../windows'
@@ -125,18 +124,6 @@ function internalFrame(frame: WebFrameMain | null | undefined): frame is WebFram
   return !!frame && !frame.parent && isInternalUrl(frame.url)
 }
 
-export function versionInfo(): VersionInfo {
-  return {
-    orbit: app.getVersion(),
-    electron: process.versions.electron ?? '',
-    chromium: process.versions.chrome ?? '',
-    node: process.versions.node,
-    v8: process.versions.v8,
-    os: `${osType()} ${release()}`,
-    arch: process.arch,
-  }
-}
-
 /** Serves internal pages in every profile session, bridges them to main, and keeps web content out. */
 export function registerInternalPages(ctx: MainContext): void {
   const { commands, events, hooks, sessions, store, tabs, windows } = ctx
@@ -190,8 +177,6 @@ export function registerInternalPages(ctx: MainContext): void {
   windows.onBroadcast((channel, args) => {
     if (live.size > 0) forward(channel, args)
   })
-
-  commands.register('devtools.version', () => versionInfo())
 
   // ---- Keeping web content out ----
   const guard = (contents: WebContents) => {

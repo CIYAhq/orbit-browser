@@ -116,3 +116,21 @@ html[data-view="internal"] body {
   font-size: 13px;
   overflow-wrap: anywhere;
 }
+
+.internal__actions {
+  margin: 20px 0 0;
+}
+
+.internal__button {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--internal-line);
+  background: transparent;
+  color: var(--internal-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.internal__button:hover {
+  background: var(--internal-line);
+}

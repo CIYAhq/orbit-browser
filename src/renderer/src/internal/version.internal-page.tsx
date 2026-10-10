@@ -1,35 +1,47 @@
 import { useEffect, useState } from 'react'
-import type { VersionInfo } from '../../../shared/commands/devtools'
+import type { BuildInfo } from '../../../shared/commands/settings'
 import { invoke } from '../api'
 import type { InternalPage } from './registry'
 
-const ROWS: [keyof VersionInfo, string][] = [
-  ['orbit', 'Orbit'],
+const ROWS: [keyof BuildInfo, string][] = [
+  ['version', 'Orbit'],
+  ['built', 'Built'],
   ['electron', 'Electron'],
-  ['chromium', 'Chromium'],
+  ['chrome', 'Chromium'],
   ['v8', 'V8'],
   ['node', 'Node.js'],
   ['os', 'Operating system'],
   ['arch', 'Architecture'],
 ]
 
-/** `orbit://version/`: what Orbit runs on, to quote in a bug report (the text can be selected). */
+/** `orbit://version/`: what Orbit runs on (the build info About shows), to quote in a bug report. */
 function VersionPage() {
-  const [info, setInfo] = useState<VersionInfo | null>(null)
+  const [info, setInfo] = useState<BuildInfo | null>(null)
+  const [copied, setCopied] = useState(false)
   useEffect(() => {
-    void invoke('devtools.version', {}).then(setInfo)
+    void invoke('settings.buildInfo', {}).then(setInfo)
   }, [])
   return (
     <>
       <h1 className="internal__title">Version</h1>
       <dl className="internal__facts" data-testid="version-facts" data-answered={info ? 'true' : 'false'}>
-        {ROWS.map(([key, label]) => (
+        {ROWS.filter(([key]) => !info || info[key]).map(([key, label]) => (
           <div key={key} className="internal__fact">
             <dt>{label}</dt>
             <dd data-testid={`version-${key}`}>{info?.[key] ?? ''}</dd>
           </div>
         ))}
       </dl>
+      <p className="internal__actions">
+        <button
+          type="button"
+          className="internal__button"
+          data-testid="version-copy"
+          onClick={() => void invoke('settings.copyBuildInfo', {}).then(() => setCopied(true))}
+        >
+          {copied ? 'Copied' : 'Copy build info'}
+        </button>
+      </p>
     </>
   )
 }

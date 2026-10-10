@@ -21,8 +21,6 @@ export interface DevtoolsCommands {
   'devtools.close': { args: { tabId?: TabId }; result: void }
   /** Whether a tab's DevTools are open, where, and whether they have the keyboard. */
   'devtools.state': { args: { tabId?: TabId }; result: DevtoolsState }
-  /** What Orbit runs on, for `orbit://version/` (DT-13). */
-  'devtools.version': { args: Record<string, never>; result: VersionInfo }
 }
 
 /**
@@ -30,20 +28,6 @@ export interface DevtoolsCommands {
  * work and how to add one: `src/main/devtools/internal-pages.ts`.
  */
 export const INTERNAL_SCHEME = 'orbit'
-
-/** The internal page listing every internal page. */
-export const INTERNAL_INDEX = 'orbit://pages/'
-
-export interface VersionInfo {
-  orbit: string
-  electron: string
-  chromium: string
-  node: string
-  v8: string
-  /** The OS's name and version, e.g. "Linux 6.8.0" or "Darwin 24.1.0". */
-  os: string
-  arch: string
-}
 
 /** DevTools panels by the engine's names: Elements, Console, Sources, Network, Performance, Application. */
 export type DevtoolsPanel = 'elements' | 'console' | 'sources' | 'network' | 'timeline' | 'resources'
