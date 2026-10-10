@@ -39,6 +39,7 @@ import {
 import type { MainContext } from '../context'
 import {
   addPaneInDraft,
+  favoritesFull,
   isFailure,
   type PaneAnchor,
   restorePaneInDraft,
@@ -366,7 +367,11 @@ export class TabOps {
         }
         if (!d.spaces[tab.spaceId]) tab.spaceId = d.spaceOrder[0] as string
         d.tabs[tab.id] = tab
-        const where = rec.location && containerItems(d, rec.location.container) ? rec.location : undefined
+        // Its old place, unless that is a full Favorites grid (FV-02): then Today.
+        const where =
+          rec.location && containerItems(d, rec.location.container) && !favoritesFull(d, rec.location.container)
+            ? rec.location
+            : undefined
         let landed: ContainerRef | undefined
         // A pane goes back into its split, in this same update (no frame shows it on its own).
         const intoSplit = rec.pane ? restorePaneInDraft(d, tab.id, rec.pane) : undefined

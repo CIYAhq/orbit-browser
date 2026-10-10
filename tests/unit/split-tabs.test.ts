@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MainContext } from '../../src/main/context'
-import { detachTab, overflowsFavorites } from '../../src/main/split/model'
+import { addPaneInDraft, detachTab, overflowsFavorites } from '../../src/main/split/model'
 import { Store } from '../../src/main/store'
 import { activateInDraft, makeTab } from '../../src/main/tabs/model'
 import { TabOps } from '../../src/main/tabs/ops'
@@ -292,5 +292,51 @@ describe('Favorite splits and the Favorites cap', () => {
     expect(ops.favorite(add())).toBe(true)
     // 12 tiles: no room for even one more.
     expect(overflowsFavorites(store.state, v, 2)).toBe(true)
+  })
+
+  /** 11 Favorites and a 3-pane Favorite split: 12 tiles, Favorites full. */
+  const fullFavorites = () => {
+    const w = world()
+    const favorites = { kind: 'favorites', profileId: DEFAULT_PROFILE_ID } as const
+    for (let i = 0; i < 11; i++) expect(w.ops.favorite(w.add())).toBe(true)
+    const panes = [w.add(), w.add(), w.add()]
+    const v = w.split({ type: 'row', sizes: [0.4, 0.3, 0.3], children: panes.map(L) })
+    expect(w.ops.moveItems([v], favorites, 11)).toBe(true)
+    const tiles = () => w.store.state.profiles[DEFAULT_PROFILE_ID]?.favorites ?? []
+    expect(tiles()).toHaveLength(12)
+    return { ...w, panes, v, tiles }
+  }
+
+  for (const how of ['reopened (⌘⇧T)', 'undone (⌘Z)'] as const) {
+    it(`[FV-02][SV-17] a closed pane ${how} when its Favorite split is full goes to Today at 12 Favorites (PR #10 review M1)`, () => {
+      const { store, ops, add, w1, panes, v, tiles } = fullFavorites()
+      const [closed, kept] = panes as [TabId, TabId]
+      ops.closeTabs([closed], 'closed')
+      expect(tiles()).toHaveLength(12)
+      // Two new panes fill the split up to 4, so the closed one can't rejoin it.
+      const extra = [add(), add()]
+      store.update((d) => {
+        for (const id of extra) addPaneInDraft(d, id, kept, 'right')
+      })
+      expect(layoutLeaves(store.state.splits[v]?.layout as SplitLayout)).toHaveLength(4)
+      if (how === 'undone (⌘Z)') expect(ops.undo.undo()).toBe('Close Tab')
+      else expect(ops.reopenLast(w1)).toBe(closed)
+      expect(tiles()).toHaveLength(12)
+      expect(locate(store.state, closed)?.container.kind).toBe('today')
+      expect(layoutLeaves(store.state.splits[v]?.layout as SplitLayout)).toHaveLength(4)
+    })
+  }
+
+  it('[FV-02][SV-19] a Favorite split removed from the sidebar comes back whole in Today once Favorites filled up (PR #10 review M1)', () => {
+    const { store, ops, add, w1, panes, v, tiles } = fullFavorites()
+    ops.deleteItem(v)
+    expect(tiles()).toHaveLength(11)
+    expect(ops.favorite(add())).toBe(true)
+    expect(tiles()).toHaveLength(12)
+    ops.reopenLast(w1)
+    expect(tiles()).toHaveLength(12)
+    const back = splitOfTab(store.state, panes[0] as TabId)
+    expect(back && locate(store.state, back)?.container.kind).toBe('today')
+    expect(layoutLeaves(store.state.splits[back as string]?.layout as SplitLayout).sort()).toEqual([...panes].sort())
   })
 })
