@@ -45,9 +45,15 @@ export function LibraryApp() {
       heard = true
       setOpen(false)
     })
-    // The first open can arrive before this page has loaded: ask what to show.
+    // The first open can arrive before this page has loaded: ask what to show. A view made ahead of
+    // its first open (while Orbit is idle) builds the section to show, hidden, so that open is quick.
     void invoke('library.status', {}).then((status) => {
-      if (!heard && status.open) apply({ ...status, entering: true })
+      if (heard) return
+      if (status.open) apply({ ...status, entering: true })
+      else {
+        setShow((shown) => shown ?? { section: status.section, nonce: 0 })
+        setSectionId((id) => id ?? status.section)
+      }
     })
     return () => {
       offShow()
@@ -76,7 +82,8 @@ export function LibraryApp() {
         )
       }
       requestAnimationFrame(() => perfMark('library:shown'))
-    } else {
+    } else if (show.nonce > 0) {
+      // (A Library made ahead of its first open was never shown: nothing to fade.)
       exit.current = el.animate([{ opacity: 1 }, { opacity: 0, transform: 'scale(0.99)' }], {
         duration: EXIT_MS,
         easing: 'ease-in',

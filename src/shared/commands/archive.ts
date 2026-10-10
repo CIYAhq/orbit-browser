@@ -257,10 +257,14 @@ export interface ArchiveCommands {
    * History). Removing tells the Library view (`library:history.removed`).
    */
   'library.historyMenu': { args: { url: string; profileId?: ProfileId; x?: number; y?: number }; result: void }
-  /** Test-only (ORBIT_E2E=1): where the calling window's Library view is and whether it has focus. */
+  /**
+   * Test-only (ORBIT_E2E=1): whether the calling window's Library view is made with its page loaded
+   * (`ready`), where it is, and its focus.
+   */
   'library.testInfo': {
     args: Record<string, never>
     result: {
+      ready: boolean
       open: boolean
       visible: boolean
       bounds?: { x: number; y: number; width: number; height: number }

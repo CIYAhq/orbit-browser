@@ -8,9 +8,19 @@ import { activeTabOf, loadRenderer, rendererEntry, uiWebPreferences } from '../w
 /** The Library fades out over this long before its view hides (FL-24). */
 const EXIT_MS = 180
 const DEFAULT_RADIUS = 10
+/**
+ * A main window's Library view is made this long after the window first lays out, once Orbit is
+ * idle (no page loading, nothing over the window), so even the first open is quick (FL-24)…
+ */
+export const IDLE_PREPARE_MS = 5000
+/** …checking again this often while Orbit is busy, and making it anyway after this many checks. */
+const IDLE_RETRY_MS = 2000
+const IDLE_CHECKS = 5
 
 interface LibraryWindow {
   view?: WebContentsView
+  /** The view's page has loaded: an open shows it at once. */
+  loaded?: boolean
   open: boolean
   show: LibraryShow
   /** The tab and Space shown when the Library opened: selecting another one closes the Library. */
@@ -51,6 +61,8 @@ export class LibraryHost {
   private frames = new Map<WindowId, Rect>()
   private radii = new Map<WindowId, number>()
   private nonce = 0
+  /** Windows whose Library view is made (or waits to be made) once Orbit is idle. */
+  private idleScheduled = new Set<WindowId>()
   /** Called when the Library opens, closes or changes section in a window. */
   onChange?: (windowId: WindowId, open: boolean, section: string) => void
 
@@ -63,6 +75,10 @@ export class LibraryHost {
       if (!windowId) return
       if (frame && frame.width > 0 && frame.height > 0) this.frames.set(windowId, frame)
       this.radii.set(windowId, radius)
+      if (!this.idleScheduled.has(windowId)) {
+        this.idleScheduled.add(windowId)
+        this.prepareWhenIdle(windowId, IDLE_CHECKS, IDLE_PREPARE_MS)
+      }
       const w = this.wins.get(windowId)
       if (!w?.open || !w.view || !pageOf(w.view)) return
       w.view.setBounds(this.bounds(windowId))
@@ -94,6 +110,22 @@ export class LibraryHost {
     if (!windowId || !win || win.isDestroyed() || this.ctx.store.state.windows[windowId]?.kind !== 'main') return
     const w = this.stateOf(windowId)
     if (!w.view) this.createView(windowId, w)
+  }
+
+  /** Makes a main window's Library view once Orbit is idle (or after `checks` tries), off-screen. */
+  private prepareWhenIdle(windowId: WindowId, checks: number, wait: number): void {
+    const timer = setTimeout(() => {
+      const state = this.ctx.store.state
+      const win = state.windows[windowId]
+      if (!win || this.wins.get(windowId)?.view) {
+        if (!win) this.idleScheduled.delete(windowId)
+        return
+      }
+      const busy = win.overlay.kind !== 'none' || Object.values(state.tabs).some((t) => t.loading)
+      if (busy && checks > 1) this.prepareWhenIdle(windowId, checks - 1, IDLE_RETRY_MS)
+      else this.prepare(windowId)
+    }, wait)
+    timer.unref?.()
   }
 
   /** Opens the Library (or switches its section) in a main window. False when it can't. */
@@ -201,8 +233,12 @@ export class LibraryHost {
     return { x: Math.round(b.x + x), y: Math.round(b.y + y) }
   }
 
-  /** Where the view is, for tests: bounds, whether it is shown, above every tab view and focused. */
+  /**
+   * Where the view is, for tests: whether it is made with its page loaded (`ready`), its bounds,
+   * whether it is shown, above every tab view and focused.
+   */
   info(windowId: WindowId | undefined): {
+    ready: boolean
     open: boolean
     visible: boolean
     bounds?: Rect
@@ -213,11 +249,12 @@ export class LibraryHost {
     const view = w?.view
     const page = pageOf(view)
     if (!windowId || !w || !view || !page) {
-      return { open: false, visible: false, aboveTabs: false, focused: false }
+      return { ready: false, open: false, visible: false, aboveTabs: false, focused: false }
     }
     const win = this.ctx.windows.get(windowId)
     const children = win && !win.isDestroyed() ? win.contentView.children : []
     return {
+      ready: !!w.loaded,
       open: w.open,
       visible: view.getVisible(),
       bounds: view.getBounds(),
@@ -336,9 +373,13 @@ export class LibraryHost {
       if (!(entry.url && url.startsWith(entry.url))) event.preventDefault()
     })
     contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    contents.on('did-finish-load', () => {
+      w.loaded = true
+    })
     // A Library whose renderer died closes and loads again for next time.
     contents.on('render-process-gone', (_event, details) => {
       if (details.reason === 'clean-exit' || contents.isDestroyed()) return
+      w.loaded = false
       this.close(windowId)
       loadRenderer(contents, 'library')
     })
@@ -346,6 +387,7 @@ export class LibraryHost {
     this.ctx.windows.get(windowId)?.once('closed', () => {
       clearTimeout(w.hideTimer)
       this.wins.delete(windowId)
+      this.idleScheduled.delete(windowId)
       this.frames.delete(windowId)
       this.radii.delete(windowId)
       if (!contents.isDestroyed()) contents.close()

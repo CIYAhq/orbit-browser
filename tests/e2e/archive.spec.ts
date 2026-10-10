@@ -38,6 +38,7 @@ const query = (o: Orbit, args: Record<string, unknown> = {}) =>
   run(o.app, 'archive.query', args) as Promise<ArchivePage>
 
 interface LibraryInfo {
+  ready: boolean
   open: boolean
   visible: boolean
   bounds?: { x: number; y: number; width: number; height: number }
@@ -172,6 +173,32 @@ test('[AR-02] ⌘T "View Archive" opens the same view; the Library reopens to th
   await action(orbit.app, 'app.archive')
   await expect.poll(async () => (await status(orbit)).section).toBe('archive')
   expect((await state(orbit.app)).settings.librarySection).toBe('archive')
+})
+
+test('[DL-09][FL-24] once Orbit is idle after launch the Library view is made off-screen, so even the first open is quick', async () => {
+  const { app } = orbit
+  // Nothing loading and nothing over the window: the view is made a few seconds after launch, hidden,
+  // with the section it opens to built.
+  await expect.poll(async () => (await info(orbit)).ready, { timeout: 20_000 }).toBe(true)
+  const lib = await libraryPage(app)
+  await expect(lib.getByTestId('library')).toHaveAttribute('data-open', 'false')
+  await expect(lib.getByTestId('archive-search')).toBeAttached()
+  expect(await info(orbit)).toMatchObject({ open: false, visible: false })
+  // The first open, from its shortcut's action (no pointer over the Library button to warm it up).
+  const marks = async () =>
+    (await app.evaluate(() =>
+      (globalThis as unknown as { __orbit: { marks: () => { name: string; t: number }[] } }).__orbit.marks(),
+    )) as { name: string; t: number }[]
+  await action(app, 'app.library')
+  await expect.poll(async () => (await status(orbit)).open).toBe(true)
+  const m = await marks()
+  const start = m.filter((x) => x.name === 'library:open:start').at(-1)?.t ?? 0
+  await expect
+    .poll(async () => (await marks()).filter((x) => x.name === 'library:shown' && x.t >= start).length)
+    .toBe(1)
+  const shown = (await marks()).filter((x) => x.name === 'library:shown').at(-1)?.t ?? 0
+  console.info(`[archive e2e perf] first Library open→shown ${(shown - start).toFixed(1)} ms`)
+  expect(shown - start).toBeLessThanOrEqual(100 * FRAME_SLACK)
 })
 
 test("[AR-03] entries are listed newest first under day headings; source, Space and how-closed filters; only this profile's entries", async () => {
