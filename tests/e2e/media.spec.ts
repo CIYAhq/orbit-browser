@@ -1,20 +1,11 @@
-/**
- * Media lane e2e (media.md): Orbit's floating player (picture-in-picture), the sidebar media tray,
- * call controls and media in the tab lifecycle. All media is generated locally: a WAV tone written
- * here, canvas captureStream() videos with an oscillator soundtrack, a short WebM recorded in the
- * page, and a long seekable video built from that recording with Media Source Extensions.
- */
-import { mkdtempSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { type ElectronApplication, _electron as electron, expect, type Frame, type Page, test } from '@playwright/test'
+import { type ElectronApplication, expect, type Frame, type Page, test } from '@playwright/test'
 import type { MediaTestHooks } from '../../src/main/media'
 import type { PlayerHost, PlayerInfo } from '../../src/main/media/player'
 import { formatClock } from '../../src/shared/media'
 import type { TabMedia } from '../../src/shared/state'
-import { FRAME_SLACK, launchOrbit, MOD, type Orbit, state, tabPage, tabView, viewPage } from './helpers'
+import { FRAME_SLACK, launchOrbit, MOD, type Orbit, state, tabPage, tabView } from './helpers'
 import { act, activeId, cmd, newTab, tab, tabsHook, waitTab } from './tabs-support'
 
 // ---- Local media fixtures (on ports 3330–3349) ----
@@ -1140,17 +1131,8 @@ async function allowCamera(app: ElectronApplication): Promise<void> {
 }
 
 /** Launches Orbit with Chromium's fake camera and microphone. */
-async function launchWithFakeDevices(): Promise<Orbit> {
-  const userData = mkdtempSync(join(tmpdir(), 'orbit-e2e-'))
-  const args = ['--use-fake-device-for-media-stream', '--force-prefers-no-reduced-motion', resolve('out/main/index.js')]
-  if (process.platform === 'linux') args.unshift('--no-sandbox')
-  const app = await electron.launch({
-    args,
-    env: { ...process.env, ORBIT_E2E: '1', ORBIT_USER_DATA: userData } as Record<string, string>,
-  })
-  const shell = await viewPage(app, 'shell')
-  await shell.getByTestId('sidebar').waitFor()
-  return { app, shell, userData }
+function launchWithFakeDevices(): Promise<Orbit> {
+  return launchOrbit({ args: ['--use-fake-device-for-media-stream'] })
 }
 
 test('[MD-14][MD-11][TB-15] a call tab shows camera and microphone indicators and sidebar call controls', async () => {
