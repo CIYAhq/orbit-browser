@@ -63,7 +63,16 @@ export interface Rect {
 }
 
 /** Which UI a renderer instance is showing. */
-export type RendererView = 'shell' | 'overlay' | 'mini' | 'settings' | 'strip' | 'library' | 'pip' | 'internal'
+export type RendererView =
+  | 'shell'
+  | 'overlay'
+  | 'mini'
+  | 'settings'
+  | 'strip'
+  | 'library'
+  | 'pip'
+  | 'onboarding'
+  | 'internal'
 
 /** The API the preload exposes on `window.orbit` to Orbit's own UI renderers. */
 export interface OrbitBridge {

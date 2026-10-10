@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 475 spec’d · 167 built (68 partial) · 241 tested · 0 feel right. 10 more are out of scope and not counted.
+**Totals:** 475 spec’d · 185 built (80 partial) · 271 tested · 0 feel right. 10 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
-| P0 | 174 | 110 | 136 |
-| P1 | 221 | 50 | 94 |
-| P2 | 80 | 7 | 11 |
+| P0 | 174 | 114 | 139 |
+| P1 | 221 | 62 | 119 |
+| P2 | 80 | 9 | 13 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -357,7 +357,7 @@ Spec: `spec/shortcuts.md`
 | KS-09 | Split view | P0 | – | – | – |  |
 | KS-10 | Peek and Mini Window | P1 | – | – | – |  |
 | KS-11 | Media | P1 | 🟡 partial | ✅ e2e | – | Space and arrows in the focused player, Cmd/Ctrl+scroll and pinch zoom (tested), hardware media keys via Chromium (untested), Mute Tab action assignable; the calendar meeting shortcut (P2) belongs to TB-21/FV-09 |
-| KS-12 | Library, history, downloads, settings, extensions, help | P1 | – | – | – |  |
+| KS-12 | Library, history, downloads, settings, extensions, help | P1 | – | ✅ e2e | – |  |
 | KS-13 | Developer tools | P1 | – | ✅ e2e+unit | – |  |
 | KS-14 | Canvases, notes, capture and Tweaks | P2 | – | – | – |  |
 | KS-15 | Standard app and window keys | P1 | – | – | – |  |
@@ -412,8 +412,8 @@ Spec: `spec/appearance.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| AP-01 | Light, Dark or Match system | P0 | – | ✅ e2e | – |  |
-| AP-02 | Theme colours carry through the whole interface | P1 | – | – | – |  |
+| AP-01 | Light, Dark or Match system | P0 | ✅ | ✅ e2e | – | Light / Dark / Match system in Settings and the Space theme picker; about 200 ms cross-fade, no flash |
+| AP-02 | Theme colours carry through the whole interface | P1 | – | ✅ e2e | – |  |
 | AP-03 | Restore the default (neutral) theme | P1 | – | ✅ unit | – |  |
 | AP-04 | Dark mode quality | P1 | – | ✅ unit | – |  |
 | AP-05 | Private-window appearance | P1 | – | – | – |  |
@@ -535,26 +535,26 @@ Spec: `spec/settings.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| ST-01 | Settings window | P0 | – | – | – |  |
-| ST-02 | Settings reachable and searchable from the command bar | P1 | – | – | – |  |
-| ST-03 | General section | P1 | – | – | – |  |
-| ST-04 | Profiles section (list, rename, delete) | P1 | – | – | – |  |
-| ST-05 | Per-profile: auto-archive timing | P1 | – | – | – |  |
-| ST-06 | Per-profile: default search engine and custom engines | P0 | – | – | – |  |
+| ST-01 | Settings window | P0 | ✅ | ✅ e2e+unit | – | own window (⌘, / Ctrl+,): opens or focuses one; remembers section and size; takes the opener Space's colours; sections come from a registry (src/renderer/src/settings/registry.ts); search filters rows |
+| ST-02 | Settings reachable and searchable from the command bar | P1 | ✅ | ✅ e2e | – | sections and common settings are command-bar actions (settings.*) that open Settings at the row; the keys lane adds Shortcuts |
+| ST-03 | General section | P1 | 🟡 partial | ✅ e2e | – | default browser row, app-menu item and command-bar action (only an installed build can register; e2e uses a stub); Mini Window archive timing; Import button once the import lane registers import.open; Updates group: automatic checks switch, Check Now and the update feed address. Not built: UP-04's install-while-idle, hover-preview toggles (OT-26, P2), Open PDFs (P2) |
+| ST-04 | Profiles section (list, rename, delete) | P1 | ✅ | ✅ e2e | – | list with Default first, rename any profile, New Profile…, delete with confirmation (off while a Space uses it, and says why) |
+| ST-05 | Per-profile: auto-archive timing | P1 | ✅ | ✅ e2e+unit | – | 12 hours (default), 24 hours, 7 days, 30 days per profile; no Never; other profiles follow Default until set |
+| ST-06 | Per-profile: default search engine and custom engines | P0 | ✅ | ✅ e2e+unit | – | per-profile default engine (8 built-ins), custom engines with keyword and %s URL, Make default from the row menu; no extension override in Electron, so that row does not exist |
 | ST-07 | Per-profile: download location, new-document app, data shortcuts | P1 | – | – | – |  |
 | ST-08 | Shortcuts section (remapping) | P1 | – | – | – |  |
-| ST-09 | Links section | P1 | – | ✅ unit | – |  |
-| ST-10 | Advanced section | P1 | – | – | – |  |
-| ST-11 | Appearance section | P1 | – | – | – |  |
-| ST-12 | Privacy & security, and clearing browsing data | P1 | – | – | – |  |
+| ST-09 | Links section | P1 | ✅ | ✅ e2e+unit | – | links from other apps open in a Mini Window (default), the most recent Space or one Space; routing rules (address contains / is exactly → a Space; first match wins; add, edit, reorder, remove); Peek options |
+| ST-10 | Advanced section | P1 | 🟡 partial | ✅ e2e+unit | – | tab sleep timer (TB-16), picture in picture, graphics acceleration; no site customizations, full-URL toggle, sounds or haptics, or edge-drag settings because those features don't exist yet |
+| ST-11 | Appearance section | P1 | 🟡 partial | ✅ e2e | – | Theme mode: Light / Dark / Match system (AP-01). Not built: window material (AP-10, Windows), app icon (AP-09), page defaults (P2) |
+| ST-12 | Privacy & security, and clearing browsing data | P1 | 🟡 partial | ✅ e2e+unit | – | privacy promise (Orbit sends nothing); Clear browsing data per profile (⌘⇧⌫ / Ctrl+Shift+Delete): history by time range; cookies and site data, and the cache, always from all time (Electron has no range), so they start ticked only for All time; Secure DNS (Automatic, Off, Cloudflare, Google, Quad9); graphics acceleration lives in Advanced. No HTTPS-first or Safe Browsing (not in Electron), no per-site clearing here |
 | ST-13 | Site settings (permissions) page | P1 | – | – | – |  |
 | ST-14 | Languages, spell check and translation | P2 | – | – | – |  |
 | ST-15 | Passwords and autofill settings | P1 | – | – | – |  |
 | ST-16 | Session restore on launch | P1 | – | – | – |  |
-| ST-17 | About Orbit | P1 | – | – | – |  |
+| ST-17 | About Orbit | P1 | ✅ | ✅ e2e+unit | – | Settings → About: logo, version (a click copies it), build date, Chromium and Electron versions, system, Check for updates, release notes, Copy build info. Licence and Open-source credits open credits.html, built with the app (D43): Orbit's and Electron's licences, a link to the LICENSES.chromium.html Electron ships, and the licence of each npm package whose code ships. Release notes and help need access to the private repository for now |
 | ST-18 | Account, sign-in and sync sections | OOS | ⛔ out of scope | – | – | the spec leaves it out |
 | ST-19 | AI features section | OOS | ⛔ out of scope | – | – | the spec leaves it out |
-| ST-20 | Which settings are global and which are per profile | P1 | – | – | – |  |
+| ST-20 | Which settings are global and which are per profile | P1 | 🟡 partial | ✅ e2e+unit | – | per-profile rows carry the profile's name; download location, passwords and site permissions don't exist yet |
 | ST-21 | Enterprise / managed policies | P2 | – | – | – |  |
 
 ## Import of data from other browsers
@@ -563,7 +563,7 @@ Spec: `spec/import.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| IM-01 | Import entry points | P1 | – | – | – |  |
+| IM-01 | Import entry points | P1 | – | ✅ e2e | – |  |
 | IM-02 | Choose the source browser and profile(s) | P1 | – | – | – |  |
 | IM-03 | Choose which data types to import | P1 | – | – | – |  |
 | IM-04 | Choose which bookmarks to import | P1 | – | – | – |  |
@@ -587,20 +587,20 @@ Spec: `spec/onboarding.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| OB-01 | Welcome screen | P1 | – | – | – |  |
-| OB-02 | No account, no sign-in, ever | P0 | – | – | – |  |
-| OB-03 | Import step | P1 | – | – | – |  |
-| OB-04 | Pick a theme colour | P1 | – | – | – |  |
-| OB-05 | Pick favourite web apps (seed Favorites) | P1 | – | – | – |  |
-| OB-06 | Ad-blocking choice | P1 | – | – | – |  |
-| OB-07 | Set as default browser | P1 | – | – | – |  |
-| OB-08 | Default search engine choice | P2 | – | – | – |  |
-| OB-09 | Done screen and the first browser window | P1 | – | – | – |  |
+| OB-01 | Welcome screen | P1 | ✅ | ✅ e2e | – | a window of its own before any browser window on a first run (gated by settings.onboarded; e2e runs skip it unless ORBIT_ONBOARDING=1): Orbit's logo with the moon in motion (still with reduced motion), a welcome line, Get started; steps slide in (about 400 ms, none with reduced motion); Enter continues, Esc goes back; each step's title takes focus; progress dots are labelled. No sounds or music (optional), no haptics (Electron has no API), no first-window shimmer |
+| OB-02 | No account, no sign-in, ever | P0 | ✅ | ✅ e2e+unit | – | audit and e2e: no account UI anywhere, onboarding included; a first run sends nothing off the computer, with or without onboarding, except Chromium's spell-check dictionary download (see tests) |
+| OB-03 | Import step | P1 | 🟡 partial | – | – | placeholder step that says import isn't available yet, because the import lane has no import.open; when it has, the step offers Import… (opens that flow in a browser window) and Do this later with the same weight. Not inline, no background import or counts, no link for people moving from another browser yet |
+| OB-04 | Pick a theme colour | P1 | ✅ | ✅ e2e | – | the Space theme picker (same ThemeEditor) for the first Space, applied live, with a preview of sidebar and frame, grain and intensity; Light / Dark / Match system (Match system preselected, Continue works at once); says it can be changed later. No haptics |
+| OB-05 | Pick favourite web apps (seed Favorites) | P1 | ✅ | ✅ e2e+unit | – | 16 web apps as letter tiles (no logos fetched), nothing preselected, at most 12; they become the first Space's profile's Favorites, unloaded until opened. No ordering by imported history (no import yet) |
+| OB-06 | Ad-blocking choice | P1 | – | – | – | there is no ad and tracker blocker (OT-15), so the step is left out of the flow |
+| OB-07 | Set as default browser | P1 | ✅ | ✅ e2e | – | explains what the default browser does; Make Orbit my default and Not now with the same weight; on Windows says what to pick in Default apps; status asked again when the window comes back to the front; no reminders later. Test runs use a stub |
+| OB-08 | Default search engine choice | P2 | ✅ | ✅ e2e | – | a Search with row on the Done screen: the Default profile's engine (ST-06's list), Google until changed |
+| OB-09 | Done screen and the first browser window | P1 | 🟡 partial | ✅ e2e | – | Done screen sums up colours, Favorites, default browser and import; Start browsing (Back to browsing after a reset) opens the first window centred at about 86% of the screen with the colours and Favorites picked, command bar closed. No Orbit basics folder or local welcome tab (no local guide pages yet), no import counts |
 | OB-10 | Getting-started guide | P1 | – | – | – |  |
 | OB-11 | Contextual tips and one-time hints | P1 | – | – | – |  |
 | OB-12 | Essential keyboard shortcuts sheet | P1 | – | – | – |  |
-| OB-13 | Help and feedback entry points | P1 | – | – | – |  |
-| OB-14 | Skip, resume and reset onboarding | P2 | – | – | – |  |
+| OB-13 | Help and feedback entry points | P1 | 🟡 partial | ✅ e2e+unit | – | command-bar Help, Report a Bug, What's New and Copy Build Info; macOS Help menu (Orbit Help, Report a Bug…, Release Notes, Troubleshooting → Copy Build Info). Help opens the project README; Report a Bug opens a new issue on the public tracker with the build info filled in. The shortcut sheet entry comes with OB-12 (keys lane) |
+| OB-14 | Skip, resume and reset onboarding | P2 | ✅ | ✅ e2e+unit | – | Skip setup on every step but the last gives the spec's default first window: the theme step's colours and mode are undone and no Favorites are added (D44). The step and the picks so far are saved, so a quit part-way resumes there with them; Reset Onboarding (command bar only) runs the flow again over the open windows and deletes nothing |
 | OB-15 | AI features opt-in step | OOS | ⛔ out of scope | – | – | the spec leaves it out |
 | OB-16 | Personal welcome card | P2 | – | – | – |  |
 
@@ -610,18 +610,18 @@ Spec: `spec/updates.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| UP-01 | Background update checks | P1 | – | – | – |  |
-| UP-02 | "Update ready" banner in the sidebar → relaunch | P1 | – | – | – |  |
-| UP-03 | Manual "Check for updates…" | P1 | – | – | – |  |
+| UP-01 | Background update checks | P1 | 🟡 partial | ✅ e2e+unit | – | checks a release feed at launch (after 30 s) and about every 4 h ± 30 min, after wake if overdue; silent, failures retried at the next check; a private in-memory session that sends only Orbit's version, system and processor type (no cookies). Nothing is checked until a feed is set in Settings → General (empty by default; test and dev builds accept only a feed on this computer). Not built: background download (builds are unsigned, so UP-10's stub) |
+| UP-02 | "Update ready" banner in the sidebar → relaunch | P1 | 🟡 partial | ✅ e2e | – | sidebar banner above the Space switcher, in the Space's colours: a pill that opens on hover with a gradient button; ✕ hides it for 24 h or until the next launch. UP-10 form: "New version available" opens the release page in a tab; no relaunch until signed builds |
+| UP-03 | Manual "Check for updates…" | P1 | 🟡 partial | ✅ e2e | – | command bar and macOS app menu "Check for Updates…" open Settings → About (not a separate window) and check: Checking…, up to date, available, or the failure; Download opens the release page (UP-10); a click on the version copies it. Not built: download progress and Relaunch, the Turn on offer (UP-04), a ☰ entry on Windows/Linux |
 | UP-04 | Automatic installation while idle (opt-in) | P2 | – | – | – |  |
 | UP-05 | Relaunch behaviour | P1 | – | – | – |  |
-| UP-06 | "What's new" after an update and release notes in-app | P1 | – | – | – |  |
-| UP-07 | About window and version info | P1 | – | – | – |  |
+| UP-06 | "What's new" after an update and release notes in-app | P1 | 🟡 partial | ✅ e2e+unit | – | after a version change the sidebar shows "Updated to Orbit X" with See what's new, which opens that version's GitHub release notes in a tab; ends when opened, dismissed or after 3 days; command bar "What's New" and Help → Release Notes. Not built: the release's one-line summary in the banner |
+| UP-07 | About window and version info | P1 | ✅ | ✅ e2e+unit | – | About Orbit (app menu) opens Settings → About: logo, version, engine, Electron, build date (set at build time), Copy build info, and the licence and open-source credits from a page that comes with the app (D43); Help → Troubleshooting → Copy Build Info and the command-bar action copy version, build date, engine, OS and processor |
 | UP-08 | Beta update channel | P2 | – | – | – |  |
 | UP-09 | OS support notices | P2 | – | – | – |  |
-| UP-10 | Orbit update stub (unsigned builds) | P1 | – | – | – |  |
+| UP-10 | Orbit update stub (unsigned builds) | P1 | ✅ | ✅ e2e+unit | – | reads Orbit's JSON feed ({version, url, summary, security}) or a GitHub releases API answer (latest, or a list: newest non-draft, non-pre-release); a newer version shows "New version available" and opens its page in a tab. No feed is set up yet: the address is empty by default |
 | UP-11 | Update failure handling | P2 | – | – | – |  |
-| UP-12 | Engine security updates cadence | P1 | – | – | – |  |
+| UP-12 | Engine security updates cadence | P1 | ✅ | ✅ e2e+unit | – | a release marked [security] in its GitHub name or notes, or security: true in Orbit's feed, shows "Important security update" in the banner and Settings |
 
 ## Canvases and Notes
 

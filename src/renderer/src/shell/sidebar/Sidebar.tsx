@@ -2,6 +2,7 @@ import { type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEv
 import type { WindowState } from '../../../../shared/state'
 import { invoke } from '../../api'
 import { DownloadsTray } from '../../downloads/DownloadsTray'
+import { UpdateBanner } from '../../settings/UpdateBanner'
 import { useOrbit } from '../../store'
 import { MediaTray } from '../media/MediaTray'
 import { SpaceStrip } from '../spaces/SpaceStrip'
@@ -28,6 +29,8 @@ export function Sidebar({ win }: { win: WindowState }) {
       <TopBar win={win} />
       <SpaceStrip windowId={win.id} spaceId={win.spaceId} />
       <UndoToast />
+      {/* Settings lane: the update and What's new banner above the Space switcher (UP-02, UP-06). */}
+      <UpdateBanner />
       {/* Media lane: transient media tray above the bottom bar (SB-10, MD-09). */}
       <MediaTray />
       {/* Downloads lane: running downloads, just above the bottom bar (DL-03). */}

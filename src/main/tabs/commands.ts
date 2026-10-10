@@ -20,7 +20,7 @@ import {
   splitOfTab,
   tabsInItem,
 } from '../../shared/tree'
-import { parseInput } from '../../shared/url'
+import { engineForWindow, parseInput } from '../../shared/url'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
 import { tabSplitMenuItems } from '../split/menu'
@@ -101,7 +101,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
       toast(windowId, 'Nothing to paste')
       return null
     }
-    const parsed = parseInput(text, store.state.settings.searchEngine)
+    const parsed = parseInput(text, engineForWindow(store.state, windowId))
     return ops.createTab({ url: parsed.url, container, windowId, activate: true })
   }
 

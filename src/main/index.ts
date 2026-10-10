@@ -10,6 +10,8 @@ import { Perf } from './perf'
 import { loadState, Persistence } from './persist'
 import { ActionRegistry, CommandRegistry, EventRegistry } from './registry'
 import { Sessions } from './sessions'
+import { startOnboarding } from './settings/onboarding'
+import { applyStartupSwitches } from './settings/system'
 import { Store } from './store'
 import { TabRuntime } from './tabs/runtime'
 import { exposeTestHooks } from './test-hooks'
@@ -30,6 +32,8 @@ process.on('unhandledRejection', (reason) =>
 // Tests and perf runs isolate their profile data.
 if (process.env.ORBIT_USER_DATA) app.setPath('userData', process.env.ORBIT_USER_DATA)
 const e2e = process.env.ORBIT_E2E === '1'
+// Settings that only apply from start-up, such as graphics acceleration (ST-12).
+applyStartupSwitches()
 
 app.setName('Orbit')
 
@@ -49,7 +53,12 @@ function start(): void {
   perf.mark('app:ready')
   const userData = app.getPath('userData')
   const stateFile = join(userData, 'orbit-state.json')
-  const { state } = loadState(stateFile)
+  const { state, firstRun } = loadState(stateFile)
+  // Installs from before onboarding existed never set `onboarded`: they are not first runs (OB-01).
+  // A first run records its step as soon as onboarding opens, so one quit part-way still resumes.
+  if (!firstRun && !state.settings.onboarded && state.settings.onboardingStep === undefined) {
+    state.settings.onboarded = true
+  }
   perf.mark('state:loaded')
   const store = new Store(state)
   const persistence = new Persistence(store, stateFile)
@@ -90,12 +99,13 @@ function start(): void {
     for (const w of Object.values(d.windows)) if (w.kind !== 'main') delete d.windows[w.id]
   })
   if (saved.length > 0) for (const w of saved) windows.open(store.state.windows[w.id])
-  else windows.open()
+  // A first run shows onboarding, which opens the first window when it is done (OB-01).
+  else if (!startOnboarding()) windows.open()
   perf.mark('windows:opened')
   registerExternalLinks(ctx)
 
   app.on('activate', () => {
-    if (windows.ids().length === 0) windows.open()
+    if (windows.ids().length === 0 && !startOnboarding()) windows.open()
   })
   app.on('before-quit', (event) => {
     // A feature asking first (downloads in progress, DL-01) stopped this quit: nothing is quitting.

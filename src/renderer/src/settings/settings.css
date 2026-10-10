@@ -1,0 +1,946 @@
+/* The Settings window (ST-01). Colours come from the opener Space's palette (theme.ts). */
+
+html[data-view="settings"] body {
+  user-select: none;
+}
+
+.settings {
+  --st-card: color-mix(in oklab, var(--surface) 55%, #ffffff);
+  --st-field: color-mix(in oklab, var(--surface) 70%, #ffffff);
+  --st-border: rgba(0, 0, 0, 0.1);
+  --st-knob: #ffffff;
+  --st-off: rgba(0, 0, 0, 0.16);
+  position: relative;
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+  height: 100%;
+  color: var(--text);
+  background: var(--surface);
+  color-scheme: light;
+}
+
+.settings[data-dark] {
+  --st-card: color-mix(in oklab, var(--surface) 88%, #ffffff);
+  --st-field: color-mix(in oklab, var(--surface) 80%, #ffffff);
+  --st-border: rgba(255, 255, 255, 0.1);
+  --st-knob: #f3f3f5;
+  --st-off: rgba(255, 255, 255, 0.18);
+  color-scheme: dark;
+}
+
+.settings [hidden] {
+  display: none !important;
+}
+
+/* Light/dark cross-fade (AP-01): about 200 ms, never a flash. */
+html[data-theme-fade] .settings,
+html[data-theme-fade] .settings * {
+  transition:
+    background-color 200ms ease,
+    border-color 200ms ease,
+    color 200ms ease,
+    --frame-top 200ms ease,
+    --frame-bottom 200ms ease !important;
+}
+
+/* macOS: the hidden title bar's drag strip (the traffic lights sit over the sidebar). */
+.settings__drag {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 40px;
+  -webkit-app-region: drag;
+  z-index: 0;
+}
+
+.settings__nav {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 14px 10px;
+  background: linear-gradient(180deg, var(--frame-top), var(--frame-bottom));
+  border-right: 1px solid var(--divider);
+}
+
+html[data-platform="darwin"] .settings__nav {
+  padding-top: 48px;
+}
+
+.settings__search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 8px;
+  background: var(--hover);
+  color: var(--text-muted);
+  -webkit-app-region: no-drag;
+}
+
+.settings__search:focus-within {
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 55%, transparent);
+}
+
+.settings__search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  user-select: text;
+}
+
+.settings__search input::placeholder {
+  color: var(--text-muted);
+}
+
+.settings__clear {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--hover);
+}
+
+.settings__tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+  -webkit-app-region: no-drag;
+}
+
+.settings__tab {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--radius-row);
+  text-align: left;
+  color: var(--text);
+  outline: none;
+  transition: background-color var(--dur-fast) ease;
+}
+
+.settings__tab svg {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.settings__tab:hover {
+  background: var(--hover);
+}
+
+.settings__tab:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.settings__tab[aria-selected="true"] {
+  background: var(--active);
+  box-shadow: var(--active-shadow);
+  font-weight: 550;
+}
+
+.settings__tab[aria-selected="true"] svg {
+  color: var(--accent);
+}
+
+.settings__tab[data-dim] {
+  opacity: 0.45;
+}
+
+.settings__content {
+  position: relative;
+  min-height: 0;
+  overflow-y: auto;
+  user-select: text;
+}
+
+.settings__page {
+  max-width: 680px;
+  padding: 26px 32px 48px;
+}
+
+html[data-platform="darwin"] .settings__page {
+  padding-top: 40px;
+}
+
+.settings__title {
+  margin: 0 0 18px;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.settings__result {
+  margin-bottom: 26px;
+}
+
+.settings__result-title {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.settings__result-title:hover {
+  color: var(--accent);
+}
+
+.settings__empty {
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 60px;
+}
+
+/* ---------- Groups and rows ---------- */
+
+.st-group {
+  margin: 0 0 22px;
+}
+
+.st-group__title {
+  margin: 0 0 8px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.st-group__desc {
+  margin: -2px 4px 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.st-group__body {
+  border: 1px solid var(--st-border);
+  border-radius: 10px;
+  background: var(--st-card);
+}
+
+/* Rows keep to the card's rounded corners without clipping it: a row's menu may hang below. */
+.st-group__body > :first-child {
+  border-top-left-radius: 9px;
+  border-top-right-radius: 9px;
+}
+
+.st-group__body > :last-child {
+  border-bottom-left-radius: 9px;
+  border-bottom-right-radius: 9px;
+}
+
+.st-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 48px;
+  padding: 10px 14px;
+  transition: background-color 400ms ease;
+}
+
+.st-row--stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.st-row:not([hidden]) ~ .st-row:not([hidden]) {
+  border-top: 1px solid var(--divider);
+}
+
+.st-row[data-flash],
+.st-group[data-flash] > .st-group__body {
+  background: color-mix(in oklab, var(--accent) 18%, transparent);
+}
+
+.st-row__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.st-row__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.st-row__desc {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.st-row__control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.st-row--stacked .st-row__control {
+  display: block;
+}
+
+.st-scope {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--accent) 16%, transparent);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* ---------- Controls ---------- */
+
+.st-switch {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--st-off);
+  outline: none;
+  transition: background-color var(--dur) var(--ease-out);
+}
+
+.st-switch[aria-checked="true"] {
+  background: var(--accent);
+}
+
+.st-switch:focus-visible,
+.st-button:focus-visible,
+.st-seg__item:focus-visible,
+.st-select select:focus-visible,
+.st-input:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 60%, transparent);
+  outline: none;
+}
+
+.st-switch:disabled {
+  opacity: 0.45;
+}
+
+.st-switch__knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--st-knob);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform var(--dur) var(--ease-spring);
+}
+
+.st-switch[aria-checked="true"] .st-switch__knob {
+  transform: translateX(14px);
+}
+
+.st-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.st-select select {
+  appearance: none;
+  min-width: 140px;
+  height: 28px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--st-border);
+  border-radius: 7px;
+  background: var(--st-field);
+  color: var(--text);
+  font: inherit;
+}
+
+.st-select svg {
+  position: absolute;
+  right: 8px;
+  pointer-events: none;
+  color: var(--text-muted);
+}
+
+.st-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--hover);
+}
+
+.st-seg__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  color: var(--text-muted);
+  transition:
+    background-color var(--dur-fast) ease,
+    color var(--dur-fast) ease;
+}
+
+.st-seg__item[aria-checked="true"] {
+  background: var(--st-card);
+  color: var(--text);
+  box-shadow: var(--active-shadow);
+}
+
+.st-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--st-border);
+  border-radius: 7px;
+  background: var(--st-field);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.st-button:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--st-field) 85%, var(--text));
+}
+
+.st-button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.st-button:disabled {
+  opacity: 0.45;
+}
+
+.st-button--primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.st-button--primary:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 88%, #000000);
+}
+
+.st-button--danger {
+  color: #d23b3b;
+}
+
+.settings[data-dark] .st-button--danger {
+  color: #ff7a7a;
+}
+
+.st-input {
+  height: 28px;
+  min-width: 0;
+  padding: 0 9px;
+  border: 1px solid var(--st-border);
+  border-radius: 7px;
+  background: var(--st-field);
+  color: var(--text);
+  font: inherit;
+  user-select: text;
+}
+
+.st-input[aria-invalid="true"] {
+  border-color: #d23b3b;
+}
+
+.st-check {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.st-check input {
+  position: absolute;
+  opacity: 0;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.st-check__box {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  border: 1px solid var(--st-border);
+  border-radius: 4px;
+  background: var(--st-field);
+  color: #ffffff;
+}
+
+.st-check input:checked + .st-check__box {
+  border-color: transparent;
+  background: var(--accent);
+}
+
+.st-check input:focus-visible + .st-check__box {
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 60%, transparent);
+}
+
+.st-check__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.st-check__desc {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.st-muted {
+  color: var(--text-muted);
+}
+
+.st-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.st-link:hover {
+  text-decoration: underline;
+}
+
+.st-link--button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+}
+
+.st-link--button:focus-visible {
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 60%, transparent);
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings *,
+  html[data-theme-fade] .settings * {
+    transition: none !important;
+  }
+}
+
+/* Visually hidden, read by screen readers. */
+.st-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---------- Text fields, menus, badges ---------- */
+
+.st-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.st-field--wide {
+  flex: 1;
+}
+
+.st-field__label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.st-field__error {
+  color: #d23b3b;
+  font-size: 12px;
+}
+
+.settings[data-dark] .st-field__error {
+  color: #ff7a7a;
+}
+
+.st-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.st-form__fields {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.st-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Words between a form's controls ("opens in"), on the controls' line. */
+.st-form__words {
+  color: var(--text-muted);
+  line-height: 28px;
+  white-space: nowrap;
+}
+
+.st-icon-button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  color: var(--text-muted);
+}
+
+.st-icon-button:hover,
+.st-icon-button[aria-expanded="true"] {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.st-icon-button:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 60%, transparent);
+  outline: none;
+}
+
+.st-menu {
+  position: relative;
+}
+
+.st-menu__list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: 170px;
+  padding: 4px;
+  border: 1px solid var(--st-border);
+  border-radius: 9px;
+  background: var(--st-card);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.st-menu__item {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  text-align: left;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.st-menu__item:hover:not(:disabled),
+.st-menu__item:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+
+.st-menu__item:disabled {
+  opacity: 0.45;
+}
+
+.st-menu__item--danger {
+  color: #d23b3b;
+}
+
+.settings[data-dark] .st-menu__item--danger {
+  color: #ff7a7a;
+}
+
+.st-key {
+  padding: 0 6px;
+  border: 1px solid var(--st-border);
+  border-radius: 5px;
+  background: var(--hover);
+  color: var(--text);
+  font:
+    500 11px / 18px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
+
+.st-badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.st-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A state shown in place of a control ("Orbit is your default browser"). */
+.st-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.st-status svg {
+  color: var(--accent);
+}
+
+/* ---------- Dialogs ---------- */
+
+.st-dialog {
+  width: min(440px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  padding: 20px 22px 18px;
+  border: 1px solid var(--st-border);
+  border-radius: 14px;
+  background: var(--st-card);
+  color: var(--text);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+}
+
+.st-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.st-dialog[open] {
+  animation: st-dialog-in 160ms ease-out;
+}
+
+@keyframes st-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .st-dialog[open] {
+    animation: none;
+  }
+}
+
+.st-dialog__title {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.st-dialog__desc {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.st-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.st-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+/* ---------- Profiles (ST-04) ---------- */
+
+.st-profiles {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+}
+
+.st-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+}
+
+.st-profile:hover {
+  background: color-mix(in oklab, var(--text) 6%, transparent);
+}
+
+.st-profile[aria-selected="true"] {
+  background: color-mix(in oklab, var(--accent) 16%, transparent);
+}
+
+.st-profile:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 60%, transparent);
+  outline: none;
+}
+
+.st-profile__avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--accent) 22%, var(--st-field));
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.st-profile__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.st-profile__name {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.st-profile__meta {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.st-profiles + .st-row {
+  border-top: 1px solid var(--divider);
+}
+
+/* A dialog's destructive confirmation is the filled button. */
+.st-dialog__actions .st-button--danger {
+  border-color: transparent;
+  background: #d23b3b;
+  color: #ffffff;
+}
+
+.st-dialog__actions .st-button--danger:hover:not(:disabled) {
+  background: #bb2f2f;
+}
+
+.st-dialog__field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* ---------- Privacy (ST-12) ---------- */
+
+.st-promise {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 22px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+  line-height: 1.45;
+}
+
+.st-promise svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--accent);
+}
+
+.st-promise p {
+  margin: 0;
+}
+
+/* A link routing rule (ST-09): the words stay on one line; a long address wraps after them. */
+.st-rule {
+  min-width: 0;
+  line-height: 20px;
+}
+
+.st-rule .st-key {
+  overflow-wrap: anywhere;
+}
+
+/* A spinner inside a button ("Checking…", UP-03). */
+.st-spin {
+  animation: st-spin 900ms linear infinite;
+}
+
+@keyframes st-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .st-spin {
+    animation: none;
+  }
+}
+
+/* About (ST-17, UP-07): Orbit's logo over the version. */
+.st-about {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 0 0 22px;
+}
+
+.st-about__name {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.st-about__line {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+}
+
+.st-version {
+  padding: 1px 6px;
+  margin: 0 -6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: copy;
+}
+
+.st-version:hover {
+  background: var(--hover);
+}
+
+.st-version:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
