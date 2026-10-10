@@ -78,7 +78,7 @@ async function waitOffline(app: ElectronApplication): Promise<void> {
  * code part-way, even inside a store update. A change made there is lost when that update finishes:
  * a background tab a test had just created vanished. Each evaluate starts in a task of its own instead.
  */
-function evaluateBetweenTasks(app: ElectronApplication): void {
+export function evaluateBetweenTasks(app: ElectronApplication): void {
   const evaluate = app.evaluate.bind(app)
   app.evaluate = ((fn: unknown, arg?: unknown) => {
     if (typeof fn !== 'function') return evaluate(fn as never, arg as never)
@@ -100,7 +100,7 @@ const UNCAUGHT = '[orbit] uncaught exception:'
  * nothing caught, even one thrown while quitting. If Orbit still hasn't quit 15 s after being asked,
  * the test fails and Orbit is killed, so one stuck quit can't hang the rest of the run (D28).
  */
-function checkQuit(app: ElectronApplication): () => string {
+export function checkQuit(app: ElectronApplication): () => string {
   const proc = app.process()
   let recent = ''
   let thrown = ''
