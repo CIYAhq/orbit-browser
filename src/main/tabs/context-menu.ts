@@ -1,4 +1,5 @@
 import { type ContextMenuParams, clipboard, Menu, type MenuItemConstructorOptions, type WebContents } from 'electron'
+import { pageMayOpen } from '../../shared/link-routing'
 import type { TabId } from '../../shared/state'
 import { engineFor, searchUrl } from '../../shared/url'
 import type { MainContext } from '../context'
@@ -37,25 +38,40 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
     if (!openLinkInTab(ctx, tabId, url, referrer)) openInNewTab(url, false)
   }
 
+  // A local file's link or picture on a page that isn't a local file keeps only its copy items:
+  // Orbit opens or saves it for no web page (D49).
+  const mayOpen = (url: string) => pageMayOpen(referrer.url, url)
+
   if (params.linkURL) {
+    const link = params.linkURL
+    const open: MenuItemConstructorOptions[] = mayOpen(link)
+      ? [
+          { label: 'Open Link in New Tab', click: () => openFromPage(link) },
+          // A new pane beside the page's pane (SV-08).
+          linkSplitMenuItem(ctx, tabId, link),
+          // Then Peek and Mini Window, new and private windows: the order NV-12 lists.
+          ...linkPeekMenuItems(ctx, tabId, link),
+          ...linkWindowItems(ctx, tabId, link, referrer),
+        ]
+      : []
     items.push(
-      { label: 'Open Link in New Tab', click: () => openFromPage(params.linkURL) },
-      // A new pane beside the page's pane (SV-08).
-      linkSplitMenuItem(ctx, tabId, params.linkURL),
-      // Then Peek and Mini Window, new and private windows: the order NV-12 lists.
-      ...linkPeekMenuItems(ctx, tabId, params.linkURL),
-      ...linkWindowItems(ctx, tabId, params.linkURL, referrer),
-      { label: 'Copy Link Address', click: () => clipboard.writeText(params.linkURL) },
-      saveLinkItem(contents, params.linkURL),
+      ...open,
+      { label: 'Copy Link Address', click: () => clipboard.writeText(link) },
+      ...(mayOpen(link) ? [saveLinkItem(contents, link)] : []),
       { type: 'separator' },
     )
   }
   if (params.mediaType === 'image' && params.srcURL) {
+    const image = params.srcURL
+    if (mayOpen(image)) {
+      items.push(
+        { label: 'Open Image in New Tab', click: () => openFromPage(image) },
+        { label: 'Save Image As…', click: () => contents.downloadURL(image) },
+      )
+    }
     items.push(
-      { label: 'Open Image in New Tab', click: () => openFromPage(params.srcURL) },
-      { label: 'Save Image As…', click: () => contents.downloadURL(params.srcURL) },
       { label: 'Copy Image', click: () => contents.copyImageAt(params.x, params.y) },
-      { label: 'Copy Image Address', click: () => clipboard.writeText(params.srcURL) },
+      { label: 'Copy Image Address', click: () => clipboard.writeText(image) },
       { type: 'separator' },
     )
   }

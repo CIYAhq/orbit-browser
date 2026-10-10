@@ -45,6 +45,21 @@ export function isWebUrl(url: string): boolean {
   return /^https?:\/\//i.test(url)
 }
 
+/** A local file's address: `file:`, or the source view of one. */
+export function isLocalFileUrl(url: string): boolean {
+  return /^(view-source:)?file:/i.test(url.trim())
+}
+
+/**
+ * Whether Orbit may itself load or save `url` for the page at `from`, as it does for the page menu,
+ * ⌥-click and a dropped link: a local file only for a page that is a local file too, as the engine
+ * allows a plain click (D49). `from` is empty when the page isn't known. Other addresses are left
+ * to each route's own rules.
+ */
+export function pageMayOpen(from: string | undefined, url: string): boolean {
+  return !isLocalFileUrl(url) || /^file:/i.test(from?.trim() ?? '')
+}
+
 /** Same registrable domain (eTLD+1): `mail.example.com` and `docs.example.com` are one site (PK-02). */
 export function sameSite(a: string, b: string): boolean {
   if (!isWebUrl(a) || !isWebUrl(b)) return false

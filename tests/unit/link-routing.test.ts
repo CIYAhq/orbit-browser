@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   decideLink,
+  isLocalFileUrl,
   isMeetingLink,
   type LinkSettings,
   type LinkSource,
+  pageMayOpen,
   routeFor,
   sameSite,
 } from '../../src/shared/link-routing'
@@ -139,6 +141,33 @@ describe('meeting links (PK-04)', () => {
     ]) {
       expect(isMeetingLink(url), url).toBe(false)
     }
+  })
+})
+
+describe('local files a page may have Orbit open (D49)', () => {
+  const file = 'file:///tmp/orbit/notes.txt'
+  it('a web page: no local file, nor its source; web and other links stay', () => {
+    expect(pageMayOpen('https://example.com/a', file)).toBe(false)
+    expect(pageMayOpen('http://localhost:3330/page/A', 'FILE:///tmp/x')).toBe(false)
+    expect(pageMayOpen('https://example.com/a', `view-source:${file}`)).toBe(false)
+    expect(pageMayOpen('https://example.com/a', 'https://example.org/b')).toBe(true)
+    expect(pageMayOpen('https://example.com/a', 'mailto:someone@example.com')).toBe(true)
+  })
+  it('a page that is itself a local file opens local files', () => {
+    expect(pageMayOpen('file:///tmp/orbit/index.html', file)).toBe(true)
+    expect(pageMayOpen('file:///tmp/orbit/index.html', 'https://example.org/b')).toBe(true)
+  })
+  it('a page not known (a dropped link), or a blank, data or source page, is not a local file', () => {
+    for (const from of [undefined, '', 'about:blank', 'data:text/html,<a>x</a>', `view-source:${file}`]) {
+      expect(pageMayOpen(from, file)).toBe(false)
+    }
+  })
+  it('which addresses are local files', () => {
+    expect(isLocalFileUrl(file)).toBe(true)
+    expect(isLocalFileUrl(` ${file}`)).toBe(true)
+    expect(isLocalFileUrl('view-source:file:///etc/hosts')).toBe(true)
+    expect(isLocalFileUrl('https://example.com/file:///x')).toBe(false)
+    expect(isLocalFileUrl('filesystem:https://example.com/temporary/x')).toBe(false)
   })
 })
 

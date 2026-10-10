@@ -1,4 +1,5 @@
 import { type BrowserWindow, Menu, type MenuItemConstructorOptions, type Referrer, type WebContents } from 'electron'
+import { pageMayOpen } from '../../shared/link-routing'
 import { type PageReferrer, popupTitle, referrerPolicyName, shownTabId } from '../../shared/nav'
 import type { TabId, WindowId } from '../../shared/state'
 import { sectionOf } from '../../shared/tree'
@@ -160,12 +161,14 @@ export function registerLinks(ctx: MainContext, deps: LinksDeps): LinksTestHooks
     }
     if (contents.isDestroyed()) return
     const until = Date.now() + ALT_CLICK_DOWNLOAD_MS
+    // A local file opens from a page that is a local file too, never from a web page (D49).
+    const page = contents.getURL()
     if (found?.href) {
-      if (!openable(found.href)) return
+      if (!openable(found.href) || !pageMayOpen(page, found.href)) return
       altClicks.set(tabId, { url: found.href, until, split: false })
       // Sent with the page as referrer, as the link's policy or the page's allows (review B-F1).
-      openInSplit(tabId, found.href, { url: contents.getURL(), policy: referrerPolicyName(found.policy) })
-    } else if (found?.frame && openable(fallback)) {
+      openInSplit(tabId, found.href, { url: page, policy: referrerPolicyName(found.policy) })
+    } else if (found?.frame && openable(fallback) && pageMayOpen(page, fallback)) {
       // A link in a frame: the engine's download of it says which, and opens the split.
       altClicks.set(tabId, { url: fallback, until, split: true })
     }

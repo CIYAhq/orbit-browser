@@ -12,6 +12,7 @@ import {
   useState,
 } from 'react'
 import { isFolderId, isTabId } from '../../../../shared/ids'
+import { pageMayOpen } from '../../../../shared/link-routing'
 import type { Space, SpaceId } from '../../../../shared/state'
 import { containerKey, locate, sectionOf, splitOfTab } from '../../../../shared/tree'
 import { engineForSpace, parseInput } from '../../../../shared/url'
@@ -283,6 +284,10 @@ function onLinkDrop(e: ReactDragEvent, spaceId: string) {
   if (!text) return
   e.preventDefault()
   const parsed = parseInput(text, engineForSpace(getOrbitState(), spaceId))
+  // Where it was dragged from isn't known, and a web page may have offered it: a local file's
+  // address opens only when typed or pasted (D49). The engine gives no address for a file dragged
+  // from the system.
+  if (!pageMayOpen(undefined, parsed.url)) return
   void invoke('tabs.create', { url: parsed.url, spaceId })
 }
 

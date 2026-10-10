@@ -1,6 +1,7 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { type ElectronApplication, expect, test } from '@playwright/test'
 import type { SplitLayout } from '../../src/shared/state'
 import { isMac, launchOrbit, type Orbit, state, tabPage } from './helpers'
@@ -573,4 +574,149 @@ test('[NV-12] Open Link in New Window and in Private Window', async () => {
     page('Links-next'),
   )
   expect(sessions).toEqual([false, true])
+})
+
+// ---- Local files from web pages (D49, fix check B M2) ----
+
+/** A 1×1 PNG. */
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+)
+
+/** A text file and a picture in a new temporary folder, with their file: addresses. */
+function localFiles(): { folder: string; text: string; image: string } {
+  const folder = mkdtempSync(join(tmpdir(), 'orbit-e2e-local-'))
+  writeFileSync(join(folder, 'orbit-local.txt'), 'orbit-local-file')
+  writeFileSync(join(folder, 'orbit-local.png'), PNG)
+  return {
+    folder: pathToFileURL(folder).href,
+    text: pathToFileURL(join(folder, 'orbit-local.txt')).href,
+    image: pathToFileURL(join(folder, 'orbit-local.png')).href,
+  }
+}
+
+/** Records from now on every page, new ones too, that starts loading an address under `prefix`. */
+async function watchLoads(app: ElectronApplication, prefix: string): Promise<() => Promise<string[]>> {
+  await app.evaluate(({ app: electronApp, webContents }, p) => {
+    const g = globalThis as unknown as { __loads: string[] }
+    g.__loads = []
+    const watch = (contents: Electron.WebContents) =>
+      contents.on('did-start-navigation', (details) => {
+        if (details.url.startsWith(p)) g.__loads.push(details.url)
+      })
+    for (const contents of webContents.getAllWebContents()) watch(contents)
+    electronApp.on('web-contents-created', (_e, contents) => watch(contents))
+  }, prefix)
+  return () => app.evaluate(() => (globalThis as unknown as { __loads: string[] }).__loads)
+}
+
+/** The items that would open or save a link or an image. */
+const OPEN_OR_SAVE = [
+  'Open Link in New Tab',
+  'Open Link in Split View',
+  'Open Link in Peek',
+  'Open Link in Mini Window',
+  'Open Link in New Window',
+  'Open Link in Private Window',
+  'Save Link As…',
+  'Open Image in New Tab',
+  'Save Image As…',
+]
+
+test('[NV-12][NV-08] a web page’s link to a local file and its local picture: the page menu offers no way to open or save them, ⌥-click opens nothing (D49, fix check B M2)', async () => {
+  const { app } = orbit
+  const local = localFiles()
+  const loads = await watchLoads(app, local.folder)
+  const web = fx.url(`/page/Web?away=${encodeURIComponent(local.text)}`)
+  const id = await openTab(app, web)
+  const tab = await tabPage(app, '/page/Web')
+  await tab.evaluate((src) => {
+    document.body.insertAdjacentHTML('afterbegin', `<img id="local" src="${src}" alt="Local" width="48" height="48">`)
+  }, local.image)
+  const downloads = await watchDownloads(app, web)
+
+  // The link: only Copy Link Address.
+  await clickInPage(app, web, '#away', [], 'right')
+  await expect.poll(async () => (await pageMenu(app))?.tabId).toBe(id)
+  const linkMenu = (await pageMenu(app))?.labels ?? []
+  expect(linkMenu.filter((l) => OPEN_OR_SAVE.includes(l))).toEqual([])
+  expect(linkMenu).toContain('Copy Link Address')
+  // The picture: copying stays.
+  await clickInPage(app, web, '#local', [], 'right')
+  await expect.poll(async () => (await pageMenu(app))?.labels ?? []).toContain('Copy Image Address')
+  const imageMenu = (await pageMenu(app))?.labels ?? []
+  expect(imageMenu.filter((l) => OPEN_OR_SAVE.includes(l))).toEqual([])
+  expect(imageMenu).toContain('Copy Image')
+
+  // ⌥-click on it opens no pane; ⌥-click on a web link after it does, alone.
+  await clickInPage(app, web, '#away', ['alt'])
+  await clickInPage(app, web, '#next', ['alt'])
+  await expect.poll(() => splitTabs(app, id)).toHaveLength(2)
+  const [, right] = await splitTabs(app, id)
+  expect(await urlOf(app, right)).toBe(page('Web-next'))
+
+  // No page ever started loading the local files, and nothing downloaded them.
+  expect(await loads()).toEqual([])
+  expect(Object.values((await state(app)).tabs).filter((t) => t.url.startsWith(local.folder))).toEqual([])
+  expect((await downloads()).filter((d) => d.url.startsWith(local.folder))).toEqual([])
+})
+
+test('[NV-12][NV-08] a local file page still opens its links to local files: Open Link in New Tab and ⌥-click (D49)', async () => {
+  const { app } = orbit
+  const local = localFiles()
+  const folder = new URL(local.folder.endsWith('/') ? local.folder : `${local.folder}/`)
+  const first = new URL('first.html', folder).href
+  const second = new URL('second.html', folder).href
+  writeFileSync(
+    new URL(first),
+    '<!doctype html><title>First</title><p><a id="second" href="second.html">Second</a></p>',
+  )
+  writeFileSync(new URL(second), '<!doctype html><title>Second</title><p>Second local page</p>')
+  const id = await openTab(app, first)
+  await clickInPage(app, first, '#second', [], 'right')
+  await expect.poll(async () => (await pageMenu(app))?.tabId).toBe(id)
+  const labels = (await pageMenu(app))?.labels ?? []
+  expect(labels).toEqual(expect.arrayContaining(['Open Link in New Tab', 'Open Link in Split View', 'Save Link As…']))
+  expect(await choosePageMenu(app, 'Open Link in New Tab')).toBe(true)
+  await expect.poll(async () => urlOf(app, (await today(app))[0])).toBe(second)
+  const opened = (await today(app))[0] as string
+  await cmd(app, 'tabs.activate', { tabId: opened })
+  await expect.poll(() => loadedTitle(app, second)).toBe('Second')
+  // ⌥-click in the local page: the other local page beside it.
+  await cmd(app, 'tabs.activate', { tabId: id })
+  await expect.poll(() => selectedTab(app)).toBe(id)
+  await clickInPage(app, first, '#second', ['alt'])
+  await expect.poll(() => splitTabs(app, id)).toHaveLength(2)
+  const [, right] = await splitTabs(app, id)
+  expect(await urlOf(app, right)).toBe(second)
+})
+
+test('[TB-02] a local file’s address dropped on the sidebar opens nothing, as a link or as text; a web link dropped after it opens (D49)', async () => {
+  const { app, shell } = orbit
+  const local = localFiles()
+  const loads = await watchLoads(app, local.folder)
+  /** Drops `text` on the sidebar as data of `type`, as a link or a selection dragged from a page does. */
+  const drop = async (type: string, text: string) => {
+    const dt = await shell.evaluateHandle(
+      ([t, u]) => {
+        const d = new DataTransfer()
+        d.setData(t, u)
+        return d
+      },
+      [type, text] as const,
+    )
+    await shell.getByTestId('sidebar-scroll').dispatchEvent('dragover', { dataTransfer: dt })
+    await shell.getByTestId('sidebar-scroll').dispatchEvent('drop', { dataTransfer: dt })
+  }
+  await drop('text/uri-list', local.text)
+  await drop('text/plain', local.text)
+  await drop('text/plain', `view-source:${local.text}`)
+  await drop('text/uri-list', page('DroppedAfter'))
+  await expect.poll(async () => urlOf(app, (await today(app))[0])).toBe(page('DroppedAfter'))
+  expect(await today(app)).toHaveLength(1)
+  expect(Object.values((await state(app)).tabs).map((t) => t.url)).not.toContainEqual(
+    expect.stringContaining('orbit-local'),
+  )
+  expect(await loads()).toEqual([])
 })
