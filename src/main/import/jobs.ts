@@ -133,6 +133,14 @@ export class ImportJobs {
     this.changed(job, true)
   }
 
+  /** Quit (D58): every import stops where it is, and nothing more is read. */
+  quit(): void {
+    for (const job of this.jobs.values()) {
+      job.cancelled = true
+      this.release.get(job.status.id)?.()
+    }
+  }
+
   /** Held imports nobody committed are dropped (onboarding ended with Skip setup, OB-14). */
   dropHeld(): void {
     for (const job of this.jobs.values()) if (job.plan.hold && !job.cancelled) this.cancel(job.status.id)

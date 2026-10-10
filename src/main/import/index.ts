@@ -18,19 +18,27 @@ import type { MainContext } from '../context'
 import type { HistoryService } from '../history'
 import type { CallContext } from '../registry'
 import { type FoundSource, findSources, inspectProfile, publicSource } from './browsers'
-import { withScratch } from './copy'
+import { removeScratch, setScratchFolder, withScratch } from './copy'
 import { pinnedExport } from './export'
 import { cleanTree, FILE_FOLDER_NAME, LINKS_FOLDER_NAME, OVER_LIMIT } from './files'
 import { historyTask } from './history'
 import { ImportJobs, type Task } from './jobs'
 import { countBookmarks, NO_BOOKMARKS, writeBookmarksHtml } from './netscape'
 import { importPlaces } from './places'
-import { readFileOffMain, readLinksOffMain, UNREADABLE } from './reader'
+import { readFileOffMain, readLinksOffMain, stopReaders, UNREADABLE } from './reader'
 import { IMPORT_WINDOW_ID, ImportWindow } from './window'
 
 export function registerImport(ctx: MainContext, history: HistoryService): void {
   const { commands, actions, store, windows } = ctx
   const jobs = new ImportJobs(ctx)
+  // Copies of another browser's files go under user data: what a crash left is cleared now, and the
+  // copies being read are removed at quit, before Orbit exits (D58). This runs before the state's last write.
+  setScratchFolder(join(ctx.paths.userData, 'import-scratch'))
+  app.on('will-quit', () => {
+    jobs.quit()
+    stopReaders()
+    removeScratch()
+  })
   const win = new ImportWindow(ctx, () => {
     const windowId = win.browserWindow()
     const spaceId = windowId ? store.state.windows[windowId]?.spaceId : store.state.spaceOrder[0]

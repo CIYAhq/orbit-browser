@@ -1,6 +1,6 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 import { manyPages, sampleHistory, writeChromium } from '../../scripts/import-fixtures'
 import type { HistoryEntry, HistoryVisit } from '../../src/shared/commands/history'
@@ -193,4 +193,56 @@ test('[IM-07][IM-14] 100,000 pages of history import in the background: the wind
   await expect
     .poll(async () => (await state(app)).windows[Object.keys((await state(app)).windows)[0] as string]?.overlay.kind)
     .toBe('commandbar')
+})
+
+/** Copies of another browser's files (`0-History`, `1-places.sqlite-wal`, …) anywhere under these folders. */
+function copiesIn(...dirs: string[]): string[] {
+  return dirs.flatMap((dir) =>
+    (readdirSync(dir, { recursive: true }) as string[]).filter((f) =>
+      /^\d+-(History|places\.sqlite|History\.db|Preferences|Secure Preferences)/.test(basename(f)),
+    ),
+  )
+}
+
+test('[IM-07][IM-14] a quit while history is read leaves no copy of it: not in the temp folder, not in user data (D58)', async () => {
+  test.setTimeout(120_000)
+  const dir = mkdtempSync(join(tmpdir(), 'orbit-import-e2e-'))
+  scratch.push(dir)
+  writeChromium(join(dir, 'chrome'), [{ folder: 'Default', name: 'Big', history: manyPages(100_000) }])
+  // Orbit's temp folder is one of the test's own, so whatever it leaves there can be seen.
+  const temp = join(dir, 'temp')
+  mkdirSync(temp)
+  orbit = await launchImport({ places: [{ browser: 'chrome', dir: join(dir, 'chrome') }], env: { TMPDIR: temp } })
+  const { app, userData } = orbit
+  const page = await importHistory(app, 'chrome')
+  await page.getByTestId('import-next').click()
+  // Quit while the pages are being read: the copy of History is there.
+  let read = 0
+  await expect
+    .poll(
+      async () => {
+        const job = (await run(app, 'import.status', {})) as ImportJob
+        read = job.items[0]?.done ?? 0
+        return job.phase === 'reading' && read > 0 && copiesIn(temp, userData).length > 0
+      },
+      { intervals: [10], timeout: 60_000 },
+    )
+    .toBe(true)
+  await app.close()
+  orbit = undefined
+  console.log(`[D58] quit with ${read.toLocaleString('en-US')} of 100,000 pages read`)
+  expect(read).toBeLessThan(100_000)
+  expect(copiesIn(temp, userData)).toEqual([])
+  expect(readdirSync(temp).filter((f) => f.startsWith('orbit-import-'))).toEqual([])
+})
+
+test('[IM-14] copies a crash left in user data are removed when Orbit starts (D58)', async () => {
+  const userData = mkdtempSync(join(tmpdir(), 'orbit-e2e-'))
+  scratch.push(userData)
+  const left = join(userData, 'import-scratch', 'read-left')
+  mkdirSync(left, { recursive: true })
+  writeFileSync(join(left, '0-History'), 'a copy of another browser’s history')
+  orbit = await launchImport({ userData })
+  await expect.poll(() => existsSync(left)).toBe(false)
+  expect(copiesIn(userData)).toEqual([])
 })

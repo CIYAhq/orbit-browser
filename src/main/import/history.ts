@@ -324,6 +324,8 @@ export function historyTask(
             )
             if (found && kept.size > 0) read.set(profile.id, kept)
           } catch (err) {
+            // Orbit is quitting: the copy was closed and removed (D58).
+            if (job.cancelled) return
             // A file the browser holds asks for it to be quit (IM-14); a broken one is left out.
             if (err instanceof LockedError) locked = true
             else {
