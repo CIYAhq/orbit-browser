@@ -1,8 +1,9 @@
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 import { manyBookmarks, netscapeHtml, sampleTree } from '../../scripts/import-fixtures'
-import type { ImportJob } from '../../src/shared/commands/import'
+import type { BookmarkNode, ImportJob } from '../../src/shared/commands/import'
 import { MOD, type Orbit, run, state } from './helpers'
 import {
   clickDone,
@@ -348,4 +349,50 @@ test('[IM-05][IM-14] 2,000 bookmarks: one closed folder, nothing loaded, quick, 
   await expect
     .poll(async () => (await state(app)).windows[Object.keys(s.windows)[0] as string]?.overlay.kind)
     .toBe('commandbar')
+})
+
+test('[IM-13][IM-14] a quit while bookmarks are being added takes them back: the relaunch shows no part-filled folder (F6)', async () => {
+  test.setTimeout(180_000)
+  const userData = mkdtempSync(join(tmpdir(), 'orbit-e2e-'))
+  try {
+    orbit = await launchImport({ userData })
+    const { app } = orbit
+    const s = await state(app)
+    const spaceId = s.windows[Object.keys(s.windows)[0] as string]?.spaceId as string
+    // 100,000 bookmarks in one folder: adding them takes several seconds, a part at a time.
+    const children: BookmarkNode[] = Array.from({ length: 100_000 }, (_, i) => ({
+      id: `b${i}`,
+      title: `Page ${i + 1}`,
+      url: `https://example.com/page/p${i + 1}`,
+    }))
+    const bookmarks: BookmarkNode[] = [{ id: 'f', title: 'Many', children }]
+    await run(app, 'import.start', {
+      plan: { kind: 'file', name: 'many.html', bookmarks, target: { kind: 'space', spaceId } },
+    })
+    let added = 0
+    await expect
+      .poll(
+        async () => {
+          const job = (await run(app, 'import.status', {})) as ImportJob
+          added = job.items[0]?.done ?? 0
+          return job.phase === 'adding' && added > 0
+        },
+        { intervals: [10], timeout: 60_000 },
+      )
+      .toBe(true)
+    await app.close()
+    console.log(`[F6] quit with ${added.toLocaleString('en-US')} of 100,000 bookmarks added`)
+    expect(added).toBeLessThan(100_000)
+
+    orbit = await launchImport({ userData })
+    const after = await state(orbit.app)
+    const left = Object.values(after.tabs).filter((t) => t.pinnedUrl?.startsWith('https://example.com/page/'))
+    console.log(`[F6] after the relaunch: ${left.length} of the imported tabs`)
+    expect(Object.values(after.folders).map((f) => f.name)).not.toContain('Imported bookmarks')
+    expect(left).toHaveLength(0)
+  } finally {
+    await orbit?.app.close().catch(() => {})
+    orbit = undefined
+    rmSync(userData, { recursive: true, force: true })
+  }
 })

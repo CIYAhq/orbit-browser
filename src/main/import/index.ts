@@ -232,7 +232,7 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
 
   // Done (IM-14): the browser window shows the imported folder, in its Space, pinned section open.
   commands.register('import.reveal', async ({ jobId }, c) => {
-    const job = jobs.get(jobId)
+    const job = jobs.find(jobId)
     const folder = job?.status.folders[0]
     const windowId = (job?.opener && store.state.windows[job.opener] ? job.opener : undefined) ?? browserOf(c)
     if (c.windowId === IMPORT_WINDOW_ID) win.close()

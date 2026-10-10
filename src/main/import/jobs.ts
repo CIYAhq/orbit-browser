@@ -43,7 +43,14 @@ export interface Job {
   folderName: string
   /** Source profiles' names by key: sub-folder names, and 'matching' destinations' names. */
   profileNames: Map<string, string>
-  extra: Map<string, unknown>
+  /** The folders of the bookmarks being added: a quit or a failure part-way takes them all back (F6). */
+  placing: PlacedFolder[]
+}
+
+/** An import that has ended: only what its summary and Done need are kept (F8). */
+export interface EndedJob {
+  status: ImportJob
+  opener: WindowId | undefined
 }
 
 export const IMPORT_UNDO_LABEL = 'Import Bookmarks'
@@ -53,7 +60,9 @@ const PLACE_CHUNK = 250
 
 /** Runs imports one after another; tells every Orbit UI how they go (`import.progress`). */
 export class ImportJobs {
+  /** Imports running, then ended ones as their status only (F8). */
   private jobs = new Map<string, Job>()
+  private ended = new Map<string, EndedJob>()
   private latest: string | undefined
   private queue: Promise<unknown> = Promise.resolve()
   private sent = 0
@@ -62,13 +71,20 @@ export class ImportJobs {
 
   constructor(private readonly ctx: MainContext) {}
 
+  /** A running import; undefined once it has ended. */
   get(jobId?: string): Job | undefined {
     const id = jobId ?? this.latest
     return id ? this.jobs.get(id) : undefined
   }
 
+  /** An import, running or ended: its status and the window it was started from. */
+  find(jobId?: string): EndedJob | undefined {
+    const id = jobId ?? this.latest
+    return id ? (this.jobs.get(id) ?? this.ended.get(id)) : undefined
+  }
+
   status(jobId?: string): ImportJob | null {
-    return this.get(jobId)?.status ?? null
+    return this.find(jobId)?.status ?? null
   }
 
   /** Starts an import made of `tasks`; returns its id. `profileNames`: the source profiles chosen, by key. */
@@ -90,7 +106,7 @@ export class ImportJobs {
       destinations: new Map(),
       folderName,
       profileNames,
-      extra: new Map(),
+      placing: [],
     }
     this.jobs.set(id, job)
     this.latest = id
@@ -98,6 +114,8 @@ export class ImportJobs {
     this.queue = run.catch(() => undefined)
     run.catch((err: unknown) => {
       console.error('[import] failed:', err)
+      // Bookmarks are all or nothing: a part-filled folder goes (F6).
+      this.takeBack(job)
       job.status.phase = 'failed'
       job.status.error = err instanceof Error ? err.message : String(err)
       this.changed(job, true)
@@ -133,12 +151,36 @@ export class ImportJobs {
     this.changed(job, true)
   }
 
-  /** Quit (D58): every import stops where it is, and nothing more is read. */
+  /**
+   * Quit: every import stops where it is (nothing more is read, D58), and the bookmarks being added
+   * are taken back, so the next launch shows no part-filled folder (F6). Runs before the state's last write.
+   */
   quit(): void {
     for (const job of this.jobs.values()) {
       job.cancelled = true
       this.release.get(job.status.id)?.()
+      this.takeBack(job)
     }
+  }
+
+  /** Removes the folders of bookmarks still being added, with everything in them, in one store update (F6). */
+  private takeBack(job: Job): void {
+    const placing = job.placing.splice(0)
+    const state = this.ctx.store.state
+    // Walked in the state, not the draft: a draft would wrap each of the (up to 200,000) tabs it reads.
+    const parts = placing.flatMap((p) =>
+      p.folderId && state.folders[p.folderId] ? [itemsUnder(state, p.folderId)] : [],
+    )
+    if (parts.length === 0) return
+    this.ctx.store.update((d) => {
+      for (const { rootId, folders, tabs } of parts) {
+        reselectAway(d, new Set(tabs))
+        removeItem(d, rootId)
+        for (const id of folders) delete d.folders[id]
+        for (const id of tabs) delete d.tabs[id]
+      }
+    })
+    for (const { tabs } of parts) for (const id of tabs) this.ctx.tabs.destroy(id)
   }
 
   /** Held imports nobody committed are dropped (onboarding ended with Skip setup, OB-14). */
@@ -186,6 +228,7 @@ export class ImportJobs {
       this.changed(job, true)
       await this.resolveDestinations(job)
       for (const task of tasks) {
+        if (job.cancelled) return
         if (task.item.state === 'failed' || task.item.state === 'skipped') continue
         task.item.state = 'running'
         this.changed(job)
@@ -201,7 +244,16 @@ export class ImportJobs {
       lag.disable()
       job.status.stats = { ms: Math.round(performance.now() - started), longestTaskMs: Math.round(lag.max / 1e6) }
       this.changed(job, true)
+      this.end(job)
     }
+  }
+
+  /** An import that has ended keeps only its status: its plan and the bookmarks read are let go (F8). */
+  private end(job: Job): void {
+    const id = job.status.id
+    this.jobs.delete(id)
+    this.release.delete(id)
+    this.ended.set(id, { status: job.status, opener: job.opener })
   }
 
   /** The starter suggestions accepted (IM-16): Favorites of the target profile, pinned tabs of its Space, unloaded. */
@@ -299,9 +351,11 @@ export class ImportJobs {
       for (const [reason, n] of plan.skipped) skipped.set(reason, (skipped.get(reason) ?? 0) + n)
       if (plan.tabs === 0) continue
       const placed: PlacedFolder = { folderId: '', tabIds: [], folderIds: [], skipped: plan.skipped }
+      job.placing.push(placed)
       const ids = new Map<number, FolderId>()
       for (let from = 0; from < plan.steps.length; from += PLACE_CHUNK) {
         await new Promise((resolve) => setImmediate(resolve))
+        if (job.cancelled) return
         let more = true
         this.ctx.store.update((d) => {
           more = applyPlacement(d, spaceId, plan, from, from + PLACE_CHUNK, placed, ids, now)
@@ -315,6 +369,8 @@ export class ImportJobs {
       job.status.folders.push({ folderId: placed.folderId, spaceId })
       this.recordUndo(placed.folderId)
     }
+    // Every folder is filled: they stay.
+    job.placing = []
     item.done = added
     job.status.skipped.push(...skippedLines(skipped, item.type === 'links' ? ['link', 'links'] : undefined))
   }
@@ -353,6 +409,21 @@ export class ImportJobs {
     }
     stack.push(IMPORT_UNDO_LABEL, undo, Date.now(), () => !store.state.folders[rootId])
   }
+}
+
+/** The ids of a folder's folders (itself included) and tabs, at any depth. */
+function itemsUnder(state: OrbitState, rootId: FolderId): { rootId: FolderId; folders: FolderId[]; tabs: TabId[] } {
+  const folders: FolderId[] = []
+  const tabs: TabId[] = []
+  const stack: string[] = [rootId]
+  for (let id = stack.pop(); id !== undefined; id = stack.pop()) {
+    const f = state.folders[id]
+    if (f) {
+      folders.push(id)
+      for (const child of f.children) stack.push(child)
+    } else if (state.tabs[id]) tabs.push(id)
+  }
+  return { rootId, folders, tabs }
 }
 
 /** A folder's own folders and tabs, copied (for undo). */
