@@ -4,7 +4,8 @@
  * leaving a tab opens picture-in-picture. No Electron or DOM here, so it is unit-tested.
  */
 import { DEFAULT_PIP_PLACEMENT, normalizePlacement } from './pip'
-import type { OrbitState, Settings, Tab, TabId, TabMedia } from './state'
+import { windowMayShow } from './private'
+import type { OrbitState, Settings, Tab, TabId, TabMedia, WindowId } from './state'
 
 /** One report from Orbit's page script (src/main/media/agent.ts). */
 export interface AgentSnapshot {
@@ -274,10 +275,15 @@ export function isAnyMediaPlaying(state: OrbitState): boolean {
   return false
 }
 
-/** Tabs in the sidebar media tray, newest first (MD-10). */
-export function trayTabIds(state: OrbitState): TabId[] {
+/**
+ * Tabs in a window's sidebar media tray, newest first (MD-10). A private window lists only its own
+ * tabs, and no other window lists a private one (`windowMayShow`).
+ */
+export function trayTabIds(state: OrbitState, windowId: WindowId): TabId[] {
   const tabs: Tab[] = []
-  for (const tab of Object.values(state.tabs)) if (tab.media?.tray) tabs.push(tab)
+  for (const tab of Object.values(state.tabs)) {
+    if (tab.media?.tray && windowMayShow(state, windowId, tab.id)) tabs.push(tab)
+  }
   tabs.sort((a, b) => (b.media?.since ?? 0) - (a.media?.since ?? 0) || (a.id < b.id ? -1 : 1))
   return tabs.map((t) => t.id)
 }

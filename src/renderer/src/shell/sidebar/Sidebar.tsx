@@ -42,7 +42,7 @@ export function Sidebar({ win, floating = false }: { win: WindowState; floating?
           <SpaceStrip windowId={win.id} spaceId={win.spaceId} />
           <UndoToast />
           {/* Media lane: transient media tray above the bottom bar (SB-10, MD-09). */}
-          <MediaTray />
+          <MediaTray windowId={win.id} />
           <SpaceBar win={win} />
         </>
       )}
