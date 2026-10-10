@@ -1,14 +1,19 @@
-import type { Option } from './controls'
+/** A select's choice (the shape of controls.tsx's Option; this file stays free of JSX for unit tests). */
+interface Option<T> {
+  value: T
+  label: string
+  disabled?: boolean
+}
 
 const MINUTE = 60 * 1000
 export const HOUR = 60 * MINUTE
 export const DAY = 24 * HOUR
 
-/** "6 hours", "7 days", "Never" (0). */
+/** "6 hours", "24 hours", "7 days", "Never" (0). */
 export function durationLabel(ms: number): string {
   if (ms <= 0) return 'Never'
   const unit = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
-  if (ms % DAY === 0) return unit(ms / DAY, 'day')
+  if (ms % DAY === 0 && ms > DAY) return unit(ms / DAY, 'day')
   if (ms % HOUR === 0) return unit(ms / HOUR, 'hour')
   return unit(Math.max(1, Math.round(ms / MINUTE)), 'minute')
 }

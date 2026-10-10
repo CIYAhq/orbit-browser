@@ -1,8 +1,9 @@
 import type { SiteSearchDraft, SiteSearchSaved } from '../../shared/commands/settings'
 import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
-import type { OrbitState, SiteSearchEngine } from '../../shared/state'
+import type { SiteSearchEngine } from '../../shared/state'
 import { engineById, isBuiltInEngine, siteEngineId } from '../../shared/url'
 import type { MainContext } from '../context'
+import { isPersistentProfile } from './profiles'
 
 const MAX_NAME = 60
 const MAX_KEYWORD = 32
@@ -45,11 +46,6 @@ export function checkSiteSearch(
     return { ok: false, field: 'url', message: 'Put %s after the site’s address' }
   }
   return { ok: true, value: { name, keyword, url } }
-}
-
-/** Whether a profile can have settings of its own: private windows' in-memory profiles can't. */
-export function isPersistentProfile(state: OrbitState, profileId: string): boolean {
-  return !!state.profiles[profileId]?.partition.startsWith('persist:')
 }
 
 /** A new site search id (the starter ones use readable ids such as "youtube"). */

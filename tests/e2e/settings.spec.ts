@@ -213,6 +213,85 @@ test('[ST-03][ST-02] General: make Orbit the default browser from Settings or th
   await expect(page.getByTestId('default-browser-status')).toBeVisible()
 })
 
+// ---- Profiles (ST-04, ST-05, ST-20) ----
+
+test('[ST-04][ST-20] Profiles: Default first, rename any profile, new profiles, delete only once no Space uses it', async () => {
+  const spaceId = (await run(orbit.app, 'spaces.create', { name: 'Client', activate: false })) as string
+  const work = (await run(orbit.app, 'profiles.create', { name: 'Work', assignSpaceId: spaceId })) as string
+  const page = await openSettings(orbit.app, { section: 'profiles' })
+  const list = page.getByTestId('profile-list').getByRole('option')
+  await expect(list).toHaveCount(2)
+  await expect(list.first()).toContainText('Default')
+  await expect(list.nth(1)).toContainText('Work')
+  await expect(list.nth(1)).toContainText('Used by 1 Space')
+
+  // The Default profile can be renamed; it applies without a Save button.
+  const name = page.getByTestId('profile-name')
+  await name.fill('Personal')
+  await name.press('Enter')
+  await expect.poll(async () => (await state(orbit.app)).profiles[DEFAULT_PROFILE_ID]?.name).toBe('Personal')
+  await expect(list.first()).toContainText('Personal')
+  await expect(page.getByTestId('profile-delete')).toHaveCount(0)
+
+  // Work is in use: Delete is off and says why.
+  await list.nth(1).click()
+  await expect(page.getByTestId('setting-profile-spaces')).toContainText('Client')
+  await expect(page.getByTestId('profile-delete')).toBeDisabled()
+  await expect(page.getByTestId('setting-profile-delete')).toContainText('Give it another profile first')
+  await run(orbit.app, 'spaces.update', { spaceId, profileId: DEFAULT_PROFILE_ID })
+  await expect(page.getByTestId('profile-delete')).toBeEnabled()
+  await page.getByTestId('profile-delete').click()
+  const dialog = page.getByTestId('profile-delete-dialog')
+  await expect(dialog).toBeVisible()
+  // Escape keeps it.
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  expect((await state(orbit.app)).profiles[work]).toBeDefined()
+  await page.getByTestId('profile-delete').click()
+  await page.getByTestId('profile-delete-confirm').click()
+  await expect.poll(async () => (await state(orbit.app)).profiles[work]).toBeUndefined()
+  await expect(list).toHaveCount(1)
+  await expect(list.first()).toHaveAttribute('aria-selected', 'true')
+
+  // New profile…: created empty and shown.
+  await page.getByTestId('profile-new').click()
+  await page.getByTestId('profile-new-name').fill('Side Project')
+  await page.getByTestId('profile-new-create').click()
+  await expect(list).toHaveCount(2)
+  await expect(list.nth(1)).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByTestId('profile-name')).toHaveValue('Side Project')
+  await expect(page.getByTestId('setting-profile-spaces')).toContainText('No Space uses this profile.')
+
+  // Its search engine is chosen here too; the engines themselves are in Search.
+  await expect(page.getByTestId('setting-profile-search-engine').locator('.st-scope')).toHaveText('Side Project')
+  await page.getByTestId('profile-search-settings').click()
+  await expect(page.getByTestId('settings-tab-search')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('[data-setting-group="site-search"]')).toBeInViewport()
+})
+
+test('[ST-05][ST-20] archive timing per profile: 12 hours by default, up to 30 days, never off; others follow Default until set', async () => {
+  const work = (await run(orbit.app, 'profiles.create', { name: 'Work' })) as string
+  const page = await openSettings(orbit.app, { section: 'profiles' })
+  const defaults = page.getByTestId(`archive-after-${DEFAULT_PROFILE_ID}`)
+  await expect(defaults.locator('option')).toHaveText(['12 hours', '24 hours', '7 days', '30 days'])
+  await expect(defaults).toHaveValue(String(12 * 3_600_000))
+  await defaults.selectOption({ label: '7 days' })
+  await expect
+    .poll(async () => (await state(orbit.app)).profiles[DEFAULT_PROFILE_ID]?.archiveAfterMs)
+    .toBe(7 * 86_400_000)
+
+  await page.getByTestId(`profile-${work}`).click()
+  const own = page.getByTestId(`archive-after-${work}`)
+  // Labelled with its profile (ST-20); follows Default until changed.
+  await expect(page.getByTestId('setting-archive-after').locator('.st-scope')).toHaveText('Work')
+  await expect(own).toHaveValue('-1')
+  await expect(own.locator('option:checked')).toHaveText('Same as Default (7 days)')
+  await own.selectOption({ label: '24 hours' })
+  await expect.poll(async () => (await state(orbit.app)).profiles[work]?.archiveAfterMs).toBe(86_400_000)
+  await own.selectOption({ label: 'Same as Default (7 days)' })
+  await expect.poll(async () => (await state(orbit.app)).profiles[work]).not.toHaveProperty('archiveAfterMs')
+})
+
 // ---- Appearance (AP-01, ST-11) ----
 
 test('[AP-01][ST-11] Light, Dark or Match system, chosen in Settings, turns every window, the command bar, menus, pages and Settings at once', async () => {

@@ -224,7 +224,17 @@ html[data-platform="darwin"] .settings__page {
   border: 1px solid var(--st-border);
   border-radius: 10px;
   background: var(--st-card);
-  overflow: hidden;
+}
+
+/* Rows keep to the card's rounded corners without clipping it: a row's menu may hang below. */
+.st-group__body > :first-child {
+  border-top-left-radius: 9px;
+  border-top-right-radius: 9px;
+}
+
+.st-group__body > :last-child {
+  border-bottom-left-radius: 9px;
+  border-bottom-right-radius: 9px;
 }
 
 .st-row {
@@ -508,6 +518,19 @@ html[data-platform="darwin"] .settings__page {
   text-decoration: underline;
 }
 
+.st-link--button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+}
+
+.st-link--button:focus-visible {
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 60%, transparent);
+  outline: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .settings *,
   html[data-theme-fade] .settings * {
@@ -675,4 +698,144 @@ html[data-platform="darwin"] .settings__page {
 
 .st-status svg {
   color: var(--accent);
+}
+
+/* ---------- Dialogs ---------- */
+
+.st-dialog {
+  width: min(440px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  padding: 20px 22px 18px;
+  border: 1px solid var(--st-border);
+  border-radius: 14px;
+  background: var(--st-card);
+  color: var(--text);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+}
+
+.st-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.st-dialog[open] {
+  animation: st-dialog-in 160ms ease-out;
+}
+
+@keyframes st-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .st-dialog[open] {
+    animation: none;
+  }
+}
+
+.st-dialog__title {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.st-dialog__desc {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.st-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.st-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+/* ---------- Profiles (ST-04) ---------- */
+
+.st-profiles {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+}
+
+.st-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+}
+
+.st-profile:hover {
+  background: color-mix(in oklab, var(--text) 6%, transparent);
+}
+
+.st-profile[aria-selected="true"] {
+  background: color-mix(in oklab, var(--accent) 16%, transparent);
+}
+
+.st-profile:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 60%, transparent);
+  outline: none;
+}
+
+.st-profile__avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--accent) 22%, var(--st-field));
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.st-profile__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.st-profile__name {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.st-profile__meta {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.st-profiles + .st-row {
+  border-top: 1px solid var(--divider);
+}
+
+/* A dialog's destructive confirmation is the filled button. */
+.st-dialog__actions .st-button--danger {
+  border-color: transparent;
+  background: #d23b3b;
+  color: #ffffff;
+}
+
+.st-dialog__actions .st-button--danger:hover:not(:disabled) {
+  background: #bb2f2f;
 }

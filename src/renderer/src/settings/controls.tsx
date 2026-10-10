@@ -232,6 +232,23 @@ export function Button({
   )
 }
 
+/** A button that reads as a link, inside a row's description ("Search settings…"). */
+export function LinkButton({
+  children,
+  onClick,
+  testId,
+}: {
+  children: ReactNode
+  onClick: () => void
+  testId?: string
+}) {
+  return (
+    <button type="button" className="st-link st-link--button" onClick={onClick} data-testid={testId}>
+      {children}
+    </button>
+  )
+}
+
 /** A check mark list item (checkbox look), for dialogs such as Clear browsing data. */
 export function Checkbox({
   checked,
@@ -270,6 +287,8 @@ export function TextField({
   testId,
   autoFocus,
   wide,
+  onCommit,
+  hideLabel,
 }: {
   value: string
   onChange: (next: string) => void
@@ -279,6 +298,10 @@ export function TextField({
   testId?: string
   autoFocus?: boolean
   wide?: boolean
+  /** Called on Enter and when the box loses focus: for a field that applies without a Save button. */
+  onCommit?: () => void
+  /** The label is for screen readers only (the row already names the field). */
+  hideLabel?: boolean
 }) {
   const errorId = useId()
   const input = useRef<HTMLInputElement>(null)
@@ -288,7 +311,7 @@ export function TextField({
   }, [])
   return (
     <label className={`st-field${wide ? ' st-field--wide' : ''}`}>
-      <span className="st-field__label">{label}</span>
+      <span className={hideLabel ? 'st-sr' : 'st-field__label'}>{label}</span>
       <input
         ref={input}
         className="st-input"
@@ -300,6 +323,13 @@ export function TextField({
         aria-describedby={error ? errorId : undefined}
         data-testid={testId}
         onChange={(e) => onChange(e.target.value)}
+        onBlur={onCommit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && onCommit) {
+            e.preventDefault()
+            onCommit()
+          }
+        }}
       />
       {error && (
         <span className="st-field__error" id={errorId} role="alert">
@@ -388,5 +418,59 @@ export function RowMenu({ label, items, testId }: { label: string; items: MenuIt
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * A modal dialog over Settings (confirmations, Clear browsing data). Shown while mounted; Escape and
+ * Cancel close it through `onClose`. Focus starts on the element with `autoFocus`, else the first control.
+ */
+export function Dialog({
+  title,
+  description,
+  children,
+  actions,
+  onClose,
+  testId,
+}: {
+  title: string
+  description?: ReactNode
+  children?: ReactNode
+  /** The buttons along the bottom. */
+  actions: ReactNode
+  onClose: () => void
+  testId?: string
+}) {
+  const ref = useRef<HTMLDialogElement>(null)
+  const titleId = useId()
+  const descId = useId()
+  useEffect(() => {
+    const dialog = ref.current
+    if (dialog && !dialog.open) dialog.showModal()
+    return () => dialog?.close()
+  }, [])
+  return (
+    <dialog
+      ref={ref}
+      className="st-dialog"
+      aria-labelledby={titleId}
+      aria-describedby={description ? descId : undefined}
+      data-testid={testId}
+      onCancel={(e) => {
+        e.preventDefault()
+        onClose()
+      }}
+    >
+      <h2 className="st-dialog__title" id={titleId}>
+        {title}
+      </h2>
+      {description && (
+        <p className="st-dialog__desc" id={descId}>
+          {description}
+        </p>
+      )}
+      {children && <div className="st-dialog__body">{children}</div>}
+      <div className="st-dialog__actions">{actions}</div>
+    </dialog>
   )
 }

@@ -54,6 +54,13 @@ export const SETTINGS_ACTIONS: SettingsActionDef[] = [
     keywords: ['default browser', 'make default'],
   },
   {
+    id: 'settings.profiles',
+    title: 'Profile Settings',
+    category: 'App',
+    settings: { section: 'profiles' },
+    keywords: ['profiles', 'new profile', 'rename profile', 'delete profile', 'archive timing', 'auto archive'],
+  },
+  {
     id: 'settings.search',
     title: 'Search Engine Settings',
     category: 'App',
@@ -123,6 +130,14 @@ export type SiteSearchSaved =
   | { ok: true; id: string }
   | { ok: false; field: 'name' | 'keyword' | 'url'; message: string }
 
+const HOUR = 60 * 60 * 1000
+
+/**
+ * "Archive Today tabs after" choices, per profile (ST-05). 12 hours is the default; archiving can't be
+ * turned off.
+ */
+export const ARCHIVE_AFTER_CHOICES: readonly number[] = [12 * HOUR, 24 * HOUR, 7 * 24 * HOUR, 30 * 24 * HOUR]
+
 /** Whether Orbit is the OS default browser (ST-03, OB-07). */
 export interface DefaultBrowserStatus {
   isDefault: boolean
@@ -168,6 +183,11 @@ export interface SettingsCommands {
   /** Adds a custom search engine, or changes one (ST-06, CB-11). */
   'settings.saveSiteSearch': { args: SiteSearchDraft; result: SiteSearchSaved }
   'settings.removeSiteSearch': { args: { id: string }; result: void }
+  /**
+   * A profile's "Archive Today tabs after" (ST-05): one of ARCHIVE_AFTER_CHOICES, or null for a
+   * profile other than Default to follow the Default profile's.
+   */
+  'settings.setArchiveAfter': { args: { profileId: ProfileId; ms: number | null }; result: void }
   /** Whether Orbit is the default browser (ST-03). */
   'settings.defaultBrowser': { args: Record<string, never>; result: DefaultBrowserStatus }
   /** Asks the OS to make Orbit the default browser (ST-03, OB-07). */
