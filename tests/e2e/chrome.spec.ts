@@ -566,6 +566,70 @@ test('[FL-02] the sidebar slides out as the card widens, edge to edge in every f
   await expect.poll(async () => (await sidebarState()).visible).toBe(true)
 })
 
+test('[SB-11][FL-02] the page keeps out of the sliding sidebar’s way: hiding, it stays where it was until the sidebar has gone; showing, it goes at once to where it ends (review A-M4)', async () => {
+  const { app, shell } = orbit
+  const id = await openTab(app, page('Native'))
+  const width = (await sidebarState()).width
+  await expect.poll(async () => (await tabView(app, id))?.bounds.x).toBe(width)
+  // Every place main puts the page's native view, and when (by the wall clock, which both processes share).
+  await app.evaluate((_electron, tabId) => {
+    const hooks = (
+      globalThis as unknown as {
+        __orbit: { ctx: { tabs: { get: (id: string) => Electron.WebContentsView | undefined } } }
+      }
+    ).__orbit
+    const view = hooks.ctx.tabs.get(tabId)
+    if (!view) throw new Error(`no view for ${tabId}`)
+    const moves: { t: number; x: number }[] = []
+    ;(globalThis as unknown as { __moves: typeof moves }).__moves = moves
+    const setBounds = view.setBounds.bind(view)
+    view.setBounds = (bounds: Electron.Rectangle) => {
+      moves.push({ t: Date.now(), x: bounds.x })
+      setBounds(bounds)
+    }
+  }, id)
+  const takeMoves = () =>
+    app.evaluate(() => (globalThis as unknown as { __moves: { t: number; x: number }[] }).__moves.splice(0))
+  /** Toggles the sidebar from the shell: when, and when its column stopped sliding. */
+  const toggle = () =>
+    shell.evaluate(async () => {
+      const el = document.querySelector('[data-testid="shell"]') as HTMLElement
+      const orbitApi = (window as unknown as { orbit: { invoke: (n: string, a: unknown) => Promise<unknown> } }).orbit
+      const ended = new Promise<number>((resolve) => {
+        const done = (e: TransitionEvent) => {
+          if (e.target !== el || e.propertyName !== 'grid-template-columns') return
+          el.removeEventListener('transitionend', done)
+          resolve(Date.now())
+        }
+        el.addEventListener('transitionend', done)
+      })
+      const start = Date.now()
+      void orbitApi.invoke('action.run', { id: 'sidebar.toggle' })
+      return { start, end: await ended }
+    })
+
+  // Hiding: the view stays at its start until the sidebar has gone, then takes the window.
+  const hid = await toggle()
+  expect(hid.end - hid.start).toBeGreaterThan(100)
+  await expect.poll(async () => (await tabView(app, id))?.bounds.x).toBe(MARGIN_HIDDEN)
+  const hiding = await takeMoves()
+  const sliding = hiding.filter((m) => m.t < hid.end)
+  expect(
+    sliding.map((m) => m.x),
+    'where main put the view while the sidebar slid out',
+  ).toEqual(sliding.map(() => width))
+  expect(hiding.at(-1)?.x).toBe(MARGIN_HIDDEN)
+
+  // Showing: the first move already puts it where it ends, clear of the sidebar coming in.
+  const shown = await toggle()
+  expect(shown.end - shown.start).toBeGreaterThan(100)
+  await expect.poll(async () => (await tabView(app, id))?.bounds.x).toBe(width)
+  const showing = await takeMoves()
+  expect(showing[0]?.x, 'the first place main put the view once the sidebar started to slide in').toBe(width)
+  expect(showing[0]?.t ?? Number.POSITIVE_INFINITY).toBeLessThan(shown.end)
+  expect(showing.every((m) => m.x === width)).toBe(true)
+})
+
 test('[SB-12][FL-03] with the sidebar hidden, the left edge brings it in over the page; it goes once the pointer moves on', async () => {
   const { app, shell } = orbit
   const id = await openTab(app, page('Under'))
