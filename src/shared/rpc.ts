@@ -15,6 +15,7 @@ import type { DownloadCommands } from './commands/downloads'
 import type { ExtensionCommands } from './commands/extensions'
 import type { HistoryCommands } from './commands/history'
 import type { ImportCommands } from './commands/import'
+import type { KeyCommands } from './commands/keys'
 import type { MediaCommands, MediaEvents } from './commands/media'
 import type { NavCommands } from './commands/nav'
 import type { PeekCommands, PeekEvents } from './commands/peek'
@@ -39,7 +40,8 @@ export interface OrbitCommands
     DownloadCommands,
     ImportCommands,
     NavCommands,
-    MediaCommands {}
+    MediaCommands,
+    KeyCommands {}
 
 export interface OrbitEvents extends CoreEvents, PeekEvents, MediaEvents {}
 

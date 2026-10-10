@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 475 spec’d · 201 built (72 partial) · 281 tested · 0 feel right. 10 more are out of scope and not counted.
+**Totals:** 475 spec’d · 201 built (74 partial) · 285 tested · 0 feel right. 10 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
-| P0 | 174 | 131 | 159 |
-| P1 | 221 | 61 | 111 |
+| P0 | 174 | 131 | 161 |
+| P1 | 221 | 61 | 113 |
 | P2 | 80 | 9 | 11 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -346,9 +346,9 @@ Spec: `spec/shortcuts.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| KS-01 | One keymap, remapping and persistence | P0 | – | ✅ e2e | – |  |
-| KS-02 | Conflicts with web pages ("prefer websites" vs "prefer Orbit") | P0 | – | – | – |  |
-| KS-03 | Platform mapping rules | P0 | – | – | – |  |
+| KS-01 | One keymap, remapping and persistence | P0 | 🟡 partial | ✅ e2e+unit | – | one keymap keyed by action id (src/shared/actions.ts + src/shared/keymap.ts): the key router, macOS menu bar (rebuilt on a remap), tooltips and command-bar rows read the live bindings; remap, several bindings per action (up to 5), none (command bar and menus still run it), a modifier required except F1-F12, system keys refused, conflicts reported (clear or swap), reset; stored per device in settings.shortcuts, cleaned on load, kept across a restart (Space keys too); the Settings → Shortcuts page comes with ST-08 |
+| KS-02 | Conflicts with web pages ("prefer websites" vs "prefer Orbit") | P0 | – | ✅ unit | – |  |
+| KS-03 | Platform mapping rules | P0 | – | ✅ unit | – |  |
 | KS-04 | Command bar and address | P0 | ✅ | ✅ e2e | – | ⌘T/⌘L/Alt+D, Esc, ⌘T/⌘L again, ↑/↓ (⌃N/⌃P), Enter, Tab, ⌫, ⇧Enter (option), ⌘⌥⌫ / Shift+Delete, ⌘⌥V |
 | KS-05 | Tabs and windows | P0 | – | – | – |  |
 | KS-06 | Switching tabs | P0 | – | – | – |  |
@@ -361,9 +361,9 @@ Spec: `spec/shortcuts.md`
 | KS-13 | Developer tools | P1 | – | – | – |  |
 | KS-14 | Canvases, notes, capture and Tweaks | P2 | – | – | – |  |
 | KS-15 | Standard app and window keys | P1 | – | – | – |  |
-| KS-16 | Text-editing keys keep their meaning | P0 | 🟡 partial | ✅ e2e | – | typed keys never go astray: a page or Orbit view that loads (a slow page, a background tab, a reload) no longer takes the keyboard from the command bar, a sidebar field or the page in front (focus-on-navigation off for every web contents Orbit makes); ⌘←/⌘→ act outside text fields only; the full text-editing and IME audit is still to do |
+| KS-16 | Text-editing keys keep their meaning | P0 | 🟡 partial | ✅ e2e+unit | – | typed keys never go astray: a page or Orbit view that loads (a slow page, a background tab, a reload) no longer takes the keyboard from the command bar, a sidebar field or the page in front (focus-on-navigation off for every web contents Orbit makes); ⌘←/⌘→ act outside text fields only; the full text-editing and IME audit is still to do |
 | KS-17 | Mouse, trackpad and modifier-click bindings | P0 | – | – | – |  |
-| KS-18 | Shortcut hints everywhere | P1 | – | – | – |  |
+| KS-18 | Shortcut hints everywhere | P1 | 🟡 partial | ✅ e2e | – | button tooltips (address, copy link, site controls, sidebar toggle, back/forward/reload, find, zoom, Library, Clear, Space dots, Peek, Mini Window Open in…), the empty-window hint, command-bar rows and macOS menu items follow a remap without a restart; context menus and the shortcut sheet (OB-12) to come |
 | KS-19 | Keys inside overlays | P0 | 🟡 partial | ✅ e2e | – | command bar: ⌘T/⌘L/⌘W/Esc handled by the bar first (ActionRegistry.intercept); other overlays belong to their lanes |
 | KS-20 | Shortcuts in special windows | P1 | – | – | – |  |
 
@@ -542,7 +542,7 @@ Spec: `spec/settings.md`
 | ST-05 | Per-profile: auto-archive timing | P1 | ✅ | ✅ e2e+unit | – | 12 hours (default), 24 hours, 7 days, 30 days per profile; no Never; other profiles follow Default until set |
 | ST-06 | Per-profile: default search engine and custom engines | P0 | ✅ | ✅ e2e+unit | – | per-profile default engine (8 built-ins), custom engines with keyword and %s URL, Make default from the row menu; no extension override in Electron, so that row does not exist |
 | ST-07 | Per-profile: download location, new-document app, data shortcuts | P1 | – | – | – |  |
-| ST-08 | Shortcuts section (remapping) | P1 | – | – | – |  |
+| ST-08 | Shortcuts section (remapping) | P1 | – | ✅ unit | – |  |
 | ST-09 | Links section | P1 | ✅ | ✅ e2e+unit | – | links from other apps open in a Mini Window (default), the most recent Space or one Space; routing rules (address contains / is exactly → a Space; first match wins; add, edit, reorder, remove); Peek options |
 | ST-10 | Advanced section | P1 | 🟡 partial | ✅ e2e+unit | – | tab sleep timer (TB-16), picture in picture, graphics acceleration; no site customizations, full-URL toggle, sounds or haptics, or edge-drag settings because those features don't exist yet |
 | ST-11 | Appearance section | P1 | 🟡 partial | ✅ e2e | – | Theme mode: Light / Dark / Match system (AP-01). Not built: window material (AP-10, Windows), app icon (AP-09), page defaults (P2) |

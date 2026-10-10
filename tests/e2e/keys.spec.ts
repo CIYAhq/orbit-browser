@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
-import { launchOrbit, MOD, type Orbit, run, state, viewPage } from './helpers'
+import { action, isMac, launchOrbit, MOD, type Orbit, run, state, viewPage } from './helpers'
 import { cmd, type NavFixtures, openTab, startNavFixtures } from './nav-support'
+import { activeSpace, createSpace } from './spaces-support'
 
 let fx: NavFixtures
 let orbit: Orbit
@@ -91,4 +92,112 @@ test('[KS-16] a tab in the background that loads again does not take the keyboar
   expect(await typeAnywhere(['a'])).toEqual([fx.url('/page/Front')])
   await finishLoad(back, '/slow/BackAgain')
   expect(await typeAnywhere(['b', 'c'])).toEqual([fx.url('/page/Front'), fx.url('/page/Front')])
+})
+
+// ---------- One keymap: remapping, several bindings, persistence (KS-01, KS-18) ----------
+
+/** The primary modifier as bindings write it. */
+const PRIMARY = isMac ? 'Cmd' : 'Ctrl'
+const SHIFT_B = isMac ? '⇧⌘B' : 'Ctrl+Shift+B'
+
+async function sidebarVisible(): Promise<boolean | undefined> {
+  return Object.values((await state(orbit.app)).windows)[0]?.sidebar.visible
+}
+
+/** Opens the command bar, types `text` and returns the top row once it is the action `title`. */
+async function actionRow(text: string, title: string) {
+  await orbit.shell.keyboard.press(`${MOD}+T`)
+  const overlay = await viewPage(orbit.app, 'overlay')
+  await expect(overlay.getByTestId('command-input')).toBeFocused()
+  await overlay.keyboard.type(text)
+  const top = overlay.getByTestId('command-result').first()
+  await expect(top).toHaveAttribute('data-kind', 'action')
+  await expect(top.getByTestId('command-result-title')).toHaveText(title)
+  return { overlay, top }
+}
+
+/** ⌘⇧B toggles the sidebar, and ⌘S no longer does. */
+async function onlyShiftBToggles(): Promise<void> {
+  const { shell } = orbit
+  await shell.keyboard.press(`${MOD}+Shift+B`)
+  await expect.poll(sidebarVisible).toBe(false)
+  // Were ⌘S still bound, these two presses would toggle twice and leave the sidebar hidden.
+  await shell.keyboard.press(`${MOD}+S`)
+  await shell.keyboard.press(`${MOD}+Shift+B`)
+  await expect.poll(sidebarVisible).toBe(true)
+}
+
+test('[KS-01][KS-18] remapping Toggle Sidebar to ⌘⇧B moves the key and every hint, and the remap and a Space key survive a restart', async () => {
+  const { app, shell, userData } = orbit
+  const bound = await run(app, 'keys.bind', {
+    actionId: 'sidebar.toggle',
+    accel: `${PRIMARY}+Shift+B`,
+    replace: `${PRIMARY}+S`,
+  })
+  expect(bound).toEqual({ ok: true })
+  // A bare function key may be a binding on its own: Space 2 moves to F8.
+  const defaultSpaceKey = isMac ? 'Ctrl+2' : 'Alt+2'
+  expect(await run(app, 'keys.bind', { actionId: 'space.goto.2', accel: 'F8', replace: defaultSpaceKey })).toEqual({
+    ok: true,
+  })
+  // The sidebar button's tooltip follows the remap at once.
+  await expect(shell.getByTestId('toggle-sidebar')).toHaveAttribute('title', `Hide sidebar (${SHIFT_B})`)
+  await onlyShiftBToggles()
+  // So does the command bar's row for the action.
+  const { overlay, top } = await actionRow('Toggle Sidebar', 'Toggle Sidebar')
+  await expect(top.getByTestId('command-shortcut')).toHaveText(SHIFT_B)
+  await overlay.keyboard.press('Escape')
+  if (isMac) {
+    const menuKey = await app.evaluate(
+      ({ Menu }) =>
+        Menu.getApplicationMenu()
+          ?.items.find((i) => i.label === 'View')
+          ?.submenu?.items.find((i) => i.label === 'Toggle Sidebar')?.accelerator,
+    )
+    expect(menuKey).toBe('Command+Shift+B')
+  }
+  const first = await activeSpace(app)
+  const second = await createSpace(app, { name: 'Second', activate: false })
+  await shell.keyboard.press('F8')
+  await expect.poll(() => activeSpace(app)).toBe(second)
+
+  await orbit.app.close()
+  orbit = await launchOrbit({ userData })
+  expect((await state(orbit.app)).settings.shortcuts).toEqual({
+    'sidebar.toggle': [`${PRIMARY}+Shift+B`],
+    'space.goto.2': ['F8'],
+  })
+  await expect(orbit.shell.getByTestId('toggle-sidebar')).toHaveAttribute('title', `Hide sidebar (${SHIFT_B})`)
+  await onlyShiftBToggles()
+  await action(orbit.app, 'space.goto.1')
+  await expect.poll(() => activeSpace(orbit.app)).toBe(first)
+  await orbit.shell.keyboard.press('F8')
+  await expect.poll(() => activeSpace(orbit.app)).toBe(second)
+})
+
+test('[KS-01] an action keeps several bindings, or none and the command bar still runs it; a binding needs a modifier and a free key', async () => {
+  const { app, shell } = orbit
+  expect(await run(app, 'keys.bind', { actionId: 'sidebar.toggle', accel: 'F7' })).toEqual({ ok: true })
+  await shell.keyboard.press('F7')
+  await expect.poll(sidebarVisible).toBe(false)
+  await shell.keyboard.press(`${MOD}+S`)
+  await expect.poll(sidebarVisible).toBe(true)
+
+  // No modifier, or a key another action has: refused, and nothing changes.
+  const bare = await run(app, 'keys.bind', { actionId: 'sidebar.toggle', accel: 'B' })
+  expect(bare).toMatchObject({ ok: false, problem: expect.stringContaining('A shortcut starts with') })
+  const taken = await run(app, 'keys.bind', { actionId: 'sidebar.toggle', accel: `${PRIMARY}+T` })
+  expect(taken).toEqual({ ok: false, conflict: { actionId: 'tab.new', title: 'New Tab' } })
+  expect((await state(app)).settings.shortcuts).toEqual({ 'sidebar.toggle': [`${PRIMARY}+S`, 'F7'] })
+
+  await run(app, 'keys.unbind', { actionId: 'sidebar.toggle', accel: `${PRIMARY}+S` })
+  await run(app, 'keys.unbind', { actionId: 'sidebar.toggle', accel: 'F7' })
+  expect((await state(app)).settings.shortcuts).toEqual({ 'sidebar.toggle': [] })
+  await expect(shell.getByTestId('toggle-sidebar')).toHaveAttribute('title', 'Hide sidebar')
+  // ⌘S does nothing now; the command bar's row, with no shortcut shown, still toggles the sidebar.
+  await shell.keyboard.press(`${MOD}+S`)
+  const { overlay, top } = await actionRow('Toggle Sidebar', 'Toggle Sidebar')
+  await expect(top.getByTestId('command-shortcut')).toHaveCount(0)
+  await overlay.keyboard.press('Enter')
+  await expect.poll(sidebarVisible).toBe(false)
 })

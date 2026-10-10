@@ -1,17 +1,39 @@
 /**
  * User-facing actions: things a person can trigger from a keyboard shortcut,
  * the app menu or the command bar. Handlers live in the main process
- * (src/main/actions.ts registry); each feature registers its own.
+ * (src/main/registry.ts ActionRegistry); each feature registers its own.
  *
- * Shortcuts use accelerator strings: modifiers Cmd, Ctrl, Alt, Shift joined by
- * "+" with a key name (A-Z, 0-9, [ ] , . / ; ' ` - = \, Left Right Up Down,
- * Tab Enter Escape Backspace Delete Space F1-F12 Home End PageUp PageDown).
- * `mac` applies on macOS and `other` on Linux/Windows.
+ * This list is the one keymap (KS-01): each action's stable id, its title, and its default
+ * shortcuts, `mac` on macOS and `other` on Linux/Windows (accelerator strings, see
+ * src/shared/keymap.ts). The key router, the menus, tooltips, command-bar rows, the shortcut
+ * sheet and Settings → Shortcuts all read an action's shortcuts through `shortcutsFor`, which
+ * gives the user's own bindings where they changed them, so a remap reaches every one at once.
  *
- * The final shortcut set follows spec/keyboard-shortcuts.md (KS-* IDs).
+ * The default set follows the KS-* tables of the shortcuts spec.
  */
 
+import type { ShortcutPriority } from './commands/keys'
 import { SETTINGS_ACTIONS, SETTINGS_LANE_ACTIONS } from './commands/settings'
+import {
+  acceleratorFromInput,
+  type CustomBindings,
+  canonicalAccelerator,
+  customBindings,
+  editsText,
+  type KeyInput,
+  keymapVersion,
+  typedWithAltGr,
+} from './keymap'
+
+export {
+  formatAccelerator,
+  type KeyInput,
+  keyName,
+  matchesAccelerator,
+  type ParsedAccelerator,
+  parseAccelerator,
+  toElectronAccelerator,
+} from './keymap'
 
 export interface ActionDef {
   id: string
@@ -30,6 +52,19 @@ export interface ActionDef {
    */
   macOutsideText?: string[]
   otherOutsideText?: string[]
+  /**
+   * The shortcuts can't be changed (KS-01 "fixed": OS conventions such as ⌘, for Settings, and keys
+   * that belong to an overlay such as the recent-tab switcher's). Settings → Shortcuts shows them
+   * without a way to record new ones.
+   */
+  fixed?: boolean
+  /**
+   * KS-02 "prefer websites": when a page also handles one of the action's keys, the page gets the
+   * first press, and pressing again within about a second runs the action. `true` on every
+   * platform, 'other' on Windows and Linux only. Otherwise the action runs and the page never sees
+   * the key ("prefer Orbit", the default). Users choose per action in Settings → Shortcuts.
+   */
+  preferWebsites?: boolean | 'other'
 }
 
 const numbered = (
@@ -80,6 +115,7 @@ export const ACTIONS: ActionDef[] = [
     mac: ['Ctrl+Tab'],
     other: ['Ctrl+Tab'],
     hidden: true,
+    fixed: true,
   },
   {
     id: 'tab.recentBack',
@@ -88,6 +124,7 @@ export const ACTIONS: ActionDef[] = [
     mac: ['Ctrl+Shift+Tab', 'Ctrl+`'],
     other: ['Ctrl+Shift+Tab'],
     hidden: true,
+    fixed: true,
   },
   { id: 'tab.togglePin', title: 'Pin / Unpin Tab', category: 'Tabs', mac: ['Cmd+D'], other: ['Ctrl+D'] },
   { id: 'tab.duplicate', title: 'Duplicate Tab', category: 'Tabs' },
@@ -105,6 +142,8 @@ export const ACTIONS: ActionDef[] = [
     mac: ['Cmd+Shift+C'],
     other: ['Ctrl+Shift+C'],
     keywords: ['link', 'share'],
+    // NV-17: on Windows and Linux the page gets Ctrl+Shift+C first (KS-02).
+    preferWebsites: 'other',
   },
   {
     id: 'tab.copyUrlMarkdown',
@@ -249,7 +288,15 @@ export const ACTIONS: ActionDef[] = [
   },
 
   // Sidebar & window
-  { id: 'sidebar.toggle', title: 'Toggle Sidebar', category: 'Sidebar', mac: ['Cmd+S'], other: ['Ctrl+S'] },
+  {
+    id: 'sidebar.toggle',
+    title: 'Toggle Sidebar',
+    category: 'Sidebar',
+    mac: ['Cmd+S'],
+    other: ['Ctrl+S'],
+    // SB-11: a web editor's ⌘S / Ctrl+S gets the first press (KS-02).
+    preferWebsites: true,
+  },
   { id: 'window.new', title: 'New Window', category: 'Window', mac: ['Cmd+N'], other: ['Ctrl+N'] },
   {
     id: 'window.newMini',
@@ -282,6 +329,8 @@ export const ACTIONS: ActionDef[] = [
     mac: ['Cmd+,'],
     other: ['Ctrl+,'],
     keywords: ['preferences'],
+    // An OS convention (KS-12).
+    fixed: true,
   },
   {
     id: 'app.archive',
@@ -416,119 +465,109 @@ export const ACTIONS: ActionDef[] = [
 
 export const ACTIONS_BY_ID: Record<string, ActionDef> = Object.fromEntries(ACTIONS.map((a) => [a.id, a]))
 
-export function shortcutsFor(action: ActionDef, platform: string): string[] {
-  return (platform === 'darwin' ? action.mac : action.other) ?? []
+/** The action's shortcuts as Orbit ships them (KS-03): `mac` on macOS, `other` elsewhere. */
+export function defaultShortcutsFor(action: ActionDef, platform: string): string[] {
+  const mac = platform === 'darwin'
+  return [
+    ...((mac ? action.mac : action.other) ?? []),
+    ...((mac ? action.macOutsideText : action.otherOutsideText) ?? []),
+  ]
 }
 
-// ---- Accelerator matching ----
-
-export interface KeyInput {
-  key: string
-  code: string
-  meta: boolean
-  control: boolean
-  alt: boolean
-  shift: boolean
+/** Who gets the action's keys first by default when a page also handles them (KS-02). */
+export function defaultPriorityFor(action: ActionDef, platform: string): ShortcutPriority {
+  const prefer = action.preferWebsites
+  return prefer === true || (prefer === 'other' && platform !== 'darwin') ? 'websites' : 'orbit'
 }
 
-const CODE_NAMES: Record<string, string> = {
-  BracketLeft: '[',
-  BracketRight: ']',
-  Comma: ',',
-  Period: '.',
-  Slash: '/',
-  Backslash: '\\',
-  Semicolon: ';',
-  Quote: "'",
-  Backquote: '`',
-  Minus: '-',
-  Equal: '=',
-  ArrowLeft: 'Left',
-  ArrowRight: 'Right',
-  ArrowUp: 'Up',
-  ArrowDown: 'Down',
-  NumpadAdd: '=',
-  NumpadSubtract: '-',
-  NumpadEnter: 'Enter',
+/** Who gets the action's keys first: the user's choice (`settings.shortcutPriority`), else the default. */
+export function priorityFor(
+  action: ActionDef,
+  platform: string,
+  chosen?: Readonly<Record<string, ShortcutPriority>>,
+): ShortcutPriority {
+  return (!action.fixed && chosen?.[action.id]) || defaultPriorityFor(action, platform)
 }
 
-/** Shifted ASCII symbols (US positions) → the unshifted key they share, so "Cmd+Shift+=" matches "+". */
-const SHIFTED_SYMBOLS: Record<string, string> = {
-  '+': '=',
-  _: '-',
-  '{': '[',
-  '}': ']',
-  '<': ',',
-  '>': '.',
-  '?': '/',
-  ':': ';',
-  '"': "'",
-  '~': '`',
-  '|': '\\',
+/** A keymap: which action each binding runs, and each action's bindings (KS-01). */
+export interface Keymap {
+  /** Each action's bindings, in their written order. */
+  lists: Map<string, string[]>
+  /** Binding (canonical) → action, for keys that never edit text. */
+  direct: Map<string, ActionDef>
+  /** Binding (canonical) → action, for keys that edit text in a field (KS-16): they act only outside one. */
+  outsideText: Map<string, ActionDef>
 }
-const ASCII_SYMBOL = /^[!-/:-@[-`{-~]$/
+
+/** Whether the user's list for an action applies: fixed actions keep their defaults. */
+const ownsList = (action: ActionDef, custom: CustomBindings) => !action.fixed && custom[action.id] !== undefined
 
 /**
- * Key name for an input, matched against accelerator keys. Like Chrome:
- *  - letters follow the keyboard layout (`key`), so AZERTY's Cmd+Z is undo, not the physical W key;
- *  - digits use the physical key (`code`), so AZERTY's unshifted digit row still selects tabs;
- *  - ASCII symbols follow the layout too (Dvorak's "." sits on the physical E key);
- *  - anything else (macOS Option combos, Cyrillic and other non-Latin layouts, dead keys) falls
- *    back to the physical key, so Cmd+Option+V or Ctrl+T on a Russian layout still work.
+ * The keymap for a platform with the user's bindings `custom`: theirs where they changed an
+ * action, the defaults elsewhere. A binding belongs to one action: fixed actions keep theirs first,
+ * then the user's own bindings win over a default that came later (the default is left off its
+ * action).
  */
-export function keyName(input: Pick<KeyInput, 'key' | 'code'>): string {
-  const { code, key } = input
-  if (/^[a-z]$/i.test(key)) return key.toUpperCase()
-  if (code.startsWith('Digit') && code.length === 6) return code.slice(5)
-  if (code.startsWith('Numpad') && code.length === 7 && /\d/.test(code[6] ?? '')) return code.slice(6)
-  if (ASCII_SYMBOL.test(key)) return SHIFTED_SYMBOLS[key] ?? key
-  if (code.startsWith('Key') && code.length === 4) return code.slice(3)
-  if (CODE_NAMES[code]) return CODE_NAMES[code] as string
-  if (key === ' ') return 'Space'
-  return key.length === 1 ? key.toUpperCase() : key
-}
-
-export interface ParsedAccelerator {
-  cmd: boolean
-  ctrl: boolean
-  alt: boolean
-  shift: boolean
-  key: string
-}
-
-export function parseAccelerator(accel: string): ParsedAccelerator {
-  const parts = accel.split('+')
-  // "Cmd+=" style keys are never "+" themselves; a trailing empty part means the key was "+".
-  const key = parts.pop() || '+'
-  const mods = new Set(parts.map((p) => p.toLowerCase()))
-  return {
-    cmd: mods.has('cmd') || mods.has('command') || mods.has('meta'),
-    ctrl: mods.has('ctrl') || mods.has('control'),
-    alt: mods.has('alt') || mods.has('option'),
-    shift: mods.has('shift'),
-    key: key.length === 1 ? key.toUpperCase() : key,
+export function buildKeymap(custom: CustomBindings, platform: string): Keymap {
+  const owner = new Map<string, ActionDef>()
+  const lists = new Map<string, string[]>()
+  const claim = (action: ActionDef, accels: readonly string[]) => {
+    const list: string[] = []
+    for (const accel of accels) {
+      const key = canonicalAccelerator(accel)
+      if (!key || owner.has(key)) continue
+      owner.set(key, action)
+      list.push(accel)
+    }
+    lists.set(action.id, list)
   }
+  for (const action of ACTIONS) if (action.fixed) claim(action, defaultShortcutsFor(action, platform))
+  for (const action of ACTIONS) if (ownsList(action, custom)) claim(action, custom[action.id] ?? [])
+  for (const action of ACTIONS) {
+    if (!action.fixed && !ownsList(action, custom)) claim(action, defaultShortcutsFor(action, platform))
+  }
+  const direct = new Map<string, ActionDef>()
+  const outsideText = new Map<string, ActionDef>()
+  for (const [key, action] of owner) (editsText(key, platform) ? outsideText : direct).set(key, action)
+  return { lists, direct, outsideText }
 }
 
-export function matchesAccelerator(input: KeyInput, accel: string): boolean {
-  const a = parseAccelerator(accel)
-  return (
-    a.cmd === input.meta &&
-    a.ctrl === input.control &&
-    a.alt === input.alt &&
-    a.shift === input.shift &&
-    a.key === keyName(input)
-  )
+let current: { version: number; platform: string; keymap: Keymap } | undefined
+
+/** The keymap in use now (KS-01): rebuilt when the user's bindings change. */
+function liveIndex(platform: string): Keymap {
+  const version = keymapVersion()
+  if (current?.version !== version || current.platform !== platform) {
+    current = { version, platform, keymap: buildKeymap(customBindings(), platform) }
+  }
+  return current.keymap
 }
+
+/**
+ * The action's shortcuts on this platform as they are now (KS-01): the user's bindings if they
+ * changed them, else the defaults. The first is the one hints show.
+ */
+export function shortcutsFor(action: ActionDef, platform: string): string[] {
+  return liveIndex(platform).lists.get(action.id) ?? []
+}
+
+/** The action that owns a binding now, if any (Settings → Shortcuts' conflict check). */
+export function actionForAccelerator(accel: string, platform: string): ActionDef | undefined {
+  const key = canonicalAccelerator(accel)
+  if (!key) return undefined
+  const keymap = liveIndex(platform)
+  return keymap.direct.get(key) ?? keymap.outsideText.get(key)
+}
+
+/** An IME is composing: only keys with ⌘ or Ctrl may act (KS-16). */
+const composingPlainKey = (input: KeyInput) => !!input.isComposing && !input.meta && !input.control
 
 /** Returns the action bound to this key press on the given platform, if any. */
 export function actionForInput(input: KeyInput, platform: string): ActionDef | undefined {
-  for (const action of ACTIONS) {
-    for (const accel of shortcutsFor(action, platform)) {
-      if (matchesAccelerator(input, accel)) return action
-    }
-  }
-  return undefined
+  // A key that typed a character through AltGr acts only outside text fields (KS-03).
+  if (composingPlainKey(input) || typedWithAltGr(input, platform)) return undefined
+  const key = acceleratorFromInput(input)
+  return key ? liveIndex(platform).direct.get(key) : undefined
 }
 
 /**
@@ -536,30 +575,9 @@ export function actionForInput(input: KeyInput, platform: string): ActionDef | u
  * The caller checks where focus is before running it.
  */
 export function outsideTextActionFor(input: KeyInput, platform: string): ActionDef | undefined {
-  for (const action of ACTIONS) {
-    const keys = (platform === 'darwin' ? action.macOutsideText : action.otherOutsideText) ?? []
-    if (keys.some((accel) => matchesAccelerator(input, accel))) return action
-  }
-  return undefined
-}
-
-/** Display form of an accelerator, e.g. "⌘⇧T" on macOS or "Ctrl+Shift+T" elsewhere. */
-export function formatAccelerator(accel: string, platform: string): string {
-  const a = parseAccelerator(accel)
-  const keyLabel = (
-    { Left: '←', Right: '→', Up: '↑', Down: '↓', Enter: '↩', Escape: 'Esc', Space: 'Space' } as Record<string, string>
-  )[a.key]
-  if (platform === 'darwin') {
-    return `${a.ctrl ? '⌃' : ''}${a.alt ? '⌥' : ''}${a.shift ? '⇧' : ''}${a.cmd ? '⌘' : ''}${keyLabel ?? a.key}`
-  }
-  return [a.ctrl && 'Ctrl', a.alt && 'Alt', a.shift && 'Shift', a.cmd && 'Meta', keyLabel ?? a.key]
-    .filter(Boolean)
-    .join('+')
-}
-
-/** Electron menu accelerator form ("CommandOrControl" etc.). */
-export function toElectronAccelerator(accel: string): string {
-  const a = parseAccelerator(accel)
-  const key = a.key === '=' ? '=' : a.key === '+' ? 'Plus' : a.key
-  return [a.cmd && 'Command', a.ctrl && 'Control', a.alt && 'Alt', a.shift && 'Shift', key].filter(Boolean).join('+')
+  if (composingPlainKey(input)) return undefined
+  const key = acceleratorFromInput(input)
+  if (!key) return undefined
+  const keymap = liveIndex(platform)
+  return keymap.outsideText.get(key) ?? (typedWithAltGr(input, platform) ? keymap.direct.get(key) : undefined)
 }

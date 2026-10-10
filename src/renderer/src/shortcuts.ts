@@ -1,4 +1,5 @@
 import { actionForInput } from '../../shared/actions'
+import { followKeymap } from './keys/live'
 
 /**
  * Fallback shortcut router for Orbit's own UI pages. Real key presses are
@@ -7,6 +8,8 @@ import { actionForInput } from '../../shared/actions'
  * input from automation) is mapped through the same keymap.
  */
 export function installShortcutFallback(): void {
+  // This page's hints and this fallback use the user's bindings (KS-01).
+  followKeymap()
   window.addEventListener(
     'keydown',
     (e) => {

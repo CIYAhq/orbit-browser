@@ -4,6 +4,7 @@ import { connectionOf, peekShown, shownTabId } from '../../../../shared/nav'
 import { SITE_PANEL } from '../../../../shared/site'
 import { displayHost } from '../../../../shared/url'
 import { invoke, runAction } from '../../api'
+import { useKeymap } from '../../keys/live'
 import { useOrbit } from '../../store'
 import { withShortcut } from './shortcut-label'
 
@@ -18,6 +19,8 @@ const COPIED_MS = 1200
  * to open pop-ups without a click, a button says so and offers them (NV-09).
  */
 export function Address({ windowId }: { windowId: string }) {
+  // The tooltips follow remapped shortcuts (KS-18).
+  useKeymap()
   // Only the URL: the display re-renders on navigations, not on title, favicon or progress changes.
   // While a Peek shows, it is the Peek's page (PK-11). A navigation Orbit started shows where it is
   // going before it commits, and after the user stopped it (NV-04).

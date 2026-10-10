@@ -17,6 +17,7 @@ import type { Space, SpaceId } from '../../../../shared/state'
 import { containerKey, locate, sectionOf, splitOfTab } from '../../../../shared/tree'
 import { engineForSpace, parseInput } from '../../../../shared/url'
 import { invoke, isMac, runAction } from '../../api'
+import { useShortcutLabel } from '../../keys/live'
 import { activeTabId } from '../../selectors'
 import { getOrbitState, useOrbit } from '../../store'
 import { DragGhost } from './DragGhost'
@@ -224,6 +225,8 @@ const PinnedSection = memo(function PinnedSection({ space }: { space: Space }) {
 function TodayBlock({ space }: { space: Space }) {
   const y = useRowShift('divider')
   const hasToday = space.today.length > 0
+  // The button's tooltip follows a remapped shortcut (KS-18).
+  const clearShortcut = useShortcutLabel('tabs.clearToday')
   return (
     <motion.div
       className="today-block"
@@ -241,7 +244,7 @@ function TodayBlock({ space }: { space: Space }) {
             type="button"
             className="sidebar__clear"
             data-testid="clear-today"
-            title={`Archive all Today tabs (${isMac ? '⌘⇧K' : 'Ctrl+Shift+K'})`}
+            title={clearShortcut ? `Archive all Today tabs (${clearShortcut})` : 'Archive all Today tabs'}
             onClick={() => void invoke('tabs.clearToday', { spaceId: space.id })}
           >
             <ArrowDown size={11} strokeWidth={2.4} />
