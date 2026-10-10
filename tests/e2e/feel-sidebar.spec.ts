@@ -2,11 +2,11 @@
  * Feel of the sidebar (feel.md FL-02 show/hide, FL-03 hover reveal, FL-21 long lists, and their
  * FL-29 budgets), measured frame by frame with the shared sampler (frames.ts).
  */
-import { expect, test } from '@playwright/test'
-import { firstFrame, frameAfterWall, jumpRatio, mainInputs, note, pacing, record, series } from './frames'
+import { expect, type Page, test } from '@playwright/test'
+import { type Frame, firstFrame, frameAfterWall, jumpRatio, mainInputs, note, pacing, record, series } from './frames'
 import { type Fixtures, FRAME_SLACK, isMac, launchOrbit, type Orbit, run, startFixtures, state } from './helpers'
 import { floatingInfo, floatingPage, pageMouse, pressInPage } from './nav-support'
-import { newTab, settled, waitTab } from './tabs-support'
+import { newTab, row, settled, waitTab } from './tabs-support'
 
 let fx: Fixtures
 let orbit: Orbit
@@ -258,6 +258,151 @@ test('[FL-21] 500 tabs and 50 folders: scrolling keeps the frame rate', async ()
   expect(p.max).toBeLessThanOrEqual(120 * FRAME_SLACK)
 })
 
+type BlankRows = { frames: number; blank: number; shown: number; worst: string }
+
+/**
+ * Watches the tab rows on screen in each frame as it is drawn: the most of them in any frame, and the
+ * most that drew nothing (left out by FL-21's row window), with the phase the test was in then. It
+ * looks once the frame's layout is done, just before it is painted (a resize observer on a probe
+ * resized in each frame). Looking after the frame instead would also count a scroll that comes in
+ * between, before the frame that draws it.
+ */
+async function watchBlankRows(
+  shell: Page,
+): Promise<{ phase: (name: string) => Promise<void>; stop: () => Promise<BlankRows> }> {
+  type Seen = BlankRows & { on: boolean; phase: string }
+  await shell.evaluate(() => {
+    const seen: Seen = { frames: 0, blank: 0, shown: 0, worst: '', on: true, phase: '' }
+    ;(window as unknown as { __blankRows: Seen }).__blankRows = seen
+    const probe = document.createElement('div')
+    probe.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;visibility:hidden;pointer-events:none'
+    document.body.append(probe)
+    const look = new ResizeObserver(() => {
+      const scroll = document.querySelector<HTMLElement>('[data-testid="sidebar-scroll"]')
+      if (!scroll) return
+      const view = scroll.getBoundingClientRect()
+      let blank = 0
+      let shown = 0
+      for (const el of scroll.querySelectorAll<HTMLElement>('[data-slot="item"]')) {
+        const r = el.getBoundingClientRect()
+        if (r.height === 0 || r.bottom <= view.top || r.top >= view.bottom) continue
+        if (el.classList.contains('is-far')) blank++
+        else shown++
+      }
+      seen.frames++
+      if (blank > seen.blank) seen.worst = `${seen.phase} at ${Math.round(scroll.scrollTop)} px`
+      seen.blank = Math.max(seen.blank, blank)
+      seen.shown = Math.max(seen.shown, shown)
+    })
+    look.observe(probe)
+    let wide = false
+    const frame = () => {
+      if (!seen.on) {
+        look.disconnect()
+        probe.remove()
+        return
+      }
+      wide = !wide
+      probe.style.width = wide ? '2px' : '1px'
+      requestAnimationFrame(frame)
+    }
+    requestAnimationFrame(frame)
+  })
+  return {
+    phase: (name) =>
+      shell.evaluate((n) => {
+        ;(window as unknown as { __blankRows: Seen }).__blankRows.phase = n
+      }, name),
+    stop: () =>
+      shell.evaluate(() => {
+        const seen = (window as unknown as { __blankRows: Seen }).__blankRows
+        seen.on = false
+        return { frames: seen.frames, blank: seen.blank, shown: seen.shown, worst: seen.worst }
+      }),
+  }
+}
+
+test('[FL-21] 300 tabs: rows coming on screen are drawn in that frame, by wheel, keys, a tab found or a drag', async () => {
+  const { app, shell } = orbit
+  test.setTimeout(180_000)
+  await manyTabs(300)
+  const scroller = shell.getByTestId('sidebar-scroll')
+  await expect(shell.getByTestId('today-list').locator(':scope > [data-slot]')).toHaveCount(300, { timeout: 30_000 })
+  await settled(shell, 30_000)
+  const spaceId = (await state(app)).spaceOrder[0] as string
+  const ids = (await state(app)).spaces[spaceId]?.today ?? []
+  const first = ids[0] as string
+  const last = ids.at(-1) as string
+  // Rows far from the screen keep their slot and draw nothing.
+  expect(await shell.locator('.row-slot.is-far').count()).toBeGreaterThan(150)
+  const box = await scroller.boundingBox()
+  if (!box) throw new Error('no list')
+  const watch = await watchBlankRows(shell)
+  // Wheel: down to the end and back.
+  await watch.phase('wheel')
+  await shell.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  for (let k = 0; k < 80; k++) await shell.mouse.wheel(0, 150)
+  for (let k = 0; k < 80; k++) await shell.mouse.wheel(0, -150)
+  await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBe(0)
+  // Keys: the list's own focus to its last row, its first, and down from there.
+  await watch.phase('keys')
+  await scroller.focus()
+  await shell.keyboard.press('End')
+  await expect(row(shell, last)).toBeInViewport()
+  await expect(row(shell, last)).toHaveClass(/is-focused/)
+  await shell.keyboard.press('Home')
+  await expect(row(shell, first)).toBeInViewport()
+  for (let k = 0; k < 3; k++) await shell.keyboard.press('ArrowDown')
+  await expect(row(shell, ids[3] as string)).toHaveClass(/is-focused/)
+  await shell.keyboard.press('Escape')
+  // Found elsewhere (the command bar's tab search, a link to an open tab): selected, it is scrolled to and drawn.
+  const found = ids[200] as string
+  await watch.phase('found')
+  await run(app, 'tabs.activate', { tabId: found })
+  await expect(row(shell, found)).toBeInViewport()
+  // A jump straight to the end.
+  await watch.phase('jump')
+  await scroller.evaluate((el) => {
+    el.scrollTop = el.scrollHeight
+  })
+  await expect(row(shell, last)).toBeInViewport()
+  // Drag: carried to the list's bottom edge, a row scrolls the list on; dropped there, it lands far down.
+  await scroller.evaluate((el) => {
+    el.scrollTop = 0
+  })
+  const moved = ids[2] as string
+  await watch.phase('drag')
+  const start = await row(shell, moved).boundingBox()
+  if (!start) throw new Error('no row')
+  const x = start.x + start.width / 2
+  await shell.mouse.move(x, start.y + start.height / 2)
+  await shell.mouse.down()
+  await shell.mouse.move(x, start.y + start.height / 2 + 6, { steps: 2 })
+  await shell.mouse.move(x, box.y + box.height - 8, { steps: 10 })
+  await expect.poll(() => scroller.evaluate((el) => el.scrollTop), { timeout: 15_000 }).toBeGreaterThan(1500)
+  await shell.mouse.move(x, box.y + box.height / 2, { steps: 4 })
+  await shell.mouse.up()
+  await expect(shell.getByTestId('drag-ghost')).toHaveCount(0)
+  await expect.poll(async () => (await state(app)).spaces[spaceId]?.today.indexOf(moved) ?? -1).toBeGreaterThan(40)
+  const seen = await watch.stop()
+  note('FL-21', 'rows on screen drawing nothing, worst frame', seen.blank, `0 (${seen.frames} frames)`, 'rows')
+  expect(seen.shown).toBeGreaterThan(10)
+  expect(seen.blank, `worst frame: ${seen.worst}`).toBe(0)
+  // The watcher sees a frame that does draw blank rows: a jump made in a frame callback is drawn
+  // before the scroll event that lets the row window catch up.
+  const check = await watchBlankRows(shell)
+  await scroller.evaluate(
+    (el) =>
+      new Promise<void>((done) =>
+        requestAnimationFrame(() => {
+          el.scrollTop = el.scrollTop > 4000 ? 0 : el.scrollHeight
+          setTimeout(done, 100)
+        }),
+      ),
+  )
+  expect((await check.stop()).blank).toBeGreaterThan(10)
+})
+
 test('[FL-21][FL-29] the first showing of a 200-tab Space that is not next door paints within budget', async () => {
   const { app, shell } = orbit
   test.setTimeout(120_000)
@@ -284,30 +429,47 @@ test('[FL-21][FL-29] the first showing of a 200-tab Space that is not next door 
   )
   const rec = await record(shell, {
     rows: { selector: '[data-testid="today-list"] [data-testid="tab-row"]', key: 'data-tab-id' },
+    // The light picture of the Space that stands in while its list renders (SpaceStrip).
+    standIn: '[data-slot="0"] .is-stand-in .tab-row',
     name: { selector: '[data-testid="space-name"]', text: true },
   })
   const t0 = Date.now()
   await run(app, 'spaces.switch', { spaceId: far })
   const r = await rec.until(2000)
   const farTabs = new Set((await state(app)).spaces[far]?.today ?? [])
-  const painted = firstFrame(r, (f) => Object.keys(f.lists.rows ?? {}).some((k) => farTabs.has(k)))
+  const listed = (f: Frame) => Object.keys(f.lists.rows ?? {}).some((k) => farTabs.has(k))
+  const shown = firstFrame(r, (f) => !!f.els.standIn || listed(f))
+  const real = firstFrame(r, listed)
   const named = firstFrame(r, (f) => f.els.name?.text === 'Far')
   const tasks = await longTasks
   const ms0 = t0 - r.wall0
+  const longest = Math.max(0, ...tasks)
   note(
     'FL-21',
-    'switch → first frame with the 200-tab Space’s rows',
-    painted ? painted.t - ms0 : undefined,
+    'switch → first frame with the Space’s rows (stand-in or list)',
+    shown && shown.t - ms0,
     '≤ 100 ms (§8)',
   )
-  note('FL-21', 'switch → its name shown', named ? named.t - ms0 : undefined, '≤ 100 ms (§8)')
+  note(
+    'FL-21',
+    'switch → its own list drawn (interactive)',
+    real && real.t - ms0,
+    '≤ 350 ms (FL-29: before the slide ends)',
+  )
+  note('FL-21', 'switch → its name shown', named && named.t - ms0, '≤ 100 ms (§8)')
   note(
     'FL-21',
     'long tasks during the first showing (sum)',
     tasks.reduce((a, b) => a + b, 0),
     'none over 50 ms',
   )
-  note('FL-21', 'longest task', Math.max(0, ...tasks), '< 50 ms')
+  note('FL-21', 'longest task', longest, '< 50 ms (§8)')
   note('FL-21', 'frame max during the first showing', pacing(r).max, `≤ ${(2 * FRAME).toFixed(1)} ms`)
-  expect(painted, 'the Space’s rows were drawn').toBeTruthy()
+  expect(shown, 'the Space’s rows were drawn').toBeTruthy()
+  expect(real, 'its list replaced the stand-in').toBeTruthy()
+  // Rows of the Space show at once, and its list is drawn while the slide still runs; no task stalls
+  // the screen for long, a loaded machine allowed for (FRAME_SLACK).
+  expect((shown?.t ?? Number.POSITIVE_INFINITY) - ms0).toBeLessThanOrEqual(100 * FRAME_SLACK + 50)
+  expect((real?.t ?? Number.POSITIVE_INFINITY) - ms0).toBeLessThanOrEqual(350 * FRAME_SLACK + 50)
+  expect(longest).toBeLessThan(50 * FRAME_SLACK + 50)
 })

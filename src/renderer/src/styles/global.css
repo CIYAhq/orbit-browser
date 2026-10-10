@@ -989,6 +989,11 @@ html[data-view="strip"] body {
 .row-slot {
   position: relative;
   flex: none;
+}
+
+/* Clipped while its height springs (growing in, closing): a settled row needs no clip of its own (FL-21). */
+.row-slot.is-growing,
+.row-slot.is-exiting {
   overflow: clip;
   overflow-clip-margin: 3px;
 }
@@ -1265,18 +1270,18 @@ html.is-dragging-tab * {
   background: color-mix(in srgb, var(--active) 70%, transparent);
 }
 
-/* Off-screen rows stay out of layout and paint work (FL-21). */
-.row-slot {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 32px;
+/*
+ * A row far from the list's visible band keeps its slot, at a row's height, and draws nothing
+ * (FL-21). Its slot is a plain box: no layer or clip of its own for each frame's hit tests,
+ * pre-paint and layerization to walk.
+ */
+.row-placeholder {
+  height: var(--row-h);
 }
 
-/*
- * A row growing in is always drawn: skipped mid-growth, it would keep that height once done. It
- * stays drawn until it first leaves the screen, so no row on screen is ever skipped for a frame.
- */
-.row-slot.is-drawn {
-  content-visibility: visible;
+.row-slot.is-far {
+  position: static;
+  overflow: visible;
 }
 
 /* A tab opened in the background glows briefly so the eye finds it (FL-06); selected, it shows at once. */

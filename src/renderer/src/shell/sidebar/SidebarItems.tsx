@@ -26,6 +26,7 @@ import { Favorites } from './Favorites'
 import { FolderSearch } from './FolderSearch'
 import { IconPicker } from './IconPicker'
 import { CHEVRON, CONCEAL, ItemList, REVEAL, TabRow, useRowShift } from './ItemList'
+import { RowWindow, RowWindowContext } from './row-window'
 import { clearSelection, startRename, useDrag, useIconPicker, useKeyboardFocus, useSelection } from './ui-state'
 
 /**
@@ -78,13 +79,14 @@ export const SidebarItems = memo(function SidebarItems({
     const ids = useSelection.getState().ids
     if (active && ids.length > 0 && !ids.includes(active)) clearSelection()
   }, [active])
-  useScrollMemory(scrollRef, spaceId)
+  const scrollTop = useScrollMemory(scrollRef, spaceId)
+  const rows = useRowWindow(scrollRef, scrollTop)
   const reveal = useAutoReveal(scrollRef, active)
   const onKeyDown = useKeyboardNav(scrollRef)
   if (!space) return null
 
   return (
-    <OrbitMotionConfig>
+    <ListScope rows={rows}>
       <div className="sidebar-items" ref={rootRef}>
         {!simple && (
           <div className="sidebar-items__favorites" data-favorites-layer>
@@ -136,9 +138,35 @@ export const SidebarItems = memo(function SidebarItems({
         <FolderSearch />
         <DragGhost />
       </div>
-    </OrbitMotionConfig>
+    </ListScope>
   )
 })
+
+/** Motion settings and the row window for everything in the sidebar's lists. */
+function ListScope({ rows, children }: { rows: RowWindow; children: ReactNode }) {
+  return (
+    <OrbitMotionConfig>
+      <RowWindowContext value={rows}>{children}</RowWindowContext>
+    </OrbitMotionConfig>
+  )
+}
+
+/**
+ * The rows drawn in this scroller (FL-21). Measured after every render of the sidebar, once the
+ * lists and the remembered scroll position are in place, so the first frame of a Space already
+ * draws the rows on screen and nothing else. `scrollTop` is where this render leaves the list.
+ */
+function useRowWindow(scrollRef: React.RefObject<HTMLDivElement | null>, scrollTop: number): RowWindow {
+  const [rows] = useState(() => new RowWindow())
+  // Rows mounting in this render are placed by their order until they are measured.
+  rows.expect(scrollTop)
+  useLayoutEffect(() => {
+    const scroll = scrollRef.current
+    return scroll ? rows.attach(scroll) : undefined
+  }, [rows, scrollRef])
+  useLayoutEffect(() => rows.update())
+  return rows
+}
 
 /** Space title row with the pinned-section caret (PN-09). */
 function SpaceHeader({ space, children }: { space: Space; children: ReactNode }) {
@@ -349,8 +377,8 @@ function useShellUndo() {
   }, [])
 }
 
-/** Each Space keeps its own scroll position in this window (SP-10). */
-function useScrollMemory(scrollRef: React.RefObject<HTMLDivElement | null>, spaceId: string) {
+/** Each Space keeps its own scroll position in this window (SP-10); returns the one this render shows. */
+function useScrollMemory(scrollRef: React.RefObject<HTMLDivElement | null>, spaceId: string): number {
   const positions = useRef(new Map<string, number>())
   const current = useRef(spaceId)
   useLayoutEffect(() => {
@@ -364,6 +392,7 @@ function useScrollMemory(scrollRef: React.RefObject<HTMLDivElement | null>, spac
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => el.removeEventListener('scroll', onScroll)
   }, [scrollRef, spaceId])
+  return positions.current.get(spaceId) ?? 0
 }
 
 /**
