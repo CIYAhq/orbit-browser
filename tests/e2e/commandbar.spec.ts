@@ -843,6 +843,8 @@ test('[CB-18] Enter on the untouched empty field runs no starter action (review 
 })
 
 test('[CB-22][CB-07][FL-17] at 500 tabs and 10,000 history entries: open ≤ 50 ms, results ≤ 30 ms per keystroke (review F3)', async () => {
+  // Up to three rounds, each in a launch of its own, take 30-60 s on a loaded machine.
+  test.setTimeout(120_000)
   // A seeded profile: 10,000 history entries on 800 hosts.
   const words = ['alpha', 'budget', 'cloud', 'design', 'engine', 'forest', 'garden', 'harbor', 'island', 'jungle']
   const userData = mkdtempSync(join(tmpdir(), 'orbit-e2e-perf-'))
@@ -865,9 +867,19 @@ test('[CB-22][CB-07][FL-17] at 500 tabs and 10,000 history entries: open ≤ 50 
   }
   writeFileSync(join(userData, 'history', 'p-default.jsonl'), `${lines.join('\n')}\n`)
   await orbit.app.close()
-  orbit = await launchOrbit({ userData })
-  await blockNetwork(orbit.app)
-  await (await viewPage(orbit.app, 'overlay')).getByTestId('overlay').waitFor({ state: 'attached' })
+  const launch = async () => {
+    orbit = await launchOrbit({ userData })
+    await blockNetwork(orbit.app)
+    await (await viewPage(orbit.app, 'overlay')).getByTestId('overlay').waitFor({ state: 'attached' })
+  }
+  /** Waits until history has loaded and the app's idle warm-up after it has run, as before a user's first search. */
+  const settle = async () => {
+    await expect
+      .poll(async () => ((await run(orbit.app, 'history.search', { text: 'garden', limit: 1 })) as unknown[]).length)
+      .toBe(1)
+    await new Promise((r) => setTimeout(r, 1800)) // idle warm-up after history loads (as in the app)
+  }
+  await launch()
   // 500 sleeping tabs.
   await orbit.app.evaluate(async (_e, ws) => {
     const hooks = (
@@ -887,12 +899,8 @@ test('[CB-22][CB-07][FL-17] at 500 tabs and 10,000 history entries: open ≤ 50 
       )
     }
   }, words)
-  await expect
-    .poll(async () => ((await run(orbit.app, 'history.search', { text: 'garden', limit: 1 })) as unknown[]).length)
-    .toBe(1)
-  await new Promise((r) => setTimeout(r, 1800)) // idle warm-up after history loads (as in the app)
+  await settle()
 
-  const overlay = await viewPage(orbit.app, 'overlay')
   const marks = async () =>
     (await orbit.app.evaluate(() =>
       (globalThis as unknown as { __orbit: { marks: () => { name: string; t: number }[] } }).__orbit.marks(),
@@ -900,6 +908,7 @@ test('[CB-22][CB-07][FL-17] at 500 tabs and 10,000 history entries: open ≤ 50 
   const p95 = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length * 0.95)] ?? Number.POSITIVE_INFINITY
   /** One round: open the bar four times and type a query each time. */
   const measure = async () => {
+    const overlay = await viewPage(orbit.app, 'overlay')
     // The bar keeps its last 100 timings; this round's are the ones after it starts.
     await overlay.evaluate(() => {
       const timings = (window as unknown as { __orbitCommandBar: { latencies: number[]; replies: number[] } })
@@ -938,9 +947,17 @@ test('[CB-22][CB-07][FL-17] at 500 tabs and 10,000 history entries: open ≤ 50 
   // focused input. FL-17: on screen within 50 ms at worst (this includes waiting for the next frame).
   const meets = (r: Round) => r.replies <= 30 && r.painted <= 50 * FRAME_SLACK && r.open <= 50 * FRAME_SLACK
   // Other work on a shared machine can only add delay, so a round that misses a budget is measured again, up to three
-  // rounds; Orbit's own speed is the best of them (D46).
+  // rounds; Orbit's own speed is the best of them (D46). Each retry runs in a fresh launch of the same profile: every
+  // round is then the bar's first use after a launch, as a user meets it after every launch, so a slowdown in that
+  // first use misses every round instead of passing on a warmer app (PR #17 review M1).
   const rounds: Round[] = []
   while (rounds.length < 3 && !rounds.some(meets)) {
+    if (rounds.length > 0) {
+      await orbit.app.close()
+      await launch()
+      await expect.poll(async () => Object.keys((await state(orbit.app)).tabs).length).toBeGreaterThanOrEqual(500)
+      await settle()
+    }
     const r = await measure()
     rounds.push(r)
     console.info(

@@ -371,10 +371,14 @@ describe('ranking', () => {
     const typed = 'garden article 42'
     // Round 0 warms the JIT and per-entry caches, as the app does in idle time after history loads. Each keystroke is
     // timed in this thread's CPU time: ranking never waits, so that is its whole cost, while wall time on a shared
-    // machine also counts the turns other processes get. The e2e test times the app in wall time. A run that misses
-    // the budget is measured again, up to three runs (D46, D51).
+    // machine also counts the turns other processes get. A run that misses the budget is measured again, up to three
+    // runs (D46, D51).
+    // CPU time can't see a blocking wait or work moved to another thread, and on Linux it moves in steps of one
+    // scheduler tick (1 ms here). The e2e test times the same ranking in the app in wall time, which sees both.
+    // Thread CPU time needs Node 23.9 or later; on an older Node the process's CPU time stands in.
+    const cpuUsage = typeof process.threadCpuUsage === 'function' ? process.threadCpuUsage : process.cpuUsage
     const cpuMs = () => {
-      const { user, system } = process.threadCpuUsage()
+      const { user, system } = cpuUsage.call(process)
       return (user + system) / 1000
     }
     const at = (sorted: number[], q: number) => sorted[Math.floor(sorted.length * q)] as number
