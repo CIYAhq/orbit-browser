@@ -25,6 +25,15 @@ const PINCH_MAX = 5
 const HOLD_MS = 5000
 /** Keys other than text that are held for the find bar (F4): it acts on them as it would. */
 const HELD_KEYS = new Set(['Backspace', 'Enter', 'Escape'])
+/** A held Backspace, Enter or Escape typed into the find bar waits this long at most for its page to have it. */
+const KEY_WAIT_MS = 1000
+/**
+ * A key named with a control character carries no text: Chromium names a key "\u0000" when its
+ * keymap has no symbol for it yet, as for keys xdotool maps on the fly (round 3 fix check, F2).
+ */
+const CONTROL = /\p{Cc}/u
+/** In the page tools' page: the next key up anywhere in it (a held key typed into the find bar). */
+const WATCH_KEY_UP = `window.__orbitKeyUp = new Promise((resolve) => addEventListener('keyup', () => resolve(true), { once: true, capture: true })); 0`
 
 const SELECTION = `String(getSelection() || '')`
 
@@ -72,15 +81,20 @@ interface HeldKey {
 }
 
 /**
- * Keys held for a window's find bar from ⌘F until its field has the keyboard (round 2 fix check,
- * F4). `nonce`: the focus request the field must say it took, once the bar is in the window and
- * has been given the keyboard; null before then.
+ * A window's find bar waiting for the keyboard, from ⌘F until its field says it has it (round 2
+ * fix check, F4). Keys typed for it meanwhile are held, for HOLD_MS at most, then typed into it.
+ * The bar takes the keyboard when it shows, held keys or not (round 3 fix check, F2). `nonce`: the
+ * focus request the field must say it took, once the bar is in the window and has been given the
+ * keyboard; null before then.
  */
 interface HeldKeys {
   tabId: TabId
   nonce: number | null
-  keys: HeldKey[]
+  /** The keys held so far, in order; null once HOLD_MS has passed, when keys go where the keyboard is again. */
+  keys: HeldKey[] | null
   timer?: NodeJS.Timeout
+  /** The held keys are being typed into the field: keys typed meanwhile are held, and typed in their turn. */
+  typing?: boolean
 }
 
 /** Where a window's page tools are after a refresh: in the window, waiting for their page to load, or out. */
@@ -208,13 +222,24 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
   const held = new Map<WindowId, HeldKeys>()
   /** The page tools' web contents whose keys are watched. */
   const watched = new WeakSet<WebContents>()
+  /** A held key is being pressed in the page tools: it isn't held again. */
+  let pressing = false
 
   const dropKeys = (windowId: WindowId) => {
     clearTimeout(held.get(windowId)?.timer)
     held.delete(windowId)
   }
 
-  /** Starts holding (or goes on holding) keys for the find bar of a window's tab. */
+  /** Keys typed for the bar are held from now, for HOLD_MS at most: then they go where the keyboard is again. */
+  const keepHolding = (h: HeldKeys) => {
+    h.keys ??= []
+    clearTimeout(h.timer)
+    h.timer = setTimeout(() => {
+      h.keys = null
+    }, HOLD_MS)
+  }
+
+  /** The find bar of a window's tab waits for the keyboard (or goes on waiting), holding keys for it. */
   const holdKeys = (windowId: WindowId, tabId: TabId): HeldKeys => {
     let h = held.get(windowId)
     if (!h || h.tabId !== tabId) {
@@ -222,12 +247,8 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
       h = { tabId, nonce: null, keys: [] }
       held.set(windowId, h)
     }
-    const holding = h
-    clearTimeout(holding.timer)
-    holding.timer = setTimeout(() => {
-      if (held.get(windowId) === holding) held.delete(windowId)
-    }, HOLD_MS)
-    return holding
+    keepHolding(h)
+    return h
   }
 
   /**
@@ -236,7 +257,7 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
    */
   const holdKey = (windowId: WindowId | undefined, tabId: TabId | null, input: Electron.Input): boolean => {
     const h = windowId ? held.get(windowId) : undefined
-    if (!h || (tabId !== null && tabId !== h.tabId)) return false
+    if (pressing || !h?.keys || (tabId !== null && tabId !== h.tabId)) return false
     if (input.control || input.meta || input.isComposing) return false
     if (input.alt && process.platform !== 'darwin') return false
     const text = [...input.key].length === 1
@@ -253,17 +274,62 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
     })
   }
 
-  /** Types a held key into the page tools, as the keyboard would have. */
-  const typeKey = (contents: WebContents, { key, shift }: HeldKey) => {
-    if ([...key].length === 1) {
-      contents.sendInputEvent({ type: 'keyDown', keyCode: key })
-      contents.sendInputEvent({ type: 'char', keyCode: key })
-      contents.sendInputEvent({ type: 'keyUp', keyCode: key })
-      return
-    }
+  /**
+   * Presses a held Backspace, Enter or Escape in the page tools, and resolves once their page has
+   * had it (its key up), or after KEY_WAIT_MS: text inserted next would otherwise overtake it.
+   */
+  const pressKey = async (contents: WebContents, { key, shift }: HeldKey) => {
+    await contents.executeJavaScript(WATCH_KEY_UP)
+    if (contents.isDestroyed()) return
     const modifiers: 'shift'[] = shift ? ['shift'] : []
-    contents.sendInputEvent({ type: 'keyDown', keyCode: key, modifiers })
-    contents.sendInputEvent({ type: 'keyUp', keyCode: key, modifiers })
+    pressing = true
+    try {
+      contents.sendInputEvent({ type: 'keyDown', keyCode: key, modifiers })
+      contents.sendInputEvent({ type: 'keyUp', keyCode: key, modifiers })
+    } finally {
+      pressing = false
+    }
+    await Promise.race([
+      contents.executeJavaScript('window.__orbitKeyUp'),
+      new Promise((resolve) => setTimeout(resolve, KEY_WAIT_MS)),
+    ])
+  }
+
+  /**
+   * Types held keys into the page tools' field, in order: text as text, so every character arrives
+   * as typed (round 3 fix check, F2), and Backspace, Enter and Escape as keys. Escape closes the
+   * bar, so what comes after it was typed for a bar that has gone.
+   */
+  const typeKeys = async (contents: WebContents, keys: HeldKey[]) => {
+    let text = ''
+    for (const key of keys) {
+      if (!HELD_KEYS.has(key.key)) {
+        if (!CONTROL.test(key.key)) text += key.key
+        continue
+      }
+      if (text) await contents.insertText(text)
+      text = ''
+      if (contents.isDestroyed()) return
+      await pressKey(contents, key)
+      if (key.key === 'Escape') return
+    }
+    if (text && !contents.isDestroyed()) await contents.insertText(text)
+  }
+
+  /** Types the keys held for a window's find bar into its field, then stops holding them. */
+  const typeHeld = async (windowId: WindowId, h: HeldKeys, contents: WebContents) => {
+    h.typing = true
+    keepHolding(h)
+    try {
+      for (let keys = h.keys; keys?.length && held.get(windowId) === h; keys = h.keys) {
+        h.keys = []
+        if (contents.isDestroyed()) break
+        await typeKeys(contents, keys)
+      }
+    } catch {
+      // The page tools' page went away with the keys.
+    }
+    if (held.get(windowId) === h) dropKeys(windowId)
   }
 
   /** The find bar is in the window: it takes the keyboard, and its field says when it has it (find.focused). */
@@ -417,10 +483,10 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
   commands.register('find.focused', ({ focus }, c) => {
     const windowId = windowOf(c)
     const h = windowId ? held.get(windowId) : undefined
-    if (!windowId || !h || h.nonce === null || focus < h.nonce) return
-    dropKeys(windowId)
+    if (!windowId || !h || h.nonce === null || focus < h.nonce || h.typing) return
     const contents = windows.toolsContents(windowId)
-    if (contents) for (const key of h.keys) typeKey(contents, key)
+    if (contents && h.keys?.length) void typeHeld(windowId, h, contents)
+    else dropKeys(windowId)
   })
   commands.register('find.close', (_args, c) => closeFind(windowOf(c)))
 
@@ -525,7 +591,8 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
   })
 
   // The page tools' page has loaded, so they can go into the window (round 2 fix check, M3): the zoom
-  // indicator shows for its full time from now, and an open find bar takes the keyboard.
+  // indicator shows for its full time from now, and a find bar waiting for the keyboard takes it,
+  // whether or not keys are still held for it (round 3 fix check, F2).
   windows.onToolsReady((windowId) => {
     const t = tools.get(windowId)
     if (t?.zoom && !t.hovered) {

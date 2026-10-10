@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -874,5 +875,202 @@ test('[NV-05] keys typed right after ⌘F in a new window’s first moments reac
   ])
   await expect.poll(input).toBe('orbit')
   await expect.poll(async () => (await toolsIn(fresh.windowId)).find).toMatchObject({ query: 'orbit', matches: 3 })
+  expect(await fieldValue(fresh.tabId)).toBe('')
+})
+
+// ---- Held keys (round 3 fix check, F2) ----
+
+/** The value of a window's find field, as its page has it. */
+function findInput(windowId: string): Promise<string | null> {
+  return orbit.app.evaluate(
+    (_e, w) =>
+      (
+        globalThis as unknown as {
+          __orbit: { ctx: { windows: { toolsContents: (w: string) => Electron.WebContents } } }
+        }
+      ).__orbit.ctx.windows
+        .toolsContents(w)
+        .executeJavaScript(`document.querySelector('[data-testid=find-input]')?.value ?? null`),
+    windowId,
+  )
+}
+
+/** The first window's id. */
+const firstWindow = () =>
+  orbit.app.evaluate(
+    () => (globalThis as unknown as { __orbit: { windowIds: () => string[] } }).__orbit.windowIds()[0] ?? '',
+  )
+
+/**
+ * Keeps a window's page tools' page busy for `ms` (a script that runs that long). Resolves with
+ * when it began, by main's clock.
+ */
+function busyTools(windowId: string, ms: number): Promise<number> {
+  return orbit.app.evaluate(
+    (_e, [w, t]) => {
+      const tools = (
+        globalThis as unknown as {
+          __orbit: { ctx: { windows: { toolsContents: (w: string) => Electron.WebContents } } }
+        }
+      ).__orbit.ctx.windows.toolsContents(w)
+      const began = new Promise<number>((resolve) => {
+        const said = (...args: unknown[]) => {
+          const busy = args.some(
+            (a) =>
+              a === 'orbit-busy' ||
+              (typeof a === 'object' && !!a && (a as { message?: unknown }).message === 'orbit-busy'),
+          )
+          if (!busy) return
+          tools.off('console-message', said)
+          resolve(Date.now())
+        }
+        tools.on('console-message', said)
+      })
+      void tools.executeJavaScript(
+        `console.log('orbit-busy'); { const until = Date.now() + ${t}; while (Date.now() < until) {} }`,
+      )
+      return began
+    },
+    [windowId, ms] as const,
+  )
+}
+
+/** Records the name main hears for each key pressed in any web contents; returns a reader. */
+async function watchKeyNames(): Promise<() => Promise<string[]>> {
+  await orbit.app.evaluate(({ app: electronApp, webContents }) => {
+    const g = globalThis as unknown as { __keyNames: string[] }
+    g.__keyNames = []
+    const watch = (contents: Electron.WebContents) =>
+      contents.on('before-input-event', (_e, input) => {
+        if (input.type === 'keyDown') g.__keyNames.push(input.key)
+      })
+    for (const contents of webContents.getAllWebContents()) watch(contents)
+    electronApp.on('web-contents-created', (_e, contents) => watch(contents))
+  })
+  return () => orbit.app.evaluate(() => (globalThis as unknown as { __keyNames: string[] }).__keyNames)
+}
+
+/**
+ * The real X keyboard on the test's display (xdotool and xmodmap, Linux), or null where there is none.
+ * `addKeys` puts keysyms on spare keys, as a keyboard that has them does, until the returned undo.
+ */
+const xkeyboard = (() => {
+  if (process.platform !== 'linux' || !process.env.DISPLAY) return null
+  try {
+    execFileSync('xdotool', ['version'], { stdio: 'ignore' })
+    execFileSync('xmodmap', ['-pke'], { stdio: 'ignore' })
+  } catch {
+    return null
+  }
+  return {
+    type: (text: string) => execFileSync('xdotool', ['type', '--delay', '40', text], { stdio: 'ignore' }),
+    addKeys: (...keysyms: string[]): (() => void) => {
+      const spare = execFileSync('xmodmap', ['-pke'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+        .split('\n')
+        .map((line) => /^keycode\s+(\d+)\s*=\s*$/.exec(line)?.[1])
+        .filter((code): code is string => !!code && Number(code) > 8)
+        .slice(0, keysyms.length)
+      if (spare.length < keysyms.length) throw new Error('no spare keys in the keymap')
+      execFileSync(
+        'xmodmap',
+        spare.flatMap((code, i) => ['-e', `keycode ${code} = ${keysyms[i]}`]),
+        { stdio: 'ignore' },
+      )
+      return () =>
+        execFileSync(
+          'xmodmap',
+          spare.flatMap((code) => ['-e', `keycode ${code} =`]),
+          { stdio: 'ignore' },
+        )
+    },
+  }
+})()
+
+test('[NV-05] keys typed for the find bar while its page is busy arrive whole: “aBéßz” from a keyboard that has é and ß (round 3 fix check, F2)', async () => {
+  test.skip(!xkeyboard, 'é and ß have to come from a keyboard that has them: test input names them no key')
+  const x = xkeyboard as NonNullable<typeof xkeyboard>
+  const { app } = orbit
+  const url = fx.url(`/page/Busy?text=${encodeURIComponent('orbit aBéßz')}`)
+  await openTab(app, url)
+  const tab = await tabPage(app, '/page/Busy')
+  // The bar's page has loaded; the page has the keyboard again.
+  const tools = await openFind('/page/Busy')
+  await cmd(app, 'find.close')
+  await expect.poll(() => focusedUrl(app)).toContain('/page/Busy')
+  const names = await watchKeyNames()
+  const undo = x.addKeys('eacute', 'ssharp')
+  try {
+    // Chromium names the new keys once it has the new keymap (before, it names them "\u0000").
+    const clearBox = () =>
+      tab.evaluate(() => {
+        const box = document.getElementById('box') as HTMLInputElement
+        box.value = ''
+        box.focus()
+      })
+    let named: string[] = []
+    for (let i = 0; i < 10 && named.join() !== 'é'; i++) {
+      await clearBox()
+      const typed = (await names()).length
+      x.type('é')
+      await expect.poll(async () => (await names()).length).toBeGreaterThan(typed)
+      named = (await names()).slice(typed)
+    }
+    expect(named).toEqual(['é'])
+    await clearBox()
+    const windowId = await firstWindow()
+    const BUSY_MS = 2500
+    const began = await busyTools(windowId, BUSY_MS)
+    const before = (await names()).length
+    await pressInPage(app, '/page/Busy', 'F', [mod])
+    x.type('aBéßz')
+    // Typed while the bar's page was busy: its field couldn't have had the keys.
+    expect(Date.now() - began).toBeLessThan(BUSY_MS)
+    await expect.poll(() => findInput(windowId), { timeout: 10_000 }).toBe('aBéßz')
+    await expect.poll(async () => (await toolsInfo(app)).find).toMatchObject({ query: 'aBéßz', matches: 1 })
+    expect((await names()).slice(before).filter((name) => name !== 'Shift')).toEqual(['f', 'a', 'B', 'é', 'ß', 'z'])
+    expect(await tab.evaluate(() => (document.getElementById('box') as HTMLInputElement).value)).toBe('')
+    await expect(tools.getByTestId('find-input')).toBeFocused()
+  } finally {
+    undo()
+  }
+})
+
+test('[NV-05] a find bar whose page tools load after its keys were let go still takes the keyboard when it shows (round 3 fix check, F2)', async () => {
+  // The next page tools' page starts loading late, as from a slow renderer: long after ⌘F.
+  const LATE_MS = 8000
+  await orbit.app.evaluate(({ webContents }, ms) => {
+    type Load = (
+      this: Electron.WebContents,
+      where: string,
+      options?: { query?: Record<string, string> },
+    ) => Promise<void>
+    const proto = Object.getPrototypeOf(webContents.getAllWebContents()[0]) as { loadFile: Load; loadURL: Load }
+    const originals = { loadFile: proto.loadFile, loadURL: proto.loadURL }
+    const g = globalThis as unknown as { __lateTools: number }
+    for (const method of ['loadFile', 'loadURL'] as const) {
+      const load = originals[method]
+      proto[method] = function (this: Electron.WebContents, where, options) {
+        if (options?.query?.view !== 'tools' && !where.includes('view=tools')) return load.call(this, where, options)
+        Object.assign(proto, originals)
+        this.once('did-finish-load', () => {
+          g.__lateTools = Date.now()
+        })
+        setTimeout(() => void load.call(this, where, options).catch(() => {}), ms)
+        return Promise.resolve()
+      }
+    }
+  }, LATE_MS)
+  const fresh = await earlyWindow(findPage('Late'), 'find', [])
+  const asked = Date.now()
+  expect((await toolsIn(fresh.windowId)).find).toMatchObject({ open: true })
+  await expect.poll(async () => (await toolsIn(fresh.windowId)).placed, { timeout: LATE_MS + 10_000 }).toBe(true)
+  // The page tools loaded after the keys held for the bar were let go (F4: 5 s).
+  const loaded = await orbit.app.evaluate(() => (globalThis as unknown as { __lateTools: number }).__lateTools)
+  expect(loaded - asked).toBeGreaterThan(5000)
+  // The bar takes the keyboard all the same: typing goes on in it, not in the page.
+  await expect.poll(() => focusedUrl(orbit.app)).toContain('view=tools')
+  expect(await typeAnywhere(['o', 'r', 'b'])).toEqual(Array(3).fill(expect.stringContaining('view=tools')))
+  await expect.poll(() => findInput(fresh.windowId)).toBe('orb')
+  await expect.poll(async () => (await toolsIn(fresh.windowId)).find).toMatchObject({ query: 'orb', matches: 3 })
   expect(await fieldValue(fresh.tabId)).toBe('')
 })
