@@ -93,6 +93,14 @@ export const SETTINGS_ACTIONS: SettingsActionDef[] = [
     settings: { section: 'appearance' },
     keywords: ['theme', 'dark mode', 'light mode', 'match system'],
   },
+  // Keys lane: Settings → Shortcuts (ST-08, KS-12).
+  {
+    id: 'settings.shortcuts',
+    title: 'Shortcut Settings',
+    category: 'App',
+    settings: { section: 'shortcuts' },
+    keywords: ['keyboard shortcuts', 'shortcuts', 'remap keys', 'key bindings', 'hotkeys'],
+  },
   {
     id: 'settings.links',
     title: 'Link Settings',

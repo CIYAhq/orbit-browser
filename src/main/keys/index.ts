@@ -1,3 +1,4 @@
+import { ACTIONS } from '../../shared/actions'
 import type { BindResult, ShortcutPriority } from '../../shared/commands/keys'
 import { onKeymapChange, setCustomBindings } from '../../shared/keymap'
 import type { MainContext } from '../context'
@@ -73,6 +74,7 @@ export function registerKeys(ctx: MainContext): void {
       if (typeof lastTabOnCmd9 === 'boolean') d.settings.lastTabOnCmd9 = lastTabOnCmd9
     }),
   )
+  commands.register('keys.available', () => ACTIONS.filter((a) => ctx.actions.has(a.id)).map((a) => a.id))
   commands.register('keys.systemClashes', () => systemClashes())
   registerWindowKeys(ctx)
   registerTabKeys(ctx)

@@ -31,3 +31,14 @@ export function useShortcutLabel(actionId: string): string {
   useKeymap()
   return shortcutLabel(actionId)
 }
+
+let recording = false
+
+/** Settings → Shortcuts is recording a new binding (ST-08): no key press in this page runs an action. */
+export function setRecordingKeys(on: boolean): void {
+  recording = on
+}
+
+export function recordingKeys(): boolean {
+  return recording
+}

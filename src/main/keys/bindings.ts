@@ -7,7 +7,13 @@ import {
   defaultShortcutsFor,
 } from '../../shared/actions'
 import type { BindRequest, BindResult, ShortcutPriority } from '../../shared/commands/keys'
-import { bindingProblem, type CustomBindings, canonicalAccelerator, formatAccelerator } from '../../shared/keymap'
+import {
+  bindingProblem,
+  type CustomBindings,
+  canonicalAccelerator,
+  formatAccelerator,
+  MAX_BINDINGS,
+} from '../../shared/keymap'
 import type { Settings } from '../../shared/state'
 
 /**
@@ -16,8 +22,7 @@ import type { Settings } from '../../shared/state'
  * next one, which src/main/keys/index.ts saves.
  */
 
-/** Most bindings one action keeps (KS-01: aliases such as Back = ⌘[ and ⌘←). */
-export const MAX_BINDINGS = 5
+export { MAX_BINDINGS }
 
 type Bindings = Record<string, string[]>
 

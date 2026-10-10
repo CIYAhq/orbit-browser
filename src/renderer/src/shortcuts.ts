@@ -1,5 +1,5 @@
 import { actionForInput } from '../../shared/actions'
-import { followKeymap } from './keys/live'
+import { followKeymap, recordingKeys } from './keys/live'
 
 /**
  * Fallback shortcut router for Orbit's own UI pages. Real key presses are
@@ -13,7 +13,8 @@ export function installShortcutFallback(): void {
   window.addEventListener(
     'keydown',
     (e) => {
-      if (e.defaultPrevented || e.isComposing) return
+      // Settings → Shortcuts takes the keys while it records a new binding (ST-08).
+      if (e.defaultPrevented || e.isComposing || recordingKeys()) return
       const action = actionForInput(
         { key: e.key, code: e.code, meta: e.metaKey, control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey },
         window.orbit.platform,

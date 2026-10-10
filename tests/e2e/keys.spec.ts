@@ -1,6 +1,7 @@
 import { expect, type Page, test } from '@playwright/test'
 import { action, isMac, launchOrbit, MOD, type Orbit, run, state, tabPage, viewPage } from './helpers'
 import { cmd, type NavFixtures, openTab, pressInPage, startNavFixtures, visit } from './nav-support'
+import { openSettings, osWindows, pageOfView } from './settings-support'
 import { activeSpace, createSpace } from './spaces-support'
 
 let fx: NavFixtures
@@ -679,4 +680,160 @@ test('[KS-05][TB-12][TB-11] Rename Tab, Move Tab to Space… and Archive Tab hav
   await pressAnywhere('F8')
   await expect.poll(async () => (await state(app)).spaces[spaceId]?.pinned).toEqual([])
   expect((await state(app)).archive.at(-1)?.url).toBe(fx.url('/page/Named'))
+})
+
+// ---------- Settings → Shortcuts (ST-08) ----------
+
+/**
+ * A key press in the Settings window as the keyboard sends it there, through Orbit's key router
+ * (which records it while Settings → Shortcuts listens for a new binding).
+ */
+function pressInSettings(keyCode: string, modifiers: Mod[] = []): Promise<void> {
+  return orbit.app.evaluate(
+    ({ webContents }, [code, mods]) => {
+      const contents = webContents.getAllWebContents().find((c) => c.getURL().includes('view=settings'))
+      if (!contents) throw new Error('no Settings window')
+      contents.sendInputEvent({ type: 'keyDown', keyCode: code, modifiers: mods })
+      contents.sendInputEvent({ type: 'keyUp', keyCode: code, modifiers: mods })
+    },
+    [keyCode, modifiers] as const,
+  )
+}
+
+const PRIMARY_MOD: Mod[] = [isMac ? 'meta' : 'control']
+const shortcutRow = (page: Page, actionId: string) => page.getByTestId(`setting-shortcut-${actionId}`)
+const keysOf = async () => (await state(orbit.app)).settings.shortcuts
+const prioritiesOf = async () => (await state(orbit.app)).settings.shortcutPriority
+
+test('[ST-08][KS-01][KS-12] Shortcut Settings opens the list; search finds an action, and clicking its key then pressing new keys remaps it everywhere', async () => {
+  const { app, shell } = orbit
+  await action(app, 'settings.shortcuts')
+  const page = await pageOfView(app, 'settings')
+  await expect(page.getByTestId('settings-tab-shortcuts')).toHaveAttribute('aria-selected', 'true')
+  await page.getByTestId('shortcuts-search').fill('sidebar tog')
+  const row = shortcutRow(page, 'sidebar.toggle')
+  await expect(row).toBeVisible()
+  await expect(shortcutRow(page, 'tab.new')).toHaveCount(0)
+  const keys = row.getByTestId('shortcut-binding')
+  await expect(keys).toHaveText([isMac ? '⌘S' : 'Ctrl+S'])
+  await keys.first().click()
+  await expect(keys.first()).toHaveText('Type shortcut')
+  await pressInSettings('B', [...PRIMARY_MOD, 'shift'])
+  await expect(keys).toHaveText([SHIFT_B])
+  expect(await keysOf()).toEqual({ 'sidebar.toggle': [`${PRIMARY}+Shift+B`] })
+  await expect(shell.getByTestId('toggle-sidebar')).toHaveAttribute('title', `Hide sidebar (${SHIFT_B})`)
+  await onlyShiftBToggles()
+
+  // Another binding: a key without a modifier is refused and Settings keeps listening; F-keys may stand alone.
+  await row.getByTestId('shortcut-add').click()
+  await pressInSettings('B')
+  await expect(row.getByTestId('shortcut-problem')).toContainText('A shortcut starts with')
+  await pressInSettings('F7')
+  await expect(keys).toHaveText([SHIFT_B, 'F7'])
+  // Esc leaves a binding as it was; ⌫ removes it.
+  await keys.nth(1).click()
+  await pressInSettings('Escape')
+  await expect(keys).toHaveText([SHIFT_B, 'F7'])
+  await keys.nth(1).click()
+  await pressInSettings('Backspace')
+  await expect(keys).toHaveText([SHIFT_B])
+  expect(await keysOf()).toEqual({ 'sidebar.toggle': [`${PRIMARY}+Shift+B`] })
+})
+
+test('[ST-08][KS-01] keys another action has: Settings warns and offers Swap or Remove, and while it listens the keys run nothing', async () => {
+  const { app } = orbit
+  const page = await openSettings(app, { section: 'shortcuts' })
+  const sidebar = shortcutRow(page, 'sidebar.toggle')
+  const dialog = page.getByTestId('shortcut-conflict')
+  // Close Tab's keys would close the Settings window: here they only ask.
+  await sidebar.getByTestId('shortcut-binding').click()
+  await pressInSettings('W', PRIMARY_MOD)
+  await expect(dialog).toContainText('is used by “Close Tab”')
+  expect(await osWindows(app, 'settings')).toHaveLength(1)
+  await dialog.getByTestId('shortcut-conflict-cancel').click()
+  await expect(dialog).toHaveCount(0)
+  expect(await keysOf()).toBeUndefined()
+
+  // Swap: Toggle Sidebar takes New Tab's keys and New Tab gets Toggle Sidebar's.
+  await sidebar.getByTestId('shortcut-binding').click()
+  await pressInSettings('T', PRIMARY_MOD)
+  await dialog.getByTestId('shortcut-conflict-swap').click()
+  await expect.poll(keysOf).toEqual({ 'sidebar.toggle': [`${PRIMARY}+T`], 'tab.new': [`${PRIMARY}+S`] })
+  await expect(shortcutRow(page, 'tab.new').getByTestId('shortcut-binding')).toHaveText([isMac ? '⌘S' : 'Ctrl+S'])
+
+  // Remove: Duplicate Tab, which has no keys, takes New Window's, which is left with none.
+  await shortcutRow(page, 'tab.duplicate').getByTestId('shortcut-record').click()
+  await pressInSettings('N', PRIMARY_MOD)
+  await expect(dialog.getByTestId('shortcut-conflict-swap')).toHaveCount(0)
+  await dialog.getByTestId('shortcut-conflict-clear').click()
+  await expect.poll(keysOf).toMatchObject({ 'tab.duplicate': [`${PRIMARY}+N`], 'window.new': [] })
+  await expect(shortcutRow(page, 'window.new').getByTestId('shortcut-record')).toBeVisible()
+})
+
+test('[ST-08][KS-02][TB-04] right-click an action to prefer websites or Orbit and to reset it; Reset All asks first; the Go to Tab options', async () => {
+  const { app } = orbit
+  expect(await run(app, 'keys.bind', { actionId: 'sidebar.toggle', accel: 'F7' })).toEqual({ ok: true })
+  const page = await openSettings(app, { section: 'shortcuts' })
+  const row = shortcutRow(page, 'sidebar.toggle')
+  const menu = page.getByTestId('shortcut-menu')
+  await expect(row).toContainText('Websites first')
+  await row.click({ button: 'right' })
+  await expect(menu.getByTestId('shortcut-menu-websites')).toHaveAttribute('aria-checked', 'true')
+  await menu.getByTestId('shortcut-menu-orbit').click()
+  await expect.poll(prioritiesOf).toEqual({ 'sidebar.toggle': 'orbit' })
+  await expect(row).not.toContainText('Websites first')
+  await row.click({ button: 'right' })
+  await menu.getByTestId('shortcut-menu-reset').click()
+  await expect.poll(keysOf).toBeUndefined()
+  expect(await prioritiesOf()).toBeUndefined()
+  await expect(row.getByTestId('shortcut-binding')).toHaveText([isMac ? '⌘S' : 'Ctrl+S'])
+  await expect(row).toContainText('Websites first')
+  // At its defaults there is nothing to reset; Esc closes the menu.
+  await row.click({ button: 'right' })
+  await expect(menu.getByTestId('shortcut-menu-reset')).toBeDisabled()
+  await page.keyboard.press('Escape')
+  await expect(menu).toHaveCount(0)
+
+  await run(app, 'keys.bind', { actionId: 'tab.duplicate', accel: 'F7' })
+  await run(app, 'keys.setPriority', { actionId: 'tab.new', priority: 'websites' })
+  await page.getByTestId('shortcuts-reset-all').click()
+  await page.getByTestId('shortcuts-reset-all-confirm').click()
+  await expect.poll(keysOf).toBeUndefined()
+  expect(await prioritiesOf()).toBeUndefined()
+  await expect(page.getByTestId('shortcuts-reset-all')).toBeDisabled()
+
+  // Go to Tab: Favorites counted first or not, and the last item or the ninth for ⌘9.
+  await page.getByTestId('shortcut-count-favorites').click()
+  await expect.poll(async () => (await state(app)).settings.countFavoritesInShortcuts).toBe(false)
+  await page.getByTestId('shortcut-last-tab').selectOption('ninth')
+  await expect.poll(async () => (await state(app)).settings.lastTabOnCmd9).toBe(false)
+  await expect(shortcutRow(page, 'tab.goto.9')).toContainText('Go to Tab 9')
+})
+
+test('[ST-08][KS-03][ST-02] keys the system keeps are marked until the action gets others; Settings search finds shortcuts by name', async () => {
+  const { app } = orbit
+  // The Space 1 keys, as macOS's Mission Control or a Linux desktop may keep them.
+  const accel = isMac ? 'Ctrl+1' : 'Alt+1'
+  await app.evaluate(
+    (_electron, list) =>
+      (
+        globalThis as unknown as { __orbitKeys: { setSystemClashes: (l: unknown) => void } }
+      ).__orbitKeys.setSystemClashes(list),
+    [{ accel, owner: 'Switch to Desktop 1' }],
+  )
+  const page = await openSettings(app, { section: 'shortcuts' })
+  const row = shortcutRow(page, 'space.goto.1')
+  await expect(page.getByTestId('shortcuts-system-notice')).toBeVisible()
+  await expect(row.getByTestId('shortcut-clash')).toContainText('your system uses it for Switch to Desktop 1')
+  await row.getByTestId('shortcut-binding').click()
+  await pressInSettings('F9')
+  await expect(row.getByTestId('shortcut-binding')).toHaveText(['F9'])
+  await expect(row.getByTestId('shortcut-clash')).toHaveCount(0)
+  await expect(page.getByTestId('shortcuts-system-notice')).toHaveCount(0)
+
+  await page.getByTestId('settings-search').fill('switch to space 1')
+  const results = page.getByTestId('settings-results')
+  await expect(results.getByTestId('setting-shortcut-space.goto.1')).toBeVisible()
+  await expect(results.getByTestId('setting-shortcut-space.goto.2')).toBeHidden()
+  await expect(results.getByTestId('shortcuts-search')).toBeHidden()
 })

@@ -259,6 +259,9 @@ export function acceleratorFromInput(input: KeyInput): string | undefined {
   return canonicalAccelerator(mods ? `${mods}+${keyName(input)}` : keyName(input))
 }
 
+/** Most bindings one action keeps (KS-01: aliases such as Back = ⌘[ and ⌘←). */
+export const MAX_BINDINGS = 5
+
 /** Function keys F1–F12 may be bound with no modifier (KS-01). */
 const BARE_KEY = /^F([1-9]|1[0-2])$/
 

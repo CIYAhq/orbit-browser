@@ -75,6 +75,8 @@ export interface KeyCommands {
   'keys.setPriority': { args: { actionId: string; priority: ShortcutPriority }; result: void }
   /** The Go to Tab options of Settings → Shortcuts (ST-08). */
   'keys.setOptions': { args: TabNumberOptions; result: void }
+  /** The ids of the actions Orbit runs (the action table also names some no feature runs yet): Settings → Shortcuts lists these. */
+  'keys.available': { args: Record<string, never>; result: string[] }
   /** Keys the operating system keeps, so Orbit never receives them (KS-03): shown in Settings → Shortcuts. */
   'keys.systemClashes': { args: Record<string, never>; result: SystemClash[] }
 }
