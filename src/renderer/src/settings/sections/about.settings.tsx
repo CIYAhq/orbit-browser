@@ -1,7 +1,7 @@
 import { Copy, ExternalLink, Info } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { BuildInfo } from '../../../../shared/commands/settings'
-import { LICENSE_URL, PROJECT_URL, RELEASES_URL } from '../../../../shared/project'
+import { RELEASES_URL } from '../../../../shared/project'
 import { invoke } from '../../api'
 import { OrbitLogo } from '../../onboarding/OrbitLogo'
 import { Button, SettingGroup, SettingRow } from '../controls'
@@ -79,15 +79,26 @@ function AboutPage() {
         <SettingRow id="release-notes" label="Release notes" description="What changed in each version.">
           <OpenLink url={RELEASES_URL} label="Release notes" />
         </SettingRow>
+        {/* Both open the credits page that comes with Orbit, offline (D43). */}
         <SettingRow id="licence" label="Licence" description="Orbit is free software under the MIT licence.">
-          <OpenLink url={LICENSE_URL} label="Licence" />
+          <OpenButton
+            label="Licence"
+            title="Orbit's licence"
+            testId="about-licence"
+            onOpen={() => void invoke('settings.openCredits', { at: 'orbit' })}
+          />
         </SettingRow>
         <SettingRow
           id="credits"
           label="Open-source credits"
-          description="Orbit is built on Chromium, Electron, React and other open-source projects."
+          description="Orbit is built on Chromium, Electron, React and other open-source projects. Their licences come with it."
         >
-          <OpenLink url={PROJECT_URL} label="Open-source credits" />
+          <OpenButton
+            label="Open-source credits"
+            title="The open-source projects in Orbit and their licences"
+            testId="about-credits"
+            onOpen={() => void invoke('settings.openCredits', {})}
+          />
         </SettingRow>
       </SettingGroup>
     </>
@@ -96,8 +107,22 @@ function AboutPage() {
 
 /** Opens a page in a tab of the browser window Settings belongs to. */
 export function OpenLink({ url, label }: { url: string; label: string }) {
+  return <OpenButton label={label} title={url} onOpen={() => void invoke('settings.openUrl', { url })} />
+}
+
+function OpenButton({
+  label,
+  title,
+  testId,
+  onOpen,
+}: {
+  label: string
+  title: string
+  testId?: string
+  onOpen: () => void
+}) {
   return (
-    <Button title={url} onClick={() => void invoke('settings.openUrl', { url })}>
+    <Button title={title} testId={testId} onClick={onOpen}>
       <ExternalLink size={13} aria-hidden="true" />
       <span className="st-sr">{label}</span>
       Open

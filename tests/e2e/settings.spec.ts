@@ -1,6 +1,7 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingHttpHeaders } from 'node:http'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
 import { DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
 import { ISSUES_URL, PROJECT_URL, RELEASES_URL } from '../../src/shared/project'
@@ -995,6 +996,31 @@ test("[UP-06] after an update the sidebar says so until What's new is opened, wh
   expect(s.settings.whatsNew).toBeUndefined()
   expect(s.settings.lastRunVersion).toBe(version)
   await expect(orbit.shell.getByTestId('update-banner')).toHaveCount(0)
+})
+
+test('[ST-17][UP-07] Licence and Open-source credits open the credits that come with Orbit, in a tab, with no network', async () => {
+  const page = await openSettings(orbit.app, { section: 'about', item: 'licence' })
+  await page.locator('[data-setting="licence"]').getByRole('button').click()
+  await expect.poll(activeUrl).toMatch(/^file:\/\/.*\/credits\.html\?chromium=file[^#]*#orbit$/)
+  const credits = await tabPage(orbit.app, 'credits.html')
+  await expect(credits).toHaveTitle('Open-source credits · Orbit')
+  await expect(credits.locator('#orbit pre')).toContainText('MIT License')
+  await expect(credits.locator('#orbit pre')).toContainText('Copyright (c) 2026 CIYA')
+  await expect(credits.locator('#electron pre')).toContainText('Copyright (c) Electron contributors')
+  // Chromium's licences: the file Electron ships, wherever this copy of Orbit has it.
+  const chromium = (await credits.locator('#chromium-link').getAttribute('href')) ?? ''
+  expect(chromium).toMatch(/^file:\/\/.*\/LICENSES\.chromium\.html$/)
+  expect(existsSync(fileURLToPath(chromium))).toBe(true)
+  // The npm packages whose code ships, each with its licence in full; none that only build Orbit.
+  const names = await credits
+    .locator('#packages h3')
+    .evaluateAll((hs) => hs.map((h) => h.firstChild?.textContent?.trim() ?? ''))
+  expect(names).toEqual(expect.arrayContaining(['immer', 'react', 'react-dom', 'scheduler', 'zustand', 'lucide-react']))
+  for (const tool of ['electron', 'vite', 'typescript', '@playwright/test']) expect(names).not.toContain(tool)
+  await expect(credits.locator('#packages pre')).toHaveCount(names.length)
+
+  await page.locator('[data-setting="credits"]').getByRole('button').click()
+  await expect.poll(activeUrl).toMatch(/^file:\/\/.*\/credits\.html\?chromium=file[^#]*$/)
 })
 
 test("[OB-13][UP-07] Report a Bug, Help and What's New open the project's pages in a tab; Copy Build Info copies it", async () => {

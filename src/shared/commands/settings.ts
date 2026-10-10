@@ -297,6 +297,11 @@ export interface SettingsCommands {
   'settings.update': { args: SettingsPatch; result: void }
   /** Opens a web page in a new tab of the browser window Settings belongs to. */
   'settings.openUrl': { args: { url: string }; result: void }
+  /**
+   * Opens the open-source credits that come with Orbit in a new tab, like `settings.openUrl`
+   * (ST-17, UP-07): at Orbit's licence with `at: 'orbit'`.
+   */
+  'settings.openCredits': { args: { at?: 'orbit' }; result: void }
   'settings.buildInfo': { args: Record<string, never>; result: BuildInfo }
   /** Copies the build info for a bug report (ST-17) and returns the text copied. */
   'settings.copyBuildInfo': { args: Record<string, never>; result: string }

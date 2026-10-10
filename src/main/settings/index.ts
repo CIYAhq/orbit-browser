@@ -6,6 +6,7 @@ import type { WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
 import { BUILD_DATE, BUILT_VERSION, bugReportUrl, buildInfoText } from './build-info'
+import { creditsUrl } from './credits'
 import { stubDefaultBrowser, systemDefaultBrowser } from './default-browser'
 import { registerLinkSettings } from './links'
 import { registerOnboarding } from './onboarding'
@@ -45,14 +46,22 @@ export function registerSettings(ctx: MainContext): void {
 
   // A page opens in a new tab of the browser window it was asked from; from Settings, onboarding or
   // a Mini Window, in the one Settings belongs to (or the last used, or a new one).
-  commands.register('settings.openUrl', async ({ url }, c) => {
-    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return
+  /** Opens a page in a new tab of the browser window Settings belongs to, and brings it forward. */
+  const openInTab = async (url: string, c: CallContext) => {
     const from = c.windowId && store.state.windows[c.windowId]?.kind === 'main' ? c.windowId : undefined
     const windowId = (from && windows.get(from) ? from : undefined) ?? settings.browserWindow() ?? windows.open()
     await commands.run('tabs.create', { url }, { windowId })
     const win = windows.get(windowId)
     if (win && !win.isDestroyed()) win.focus()
+  }
+  commands.register('settings.openUrl', async ({ url }, c) => {
+    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return
+    await openInTab(url, c)
   })
+  // Licence and Open-source credits (ST-17, UP-07): the credits page that comes with Orbit (D43).
+  commands.register('settings.openCredits', ({ at }, c) =>
+    openInTab(creditsUrl(at === 'orbit' ? 'orbit' : undefined), c),
+  )
   const openPage = (url: string, windowId: WindowId | undefined) =>
     commands.run('settings.openUrl', { url }, { windowId })
   // Default browser (ST-03). Test runs never change the OS setting.

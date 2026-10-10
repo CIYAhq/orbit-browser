@@ -552,7 +552,7 @@ Spec: `spec/settings.md`
 | ST-14 | Languages, spell check and translation | P2 | – | – | – |  |
 | ST-15 | Passwords and autofill settings | P1 | – | – | – |  |
 | ST-16 | Session restore on launch | P1 | – | – | – |  |
-| ST-17 | About Orbit | P1 | ✅ | ✅ e2e | – | Settings → About: logo, version (a click copies it), build date, Chromium and Electron versions, system, Check for updates, release notes, licence, open-source credits, Copy build info |
+| ST-17 | About Orbit | P1 | ✅ | ✅ e2e+unit | – | Settings → About: logo, version (a click copies it), build date, Chromium and Electron versions, system, Check for updates, release notes, Copy build info. Licence and Open-source credits open credits.html, built with the app (D43): Orbit's and Electron's licences, a link to the LICENSES.chromium.html Electron ships, and the licence of each npm package whose code ships. Release notes and help need access to the private repository for now |
 | ST-18 | Account, sign-in and sync sections | ? | – | – | – |  |
 | ST-19 | AI features section | ? | – | – | – |  |
 | ST-20 | Which settings are global and which are per profile | P1 | 🟡 partial | ✅ e2e+unit | – | per-profile rows carry the profile's name; download location, passwords and site permissions don't exist yet |
@@ -617,7 +617,7 @@ Spec: `spec/updates.md`
 | UP-04 | Automatic installation while idle (opt-in) | P2 | – | – | – |  |
 | UP-05 | Relaunch behaviour | P1 | – | – | – |  |
 | UP-06 | "What's new" after an update and release notes in-app | P1 | 🟡 partial | ✅ e2e+unit | – | after a version change the sidebar shows "Updated to Orbit X" with See what's new, which opens that version's GitHub release notes in a tab; ends when opened, dismissed or after 3 days; command bar "What's New" and Help → Release Notes. Not built: the release's one-line summary in the banner |
-| UP-07 | About window and version info | P1 | ✅ | ✅ e2e+unit | – | About Orbit (app menu) opens Settings → About: logo, version, engine, Electron, build date (set at build time), licence, open-source credits, Copy build info; Help → Troubleshooting → Copy Build Info and the command-bar action copy version, build date, engine, OS and processor |
+| UP-07 | About window and version info | P1 | ✅ | ✅ e2e+unit | – | About Orbit (app menu) opens Settings → About: logo, version, engine, Electron, build date (set at build time), Copy build info, and the licence and open-source credits from a page that comes with the app (D43); Help → Troubleshooting → Copy Build Info and the command-bar action copy version, build date, engine, OS and processor |
 | UP-08 | Beta update channel | P2 | – | – | – |  |
 | UP-09 | OS support notices | P2 | – | – | – |  |
 | UP-10 | Orbit update stub (unsigned builds) | P1 | ✅ | ✅ e2e+unit | – | reads Orbit's JSON feed ({version, url, summary, security}) or a GitHub releases API answer (latest, or a list: newest non-draft, non-pre-release); a newer version shows "New version available" and opens its page in a tab. No feed is set up yet: the address is empty by default |
