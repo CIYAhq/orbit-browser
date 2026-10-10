@@ -32,6 +32,6 @@ export function registerFeatures(ctx: MainContext): void {
   registerExtensions(ctx)
   registerDownloads(ctx)
   registerSettings(ctx)
-  registerImport(ctx)
+  registerImport(ctx, history)
   registerUpdates(ctx)
 }

@@ -11,6 +11,7 @@
  * The final shortcut set follows spec/keyboard-shortcuts.md (KS-* IDs).
  */
 
+import { IMPORT_ACTIONS } from './commands/import'
 import { SETTINGS_ACTIONS, SETTINGS_LANE_ACTIONS } from './commands/settings'
 
 export interface ActionDef {
@@ -375,6 +376,7 @@ export const ACTIONS: ActionDef[] = [
   // Settings sections and common settings (ST-02); onboarding, updates and help
   ...SETTINGS_ACTIONS,
   ...SETTINGS_LANE_ACTIONS,
+  ...IMPORT_ACTIONS,
 ]
 
 export const ACTIONS_BY_ID: Record<string, ActionDef> = Object.fromEntries(ACTIONS.map((a) => [a.id, a]))

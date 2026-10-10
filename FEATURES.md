@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 475 spec’d · 174 built (72 partial) · 251 tested · 0 feel right. 10 more are out of scope and not counted.
+**Totals:** 475 spec’d · 174 built (77 partial) · 260 tested · 0 feel right. 10 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 111 | 136 |
-| P1 | 221 | 54 | 104 |
-| P2 | 80 | 9 | 11 |
+| P1 | 221 | 54 | 111 |
+| P2 | 80 | 9 | 13 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -563,23 +563,23 @@ Spec: `spec/import.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| IM-01 | Import entry points | P1 | – | ✅ e2e | – |  |
-| IM-02 | Choose the source browser and profile(s) | P1 | – | – | – |  |
+| IM-01 | Import entry points | P1 | 🟡 partial | ✅ e2e | – | the import window (a child of the browser window, in its Space's colours): Back / Next / Cancel, Cancel imports nothing, Enter is Next and Escape is Back, ⌘W closes it; onboarding shows the same flow inline (OB-03). The app menu, command bar and Settings entry points come with the rest of the flow |
+| IM-02 | Choose the source browser and profile(s) | P1 | – | ✅ unit | – |  |
 | IM-03 | Choose which data types to import | P1 | – | – | – |  |
-| IM-04 | Choose which bookmarks to import | P1 | – | – | – |  |
-| IM-05 | Mapping bookmarks into Orbit (pinned tabs and folders) | P1 | – | – | – |  |
-| IM-06 | Target Space and profile for imported data | P1 | – | – | – |  |
+| IM-04 | Choose which bookmarks to import | P1 | 🟡 partial | ✅ e2e+unit | – | the bookmark tree with a checkbox per folder and bookmark, everything chosen at first, Select all / none and a count; addresses that can't be pinned show unticked with the reason. Files only so far: browser sources come with IM-02 |
+| IM-05 | Mapping bookmarks into Orbit (pinned tabs and folders) | P1 | 🟡 partial | ✅ e2e+unit | – | a file's bookmarks become one pinned folder at the end of the target Space's pinned section: top-level groups and nested folders kept, in order, as closed sub-folders (the folder itself closed above 1,000 items); each bookmark a pinned tab, asleep, with no favicon or request until opened; bookmarklets, browser-only and non-web addresses skipped and counted; no Favorites made; one undo step takes it all back. 2,000 bookmarks take about 0.1 s with the longest main-process stall about 110 ms. "Imported from <Browser>" comes with IM-02 |
+| IM-06 | Target Space and profile for imported data | P1 | – | ✅ e2e | – |  |
 | IM-07 | History import | P1 | – | – | – |  |
 | IM-08 | Password import | P1 | – | – | – |  |
 | IM-09 | Extension import (Chromium-family sources) | P1 | – | – | – |  |
 | IM-10 | Cookies / signed-in sessions import | P2 | – | – | – |  |
 | IM-11 | Autofill addresses and payment cards import | P2 | – | – | – |  |
 | IM-12 | Bringing data over from Arc (user-facing exports only) | P1 | – | – | – |  |
-| IM-13 | Import from files (standard formats) | P1 | – | – | – |  |
-| IM-14 | Progress, summary and errors | P1 | – | – | – |  |
-| IM-15 | Re-import and duplicates | P2 | – | – | – |  |
+| IM-13 | Import from files (standard formats) | P1 | 🟡 partial | ✅ e2e+unit | – | bookmarks HTML (the Netscape format; Chromium- and Firefox-style exports tested) from From a file… or dropped on the import window or the sidebar, mapped as IM-05 into "Imported bookmarks"; a file with no bookmarks says "No bookmarks found in this file" and imports nothing; a cut-off file imports what it holds; 64 MB at most. A .txt list of links opens the paste route (IM-12). No passwords CSV (D52) |
+| IM-14 | Progress, summary and errors | P1 | 🟡 partial | ✅ e2e | – | progress per data type, then a summary with counts and the skipped items with reasons; Done shows the imported folder in the sidebar (its Space, the pinned section open, the folder in view); the browser window stays responsive meanwhile. Locked browser files come with IM-02 |
+| IM-15 | Re-import and duplicates | P2 | – | ✅ e2e+unit | – |  |
 | IM-16 | Starter suggestions from imported history | P2 | – | – | – |  |
-| IM-17 | Export Orbit's pinned items (anti-lock-in) | P2 | – | – | – |  |
+| IM-17 | Export Orbit's pinned items (anti-lock-in) | P2 | – | ✅ unit | – |  |
 
 ## Onboarding (first run), tips and tutorials
 
@@ -589,13 +589,13 @@ Spec: `spec/onboarding.md`
 |---|---|---|---|---|---|---|
 | OB-01 | Welcome screen | P1 | ✅ | ✅ e2e | – | a window of its own before any browser window on a first run (gated by settings.onboarded; e2e runs skip it unless ORBIT_ONBOARDING=1): Orbit's logo with the moon in motion (still with reduced motion), a welcome line, Get started; steps slide in (about 400 ms, none with reduced motion); Enter continues, Esc goes back; each step's title takes focus; progress dots are labelled. No sounds or music (optional), no haptics (Electron has no API), no first-window shimmer |
 | OB-02 | No account, no sign-in, ever | P0 | ✅ | ✅ e2e+unit | – | audit and e2e: no account UI anywhere, onboarding included; a first run sends nothing off the computer, with or without onboarding, except Chromium's spell-check dictionary download (see tests) |
-| OB-03 | Import step | P1 | 🟡 partial | – | – | placeholder step that says import isn't available yet, because the import lane has no import.open; when it has, the step offers Import… (opens that flow in a browser window) and Do this later with the same weight. Not inline, no background import or counts, no link for people moving from another browser yet |
+| OB-03 | Import step | P1 | 🟡 partial | ✅ e2e | – | the import flow inline (IM-01): a bookmarks file dropped or chosen, the paste route and the help for people moving from another browser, with Do this later weighing the same as Next. An import chosen there is read at once and added when Start browsing ends onboarding; Skip setup adds nothing (D44). Browser logos, profiles and data types come with IM-02 and IM-03 |
 | OB-04 | Pick a theme colour | P1 | ✅ | ✅ e2e | – | the Space theme picker (same ThemeEditor) for the first Space, applied live, with a preview of sidebar and frame, grain and intensity; Light / Dark / Match system (Match system preselected, Continue works at once); says it can be changed later. No haptics |
 | OB-05 | Pick favourite web apps (seed Favorites) | P1 | ✅ | ✅ e2e+unit | – | 16 web apps as letter tiles (no logos fetched), nothing preselected, at most 12; they become the first Space's profile's Favorites, unloaded until opened. No ordering by imported history (no import yet) |
 | OB-06 | Ad-blocking choice | P1 | – | – | – | there is no ad and tracker blocker (OT-15), so the step is left out of the flow |
 | OB-07 | Set as default browser | P1 | ✅ | ✅ e2e | – | explains what the default browser does; Make Orbit my default and Not now with the same weight; on Windows says what to pick in Default apps; status asked again when the window comes back to the front; no reminders later. Test runs use a stub |
 | OB-08 | Default search engine choice | P2 | ✅ | ✅ e2e | – | a Search with row on the Done screen: the Default profile's engine (ST-06's list), Google until changed |
-| OB-09 | Done screen and the first browser window | P1 | 🟡 partial | ✅ e2e | – | Done screen sums up colours, Favorites, default browser and import; Start browsing (Back to browsing after a reset) opens the first window centred at about 86% of the screen with the colours and Favorites picked, command bar closed. No Orbit basics folder or local welcome tab (no local guide pages yet), no import counts |
+| OB-09 | Done screen and the first browser window | P1 | 🟡 partial | ✅ e2e | – | Done screen sums up colours, Favorites, default browser and import (what will be added from where, e.g. "6 bookmarks from bookmarks.html", or that nothing was and where import lives); Start browsing (Back to browsing after a reset) opens the first window centred at about 86% of the screen with the colours and Favorites picked, command bar closed. No Orbit basics folder or local welcome tab (no local guide pages yet) |
 | OB-10 | Getting-started guide | P1 | – | – | – |  |
 | OB-11 | Contextual tips and one-time hints | P1 | – | – | – |  |
 | OB-12 | Essential keyboard shortcuts sheet | P1 | – | – | – |  |

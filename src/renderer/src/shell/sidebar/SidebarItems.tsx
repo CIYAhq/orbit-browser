@@ -16,6 +16,7 @@ import type { Space, SpaceId } from '../../../../shared/state'
 import { containerKey, locate, sectionOf, splitOfTab } from '../../../../shared/tree'
 import { engineForSpace, parseInput } from '../../../../shared/url'
 import { invoke, isMac, runAction } from '../../api'
+import { importDroppedFile, revealInSidebar } from '../../import/sidebar'
 import { activeTabId } from '../../selectors'
 import { getOrbitState, useOrbit } from '../../store'
 import { DragGhost } from './DragGhost'
@@ -263,7 +264,7 @@ function TodayBlock({ space }: { space: Space }) {
 function onLinkDragOver(e: ReactDragEvent) {
   if (useDrag.getState().phase !== 'idle') return
   const types = e.dataTransfer.types
-  if (types.includes('text/uri-list') || types.includes('text/plain')) {
+  if (types.includes('text/uri-list') || types.includes('text/plain') || types.includes('Files')) {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'copy'
   }
@@ -275,6 +276,7 @@ function onLinkDrop(e: ReactDragEvent, spaceId: string) {
     .split('\n')
     .find((l) => l && !l.startsWith('#'))
   const text = uri?.trim() || e.dataTransfer.getData('text/plain').trim()
+  if (importDroppedFile(e, text, spaceId)) return
   if (!text) return
   e.preventDefault()
   const parsed = parseInput(text, engineForSpace(getOrbitState(), spaceId))
@@ -298,6 +300,7 @@ function useMainMessages(scrollRef: React.RefObject<HTMLDivElement | null>) {
       window.orbit.on('sidebar:edit-pinned-url', (p) => startRename((p as { id: string }).id, { mode: 'url' })),
       window.orbit.on('sidebar:icon', (p) => useIconPicker.setState({ id: (p as { id: string }).id })),
       window.orbit.on('sidebar:clear-selection', () => clearSelection()),
+      window.orbit.on('sidebar:reveal', (p) => revealInSidebar(scrollRef.current, (p as { id: string }).id)),
       window.orbit.on('sidebar:focus', () => {
         const el = scrollRef.current
         if (!el) return

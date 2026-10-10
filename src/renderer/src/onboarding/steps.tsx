@@ -7,6 +7,7 @@ import type { ColorMode, SpaceTheme } from '../../../shared/state'
 import { NEUTRAL_THEME } from '../../../shared/theme'
 import { engineFor, SEARCH_ENGINES } from '../../../shared/url'
 import { invoke } from '../api'
+import { ImportSummary, OnboardingImport } from '../import/Onboarding'
 import { swatchBackground, ThemeEditor } from '../shell/spaces/ThemeEditor'
 import '../shell/spaces/spaces.css'
 import { useOrbit } from '../store'
@@ -75,7 +76,16 @@ export function WelcomeStep({ onNext }: { onNext: () => void }) {
 
 // ---- OB-03 ----
 
-export function ImportStep({ importer, onNext }: { importer: boolean; onNext: () => void }) {
+export function ImportStep({
+  importer,
+  onNext,
+  onImport,
+}: {
+  importer: boolean
+  onNext: () => void
+  /** An import was started (the import lane's flow, OB-03): it is added when onboarding ends. */
+  onImport: (jobId: string) => void
+}) {
   if (!importer) {
     // The import lane hasn't shipped its flow (`import.open`): say so plainly and move on.
     return (
@@ -92,22 +102,15 @@ export function ImportStep({ importer, onNext }: { importer: boolean; onNext: ()
       </div>
     )
   }
+  // The import flow inline; its "Do this later" has the same weight as its Next.
   return (
-    <div className="ob-narrow">
-      <Title id="import">Bring your bookmarks along</Title>
-      <p className="ob-lead">
-        Copy bookmarks, history and more from another browser on this computer. You can also do it later from Settings.
-      </p>
-      <Actions>
-        {/* The same weight for both: doing it later is a fine choice. */}
-        <Button onClick={onNext} testId="onboarding-import-later">
-          Do this later
-        </Button>
-        <Button onClick={() => void invoke('settings.openImport', {}).then(onNext)} testId="onboarding-import">
-          Import…
-        </Button>
-      </Actions>
-    </div>
+    <OnboardingImport
+      onLater={onNext}
+      onStarted={(jobId) => {
+        onImport(jobId)
+        onNext()
+      }}
+    />
   )
 }
 
@@ -432,6 +435,7 @@ export function DoneStep({
   browser,
   declined,
   importer,
+  importJob,
   returning,
   finishing,
   onStart,
@@ -441,6 +445,7 @@ export function DoneStep({
   browser: DefaultBrowserStatus | undefined
   declined: boolean
   importer: boolean
+  importJob: string | undefined
   returning: boolean
   finishing: boolean
   onStart: () => void
@@ -473,12 +478,10 @@ export function DoneStep({
                 : 'Unchanged: it’s in Settings, under General'}
           </dd>
         </div>
-        {!importer && (
-          <div>
-            <dt>Import</dt>
-            <dd>Not yet available</dd>
-          </div>
-        )}
+        <div>
+          <dt>Import</dt>
+          <dd>{importer ? <ImportSummary jobId={importJob} /> : 'Not yet available'}</dd>
+        </div>
         <div>
           <dt>
             <label htmlFor="ob-search">Search with</label>

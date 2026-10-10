@@ -70,6 +70,15 @@ function Flow({ info }: { info: OnboardingInfo }) {
   const [browser, setBrowser] = useState<DefaultBrowserStatus>()
   const [declined, setDeclined] = useState(false)
   const [finishing, setFinishing] = useState(false)
+  // An import started at the import step (OB-03): read now, added by Start browsing, never by Skip setup.
+  const [importJob, setImportJob] = useState<string>()
+  const pickImport = useCallback(
+    (jobId: string) => {
+      if (importJob && importJob !== jobId) void invoke('import.cancel', { jobId: importJob })
+      setImportJob(jobId)
+    },
+    [importJob],
+  )
   const step = ONBOARDING_STEPS[index] as OnboardingStep
   const last = ONBOARDING_STEPS.length - 1
   const stepRef = useRef<HTMLElement>(null)
@@ -97,9 +106,10 @@ function Flow({ info }: { info: OnboardingInfo }) {
     (chosen: string[]) => {
       if (finishing) return
       setFinishing(true)
-      invoke('onboarding.finish', { favorites: chosen }).catch(() => setFinishing(false))
+      const commit = importJob ? invoke('import.commit', { jobId: importJob }) : Promise.resolve()
+      commit.then(() => invoke('onboarding.finish', { favorites: chosen })).catch(() => setFinishing(false))
     },
-    [finishing],
+    [finishing, importJob],
   )
   const finish = useCallback(() => end(favorites), [end, favorites])
   // Skip setup (OB-14, D44): a default first window from any step. Main puts back the colours and mode
@@ -175,7 +185,7 @@ function Flow({ info }: { info: OnboardingInfo }) {
           data-testid={`onboarding-step-${step}`}
         >
           {step === 'welcome' && <WelcomeStep onNext={next} />}
-          {step === 'import' && <ImportStep importer={info.importer} onNext={next} />}
+          {step === 'import' && <ImportStep importer={info.importer} onNext={next} onImport={pickImport} />}
           {step === 'theme' && info.spaceId && <ThemeStep spaceId={info.spaceId} onNext={next} />}
           {step === 'favorites' && <FavoritesStep chosen={favorites} onChange={pickFavorites} onNext={next} />}
           {step === 'browser' && (
@@ -196,6 +206,7 @@ function Flow({ info }: { info: OnboardingInfo }) {
               browser={browser}
               declined={declined}
               importer={info.importer}
+              importJob={importJob}
               returning={info.returning}
               finishing={finishing}
               onStart={finish}

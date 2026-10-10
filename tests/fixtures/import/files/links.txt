@@ -1,0 +1,7 @@
+https://example.com/page/One
+Two — https://example.com/page/Two
+example.org/three
+
+not a link at all
+- [Four](https://example.com/page/Four)
+Five | https://example.com/page/Five

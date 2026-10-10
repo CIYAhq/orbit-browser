@@ -210,8 +210,8 @@ test('[ST-03][ST-02] General: make Orbit the default browser from Settings or th
   // (Test runs use a stand-in: the OS setting never changes.)
   await page.getByTestId('default-browser-set').click()
   await expect(page.getByTestId('default-browser-status')).toHaveText('Orbit is your default browser')
-  // Import shows only once the import flow exists (IM-01).
-  await expect(page.getByTestId('setting-import')).toHaveCount(0)
+  // Import shows once the import flow exists (IM-01): it does now.
+  await expect(page.getByTestId('setting-import')).toBeVisible()
   await page.getByTestId('settings-tab-about').click()
 
   // The command bar action opens General at that setting.
