@@ -1,4 +1,4 @@
-import type { ContainerRef, FolderId, ItemId, SpaceId, TabId, WindowId } from '../state'
+import type { ContainerRef, FolderId, ItemId, ProfileId, SpaceId, TabId, WindowId } from '../state'
 
 /** Owned by the sidebar/tabs lane. */
 export interface TabCommands {
@@ -16,7 +16,16 @@ export interface TabCommands {
   /** Recently closed tabs, newest first (for command bar results, TB-07). */
   'tabs.recentlyClosed': {
     args: Record<string, never>
-    result: { tabId: TabId; url: string; title: string; favicon?: string; spaceId: SpaceId; closedAt: number }[]
+    result: {
+      tabId: TabId
+      url: string
+      title: string
+      favicon?: string
+      spaceId: SpaceId
+      /** Its profile: lists in normal windows leave out private and deleted profiles' tabs (AR-09). */
+      profileId: ProfileId
+      closedAt: number
+    }[]
   }
   /** Undo the last sidebar change (TB-18). Returns what was undone. */
   'tabs.undo': { args: Record<string, never>; result: string | null }
