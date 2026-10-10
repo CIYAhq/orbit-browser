@@ -691,11 +691,16 @@ export class WindowManager {
     return { exists: true, placed: rec.win.contentView.children.includes(view), bounds: view.getBounds() }
   }
 
-  /** Places the permission prompt's view at `bounds` (window coordinates): above the pages, under the floating sidebar and the overlay (NV-15). */
+  /**
+   * Places the permission prompt's view at `bounds` (window coordinates): above the pages, under
+   * the floating sidebar and the overlay (NV-15). Its page hears `prompt:placed` each time the view
+   * goes on or off screen: the card's choices wait a moment after it shows.
+   */
   showPrompt(windowId: WindowId, bounds: Rect): void {
     const rec = this.records.get(windowId)
     if (!rec || rec.win.isDestroyed()) return
     const view = this.ensurePrompt(rec)
+    const placing = !rec.promptShown
     const next = roundRect(bounds)
     const current = view.getBounds()
     if (
@@ -709,6 +714,7 @@ export class WindowManager {
     rec.promptShown = true
     this.placeAbovePages(rec, view)
     view.setVisible(true)
+    if (placing) viewContents(view)?.send('orbit:prompt:placed', true)
   }
 
   /** Takes the permission prompt's view out of the window; keyboard focus in it goes back to the page. */
@@ -721,6 +727,7 @@ export class WindowManager {
     const focused = !!contents && webContents.getFocusedWebContents() === contents
     if (focused && !rec.overlayShown && rec.win.isFocused()) this.focusActiveTab(rec.id)
     this.removeChild(rec, view)
+    contents?.send('orbit:prompt:placed', false)
   }
 
   /** Test/debug view of a window's permission prompt view. */

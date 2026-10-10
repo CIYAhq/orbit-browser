@@ -201,6 +201,60 @@ export function perKeyGate<K>(gapMs: number, now: () => number = Date.now): (key
   }
 }
 
+/**
+ * How long a permission prompt's choices ignore presses after it shows, and the gap a press must
+ * leave after the one before it (a double-click's), as Chromium's prompts do.
+ */
+export const PROMPT_GUARD_MS = 500
+
+/**
+ * Input protection for a permission prompt (NV-15): a press (pointer, Enter or Space) takes a
+ * choice only once the prompt has been on screen for PROMPT_GUARD_MS, and only when the press
+ * before it was at least that long ago. So clicks that land on a prompt as it appears (a page knows
+ * where it will) never answer it, however long they keep coming; the user's own click, after a
+ * pause, does. Times are in milliseconds on one clock (a renderer's `performance.now()`).
+ */
+export class PromptGuard {
+  private shownAt = Number.POSITIVE_INFINITY
+  private lastPress = Number.NEGATIVE_INFINITY
+  private counts = false
+  private doubleCounts = false
+
+  /** The prompt is on screen from `now`: a new one, or this one in a new place. */
+  shown(now: number): void {
+    this.shownAt = now
+    this.lastPress = Number.NEGATIVE_INFINITY
+    this.counts = false
+    this.doubleCounts = false
+  }
+
+  /** The prompt is off screen: no press counts until it shows again. */
+  hidden(): void {
+    this.shownAt = Number.POSITIVE_INFINITY
+    this.counts = false
+    this.doubleCounts = false
+  }
+
+  /** A press at `now`: whether it may take a choice. */
+  press(now: number): boolean {
+    const quick = now - this.lastPress < PROMPT_GUARD_MS
+    this.doubleCounts = quick && this.counts
+    this.counts = !quick && now - this.shownAt >= PROMPT_GUARD_MS
+    this.lastPress = now
+    return this.counts
+  }
+
+  /** Whether the last press may take a choice; `double`: the second press of a double-click on a pick. */
+  allows(double = false): boolean {
+    return double ? this.doubleCounts : this.counts
+  }
+
+  /** When the next press will count (Infinity while off screen). */
+  readyAt(): number {
+    return Math.max(this.shownAt, this.lastPress) + PROMPT_GUARD_MS
+  }
+}
+
 /** Sorts permissions into PERMISSION_ORDER, without repeats. */
 export function sortKinds(kinds: Iterable<PermissionKind>): PermissionKind[] {
   const set = new Set(kinds)

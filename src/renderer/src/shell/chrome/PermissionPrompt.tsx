@@ -16,7 +16,16 @@ import {
   Video,
   X,
 } from 'lucide-react'
-import { type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import {
+  type KeyboardEvent,
+  type PointerEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
 import { shownTabId } from '../../../../shared/nav'
 import {
   DEVICE_ASK,
@@ -25,6 +34,7 @@ import {
   type PermissionKind,
   type PermissionPrompt as Prompt,
   type PromptChoice,
+  PromptGuard,
   siteLabel,
 } from '../../../../shared/site'
 import { invoke } from '../../api'
@@ -63,10 +73,48 @@ export function useActivePrompt(windowId: string): Prompt | undefined {
  * "Block" for the rest, or a list to pick a device or a screen from. The text wraps to the
  * sidebar's width. Esc (or the close button) dismisses it: the site may ask again later. Arrow
  * keys move between the choices; Enter takes one.
+ *
+ * Its choices ignore presses for a moment after it shows, and while presses keep coming quickly
+ * (`PromptGuard`), so clicks meant for the page can't answer it. `shown` is false while the card is
+ * off screen; `shownKey` changes each time it is put on screen again (the prompt view).
  */
-export function PermissionPrompt({ prompt, onSize }: { prompt: Prompt; onSize?: (height: number) => void }) {
+export function PermissionPrompt({
+  prompt,
+  onSize,
+  shown = true,
+  shownKey = 0,
+}: {
+  prompt: Prompt
+  onSize?: (height: number) => void
+  shown?: boolean
+  shownKey?: number
+}) {
   const card = useRef<HTMLDivElement>(null)
   const [busy, setBusy] = useState(false)
+  const guard = useRef(new PromptGuard())
+  /** Whether a press now would count (the choices say so to assistive tech while they wait). */
+  const [armed, setArmed] = useState(false)
+  const armTimer = useRef<number | undefined>(undefined)
+
+  const rearm = useCallback(() => {
+    window.clearTimeout(armTimer.current)
+    const wait = guard.current.readyAt() - performance.now()
+    setArmed(wait <= 0)
+    if (wait > 0 && Number.isFinite(wait)) armTimer.current = window.setTimeout(rearm, Math.ceil(wait) + 1)
+  }, [])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: shownKey restarts the guard (shown again)
+  useLayoutEffect(() => {
+    if (shown) guard.current.shown(performance.now())
+    else guard.current.hidden()
+    rearm()
+  }, [shown, shownKey, rearm])
+  useEffect(() => () => window.clearTimeout(armTimer.current), [])
+
+  const onPress = (timeStamp: number) => {
+    guard.current.press(timeStamp)
+    rearm()
+  }
 
   useLayoutEffect(() => {
     const el = card.current
@@ -77,8 +125,10 @@ export function PermissionPrompt({ prompt, onSize }: { prompt: Prompt; onSize?: 
     return () => observer.disconnect()
   }, [onSize])
 
-  const answer = (choice: PromptChoice, pick?: string) => {
+  const answer = (choice: PromptChoice, pick?: string, double = false) => {
     if (busy) return
+    // Dismissing is always safe; anything else needs a press the guard let through.
+    if (choice !== 'dismiss' && !guard.current.allows(double)) return
     setBusy(true)
     void invoke('permissions.answer', { id: prompt.id, choice, pick }).finally(() => setBusy(false))
   }
@@ -113,7 +163,12 @@ export function PermissionPrompt({ prompt, onSize }: { prompt: Prompt; onSize?: 
       data-testid="permission-prompt"
       data-type={prompt.type}
       data-kinds={prompt.type === 'permission' ? prompt.kinds.join(' ') : undefined}
+      data-armed={armed}
       onKeyDown={onKeyDown}
+      onPointerDownCapture={(e: PointerEvent) => onPress(e.timeStamp)}
+      onKeyDownCapture={(e: KeyboardEvent) => {
+        if (e.key === 'Enter' || e.key === ' ') onPress(e.timeStamp)
+      }}
     >
       <div className="perm-prompt__head">
         <p className="perm-prompt__title">
@@ -133,15 +188,15 @@ export function PermissionPrompt({ prompt, onSize }: { prompt: Prompt; onSize?: 
           <X size={13} />
         </button>
       </div>
-      {prompt.type === 'permission' && <PermissionBody prompt={prompt} busy={busy} answer={answer} />}
-      {prompt.type === 'device' && <DeviceBody prompt={prompt} busy={busy} answer={answer} />}
-      {prompt.type === 'screen' && <ScreenBody prompt={prompt} busy={busy} answer={answer} />}
+      {prompt.type === 'permission' && <PermissionBody prompt={prompt} busy={busy} held={!armed} answer={answer} />}
+      {prompt.type === 'device' && <DeviceBody prompt={prompt} busy={busy} held={!armed} answer={answer} />}
+      {prompt.type === 'screen' && <ScreenBody prompt={prompt} busy={busy} held={!armed} answer={answer} />}
       {prompt.type === 'file' && (
         <Actions>
-          <Choice testId="permission-block" disabled={busy} onClick={() => answer('block')}>
+          <Choice testId="permission-block" held={!armed} disabled={busy} onClick={() => answer('block')}>
             Block
           </Choice>
-          <Choice testId="permission-allow" primary disabled={busy} onClick={() => answer('allow')}>
+          <Choice testId="permission-allow" primary held={!armed} disabled={busy} onClick={() => answer('allow')}>
             Allow
           </Choice>
         </Actions>
@@ -166,23 +221,26 @@ function title(prompt: Prompt): string {
   }
 }
 
-type Answer = (choice: PromptChoice, pick?: string) => void
+type Answer = (choice: PromptChoice, pick?: string, double?: boolean) => void
 
 function Actions({ children, stacked = false }: { children: ReactNode; stacked?: boolean }) {
   return <div className={`perm-prompt__actions${stacked ? ' is-stacked' : ''}`}>{children}</div>
 }
 
+/** A choice; `held` while the prompt's guard wouldn't let a press through yet (it looks the same). */
 function Choice({
   children,
   onClick,
   primary = false,
   disabled = false,
+  held = false,
   testId,
 }: {
   children: ReactNode
   onClick: () => void
   primary?: boolean
   disabled?: boolean
+  held?: boolean
   testId: string
 }) {
   return (
@@ -190,6 +248,7 @@ function Choice({
       type="button"
       className={`perm-prompt__choice${primary ? ' is-primary' : ''}`}
       disabled={disabled}
+      aria-disabled={held || undefined}
       data-testid={testId}
       onClick={onClick}
     >
@@ -201,10 +260,12 @@ function Choice({
 function PermissionBody({
   prompt,
   busy,
+  held,
   answer,
 }: {
   prompt: Extract<Prompt, { type: 'permission' }>
   busy: boolean
+  held: boolean
   answer: Answer
 }) {
   return (
@@ -222,22 +283,22 @@ function PermissionBody({
       </ul>
       {prompt.oneTime ? (
         <Actions stacked>
-          <Choice testId="permission-allow" disabled={busy} onClick={() => answer('allow')}>
+          <Choice testId="permission-allow" held={held} disabled={busy} onClick={() => answer('allow')}>
             Allow while visiting the site
           </Choice>
-          <Choice testId="permission-once" disabled={busy} onClick={() => answer('once')}>
+          <Choice testId="permission-once" held={held} disabled={busy} onClick={() => answer('once')}>
             Allow this time
           </Choice>
-          <Choice testId="permission-block" disabled={busy} onClick={() => answer('block')}>
+          <Choice testId="permission-block" held={held} disabled={busy} onClick={() => answer('block')}>
             Never allow
           </Choice>
         </Actions>
       ) : (
         <Actions>
-          <Choice testId="permission-block" disabled={busy} onClick={() => answer('block')}>
+          <Choice testId="permission-block" held={held} disabled={busy} onClick={() => answer('block')}>
             Block
           </Choice>
-          <Choice testId="permission-allow" primary disabled={busy} onClick={() => answer('allow')}>
+          <Choice testId="permission-allow" primary held={held} disabled={busy} onClick={() => answer('allow')}>
             Allow
           </Choice>
         </Actions>
@@ -260,7 +321,8 @@ function PickList({
   items: { id: string; name: string; icon?: ReactNode; preview?: string }[]
   picked: string | undefined
   onPick: (id: string) => void
-  onEnter: () => void
+  /** Takes the pick: Enter, or a double-click (`double`). */
+  onEnter: (double?: boolean) => void
   empty: string
   testId: string
 }) {
@@ -310,7 +372,7 @@ function PickList({
           onClick={() => onPick(item.id)}
           onDoubleClick={() => {
             onPick(item.id)
-            onEnter()
+            onEnter(true)
           }}
         >
           {item.preview !== undefined ? (
@@ -331,10 +393,12 @@ function PickList({
 function DeviceBody({
   prompt,
   busy,
+  held,
   answer,
 }: {
   prompt: Extract<Prompt, { type: 'device' }>
   busy: boolean
+  held: boolean
   answer: Answer
 }) {
   const [picked, setPicked] = useState<string | undefined>(undefined)
@@ -348,7 +412,7 @@ function DeviceBody({
         items={prompt.devices.map((d) => ({ id: d.id, name: d.name, icon: <Icon size={14} aria-hidden /> }))}
         picked={current}
         onPick={setPicked}
-        onEnter={() => current && answer('allow', current)}
+        onEnter={(double) => current && answer('allow', current, double)}
         empty="No compatible devices found."
         testId="permission-devices"
       />
@@ -356,7 +420,13 @@ function DeviceBody({
         <Choice testId="permission-block" disabled={busy} onClick={() => answer('dismiss')}>
           Cancel
         </Choice>
-        <Choice testId="permission-allow" primary disabled={busy || !current} onClick={() => answer('allow', current)}>
+        <Choice
+          testId="permission-allow"
+          primary
+          held={held}
+          disabled={busy || !current}
+          onClick={() => answer('allow', current)}
+        >
           Connect
         </Choice>
       </Actions>
@@ -367,10 +437,12 @@ function DeviceBody({
 function ScreenBody({
   prompt,
   busy,
+  held,
   answer,
 }: {
   prompt: Extract<Prompt, { type: 'screen' }>
   busy: boolean
+  held: boolean
   answer: Answer
 }) {
   const [picked, setPicked] = useState<string | undefined>(prompt.sources.find((s) => s.screen)?.id)
@@ -396,7 +468,7 @@ function ScreenBody({
         items={items}
         picked={picked}
         onPick={setPicked}
-        onEnter={() => picked && answer('allow', picked)}
+        onEnter={(double) => picked && answer('allow', picked, double)}
         empty="Nothing to share."
         testId="permission-sources"
       />
@@ -404,7 +476,13 @@ function ScreenBody({
         <Choice testId="permission-block" disabled={busy} onClick={() => answer('dismiss')}>
           Cancel
         </Choice>
-        <Choice testId="permission-allow" primary disabled={busy || !picked} onClick={() => answer('allow', picked)}>
+        <Choice
+          testId="permission-allow"
+          primary
+          held={held}
+          disabled={busy || !picked}
+          onClick={() => answer('allow', picked)}
+        >
           Share
         </Choice>
       </Actions>

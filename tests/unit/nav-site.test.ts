@@ -16,6 +16,8 @@ import {
   PERMISSION_ASK,
   PERMISSION_NAME,
   PERMISSION_ORDER,
+  PROMPT_GUARD_MS,
+  PromptGuard,
   pagePermissionKinds,
   perKeyGate,
   permissionOrigin,
@@ -267,5 +269,53 @@ describe('notification clicks a page reports (NV-15)', () => {
     expect(pass(64)).toBe(true)
     expect(pass(0)).toBe(true)
     expect(pass(0)).toBe(false)
+  })
+})
+
+describe('a permission prompt ignores presses that come too soon (NV-15)', () => {
+  it('takes none until it has been on screen a moment', () => {
+    const guard = new PromptGuard()
+    // Not shown yet: nothing counts.
+    expect(guard.press(0)).toBe(false)
+    guard.shown(1000)
+    expect(guard.press(1000 + PROMPT_GUARD_MS - 1)).toBe(false)
+    expect(guard.allows()).toBe(false)
+    // The press before was too recent; after a pause, a press counts.
+    expect(guard.press(1000 + 2 * PROMPT_GUARD_MS)).toBe(true)
+    expect(guard.allows()).toBe(true)
+  })
+
+  it('keeps ignoring presses while they come quickly, however long', () => {
+    const guard = new PromptGuard()
+    guard.shown(0)
+    for (let t = 50; t < 5000; t += 150) expect(guard.press(t)).toBe(false)
+    expect(guard.readyAt()).toBe(4850 + PROMPT_GUARD_MS)
+    expect(guard.press(4850 + PROMPT_GUARD_MS)).toBe(true)
+  })
+
+  it('lets a double-click take a pick only when its first press counted', () => {
+    const guard = new PromptGuard()
+    guard.shown(0)
+    guard.press(600)
+    guard.press(700)
+    expect(guard.allows()).toBe(false)
+    expect(guard.allows(true)).toBe(true)
+    // Quick clicks as it shows: no pair of them counts.
+    guard.shown(2000)
+    guard.press(2050)
+    guard.press(2200)
+    expect(guard.allows(true)).toBe(false)
+  })
+
+  it('starts again each time it shows, and takes nothing while off screen', () => {
+    const guard = new PromptGuard()
+    guard.shown(0)
+    expect(guard.press(1000)).toBe(true)
+    guard.hidden()
+    expect(guard.press(5000)).toBe(false)
+    expect(guard.readyAt()).toBe(Number.POSITIVE_INFINITY)
+    guard.shown(6000)
+    expect(guard.press(6100)).toBe(false)
+    expect(guard.press(6700)).toBe(true)
   })
 })

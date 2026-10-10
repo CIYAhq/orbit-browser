@@ -433,6 +433,79 @@ test('[NV-15] with the sidebar hidden the prompt shows over the page’s top-lef
   await expect(orbit.shell.getByTestId('permission-prompt')).toBeVisible()
 })
 
+/**
+ * Real clicks (input events, not script) on the prompt view's first "Allow" button, every `every`
+ * ms from the moment it shows, `count` times. Returns how long after the view was placed and after
+ * the button showed the first click came.
+ */
+const clickAllowAsItShows = (app: ElectronApplication, count: number, every: number) =>
+  app.evaluate(
+    async ({ webContents }, [n, gap]) => {
+      const g = globalThis as unknown as { __orbitNav: { prompt: () => { placed: boolean } } }
+      const view = webContents.getAllWebContents().find((c) => c.getURL().includes('view=prompt'))
+      if (!view) throw new Error('no prompt view')
+      const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+      const find = `(() => {
+        const button = document.querySelector('[data-testid="permission-allow"]')
+        if (!button) return null
+        const r = button.getBoundingClientRect()
+        return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }
+      })()`
+      const deadline = Date.now() + 15_000
+      let placedAt = 0
+      let at: { x: number; y: number } | null = null
+      while (!at && Date.now() < deadline) {
+        if (!placedAt && g.__orbitNav.prompt().placed) placedAt = Date.now()
+        at = placedAt ? await view.executeJavaScript(find) : null
+        if (!at) await wait(5)
+      }
+      if (!at) throw new Error('no Allow button in the prompt view')
+      const shownAt = Date.now()
+      for (let i = 0; i < n; i++) {
+        if (i > 0) await wait(gap)
+        view.sendInputEvent({ type: 'mouseDown', x: at.x, y: at.y, button: 'left', clickCount: 1 })
+        view.sendInputEvent({ type: 'mouseUp', x: at.x, y: at.y, button: 'left', clickCount: 1 })
+      }
+      return { afterPlaced: shownAt - placedAt, at }
+    },
+    [count, every] as const,
+  )
+
+test('[NV-15] a prompt takes no clicks as it shows, nor while they keep coming; a click after a pause answers', async () => {
+  const { app } = orbit
+  const { id, p } = await open(app, page('Quick'))
+  await action(app, 'sidebar.toggle')
+  await expect.poll(async () => (await windowState(app)).sidebar.visible).toBe(false)
+  await settledPage(app, id)
+  // A first prompt, dismissed: the prompt view's page is up, as after any prompt.
+  await ask(p, 'notifications')
+  await expect.poll(async () => (await promptView(app)).placed).toBe(true)
+  const view = await promptPage(app)
+  await view.getByTestId('permission-dismiss').click()
+  await expect.poll(() => answerOf(p, 'notifications')).toBe('default')
+  await expect.poll(async () => (await promptView(app)).placed).toBe(false)
+
+  // The page asks for the camera while the user clicks quickly (every 150 ms, for over a second)
+  // where "Allow while visiting the site" shows up.
+  await ask(p, 'camera')
+  const { afterPlaced, at } = await clickAllowAsItShows(app, 8, 150)
+  expect(afterPlaced).toBeLessThan(1000)
+  // Each click came too soon: the request still waits.
+  await shellRoundTrip(orbit.shell)
+  expect(await answerOf(p, 'camera')).toBeNull()
+  expect((await state(app)).tabs[id]?.permissionPrompt?.type).toBe('permission')
+  expect((await promptView(app)).placed).toBe(true)
+
+  // After a pause, the user's click answers.
+  await expect(view.getByTestId('permission-allow')).toBeEnabled()
+  await app.evaluate(({ webContents }, point) => {
+    const prompt = webContents.getAllWebContents().find((c) => c.getURL().includes('view=prompt'))
+    prompt?.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button: 'left', clickCount: 1 })
+    prompt?.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button: 'left', clickCount: 1 })
+  }, at)
+  await expect.poll(() => answerOf(p, 'camera')).toBe('granted')
+})
+
 test('[NV-15] a site asking for a serial port gets a device chooser; Connect waits for a pick, Cancel refuses', async () => {
   const { app, shell } = orbit
   const { p } = await open(app, page('Ports'))
