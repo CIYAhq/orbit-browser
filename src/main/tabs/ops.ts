@@ -253,6 +253,11 @@ export class TabOps {
       closedAt,
       ...splitInfo.get(id),
     }))
+    // The tabs main windows were showing: undo shows them there again (⌘Z reopens, AR-09).
+    const shownBefore = Object.values(state.windows).flatMap((w) => {
+      const active = w.kind === 'main' ? w.activeTab[w.spaceId] : undefined
+      return active && removing.includes(active) ? [{ windowId: w.id, tabId: active }] : []
+    })
     const todayTabs = (spaceId: SpaceId) =>
       new Set((state.spaces[spaceId]?.today ?? []).flatMap((id) => tabsInItem(state, id)))
     const pick =
@@ -313,6 +318,16 @@ export class TabOps {
         label,
         () => {
           const back = this.restoreClosed(records, { select: false })
+          const reshow = shownBefore.filter((s) => back.includes(s.tabId))
+          if (reshow.length > 0) {
+            const now = this.now()
+            this.ctx.store.update((d) => {
+              for (const { windowId, tabId } of reshow) {
+                const win = d.windows[windowId]
+                if (win && d.tabs[tabId]?.spaceId === win.spaceId) activateInDraft(d, windowId, tabId, now)
+              }
+            })
+          }
           return () => this.closeTabs(back, reason, { remove: opts.remove, reselect: opts.reselect, undoLabel: label })
         },
         this.now(),

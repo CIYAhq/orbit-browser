@@ -187,6 +187,14 @@ export class LibraryHost {
     page?.focus()
   }
 
+  /** A point of the Library view in its window's coordinates (where a menu pops up). */
+  toWindowPoint(windowId: WindowId | undefined, x: number, y: number): { x: number; y: number } | undefined {
+    const view = windowId ? this.wins.get(windowId)?.view : undefined
+    if (!view || !pageOf(view) || !Number.isFinite(x) || !Number.isFinite(y)) return undefined
+    const b = view.getBounds()
+    return { x: Math.round(b.x + x), y: Math.round(b.y + y) }
+  }
+
   /** Where the view is, for tests: bounds, whether it is shown, above every tab view and focused. */
   info(windowId: WindowId | undefined): {
     open: boolean

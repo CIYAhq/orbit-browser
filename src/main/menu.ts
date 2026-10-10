@@ -1,5 +1,6 @@
 import { app, Menu, type MenuItemConstructorOptions } from 'electron'
 import { ACTIONS_BY_ID, shortcutsFor, toElectronAccelerator } from '../shared/actions'
+import { recentlyClosedItems } from './archive/recently-closed'
 import type { MainContext } from './context'
 
 /**
@@ -56,6 +57,8 @@ export function installMenu(ctx: MainContext): void {
         item('tab.close'),
         { role: 'close', label: 'Close Window', accelerator: 'Command+Shift+W' },
         item('tab.reopenClosed'),
+        // The last ~10 closed tabs (archive lane, AR-09); rebuilt as tabs close and come back.
+        { label: 'Recently Closed', submenu: recentlyClosedItems(ctx) },
         { type: 'separator' },
         item('page.print'),
       ],

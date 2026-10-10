@@ -1,4 +1,4 @@
-import { ArchiveRestore, Search, X } from 'lucide-react'
+import { ArchiveRestore, History, Search, X } from 'lucide-react'
 import {
   type CSSProperties,
   type KeyboardEvent,
@@ -502,6 +502,20 @@ export function ArchiveSection({ show }: LibrarySectionProps) {
               </button>
             )}
           </label>
+          <button
+            type="button"
+            className="archive__button"
+            data-testid="archive-recently-closed"
+            title="Reopen a recently closed tab"
+            aria-haspopup="menu"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect()
+              void invoke('archive.recentlyClosedMenu', { x: r.left, y: r.bottom + 4 })
+            }}
+          >
+            <History size={14} />
+            <span>Recently Closed</span>
+          </button>
         </div>
         <div className="archive__filters">
           <fieldset className="archive__segments" aria-label="Show">

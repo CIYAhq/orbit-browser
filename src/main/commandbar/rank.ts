@@ -141,7 +141,12 @@ interface Cand {
   strong: boolean
   /** Dedupe preference: higher wins for the same URL. */
   prio: number
+  /** Keeps the score of the row it replaces when that is higher (a page closed a moment ago). */
+  lift?: boolean
 }
+
+/** A page closed this recently ranks where its history row would (AR-09, TB-07), not after history. */
+const RECENT_CLOSE_MS = 10 * 60_000
 
 /** URL identity for dedupe: no scheme, no "www.", no fragment, no trailing slash. */
 export function normKey(url: string): string {
@@ -554,6 +559,7 @@ export function rank(input: RankInput): SearchResponse {
         key,
         strong: m.strong,
         prio: 2,
+        lift: now - a.archivedAt < RECENT_CLOSE_MS,
       })
     }
 
@@ -662,7 +668,8 @@ function findHistory(history: readonly IndexedEntry[], key: string): IndexedEntr
 /**
  * Keeps one row per URL, preferring open tab > archived > history. The kept row takes its own
  * place in the order, not the dropped row's: rows that score the same stay in their kind's order
- * (the most recently archived tab first, review N3).
+ * (the most recently archived tab first, review N3). A page closed a moment ago keeps its history
+ * row's score (recently closed pages rank highly, AR-09).
  */
 function dedupe(cands: Cand[]): Cand[] {
   const byKey = new Map<string, Cand>()
@@ -678,7 +685,8 @@ function dedupe(cands: Cand[]): Cand[] {
       out.push(c)
     } else if (c.prio > seen.prio) {
       // Keep the better kind, and its chance to be the top row.
-      const kept = { ...c, strong: c.strong || seen.strong }
+      const lifted = c.lift && seen.r.score > c.r.score ? { r: { ...c.r, score: seen.r.score } } : {}
+      const kept = { ...c, strong: c.strong || seen.strong, ...lifted }
       out[out.indexOf(seen)] = undefined
       out.push(kept)
       byKey.set(c.key, kept)

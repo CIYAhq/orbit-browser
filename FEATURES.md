@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 145 built (47 partial) · 196 tested · 0 feel right.
+**Totals:** 485 spec’d · 146 built (47 partial) · 197 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 102 | 123 |
+| P0 | 174 | 103 | 124 |
 | P1 | 221 | 39 | 67 |
 | P2 | 83 | 4 | 6 |
 
@@ -337,7 +337,7 @@ Spec: `spec/archive.md`
 | AR-06 | Preview an archived item without restoring | P2 | – | – | – |  |
 | AR-07 | Clear the Archive | P1 | – | – | – |  |
 | AR-08 | Retention of archived entries | P1 | – | – | – |  |
-| AR-09 | Reopen recently closed tabs | P0 | – | – | – |  |
+| AR-09 | Reopen recently closed tabs | P0 | ✅ | ✅ e2e+unit | – | ⌘⇧T and ⌘Z walk back through closes with full history (TB-07, TB-18); ⌘Z also shows the tab again when it was the one shown; a closed Peek comes back through the same key (PK-10, peek lane). A page closed in the last 10 minutes keeps its history rank in the command bar (as the archived row). macOS File menu: Reopen Closed Tab and a Recently Closed submenu of the last 10; on every platform the Archive toolbar has a Recently Closed menu |
 | AR-10 | Browsing history view | P1 | – | – | – |  |
 | AR-11 | Sidebar backups and "Restore Data" | P2 | – | – | – |  |
 

@@ -351,6 +351,31 @@ html[data-view="library"] body {
   font-size: 12px;
 }
 
+.archive__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.archive__button:hover {
+  background: var(--hover);
+}
+
+.archive__button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .archive__selection {
   display: flex;
   align-items: center;

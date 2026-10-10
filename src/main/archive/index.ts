@@ -1,13 +1,16 @@
 import { join } from 'node:path'
 import { app, clipboard, Menu, type MenuItemConstructorOptions } from 'electron'
+import { ACTIONS_BY_ID, shortcutsFor, toElectronAccelerator } from '../../shared/actions'
 import type { ArchiveQuery, ArchiveRestoreResult, LibraryOpenArgs } from '../../shared/commands/archive'
 import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
 import type { ArchivedTab, ProfileId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
+import { installMenu } from '../menu'
 import type { CallContext } from '../registry'
 import { findMenuItem, menuLabels } from '../tabs/menus'
 import { LibraryHost } from './library'
+import { recentlyClosedItems, refreshRecentlyClosed, watchRecentlyClosed } from './recently-closed'
 import { restoreEntries } from './restore'
 import { ArchiveSync } from './service'
 import { ArchiveStore } from './store'
@@ -214,9 +217,49 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
     Menu.buildFromTemplate(items).popup(win ? { window: win } : undefined)
   })
 
+  // ---- Recently Closed (AR-09) ----
+
+  const reopenAction = ACTIONS_BY_ID['tab.reopenClosed']
+  const reopenShortcut = reopenAction ? shortcutsFor(reopenAction, process.platform)[0] : undefined
+  const reopenKey = reopenShortcut ? toElectronAccelerator(reopenShortcut) : undefined
+  // The app menu's Recently Closed submenu follows the list (macOS has the only app menu).
+  watchRecentlyClosed(ctx, () => {
+    if (process.platform === 'darwin') installMenu(ctx)
+  })
+  commands.register('archive.recentlyClosedMenu', async ({ x, y }, c) => {
+    const windowId = windowOf(c)
+    await refreshRecentlyClosed(ctx)
+    const list = recentlyClosedItems(ctx, () => windowId)
+    const items: MenuItemConstructorOptions[] = [
+      ...list,
+      { type: 'separator' },
+      {
+        label: 'Reopen Closed Tab',
+        enabled: list.some((i) => i.enabled !== false),
+        ...(reopenKey ? { accelerator: reopenKey, registerAccelerator: false } : {}),
+        click: () => {
+          Promise.resolve(ctx.actions.run('tab.reopenClosed', { windowId })).catch((err) =>
+            console.error('[archive] could not reopen a closed tab', err),
+          )
+        },
+      },
+    ]
+    lastMenu = items
+    if (ctx.e2e) return
+    const win = windowId ? windows.get(windowId) : undefined
+    if (!win || win.isDestroyed()) return
+    const at = typeof x === 'number' && typeof y === 'number' ? library.toWindowPoint(windowId, x, y) : undefined
+    Menu.buildFromTemplate(items).popup({ window: win, ...(at ?? {}) })
+  })
+
   if (ctx.e2e) {
     commands.register('library.testInfo', (_args, c) => library.info(windowOf(c)))
-    commands.register('archive.testMenu', ({ click }) => {
+    commands.register('archive.testMenu', ({ click, appMenu }) => {
+      if (appMenu) {
+        const file = Menu.getApplicationMenu()?.items.find((i) => i.label === 'File')
+        const recent = file?.submenu?.items.find((i) => i.label === 'Recently Closed')
+        return recent?.submenu?.items.map((i) => i.label) ?? []
+      }
       if (click) {
         const item = findMenuItem(lastMenu, click)
         if (item?.click && item.enabled !== false) (item.click as () => void)()

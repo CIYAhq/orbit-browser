@@ -116,8 +116,11 @@ export interface ArchiveCommands {
   'archive.clear': { args: { profileId?: ProfileId }; result: number }
   /** Shows the row's context menu (Restore, Open in New Tab, Copy URL, Delete) at a point of the Library. */
   'archive.contextMenu': { args: { ids: string[]; x: number; y: number }; result: void }
-  /** Test-only (ORBIT_E2E=1): the labels of the last Archive menu; `click` runs an item ("Delete"). */
-  'archive.testMenu': { args: { click?: string }; result: string[] }
+  /**
+   * Test-only (ORBIT_E2E=1): the labels of the last Archive menu; `click` runs an item ("Delete").
+   * With `appMenu`, the labels in the app menu's File > Recently Closed (none without an app menu).
+   */
+  'archive.testMenu': { args: { click?: string; appMenu?: boolean }; result: string[] }
   /** Test-only (ORBIT_E2E=1): adds `count` entries spread over `days` days for one profile. */
   'archive.testSeed': {
     args: { count: number; days?: number; profileId?: ProfileId; spaceId?: SpaceId; prefix?: string }
@@ -136,6 +139,11 @@ export interface ArchiveCommands {
   'library.status': { args: Record<string, never>; result: LibraryShow & { open: boolean } }
   /** Remembers the section shown, so the Library reopens there (AR-02). */
   'library.setSection': { args: { section: string }; result: void }
+  /**
+   * Shows the Recently Closed list (AR-09) as a menu at a point of the Library view (under its
+   * button); choosing an entry reopens that tab.
+   */
+  'archive.recentlyClosedMenu': { args: { x?: number; y?: number }; result: void }
   /** Test-only (ORBIT_E2E=1): where the calling window's Library view is and whether it has focus. */
   'library.testInfo': {
     args: Record<string, never>

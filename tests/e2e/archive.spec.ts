@@ -369,3 +369,76 @@ test('[AR-05] the row menu restores, opens in a new tab or deletes; ↓ and Ente
   const id = await activeId(app)
   expect((await state(app)).tabs[id ?? '']?.url).toBe(second?.url)
 })
+
+test('[AR-09][TB-07] closing A, B, C: ⌘⇧T brings back C, B, A, each selected with its history; ⌘Z reopens a just-closed tab', async () => {
+  const { app, shell } = orbit
+  const tabs: string[] = []
+  for (const name of ['RcA', 'RcB', 'RcC']) {
+    const t = await newTab(app, fx.url(`/page/${name}`))
+    await waitTab(app, t, `/page/${name}`)
+    await (await tabPage(app, `/page/${name}`)).click('#next')
+    await waitTab(app, t, `/page/${name}-next`)
+    tabs.push(t)
+  }
+  const [a, b, c] = tabs as [string, string, string]
+  // Close A, then B, then C, each while it is the tab shown.
+  for (const t of tabs) {
+    await run(app, 'tabs.activate', { tabId: t })
+    await expect.poll(() => activeId(app)).toBe(t)
+    await shell.keyboard.press(`${MOD}+W`)
+    await expect.poll(async () => (await state(app)).tabs[t]).toBeUndefined()
+  }
+  // ⌘⇧T walks back through the closes: each tab is selected on its last page, the one before behind it.
+  for (const [t, name] of [
+    [c, 'RcC'],
+    [b, 'RcB'],
+    [a, 'RcA'],
+  ] as const) {
+    await shell.keyboard.press(`${MOD}+Shift+T`)
+    await expect.poll(() => activeId(app)).toBe(t)
+    await waitTab(app, t, `/page/${name}-next`)
+    await expect.poll(async () => (await state(app)).tabs[t]?.canGoBack).toBe(true)
+  }
+  await action(app, 'nav.back')
+  await waitTab(app, a, '/page/RcA')
+  // ⌘Z right after closing: the tab is back in its place, and shown again.
+  const order = (await space(app)).today
+  await shell.keyboard.press(`${MOD}+W`)
+  await expect.poll(async () => (await state(app)).tabs[a]).toBeUndefined()
+  expect(await activeId(app)).not.toBe(a)
+  await shell.keyboard.press(`${MOD}+Z`)
+  await expect.poll(() => activeId(app)).toBe(a)
+  expect((await space(app)).today).toEqual(order)
+  await waitTab(app, a, '/page/RcA')
+})
+
+test('[AR-09] Recently Closed lists the last closed tabs newest first, in the Library and the macOS File menu; choosing one reopens it', async () => {
+  const { app } = orbit
+  const lib = await openLibrary(orbit)
+  await lib.getByTestId('archive-recently-closed').click()
+  await expect.poll(() => run(app, 'archive.testMenu', {})).toEqual(['No Recently Closed Tabs', 'Reopen Closed Tab'])
+  await lib.keyboard.press('Escape')
+  await expect.poll(async () => (await info(orbit)).open).toBe(false)
+  const tabs: string[] = []
+  for (const name of ['ListA', 'ListB']) {
+    const t = await newTab(app, fx.url(`/page/${name}`))
+    await waitTab(app, t, `/page/${name}`)
+    tabs.push(t)
+  }
+  const [a, b] = tabs as [string, string]
+  await run(app, 'tabs.close', { tabId: a })
+  await run(app, 'tabs.close', { tabId: b })
+  // There is an app menu on macOS only (Windows and Linux use the Library's list).
+  const appMenu = () => run(app, 'archive.testMenu', { appMenu: true })
+  if (process.platform === 'darwin') await expect.poll(appMenu).toEqual(['ListB', 'ListA'])
+  else expect(await appMenu()).toEqual([])
+  await openLibrary(orbit)
+  await lib.getByTestId('archive-recently-closed').click()
+  await expect.poll(() => run(app, 'archive.testMenu', {})).toEqual(['ListB', 'ListA', 'Reopen Closed Tab'])
+  // The older one, chosen from the list, comes back selected; the Library makes way for it.
+  await run(app, 'archive.testMenu', { click: 'ListA' })
+  await expect.poll(() => activeId(app)).toBe(a)
+  await expect.poll(async () => (await info(orbit)).open).toBe(false)
+  expect((await state(app)).tabs[b]).toBeUndefined()
+  if (process.platform === 'darwin') await expect.poll(appMenu).toEqual(['ListB'])
+})
