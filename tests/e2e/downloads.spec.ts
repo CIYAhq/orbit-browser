@@ -3,6 +3,7 @@ import { createServer, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
+import type { MainContext } from '../../src/main/context'
 import type { Download, OrbitState } from '../../src/shared/state'
 import { activeTabId, launchOrbit, listenInRange, type Orbit, run, state, tabPage } from './helpers'
 
@@ -222,11 +223,13 @@ test('[DL-01] quitting with a download in progress asks first', async () => {
   await answer('cancel')
   await orbit.app.evaluate(({ app }) => app.quit())
   await expect.poll(asked).toEqual(['1 download in progress, quit anyway?'])
-  expect(
-    await orbit.app.evaluate(
-      () => (globalThis as unknown as { __orbit: { windowIds: () => string[] } }).__orbit.windowIds().length,
-    ),
-  ).toBe(1)
+  // Nothing started quitting: the window is there and the window manager isn't winding down.
+  const windowManager = () =>
+    orbit.app.evaluate(() => {
+      const { ctx } = (globalThis as unknown as { __orbit: { ctx: MainContext } }).__orbit
+      return { windows: ctx.windows.ids().length, quitting: ctx.windows.quitting }
+    })
+  expect(await windowManager()).toEqual({ windows: 1, quitting: false })
   expect((await named('big.bin'))?.state).toBe('progressing')
   // "Quit": it quits (app.close() fails the test if it doesn't).
   await answer('quit')
