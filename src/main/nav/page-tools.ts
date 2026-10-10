@@ -11,6 +11,7 @@ import {
 } from '../../shared/nav'
 import type { TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
+import { setPageZoom } from '../peek/page-actions'
 import type { CallContext } from '../registry'
 import { activeTabOf } from '../windows'
 import { NAV_WORLD } from './focus'
@@ -341,17 +342,23 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
       .catch(() => {})
   }
 
-  /** Zooms a tab one step in (1) or out (-1), or back to 100% (0), and shows the indicator in its window. */
-  const zoom = (windowId: WindowId, tabId: TabId, direction: 1 | -1 | 0) => {
-    const contents = pageOf(tabId)
-    if (!contents) return
+  /** Zooms a page one step in (1) or out (-1), or back to 100% (0), and keeps it for the site. Returns the new factor. */
+  const zoomContents = (contents: WebContents, tabId: TabId | undefined, direction: 1 | -1 | 0): number => {
     const before = contents.getZoomFactor()
     const next = direction === 0 ? 1 : zoomStep(before, direction)
     if (!sameZoom(before, next)) contents.setZoomFactor(next)
     if (direction === 0) resetPinch(contents)
-    remember(tabId, contents.getURL(), next)
-    showZoom(windowId, next)
+    if (tabId) remember(tabId, contents.getURL(), next)
+    return next
   }
+
+  /** Zooms a tab and shows the indicator in its window. */
+  const zoom = (windowId: WindowId, tabId: TabId, direction: 1 | -1 | 0) => {
+    const contents = pageOf(tabId)
+    if (contents) showZoom(windowId, zoomContents(contents, tabId, direction))
+  }
+  // A Peek's page and a Mini Window's zoom the same way, and are remembered too (review A-F4).
+  setPageZoom((contents, direction) => zoomContents(contents, tabs.tabIdFor(contents), direction))
 
   const zoomAction = (direction: 1 | -1 | 0) => (c: CallContext) => {
     const windowId = windowOf(c)

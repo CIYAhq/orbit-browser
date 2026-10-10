@@ -411,6 +411,26 @@ test('[NV-05][KS-08] Jump to Selection (⌘J on macOS) scrolls the page back to 
 
 // ---------- Page zoom (NV-06) ----------
 
+test('[NV-06][PK-11] zoom in a Peek takes the tab steps and says the new zoom; the site’s tabs follow and keep it (review A-F4)', async () => {
+  const { app, shell } = orbit
+  await openTab(app, page('Under'))
+  const peekUrl = page('PeekZoom')
+  const peekTab = await cmd<string>(app, 'peek.open', { url: peekUrl })
+  await waitLoaded(app, peekTab, peekUrl)
+  await expect.poll(() => focusedUrl(app)).toContain('/page/PeekZoom')
+  await pressInPage(app, '/page/PeekZoom', '=', [mod])
+  await pressInPage(app, '/page/PeekZoom', '=', [mod])
+  await expect.poll(() => zoomOf(app, '/page/PeekZoom')).toBeCloseTo(1.25, 3)
+  await expect(shell.getByTestId('toast').last()).toHaveText('Zoom 125%')
+  expect((await windowState(app)).overlay.kind).toBe('peek')
+  // The tab under the Peek is on the same site: it follows.
+  expect(await zoomOf(app, '/page/Under')).toBeCloseTo(1.25, 3)
+  // Kept for the site: a new tab on it opens at that zoom.
+  await openTab(app, page('AfterPeek'))
+  await expect.poll(() => zoomOf(app, '/page/AfterPeek')).toBeCloseTo(1.25, 3)
+  expect(await zoomOf(app, '/page/Under')).toBeCloseTo(1.25, 3)
+})
+
 test('[NV-06][KS-08] ⌘+ and ⌘− step through the zoom levels with an indicator; the site’s other tabs follow; ⌘0 resets', async () => {
   const { app } = orbit
   const first = await openTab(app, page('ZoomA'))
