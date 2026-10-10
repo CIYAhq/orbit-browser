@@ -5,6 +5,7 @@ import { expect, test } from '@playwright/test'
 import type { MainContext } from '../../src/main/context'
 import { INTERNAL_DOCUMENT_CSP } from '../../src/main/devtools/internal-urls'
 import type { DevtoolsState, DockSide } from '../../src/shared/commands/devtools'
+import { PAGE_TOOLS } from '../../src/shared/nav'
 import type { OrbitState } from '../../src/shared/state'
 import {
   action,
@@ -21,7 +22,7 @@ import {
   tabView,
   viewPage,
 } from './helpers'
-import { choosePageMenu, pageMenu } from './nav-support'
+import { choosePageMenu, pageMenu, pageMouse, toolsInfo } from './nav-support'
 import { clickInTab } from './peek-helpers'
 
 /**
@@ -176,6 +177,16 @@ const DEVICE_MODE = `(async () =>
 
 const devtoolsState = (tabId: string) => run(orbit.app, 'devtools.state', { tabId }) as Promise<DevtoolsState>
 const isOpen = async (tabId: string) => (await devtoolsState(tabId)).open
+
+/** The first window's link pill (SB-27). */
+const linkPill = () =>
+  orbit.app.evaluate(() =>
+    (
+      globalThis as unknown as {
+        __orbitNav: { linkPill: () => { visible: boolean; url: string | null; bounds?: Electron.Rectangle } }
+      }
+    ).__orbitNav.linkPill(),
+  )
 
 type Target = 'focused' | { tab: string } | { devtools: string }
 
@@ -538,6 +549,64 @@ test('[DT-03] undocked DevTools come to the front with the open key; DevTools fo
   for (const id of others) await run(orbit.app, 'devtools.open', { tabId: id })
   for (const id of [tabId, ...others]) await expect.poll(() => isOpen(id)).toBe(true)
   expect(await counts()).toEqual({ ...before, tabs: before.tabs + 2, devtools: before.devtools + 3 })
+})
+
+test('[DT-03][NV-05][SB-27] the find bar and the link pill stay on the page, off the DevTools docked beside it', async () => {
+  const tabId = await openPage('Beside')
+  await inPage(
+    tabId,
+    `document.body.insertAdjacentHTML('beforeend', '<a id="go" href="/next" style="position:absolute;left:260px;top:140px">Next</a>')`,
+  )
+  const view = (await tabView(orbit.app, tabId))?.bounds
+  if (!view) throw new Error('no view')
+  /** The page's own size: its view less DevTools. */
+  const pageSize = async () => {
+    const [width, height] = (await inPage<[number, number]>(tabId, '[innerWidth, innerHeight]')) ?? [0, 0]
+    return { width, height }
+  }
+  /** The find bar's right edge: PAGE_TOOLS.inset from the page's (its view has a margin for the shadow). */
+  const findRight = async () => {
+    const b = (await toolsInfo(orbit.app)).bounds
+    return b ? b.x + b.width + PAGE_TOOLS.inset - PAGE_TOOLS.margin : null
+  }
+  /** Where the link pill's view is with the pointer on the link (its left and bottom are the page's). */
+  const pill = async () => {
+    await pageMouse(orbit.app, '/page/Beside', 'mouseMove', 280, 150)
+    const { visible, url, bounds: b } = await linkPill()
+    return visible && url === site.url('/next') && b ? { left: b.x, bottom: b.y + b.height } : null
+  }
+  await action(orbit.app, 'page.find')
+  await expect.poll(async () => (await toolsInfo(orbit.app)).placed).toBe(true)
+  expect(await findRight()).toBe(view.x + view.width)
+
+  // Docked right: the find bar is at the page's top-right corner, left of DevTools.
+  await run(orbit.app, 'devtools.open', { tabId })
+  await expect.poll(() => devtoolsState(tabId)).toMatchObject({ open: true, dock: 'right' })
+  await expect.poll(async () => (await pageSize()).width).toBeLessThan(view.width)
+  const right = await pageSize()
+  await expect.poll(() => findRight()).toBe(view.x + right.width)
+  // Docked at the bottom: the pill is at the page's bottom, above DevTools; the find bar back at the view's edge.
+  await inDevtools(tabId, setDockSide('bottom'))
+  await expect.poll(async () => (await pageSize()).height).toBeLessThan(view.height)
+  const bottom = await pageSize()
+  expect(bottom.width).toBe(view.width)
+  await expect.poll(() => findRight()).toBe(view.x + view.width)
+  await expect.poll(() => pill()).toEqual({ left: view.x, bottom: view.y + bottom.height })
+  // Docked left: the pill is at the page's bottom-left corner, right of DevTools.
+  await inDevtools(tabId, setDockSide('left'))
+  await expect.poll(async () => (await pageSize()).height).toBe(view.height)
+  await expect.poll(async () => (await pageSize()).width).toBeLessThan(view.width)
+  const left = await pageSize()
+  await expect.poll(() => pill()).toEqual({ left: view.x + view.width - left.width, bottom: view.y + view.height })
+  // Undocked, and closed: the page has its whole view again, and so do the pill and the find bar.
+  await inDevtools(tabId, setDockSide('undocked'))
+  await expect.poll(async () => (await pageSize()).width).toBe(view.width)
+  await expect.poll(() => pill()).toEqual({ left: view.x, bottom: view.y + view.height })
+  await inDevtools(tabId, setDockSide('right'))
+  await expect.poll(() => findRight()).toBeLessThan(view.x + view.width)
+  await run(orbit.app, 'devtools.close', { tabId })
+  await expect.poll(() => isOpen(tabId)).toBe(false)
+  await expect.poll(() => findRight()).toBe(view.x + view.width)
 })
 
 // ---- DT-14 ----

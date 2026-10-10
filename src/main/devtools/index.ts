@@ -4,7 +4,7 @@ import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
 import { activeTabOf, shownTabs } from '../windows'
 import { DEVTOOLS_ACTIONS, devtoolsState, installKeys, openDevtools, runDevtoolsAction } from './control'
-import { inFrontend, SYNC_DOCKED_SIZE, showPanel } from './frontend'
+import { inFrontend, parsePageArea, SYNC_DOCKED_SIZE, showPanel, WATCH_PAGE_AREA } from './frontend'
 
 /**
  * DevTools (DT-01 to DT-03): the engine's DevTools for the selected tab or focused split pane,
@@ -50,12 +50,29 @@ export function registerDevtools(ctx: MainContext): void {
     return contents ? devtoolsState(contents) : { open: false, focused: false }
   })
 
+  /**
+   * Keeps what Orbit puts over a tab's page (page tools, link pill, prompts) on the page, off the
+   * DevTools docked beside it (DT-03): DevTools say where they put the page, each time they move it.
+   */
+  const watchPageArea = (tabId: TabId, contents: WebContents, devtools: WebContents) => {
+    devtools.on('console-message', (event) => {
+      const page = parsePageArea(event.message)
+      if (page === undefined || contents.isDestroyed() || contents.devToolsWebContents?.id !== devtools.id) return
+      windows.setDevtoolsPage(tabId, page)
+    })
+    void inFrontend(devtools, WATCH_PAGE_AREA)
+  }
+
   hooks.tabCreated.push((tabId, contents) => {
     // Every opening loads a new DevTools page, however it was opened (keys, Inspect, the picker).
     contents.on('devtools-opened', () => {
       const devtools = contents.devToolsWebContents
-      if (devtools) void installKeys(devtools)
+      if (!devtools) return
+      void installKeys(devtools)
+      watchPageArea(tabId, contents, devtools)
     })
+    contents.on('devtools-closed', () => windows.setDevtoolsPage(tabId, null))
+    contents.on('destroyed', () => windows.setDevtoolsPage(tabId, null))
     // Links DevTools open (a request's URL, "Open in new tab") open as a tab beside the page's.
     contents.on('devtools-open-url', (_event, url) => {
       if (!/^(https?|file):/i.test(url)) return

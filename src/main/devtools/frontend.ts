@@ -1,5 +1,6 @@
 import type { WebContents } from 'electron'
 import type { DevtoolsPanel, DockSide } from '../../shared/commands/devtools'
+import type { Rect } from '../../shared/rpc'
 
 /**
  * Scripts Orbit runs in a DevTools page (the engine's DevTools front end). They use its embedder API
@@ -99,6 +100,58 @@ export const SYNC_DOCKED_SIZE = `(async () => {
   split.setSidebarSize(size);
   return 'synced';
 })()`
+
+/** What starts each of WATCH_PAGE_AREA's reports. */
+export const PAGE_AREA_MARK = '[orbit:page-area] '
+
+/**
+ * Reports where DevTools put the page in its view (DT-03): now, each time DevTools lay the page out
+ * (docked on another side, resized, the view resized), and when they undock. A report is a console
+ * message of the DevTools page: PAGE_AREA_MARK, then the page's rectangle in the view (DIP) as
+ * JSON, or null while DevTools are undocked. Installing it again only reports again.
+ */
+export const WATCH_PAGE_AREA = `(async () => {
+  ${LEGACY}
+  const emulation = await import('./panels/emulation/emulation.js');
+  const dock = legacy.DockController.DockController.instance();
+  const report = (rect) =>
+    console.debug(${JSON.stringify(PAGE_AREA_MARK)} + JSON.stringify(dock.dockSide() === 'undocked' ? null : rect));
+  const now = () => {
+    const r = emulation.InspectedPagePlaceholder.InspectedPagePlaceholder.instance().dipPageRect();
+    return { x: Math.round(r.x), y: Math.round(r.y), width: Math.max(1, Math.round(r.width)), height: Math.max(1, Math.round(r.height)) };
+  };
+  if (!window.__orbitPageArea) {
+    window.__orbitPageArea = true;
+    // What DevTools tell the engine each time they lay the page out.
+    const host = window.InspectorFrontendHost;
+    const set = host.setInspectedPageBounds;
+    host.setInspectedPageBounds = function (bounds) {
+      report(bounds);
+      return set.apply(this, arguments);
+    };
+    dock.addEventListener('AfterDockSideChanged', () => report(now()));
+  }
+  report(now());
+})()`
+
+/**
+ * A WATCH_PAGE_AREA report: the page's place in its view, or null while DevTools are undocked.
+ * Undefined for any other message.
+ */
+export function parsePageArea(message: string): Rect | null | undefined {
+  if (!message.startsWith(PAGE_AREA_MARK)) return undefined
+  let value: unknown
+  try {
+    value = JSON.parse(message.slice(PAGE_AREA_MARK.length))
+  } catch {
+    return undefined
+  }
+  if (value === null) return null
+  if (typeof value !== 'object') return undefined
+  const { x, y, width, height } = value as Record<string, unknown>
+  const size = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n < 1e6
+  return size(x) && size(y) && size(width) && size(height) ? { x, y, width, height } : undefined
+}
 
 export function isDockSide(value: unknown): value is DockSide {
   return value === 'right' || value === 'left' || value === 'bottom' || value === 'undocked'
