@@ -30,7 +30,8 @@ import { pressInTab } from './peek-helpers'
  * - `/held/<name>?size=` half at once, the rest when the test releases it;
  * - `/slow/<name>?size=&rate=` at `rate` bytes per second;
  * - `/cut/<name>?size=` a quarter, then the connection breaks, and every request breaks until the
- *   test repairs it.
+ *   test repairs it;
+ * - `/inline/<name>` as a page would serve it, with its type and no "attachment" (DL-13).
  */
 
 const MB = 1024 * 1024
@@ -48,6 +49,33 @@ interface DownloadServer {
 
 const PAGE = (body: string) => `<!doctype html><html><head><title>Downloads</title></head>
 <body style="font: 16px system-ui; padding: 24px">${body}</body></html>`
+
+/** A one-page PDF ("Hello PDF"), small enough to write out. */
+const PDF = Buffer.from(`%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj
+4 0 obj<</Length 44>>stream
+BT /F1 24 Tf 20 100 Td (Hello PDF) Tj ET
+endstream endobj
+5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
+trailer<</Root 1 0 R>>
+%%EOF
+`)
+
+/** A 1×1 PNG. */
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+  'base64',
+)
+
+const INLINE: Record<string, { type: string; data: () => Buffer }> = {
+  pdf: { type: 'application/pdf', data: () => PDF },
+  png: { type: 'image/png', data: () => PNG },
+  txt: { type: 'text/plain; charset=utf-8', data: () => Buffer.from('Plain text, shown as it is.') },
+  webm: { type: 'video/webm', data: () => body(2048) },
+  mp3: { type: 'audio/mpeg', data: () => body(2048) },
+}
 
 function body(size: number): Buffer {
   const out = Buffer.alloc(size)
@@ -77,6 +105,14 @@ async function startDownloadServer(): Promise<DownloadServer> {
           <p><a id="held" href="/held/big.bin?size=${4 * MB}">Big file</a></p>`),
       )
       return
+    }
+    if (kind === 'inline') {
+      const inline = INLINE[name.split('.').pop() ?? '']
+      if (inline) {
+        res.writeHead(200, { 'content-type': inline.type })
+        res.end(inline.data())
+        return
+      }
     }
     if (kind !== 'file' && kind !== 'held' && kind !== 'slow' && kind !== 'cut') {
       res.writeHead(404, { 'content-type': 'text/plain' })
@@ -1262,4 +1298,39 @@ test('[DL-12] a program waits in its row until kept or discarded; only a kept on
   await expect.poll(async () => named('tool.exe')).toBeUndefined()
   expect(readdirSync(folder()).filter((f) => f.startsWith('tool'))).toEqual([])
   await expect(row('tool.exe')).toHaveCount(0)
+})
+
+// ---- DL-13: files the browser shows ----
+
+test('[DL-13] PDFs, pictures, text, audio and video open in a tab, not as downloads', async () => {
+  for (const name of ['doc.pdf', 'dot.png', 'notes.txt', 'clip.webm', 'song.mp3']) {
+    await run(orbit.app, 'tabs.create', { url: server.url(`/inline/${name}`) })
+    const page = await tabPage(orbit.app, `/inline/${name}`)
+    if (name.endsWith('.pdf')) {
+      // The PDF viewer.
+      await expect.poll(() => page.frames().some((f) => f.url().startsWith('chrome-extension://'))).toBe(true)
+    } else if (name.endsWith('.png')) {
+      await expect.poll(() => page.evaluate(() => document.querySelector('img')?.naturalWidth)).toBe(1)
+    } else if (name.endsWith('.txt')) {
+      await expect.poll(() => page.evaluate(() => document.body.innerText.trim())).toBe('Plain text, shown as it is.')
+    } else {
+      // A media page (a player, even for these made-up bytes).
+      await expect.poll(() => page.evaluate(() => !!document.querySelector('video, audio'))).toBe(true)
+    }
+  }
+  // None went to Downloads. (A site that says "attachment" still downloads: DL-01.)
+  expect(await list()).toEqual([])
+  expect(existsSync(folder()) ? readdirSync(folder()) : []).toEqual([])
+})
+
+test("[DL-13] the PDF viewer's download button saves the file the usual way", async () => {
+  await run(orbit.app, 'tabs.create', { url: server.url('/inline/doc.pdf') })
+  const page = await tabPage(orbit.app, '/inline/doc.pdf')
+  await expect.poll(() => page.frames().some((f) => f.url().startsWith('chrome-extension://'))).toBe(true)
+  const viewer = page.frames().find((f) => f.url().startsWith('chrome-extension://'))
+  await viewer?.locator('viewer-download-controls #save').click()
+  await expect.poll(async () => (await named('doc.pdf'))?.state).toBe('completed')
+  expect(readFileSync(join(folder(), 'doc.pdf')).equals(PDF)).toBe(true)
+  // It flies to the Library button and shows in the sidebar like any other (DL-02, DL-03).
+  await expect(row('doc.pdf')).toBeVisible()
 })
