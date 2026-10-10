@@ -484,6 +484,40 @@ test('[ST-06][ST-20] each profile has its own default search engine, labelled wi
   expect(await searchFromCommandBar('second query')).toBe('https://www.bing.com/search?q=second+query')
 })
 
+test("[ST-06] Search for a selection, from the page's menu, uses the engine of the tab's profile", async () => {
+  const spaceId = (await run(orbit.app, 'spaces.create', { name: 'Work', activate: false })) as string
+  const work = (await run(orbit.app, 'profiles.create', { name: 'Work', assignSpaceId: spaceId })) as string
+  await run(orbit.app, 'settings.setSearchEngine', { profileId: work, engine: 'bing' })
+  await run(orbit.app, 'spaces.switch', { spaceId })
+  await run(orbit.app, 'tabs.create', { url: fx.url('/page/Selected') })
+  const web = await tabPage(orbit.app, '/page/Selected')
+  // The page's menu is kept for the test instead of being shown.
+  type Kept = { __pageMenu?: Electron.Menu }
+  await orbit.app.evaluate(({ Menu }) => {
+    Menu.prototype.popup = function (this: Electron.Menu) {
+      ;(globalThis as unknown as Kept).__pageMenu = this
+    }
+  })
+  // The heading's text, selected, and a right-click on it.
+  const at = await web.evaluate(() => {
+    const range = document.createRange()
+    range.selectNodeContents(document.getElementById('title') as HTMLElement)
+    getSelection()?.removeAllRanges()
+    getSelection()?.addRange(range)
+    const r = range.getBoundingClientRect()
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+  })
+  await web.mouse.click(at.x, at.y, { button: 'right' })
+  const search = 'Search for “Selected”'
+  await expect
+    .poll(() => orbit.app.evaluate(() => (globalThis as unknown as Kept).__pageMenu?.items.map((i) => i.label) ?? []))
+    .toContain(search)
+  await orbit.app.evaluate((_electron, label) => {
+    ;(globalThis as unknown as Kept).__pageMenu?.items.find((i) => i.label === label)?.click()
+  }, search)
+  await expect.poll(activeUrl).toBe('https://www.bing.com/search?q=Selected')
+})
+
 test('[ST-06] a custom engine can be added, made the default, and removed', async () => {
   const page = await openSettings(orbit.app, { section: 'search' })
   await page.getByTestId('site-search-add').click()
