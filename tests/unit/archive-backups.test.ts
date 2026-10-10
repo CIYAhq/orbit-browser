@@ -603,6 +603,60 @@ describe('Restore Data (AR-11)', () => {
     expect(readdirSync(dir)).toEqual([])
   })
 
+  /** How many sidebar rows hold a tab, and how many Archive entries it has in state and in the store. */
+  const traces = (w: Awaited<ReturnType<typeof world>>, id: TabId) => {
+    const s = w.store.state
+    const lists = [
+      ...Object.values(s.profiles).map((p) => p.favorites),
+      ...Object.values(s.spaces).flatMap((sp) => [sp.pinned, sp.today]),
+      ...Object.values(s.folders).map((f) => f.children),
+    ]
+    return {
+      open: !!s.tabs[id],
+      rows: lists.reduce((n, list) => n + list.filter((i) => i === id).length, 0),
+      archived: s.archive.filter((e) => e.tabId === id).length,
+      stored: w.archive.idsOfTab(id).length,
+    }
+  }
+
+  it('[AR-11][TB-18] undoing a close after undoing a Restore Data brings the tab back once, with no Archive entry left (re-review R1)', async () => {
+    const w = await world()
+    const backups = new BackupStore(backupsDir())
+    const restore = new RestoreData(w.ctx, w.archive, backups)
+    const x = w.tab(w.a, 'https://x.test/')
+    const earlier = await backups.take(w.store.state, Date.now() - 5 * MIN)
+    // Close X: its entry goes to the Archive.
+    w.ops.closeTabs([x], 'closed')
+    expect(traces(w, x)).toEqual({ open: false, rows: 0, archived: 1, stored: 1 })
+    // Restore Data from before the close: X is back, and its entry leaves the Archive.
+    expect(await restore.restore(earlier.id)).toMatchObject({ restored: true })
+    expect(traces(w, x)).toEqual({ open: true, rows: 1, archived: 0, stored: 0 })
+    // ⌘Z takes the restore back: X goes to the Archive again, as a new entry.
+    expect(w.ops.undo.undo()).toBe('Restore Data')
+    expect(traces(w, x)).toEqual({ open: false, rows: 0, archived: 1, stored: 1 })
+    // ⌘Z again undoes the close: X is back once, and no entry is left to open a second copy from.
+    expect(w.ops.undo.undo()).toBe('Close Tab')
+    expect(traces(w, x)).toEqual({ open: true, rows: 1, archived: 0, stored: 0 })
+  })
+
+  it('[AR-11][FD-10][TB-18] undoing a folder delete after undoing a Restore Data brings its tab back once, with no Archive entry left (re-review R1)', async () => {
+    const w = await world()
+    const backups = new BackupStore(backupsDir())
+    const restore = new RestoreData(w.ctx, w.archive, backups)
+    const y = w.tab(w.a, 'https://y.test/')
+    const folderId = w.ops.createFolder({ name: 'Reading', items: [y], windowId: w.w1 })
+    const earlier = await backups.take(w.store.state, Date.now() - 5 * MIN)
+    w.ops.deleteFolder(folderId, false)
+    expect(traces(w, y)).toEqual({ open: false, rows: 0, archived: 1, stored: 1 })
+    expect(await restore.restore(earlier.id)).toMatchObject({ restored: true })
+    expect(traces(w, y)).toEqual({ open: true, rows: 1, archived: 0, stored: 0 })
+    expect(w.ops.undo.undo()).toBe('Restore Data')
+    expect(traces(w, y)).toEqual({ open: false, rows: 0, archived: 1, stored: 1 })
+    expect(w.ops.undo.undo()).toBe('Delete Folder')
+    expect(w.store.state.folders[folderId]?.children).toEqual([y])
+    expect(traces(w, y)).toEqual({ open: true, rows: 1, archived: 0, stored: 0 })
+  })
+
   it('[AR-11] the toast’s Undo takes the restore back while it is the newest change, and only then (review F2)', async () => {
     const w = await world()
     const backups = new BackupStore(backupsDir())

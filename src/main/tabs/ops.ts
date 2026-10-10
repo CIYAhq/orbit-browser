@@ -89,6 +89,17 @@ const MAX_RECENTLY_CLOSED = 50
 const MAX_ARCHIVE = 5000
 const ARCHIVE_TRIM_CHUNK = 500
 
+/**
+ * A tab that comes back leaves the Archive: the entry its close made, and any made since. Undoing a
+ * Restore Data can archive the tab again before an older undo step brings it back (re-review R1).
+ */
+function unarchive(d: OrbitState, tabId: TabId, archiveId: string | undefined): void {
+  for (let i = d.archive.length - 1; i >= 0; i--) {
+    const a = d.archive[i]
+    if (a && (a.id === archiveId || a.tabId === tabId)) d.archive.splice(i, 1)
+  }
+}
+
 export class TabOps {
   readonly recentlyClosed: ClosedTab[] = []
   readonly undo = new UndoStack()
@@ -389,10 +400,7 @@ export class TabOps {
       }
       for (const rec of sorted) {
         if (placedByUnit.has(rec.tab.id)) {
-          if (rec.archiveId) {
-            const i = d.archive.findIndex((a) => a.id === rec.archiveId)
-            if (i >= 0) d.archive.splice(i, 1)
-          }
+          unarchive(d, rec.tab.id, rec.archiveId)
           continue
         }
         const tab: Tab = d.tabs[rec.tab.id] ?? {
@@ -428,10 +436,7 @@ export class TabOps {
         // History from another profile's session stays behind (PR-05) — dropped here, before
         // selecting it lets the layout pass wake the tab.
         if (landed) for (const moved of this.fixupTabs(d, [tab.id], landed)) this.ctx.tabs.savedHistory.delete(moved)
-        if (rec.archiveId) {
-          const i = d.archive.findIndex((a) => a.id === rec.archiveId)
-          if (i >= 0) d.archive.splice(i, 1)
-        }
+        unarchive(d, tab.id, rec.archiveId)
       }
       // A tab that came back under another profile (its split or folder moved to another
       // profile's Space) starts afresh in that session: the old session's history stays behind (PR-05).
@@ -592,10 +597,7 @@ export class TabOps {
         for (const s of splits) d.splits[s.id] = structuredClone(s)
         for (const rec of records) {
           d.tabs[rec.tab.id] = { ...rec.tab, asleep: true, loading: false, audible: false }
-          if (rec.archiveId) {
-            const i = d.archive.findIndex((a) => a.id === rec.archiveId)
-            if (i >= 0) d.archive.splice(i, 1)
-          }
+          unarchive(d, rec.tab.id, rec.archiveId)
         }
         insertItem(d, loc.container, loc.index, folderId)
         // Its Space may have changed profile meanwhile: the tabs take that profile, and history
