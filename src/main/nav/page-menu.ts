@@ -179,6 +179,61 @@ export function pageItems(ctx: MainContext, tabId: TabId, contents: WebContents)
   ]
 }
 
+/**
+ * Loop and Show Controls for the video or audio right-clicked (NV-12), ticked as the element is;
+ * media adds Picture in Picture after them. Each is greyed where the engine says it can't be done:
+ * a live stream doesn't loop, and an audio player's controls stay, as without them it would be gone
+ * with no way back.
+ */
+export function mediaItems(contents: WebContents, params: ContextMenuParams): MenuItemConstructorOptions[] {
+  if (params.mediaType !== 'video' && params.mediaType !== 'audio') return []
+  const flags = params.mediaFlags
+  const set = (property: 'loop' | 'controls', on: boolean) => () => void setMedia(contents, params, property, on)
+  return [
+    {
+      label: 'Loop',
+      type: 'checkbox',
+      checked: flags.isLooping,
+      enabled: flags.canLoop,
+      click: set('loop', !flags.isLooping),
+    },
+    {
+      label: 'Show Controls',
+      type: 'checkbox',
+      checked: flags.isControlsVisible,
+      enabled: flags.canToggleControls,
+      click: set('controls', !flags.isControlsVisible),
+    },
+  ]
+}
+
+/**
+ * Sets `loop` or `controls` on the media element the menu was opened over: the one under the
+ * pointer, or in a frame inside the page (where the pointer's place is the page's, not the
+ * frame's) the frame's element playing the same source.
+ */
+async function setMedia(
+  contents: WebContents,
+  params: ContextMenuParams,
+  property: 'loop' | 'controls',
+  on: boolean,
+): Promise<void> {
+  const bySource = `[...document.querySelectorAll('video, audio')].find((m) => m.currentSrc === ${JSON.stringify(params.srcURL)})`
+  try {
+    if (params.frame?.parent) {
+      await params.frame.executeJavaScript(`(() => { const m = ${bySource}; if (m) m.${property} = ${on} })()`)
+      return
+    }
+    const zoom = contents.getZoomFactor() || 1
+    const x = Math.round(params.x / zoom)
+    const y = Math.round(params.y / zoom)
+    const code = `(() => { const at = document.elementFromPoint(${x}, ${y}); const m = (at && at.closest('video, audio')) || ${bySource}; if (m) m.${property} = ${on} })()`
+    await contents.executeJavaScriptInIsolatedWorld(NAV_WORLD, [{ code }])
+  } catch {
+    // The page or its frame went away meanwhile.
+  }
+}
+
 /** In tests, keeps the menu for the test hooks instead of showing it. True when kept. */
 export function keepPageMenu(ctx: MainContext, tabId: TabId, items: MenuItemConstructorOptions[]): boolean {
   if (!ctx.e2e) return false
@@ -189,8 +244,16 @@ export function keepPageMenu(ctx: MainContext, tabId: TabId, items: MenuItemCons
 const labelOf = (item: MenuItemConstructorOptions) => item.label ?? (item.role ? `role:${item.role}` : '')
 
 export interface PageMenuTestHooks {
-  /** The page menu last opened: its items' labels (`role:copy` for built-in ones; `-` for separators), or null. */
-  pageMenu: () => { tabId: TabId; labels: string[]; enabled: Record<string, boolean> } | null
+  /**
+   * The page menu last opened: its items' labels (`role:copy` for built-in ones; `-` for separators),
+   * which are enabled, and whether each tickable one is ticked; or null.
+   */
+  pageMenu: () => {
+    tabId: TabId
+    labels: string[]
+    enabled: Record<string, boolean>
+    checked: Record<string, boolean>
+  } | null
   /** Chooses an item of the page menu by label (`Menu > Item` for one in a submenu). */
   choosePageMenu: (label: string) => boolean
 }
@@ -199,11 +262,16 @@ export const pageMenuTestHooks: PageMenuTestHooks = {
   pageMenu: () => {
     if (!shown) return null
     const enabled: Record<string, boolean> = {}
-    for (const item of shown.items) if (item.type !== 'separator') enabled[labelOf(item)] = item.enabled !== false
+    const checked: Record<string, boolean> = {}
+    for (const item of shown.items) {
+      if (item.type !== 'separator') enabled[labelOf(item)] = item.enabled !== false
+      if (item.type === 'checkbox' || item.type === 'radio') checked[labelOf(item)] = !!item.checked
+    }
     return {
       tabId: shown.tabId,
       labels: shown.items.map((i) => (i.type === 'separator' ? '-' : labelOf(i))),
       enabled,
+      checked,
     }
   },
   choosePageMenu: (label) => {

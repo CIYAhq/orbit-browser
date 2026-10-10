@@ -423,6 +423,76 @@ test('[NV-12] right-clicking a link offers new tab, split view, Peek, Mini Windo
   await expect(shell.getByTestId('split-pane')).toHaveCount(2)
 })
 
+test('[NV-12] Open Link in New Tab with the sidebar hidden says so, as a ⌘-clicked link does (review B-M4)', async () => {
+  const { app, shell } = orbit
+  const id = await openTab(app, page('Hidden'))
+  await cmd(app, 'window.setSidebar', { visible: false })
+  await expect(shell.getByTestId('sidebar')).toBeHidden()
+  await clickInPage(app, page('Hidden'), '#next', [], 'right')
+  await expect.poll(async () => (await pageMenu(app))?.tabId).toBe(id)
+  expect(await choosePageMenu(app, 'Open Link in New Tab')).toBe(true)
+  await expect.poll(async () => urlOf(app, (await today(app))[0])).toBe(page('Hidden-next'))
+  await expect(shell.getByTestId('toast').last()).toContainText('Opened in a new tab')
+  expect(await selectedTab(app)).toBe(id)
+})
+
+test('[NV-12] right-clicking a video or audio offers Loop and Show Controls, ticked as the element is, before Picture in Picture; each sets the element (review B-M4)', async () => {
+  const { app } = orbit
+  const id = await openTab(app, fx.url('/media/Clip'))
+  const tab = await tabPage(app, '/media/Clip')
+  // The video has been recorded and has a length and a picture; the tone has loaded.
+  await expect
+    .poll(() =>
+      tab.evaluate(() => {
+        const v = document.getElementById('v') as HTMLVideoElement
+        const a = document.getElementById('a') as HTMLAudioElement
+        return v.readyState >= 1 && Number.isFinite(v.duration) && v.videoWidth > 0 && a.readyState >= 1
+      }),
+    )
+    .toBe(true)
+  const elements = () =>
+    tab.evaluate(() => {
+      const v = document.getElementById('v') as HTMLVideoElement
+      const a = document.getElementById('a') as HTMLAudioElement
+      return { video: { loop: v.loop, controls: v.controls }, audio: { loop: a.loop, controls: a.controls } }
+    })
+  /** Right-clicks an element near its top left (clear of a paused video's play button): the menu's first group. */
+  const menuOn = async (selector: string) => {
+    const box = await tab.locator(selector).boundingBox()
+    if (!box) throw new Error(`no ${selector}`)
+    await tab.mouse.click(box.x + 16, box.y + 16, { button: 'right' })
+    await expect.poll(async () => (await pageMenu(app))?.tabId).toBe(id)
+    const menu = await pageMenu(app)
+    const labels = menu?.labels ?? []
+    const end = labels.indexOf('-')
+    return { group: end < 0 ? labels : labels.slice(0, end), checked: menu?.checked, enabled: menu?.enabled }
+  }
+
+  // The video: Loop unticked, Show Controls ticked, then media's Picture in Picture.
+  let menu = await menuOn('#v')
+  expect(menu.group).toEqual(['Loop', 'Show Controls', 'Picture in Picture'])
+  expect(menu.checked).toMatchObject({ Loop: false, 'Show Controls': true })
+  expect(menu.enabled).toMatchObject({ Loop: true, 'Show Controls': true })
+  expect(await choosePageMenu(app, 'Loop')).toBe(true)
+  await expect.poll(async () => (await elements()).video).toEqual({ loop: true, controls: true })
+  menu = await menuOn('#v')
+  expect(menu.checked).toMatchObject({ Loop: true, 'Show Controls': true })
+  expect(await choosePageMenu(app, 'Show Controls')).toBe(true)
+  await expect.poll(async () => (await elements()).video).toEqual({ loop: true, controls: false })
+  menu = await menuOn('#v')
+  expect(menu.checked).toMatchObject({ Loop: true, 'Show Controls': false })
+  expect(await choosePageMenu(app, 'Loop')).toBe(true)
+  await expect.poll(async () => (await elements()).video).toEqual({ loop: false, controls: false })
+
+  // The tone: no Picture in Picture, and its controls stay (without them it would be gone for good).
+  menu = await menuOn('#a')
+  expect(menu.group).toEqual(['Loop', 'Show Controls'])
+  expect(menu.checked).toMatchObject({ Loop: false, 'Show Controls': true })
+  expect(menu.enabled).toMatchObject({ Loop: true, 'Show Controls': false })
+  expect(await choosePageMenu(app, 'Loop')).toBe(true)
+  await expect.poll(async () => (await elements()).audio).toEqual({ loop: true, controls: true })
+})
+
 test('[NV-12] right-clicking the page offers Back, Forward, Reload, Save Page As, Print and View Page Source', async () => {
   const { app } = orbit
   const id = await openTab(app, page('Plain'))

@@ -6,6 +6,7 @@ import {
   keepPageMenu,
   linkWindowItems,
   lookUpItems,
+  mediaItems,
   menuReferrer,
   openLinkInTab,
   pageItems,
@@ -18,10 +19,13 @@ import { linkSplitMenuItem } from '../split/menu'
 
 /** Native right-click menu for web pages. */
 export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: WebContents, params: ContextMenuParams) {
-  // Items other features add (media: Picture in Picture on a video).
-  const items: MenuItemConstructorOptions[] = (ctx.hooks.pageContextMenu ?? []).flatMap((hook) =>
-    hook(tabId, contents, params),
-  )
+  // Video and audio first: Loop and Show Controls, then what other features add (media: Picture in
+  // Picture on a video) (NV-12). The group ends with a separator, whoever added its last item.
+  const items: MenuItemConstructorOptions[] = [
+    ...mediaItems(contents, params),
+    ...(ctx.hooks.pageContextMenu ?? []).flatMap((hook) => hook(tabId, contents, params)),
+  ]
+  if (items.length > 0 && items.at(-1)?.type !== 'separator') items.push({ type: 'separator' })
   const openInNewTab = (url: string, activate: boolean) => {
     const tab = ctx.store.state.tabs[tabId]
     void ctx.commands.run('tabs.create', { url, spaceId: tab?.spaceId, activate }, {})

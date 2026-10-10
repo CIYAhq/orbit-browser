@@ -309,8 +309,8 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
         openerTabId: opener?.id,
         load: { httpReferrer: referrer },
       })
-      // It loads in the background, as a ⌘-clicked link's tab does.
-      tabs.ensure(id)
+      // It loads in the background, as a ⌘-clicked link's tab does, and says so while the sidebar is hidden (NV-12).
+      openedInBackground(windowId, id)
     },
     window: openLinkWindow,
     private: (url, from) => void privateWindows.open({ url, fromWindowId: from.windowId }),

@@ -89,6 +89,67 @@ ${open ? `window.open(${JSON.stringify(open)}, 'auto', 'width=400,height=300')` 
 }
 
 /**
+ * A page with a short video (#v, with controls) and a tone (#a, with controls). The video is
+ * recorded in the page and played from a MediaSource, so it has a length (it can loop) and a
+ * picture (its controls can be hidden).
+ */
+function mediaPage(title: string): string {
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+<style>body{font:16px system-ui;margin:0;padding:40px}video{display:block;width:320px;height:180px;background:#000}audio{display:block;width:320px;margin-top:24px}</style></head>
+<body><video id="v" controls></video><audio id="a" controls src="/tone.wav"></audio>
+<script>
+const type = 'video/webm;codecs=vp8'
+const c = document.createElement('canvas')
+c.width = 160
+c.height = 90
+const g = c.getContext('2d')
+let n = 0
+const draw = () => { g.fillStyle = n++ % 2 ? '#2f855a' : '#2b6cb0'; g.fillRect(0, 0, 160, 90) }
+draw()
+const timer = setInterval(draw, 40)
+const rec = new MediaRecorder(c.captureStream(25), { mimeType: type })
+const chunks = []
+rec.ondataavailable = (e) => chunks.push(e.data)
+rec.onstop = async () => {
+  clearInterval(timer)
+  const data = await new Blob(chunks).arrayBuffer()
+  const source = new MediaSource()
+  source.addEventListener('sourceopen', () => {
+    const buffer = source.addSourceBuffer(type)
+    buffer.addEventListener('updateend', () => source.endOfStream(), { once: true })
+    buffer.appendBuffer(data)
+  }, { once: true })
+  document.getElementById('v').src = URL.createObjectURL(source)
+}
+rec.start()
+setTimeout(() => rec.stop(), 400)
+</script>
+</body></html>`
+}
+
+/** A WAV file: `seconds` of a quiet 440 Hz tone (8-bit mono, 8 kHz). */
+function tone(seconds: number): Buffer {
+  const rate = 8000
+  const samples = Math.round(seconds * rate)
+  const wav = Buffer.alloc(44 + samples)
+  wav.write('RIFF', 0)
+  wav.writeUInt32LE(36 + samples, 4)
+  wav.write('WAVEfmt ', 8)
+  wav.writeUInt32LE(16, 16)
+  wav.writeUInt16LE(1, 20)
+  wav.writeUInt16LE(1, 22)
+  wav.writeUInt32LE(rate, 24)
+  wav.writeUInt32LE(rate, 28)
+  wav.writeUInt16LE(1, 32)
+  wav.writeUInt16LE(8, 34)
+  wav.write('data', 36)
+  wav.writeUInt32LE(samples, 40)
+  for (let i = 0; i < samples; i++) wav[44 + i] = 128 + Math.round(16 * Math.sin((2 * Math.PI * 440 * i) / rate))
+  return wav
+}
+
+/**
  * Routes:
  * - `/page/<title>?bg=<css colour>&text=<words>`: a page (see `page()`), optionally in another
  *   background and with some text.
@@ -99,6 +160,7 @@ ${open ? `window.open(${JSON.stringify(open)}, 'auto', 'width=400,height=300')` 
  * - `/download/<name>`: a small text file sent as a download (Content-Disposition: attachment).
  * - `/cookies`: a page that sets two cookies for its host, `strict=1` (SameSite=Strict) and
  *   `lax=1` (SameSite=Lax).
+ * - `/media/<title>`: a page with a video and a tone (see `mediaPage()`); `/tone.wav`: the tone.
  */
 export async function startNavFixtures(): Promise<NavFixtures> {
   const hits = new Map<string, number>()
@@ -157,6 +219,14 @@ export async function startNavFixtures(): Promise<NavFixtures> {
         'set-cookie': ['strict=1; SameSite=Strict; Path=/', 'lax=1; SameSite=Lax; Path=/'],
       })
       return res.end('<!doctype html><title>Cookies</title><p>Cookies set.</p>')
+    }
+    if (kind === 'media') {
+      res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' })
+      return res.end(mediaPage(title))
+    }
+    if (kind === 'tone.wav') {
+      res.writeHead(200, { 'content-type': 'audio/wav', 'cache-control': 'no-store' })
+      return res.end(tone(2))
     }
     if (kind === 'slow') return later(Number(u.searchParams.get('ms') ?? 30_000))
     if (kind === 'slow-reload') return count === 1 ? send() : later(30_000)
@@ -221,6 +291,8 @@ export interface PageMenu {
   tabId: string
   labels: string[]
   enabled: Record<string, boolean>
+  /** Whether each tickable item is ticked. */
+  checked: Record<string, boolean>
 }
 
 /** The page context menu last opened (kept instead of shown in tests), or null. */
