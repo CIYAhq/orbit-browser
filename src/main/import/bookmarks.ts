@@ -6,7 +6,7 @@
 import { freeze } from 'immer'
 import type { BookmarkNode } from '../../shared/commands/import'
 import { newId } from '../../shared/ids'
-import type { Folder, FolderId, OrbitState, SpaceId, Tab, TabId } from '../../shared/state'
+import type { Folder, FolderId, OrbitState, ProfileId, SpaceId, Tab, TabId } from '../../shared/state'
 import { insertItem } from '../../shared/tree'
 import { fallbackTitle } from '../../shared/url'
 import { makeTab } from '../tabs/model'
@@ -99,55 +99,62 @@ export function planPlacement(name: string, nodes: readonly BookmarkNode[]): Pla
 }
 
 /**
- * Adds steps `from` to `to` of a plan to the draft: the top folder at the end of the Space's pinned
- * section, the rest at the end of their parent folder. Large imports go in several store updates, so
- * no single one holds up the windows (IM-14). Tabs are asleep, have no favicon (it comes when the
- * page first loads) and count as never used. Returns false once there is nowhere left to add to
- * (the Space or the new folder was deleted part-way). Draft helper.
+ * One Space's folder of an import, made out of sight (D62 (3)). `build` makes the plan's steps a part at a time, and
+ * each part's tabs go into the state where no section shows them (`addUnplacedTabs`); `attachFolders` then adds the
+ * folders and shows the whole folder at once. Until then the sidebar shows none of it, so nothing can be moved into or
+ * out of it, and a quit or a failure takes back exactly the tabs added. Tabs are asleep, have no favicon (it comes when
+ * the page first loads) and count as never used.
  */
-export function applyPlacement(
-  d: OrbitState,
-  spaceId: SpaceId,
-  plan: Placement,
-  from: number,
-  to: number,
-  placed: PlacedFolder,
-  ids: Map<number, FolderId>,
-  now: number,
-): boolean {
-  const space = d.spaces[spaceId]
-  if (!space || (placed.folderId && !d.folders[placed.folderId])) return false
-  for (const step of plan.steps.slice(from, to)) {
-    if (step.kind === 'folder' && step.parent === -1) {
-      // Sub-folders start closed; the top folder too when it holds more than COLLAPSE_OVER items.
-      const root: Folder = {
-        id: newId('f'),
-        name: step.name,
-        children: [],
-        collapsed: plan.tabs + plan.folders > COLLAPSE_OVER,
-        createdAt: now,
+export class DetachedFolder {
+  /** The top folder first, then its folders in the plan's order. */
+  readonly folders: Folder[] = []
+  readonly tabs: Tab[] = []
+  private readonly byKey = new Map<number, Folder>()
+  private made = 0
+
+  constructor(
+    private readonly plan: Placement,
+    readonly spaceId: SpaceId,
+    /** The profile its tabs are made in: the Space's when the import started. */
+    readonly profileId: ProfileId,
+    private readonly now: number,
+  ) {}
+
+  /** Every step is made. */
+  get whole(): boolean {
+    return this.made >= this.plan.steps.length
+  }
+
+  /** The tabs it holds when whole. */
+  get total(): number {
+    return this.plan.tabs
+  }
+
+  /** Makes steps until `tabs` more tabs are made, or the plan ends; returns those tabs. */
+  build(tabs: number): Tab[] {
+    const { plan, now } = this
+    const out: Tab[] = []
+    for (; this.made < plan.steps.length && out.length < tabs; this.made++) {
+      const step = plan.steps[this.made] as PlaceStep
+      if (step.kind === 'folder') {
+        // Sub-folders start closed; the top folder too when it holds more than COLLAPSE_OVER items.
+        const top = step.parent === -1
+        const folder: Folder = {
+          id: newId('f'),
+          name: step.name,
+          children: [],
+          collapsed: top ? plan.tabs + plan.folders > COLLAPSE_OVER : true,
+          createdAt: now,
+        }
+        this.folders.push(folder)
+        this.byKey.set(step.key, folder)
+        if (!top) this.byKey.get(step.parent)?.children.push(folder.id)
+        continue
       }
-      d.folders[root.id] = root
-      insertItem(d, { kind: 'pinned', spaceId }, space.pinned.length, root.id)
-      ids.set(0, root.id)
-      placed.folderId = root.id
-      placed.folderIds.push(root.id)
-      continue
-    }
-    // A folder deleted part-way: what was to go in it is left out.
-    const parent = d.folders[ids.get(step.parent) ?? '']
-    if (!parent) continue
-    if (step.kind === 'folder') {
-      const folder: Folder = { id: newId('f'), name: step.name, children: [], collapsed: true, createdAt: now }
-      d.folders[folder.id] = folder
-      parent.children.push(folder.id)
-      ids.set(step.key, folder.id)
-      placed.folderIds.push(folder.id)
-    } else {
       const tab: Tab = makeTab(
         {
-          spaceId,
-          profileId: space.profileId,
+          spaceId: this.spaceId,
+          profileId: this.profileId,
           url: step.url,
           title: step.title,
           pinnedUrl: step.url,
@@ -159,13 +166,57 @@ export function applyPlacement(
         },
         now,
       )
-      // Frozen first, as Immer advises for data added in bulk: it then skips walking each new tab.
-      d.tabs[tab.id] = freeze(tab)
-      parent.children.push(tab.id)
-      placed.tabIds.push(tab.id)
+      out.push(tab)
+      this.byKey.get(step.parent)?.children.push(tab.id)
     }
+    this.tabs.push(...out)
+    return out
   }
-  return true
+
+  /** Leaves out tabs no longer in the state (Restore Data while it was made, say); returns how many are left. */
+  keepOnly(present: (id: TabId) => boolean): number {
+    const gone = new Set(this.tabs.filter((t) => !present(t.id)).map((t) => t.id))
+    if (gone.size > 0) {
+      for (const f of this.folders) f.children = f.children.filter((id) => !gone.has(id))
+      this.tabs.splice(0, this.tabs.length, ...this.tabs.filter((t) => !gone.has(t.id)))
+    }
+    return this.tabs.length
+  }
+}
+
+/** Adds tabs an import made where no section shows them, frozen first (Immer then skips walking each one). Draft helper. */
+export function addUnplacedTabs(d: OrbitState, tabs: readonly Tab[]): void {
+  for (const t of tabs) d.tabs[t.id] = freeze(t)
+}
+
+/**
+ * Shows whole folders at once (D62 (3)): each one's folders are added, its top folder named `names[i]` and put at the
+ * end of its Space's pinned section. Their tabs are in the state already (`addUnplacedTabs`). A Space deleted meanwhile
+ * gets nothing. Returns the folders shown. Draft helper.
+ */
+export function attachFolders(
+  d: OrbitState,
+  built: readonly DetachedFolder[],
+  names: readonly string[],
+): { folderId: FolderId; spaceId: SpaceId; tabs: number }[] {
+  const added: { folderId: FolderId; spaceId: SpaceId; tabs: number }[] = []
+  built.forEach((b, i) => {
+    const space = d.spaces[b.spaceId]
+    const root = b.folders[0]
+    if (!space || !root || !b.whole || b.tabs.length === 0) return
+    root.name = names[i] ?? root.name
+    for (const f of b.folders) d.folders[f.id] = freeze(f)
+    // The Space moved to another profile meanwhile (PR-03): its new tabs go with it.
+    if (space.profileId !== b.profileId) {
+      for (const t of b.tabs) {
+        const tab = d.tabs[t.id]
+        if (tab) tab.profileId = space.profileId
+      }
+    }
+    insertItem(d, { kind: 'pinned', spaceId: b.spaceId }, space.pinned.length, root.id)
+    added.push({ folderId: root.id, spaceId: b.spaceId, tabs: b.tabs.length })
+  })
+  return added
 }
 
 /**
@@ -179,11 +230,17 @@ export function placeBookmarks(
   nodes: readonly BookmarkNode[],
   now: number,
 ): PlacedFolder | undefined {
-  if (!d.spaces[spaceId]) return undefined
+  const space = d.spaces[spaceId]
+  if (!space) return undefined
   const plan = planPlacement(name, nodes)
   const placed: PlacedFolder = { folderId: '', tabIds: [], folderIds: [], skipped: plan.skipped }
   if (plan.tabs === 0) return placed
-  applyPlacement(d, spaceId, plan, 0, plan.steps.length, placed, new Map(), now)
+  const folder = new DetachedFolder(plan, spaceId, space.profileId, now)
+  addUnplacedTabs(d, folder.build(plan.tabs))
+  attachFolders(d, [folder], [name])
+  placed.folderId = folder.folders[0]?.id ?? ''
+  placed.folderIds = folder.folders.map((f) => f.id)
+  placed.tabIds = folder.tabs.map((t) => t.id)
   return placed
 }
 

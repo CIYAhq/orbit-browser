@@ -2,10 +2,11 @@ import { produce } from 'immer'
 import { describe, expect, it } from 'vitest'
 import { manyBookmarks, netscapeHtml, sampleTree } from '../../scripts/import-fixtures'
 import {
-  applyPlacement,
+  addUnplacedTabs,
+  attachFolders,
   COLLAPSE_OVER,
+  DetachedFolder,
   freeFolderName,
-  type PlacedFolder,
   placeBookmarks,
   planPlacement,
   skippedLines,
@@ -123,64 +124,92 @@ describe('[IM-05] bookmarks become pinned items', () => {
   })
 })
 
-describe('[IM-05][IM-14] a large import goes in parts', () => {
+describe('[IM-05][IM-14] a large import is made out of sight, then shown at once (D62 (3))', () => {
   const tree = parseBookmarksHtml(netscapeHtml(sampleTree())) ?? []
 
-  /** Applies a plan `size` steps per store update, as an import does. */
-  function inParts(state: OrbitState, size: number, between?: (s: OrbitState, placed: PlacedFolder) => OrbitState) {
+  /** The import's folder for the first Space, its tabs added `size` at a time where no section shows them. */
+  function inParts(state: OrbitState, size: number) {
     const spaceId = state.spaceOrder[0] as string
-    const plan = planPlacement('Imported bookmarks', tree)
-    const placed: PlacedFolder = { folderId: '', tabIds: [], folderIds: [], skipped: plan.skipped }
-    const ids = new Map<number, string>()
-    let updates = 0
-    for (let from = 0; from < plan.steps.length; from += size) {
-      if (from > 0 && between) state = between(state, placed)
-      let more = true
-      state = produce(state, (d) => {
-        more = applyPlacement(d, spaceId, plan, from, from + size, placed, ids, NOW)
-      })
-      updates++
-      if (!more) break
+    const folder = new DetachedFolder(
+      planPlacement('Imported bookmarks', tree),
+      spaceId,
+      state.spaces[spaceId]?.profileId as string,
+      NOW,
+    )
+    let parts = 0
+    for (; !folder.whole; parts++) {
+      const tabs = folder.build(size)
+      state = produce(state, (d) => addUnplacedTabs(d, tabs))
     }
-    return { state, placed, spaceId, updates }
+    return { state, folder, spaceId, parts }
   }
 
-  it('ends as one placement would, in the same order', () => {
+  it('ends as one placement would, in the same order; until it is shown, no section holds any of it', () => {
     const whole = place(createInitialState(NOW), 'Imported bookmarks', tree)
-    const parts = inParts(createInitialState(NOW), 2)
-    expect(parts.updates).toBeGreaterThan(5)
-    expect(pinnedShape(parts.state, [parts.placed.folderId])).toEqual(pinnedShape(whole.next, [whole.placed.folderId]))
-    expect(parts.placed.tabIds).toHaveLength(6)
+    const base = createInitialState(NOW)
+    const { state, folder, parts } = inParts(base, 2)
+    expect(parts).toBe(3)
+    expect(Object.keys(state.tabs)).toHaveLength(6)
+    expect(state.spaces).toEqual(base.spaces)
+    expect(state.folders).toEqual({})
+    let added: ReturnType<typeof attachFolders> = []
+    const next = produce(state, (d) => {
+      added = attachFolders(d, [folder], ['Imported bookmarks'])
+    })
+    expect(added).toHaveLength(1)
+    expect(added[0]?.tabs).toBe(6)
+    expect(pinnedShape(next, [added[0]?.folderId as string])).toEqual(pinnedShape(whole.next, [whole.placed.folderId]))
   })
 
-  it('stops when the new folder is deleted part-way, and skips into a sub-folder that was', () => {
-    const gone = inParts(createInitialState(NOW), 3, (s, placed) =>
-      produce(s, (d) => {
-        const space = d.spaces[d.spaceOrder[0] as string]
-        if (space) space.pinned = space.pinned.filter((id) => id !== placed.folderId)
-        delete d.folders[placed.folderId]
-      }),
-    )
-    expect(gone.updates).toBe(2)
-    expect(gone.placed.tabIds.length).toBeLessThan(6)
-    // A sub-folder deleted part-way: what was to go in it is left out; the rest still comes.
-    let deleted = ''
-    const sub = inParts(createInitialState(NOW), 3, (s, placed) => {
-      if (deleted) return s
-      return produce(s, (d) => {
-        const root = d.folders[placed.folderId]
-        deleted = root?.children[0] ?? ''
-        if (root) root.children = root.children.slice(1)
-        delete d.folders[deleted]
-      })
+  it('shows nothing in a Space deleted while its folder was made, nor a folder not yet whole', () => {
+    const { state, folder } = inParts(createInitialState(NOW), 3)
+    const gone = produce(state, (d) => {
+      delete d.spaces[d.spaceOrder[0] as string]
     })
-    expect(pinnedShape(sub.state, [sub.placed.folderId])).toEqual([
-      {
-        'Imported bookmarks': [
-          { 'Other bookmarks': [{ Recipes: [{ Bread: ['Sourdough <https://example.com/page/Sourdough>'] }] }] },
-        ],
-      },
-    ])
+    let added: ReturnType<typeof attachFolders> = []
+    const after = produce(gone, (d) => {
+      added = attachFolders(d, [folder], ['Imported bookmarks'])
+    })
+    expect(added).toEqual([])
+    expect(after).toBe(gone)
+    const base = createInitialState(NOW)
+    const spaceId = base.spaceOrder[0] as string
+    const part = new DetachedFolder(planPlacement('Imported bookmarks', tree), spaceId, 'p-default', NOW)
+    const some = produce(base, (d) => addUnplacedTabs(d, part.build(4)))
+    expect(part.whole).toBe(false)
+    expect(produce(some, (d) => void attachFolders(d, [part], ['Imported bookmarks']))).toBe(some)
+  })
+
+  it('gives the tabs the Space’s profile when the Space moved to another one meanwhile (PR-03)', () => {
+    const { state, folder, spaceId } = inParts(createInitialState(NOW), 100)
+    const moved = produce(state, (d) => {
+      const space = d.spaces[spaceId]
+      if (space) space.profileId = 'p-other'
+    })
+    let added: ReturnType<typeof attachFolders> = []
+    const next = produce(moved, (d) => {
+      added = attachFolders(d, [folder], ['Imported bookmarks'])
+    })
+    expect(added[0]?.tabs).toBe(6)
+    expect(folder.tabs.map((t) => next.tabs[t.id]?.profileId)).toEqual(Array(6).fill('p-other'))
+  })
+
+  it('leaves out of its folders a tab gone while it was made', () => {
+    const { state, folder } = inParts(createInitialState(NOW), 100)
+    const first = folder.tabs[0]?.id as string
+    const without = produce(state, (d) => {
+      delete d.tabs[first]
+    })
+    expect(folder.keepOnly((id) => !!without.tabs[id])).toBe(5)
+    let added: ReturnType<typeof attachFolders> = []
+    const next = produce(without, (d) => {
+      added = attachFolders(d, [folder], ['Imported bookmarks'])
+    })
+    const root = added[0]?.folderId as string
+    const shown = (ids: readonly string[]): string[] =>
+      ids.flatMap((id) => [id, ...shown(next.folders[id]?.children ?? [])])
+    expect(shown([root])).not.toContain(first)
+    expect(shown([root]).filter((id) => next.tabs[id])).toHaveLength(5)
   })
 })
 

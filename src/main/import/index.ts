@@ -41,6 +41,15 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
     stopReaders()
     removeScratch()
   })
+  if (ctx.e2e) {
+    const hooks = {
+      /** The next import stops adding once `at` bookmarks are made, until Orbit quits (D62's tests quit part-way). */
+      holdAddingAt: (at: number) => {
+        jobs.testPause = (made) => (made >= at ? new Promise<void>(() => {}) : undefined)
+      },
+    }
+    ;(globalThis as unknown as { __orbitImport: typeof hooks }).__orbitImport = hooks
+  }
   const win = new ImportWindow(ctx, () => {
     const windowId = win.browserWindow()
     const spaceId = windowId ? store.state.windows[windowId]?.spaceId : store.state.spaceOrder[0]

@@ -352,21 +352,45 @@ test('[IM-05][IM-14] 2,000 bookmarks: one closed folder, nothing loaded, quick, 
     .toBe('commandbar')
 })
 
-test('[IM-13][IM-14] a quit while bookmarks are being added takes them back: the relaunch shows no part-filled folder (F6)', async () => {
+/** `folders` folders of `size` bookmarks each, at addresses that are never loaded. */
+function inFolders(folders: number, size: number): BookmarkNode[] {
+  return Array.from({ length: folders }, (_, f) => ({
+    id: `f${f}`,
+    title: `Folder ${f + 1}`,
+    children: Array.from({ length: size }, (_, i) => ({
+      id: `b${f}-${i}`,
+      title: `Page ${i + 1}`,
+      url: `https://example.com/page/f${f + 1}/p${i + 1}`,
+    })),
+  }))
+}
+
+test('[IM-13][IM-14] a quit part-way leaves nothing of the import and every tab of the user’s, moved in or not (F6, D62)', async () => {
   test.setTimeout(180_000)
   const userData = mkdtempSync(join(tmpdir(), 'orbit-e2e-'))
+  server = await loggedServer()
+  const local = server
   try {
     orbit = await launchImport({ userData })
     const { app } = orbit
     const s = await state(app)
     const spaceId = s.windows[Object.keys(s.windows)[0] as string]?.spaceId as string
-    // 100,000 bookmarks in one folder: adding them takes several seconds, a part at a time.
-    const children: BookmarkNode[] = Array.from({ length: 100_000 }, (_, i) => ({
-      id: `b${i}`,
-      title: `Page ${i + 1}`,
-      url: `https://example.com/page/p${i + 1}`,
-    }))
-    const bookmarks: BookmarkNode[] = [{ id: 'f', title: 'Many', children }]
+    // Two pinned tabs of the user's.
+    const mine: string[] = []
+    for (const path of ['/mine-1', '/mine-2']) {
+      const container = { kind: 'pinned', spaceId }
+      mine.push(
+        (await run(app, 'tabs.create', { url: local.url(path), spaceId, container, activate: false })) as string,
+      )
+    }
+    // 20,000 bookmarks in 10 folders of 2,000. The import holds once 5,000 are made (an e2e hook), so the quit
+    // comes part-way, with the folder being filled half full.
+    const bookmarks = inFolders(10, 2000)
+    await app.evaluate(() =>
+      (globalThis as unknown as { __orbitImport: { holdAddingAt: (n: number) => void } }).__orbitImport.holdAddingAt(
+        5000,
+      ),
+    )
     await run(app, 'import.start', {
       plan: { kind: 'file', name: 'many.html', bookmarks, target: { kind: 'space', spaceId } },
     })
@@ -376,26 +400,102 @@ test('[IM-13][IM-14] a quit while bookmarks are being added takes them back: the
         async () => {
           const job = (await run(app, 'import.status', {})) as ImportJob
           added = job.items[0]?.done ?? 0
-          return job.phase === 'adding' && added > 0
+          return job.phase === 'adding' && added >= 5000
         },
         { intervals: [10], timeout: 60_000 },
       )
       .toBe(true)
+    // Meanwhile the user moves what the sidebar shows of the import: a tab of theirs into its folder, another into
+    // its first sub-folder, and its last sub-folder (the one being filled) out to the pinned section.
+    const during = await state(app)
+    const root = (during.spaces[spaceId]?.pinned ?? []).find((id) => during.folders[id]?.name === 'Imported bookmarks')
+    if (root) {
+      const subs = (during.folders[root]?.children ?? []).filter((id) => during.folders[id])
+      await run(app, 'tabs.move', { id: mine[0], to: { kind: 'folder', folderId: root }, index: 0 })
+      await run(app, 'tabs.move', { id: mine[1], to: { kind: 'folder', folderId: subs[0] }, index: 0 })
+      await run(app, 'tabs.move', { id: subs.at(-1), to: { kind: 'pinned', spaceId }, index: 0 })
+      const moved = await state(app)
+      console.log(
+        `[D62] the sidebar showed the import's folder: moved in 2 tabs of the user's, and moved out "${moved.folders[subs.at(-1) as string]?.name}" holding ${tabsUnder(moved, subs.at(-1) as string).length} tabs`,
+      )
+    }
     await app.close()
-    console.log(`[F6] quit with ${added.toLocaleString('en-US')} of 100,000 bookmarks added`)
-    expect(added).toBeLessThan(100_000)
+    console.log(`[D62] quit with ${added.toLocaleString('en-US')} of 20,000 bookmarks made`)
 
     orbit = await launchImport({ userData })
     const after = await state(orbit.app)
+    const pinned = (after.spaces[spaceId]?.pinned ?? []).flatMap((id) => [id, ...tabsUnder(after, id).map((t) => t.id)])
     const left = Object.values(after.tabs).filter((t) => t.pinnedUrl?.startsWith('https://example.com/page/'))
-    console.log(`[F6] after the relaunch: ${left.length} of the imported tabs`)
-    expect(Object.values(after.folders).map((f) => f.name)).not.toContain('Imported bookmarks')
+    const folders = Object.values(after.folders).map((f) => `${f.name} (${tabsUnder(after, f.id).length} tabs)`)
+    console.log(`[D62] after the relaunch: ${left.length} imported tabs; folders: ${JSON.stringify(folders)}`)
+    // Every tab of the user's is there, pinned in its Space.
+    expect(mine.map((id) => after.tabs[id]?.pinnedUrl)).toEqual([local.url('/mine-1'), local.url('/mine-2')])
+    expect(pinned).toEqual(expect.arrayContaining(mine))
+    // Nothing of the import: no tab, and no folder anywhere, part-filled or not.
     expect(left).toHaveLength(0)
+    expect(folders).toEqual([])
+    // The import made its folder out of sight: the sidebar showed none of it while it ran (D62 (3)).
+    expect(root).toBeUndefined()
   } finally {
     await orbit?.app.close().catch(() => {})
     orbit = undefined
     rmSync(userData, { recursive: true, force: true })
   }
+})
+
+test('[IM-14] while 20,000 bookmarks are added, the browser window never freezes for 200 ms (N3)', async () => {
+  test.setTimeout(240_000)
+  orbit = await launchImport()
+  const { app, shell } = orbit
+  const s = await state(app)
+  const spaceId = s.windows[Object.keys(s.windows)[0] as string]?.spaceId as string
+  const bookmarks = inFolders(10, 2000)
+  // Best of three rounds (D46). The browser window's longest freeze is the longest gap of a 10 ms timer in it, from
+  // the start until its sidebar shows the new folder; main's longest stall is the import's own measure (its stats).
+  type Round = { ms: number; windowLongestMs: number; mainLongestMs: number }
+  const rounds: Round[] = []
+  const meets = (r: Round) => r.windowLongestMs < 200
+  for (let round = 0; round < 3; round++) {
+    await shell.evaluate(() => {
+      const w = window as unknown as { __gap: number; __gapTimer: number }
+      w.__gap = 0
+      let last = performance.now()
+      w.__gapTimer = window.setInterval(() => {
+        const now = performance.now()
+        w.__gap = Math.max(w.__gap, now - last)
+        last = now
+      }, 10)
+    })
+    const id = (await run(app, 'import.start', {
+      plan: { kind: 'file', name: 'many.html', bookmarks, target: { kind: 'space', spaceId } },
+    })) as string
+    let job: ImportJob | undefined
+    await expect
+      .poll(
+        async () => {
+          job = (await run(app, 'import.status', { jobId: id })) as ImportJob
+          return job.phase
+        },
+        { timeout: 120_000 },
+      )
+      .toBe('done')
+    expect(job?.items[0]?.done).toBe(20_000)
+    await expect(shell.locator(`[data-testid="folder"][data-folder-id="${job?.folders[0]?.folderId}"]`)).toBeVisible()
+    // A last stretch, so a freeze still going on shows.
+    await shell.evaluate(() => new Promise((resolve) => setTimeout(resolve, 100)))
+    const windowLongestMs = Math.round(
+      await shell.evaluate(() => {
+        const w = window as unknown as { __gap: number; __gapTimer: number }
+        clearInterval(w.__gapTimer)
+        return w.__gap
+      }),
+    )
+    const stats = job?.stats ?? { ms: Number.POSITIVE_INFINITY, longestTaskMs: Number.POSITIVE_INFINITY }
+    rounds.push({ ms: stats.ms, windowLongestMs, mainLongestMs: stats.longestTaskMs })
+    if (meets(rounds.at(-1) as Round)) break
+  }
+  console.log(`[N3] 20,000 bookmarks: ${JSON.stringify(rounds)}`)
+  expect(rounds.some(meets), JSON.stringify(rounds)).toBe(true)
 })
 
 test('[IM-14] the summary counts every skipped bookmark, also those in a folder that holds nothing else (F3)', async () => {

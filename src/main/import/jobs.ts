@@ -10,12 +10,19 @@ import type {
 import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
 import type { FolderId, OrbitState, ProfileId, SpaceId, TabId, WindowId } from '../../shared/state'
-import { containerItems, insertItem, locate, removeItem } from '../../shared/tree'
+import { containerItems, insertItem, locate, removeItem, splitLeaves } from '../../shared/tree'
 import { sidebarUndo } from '../archive/inbox'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
-import { reselectAway } from '../tabs/model'
-import { applyPlacement, freeFolderName, type PlacedFolder, planPlacement, skippedLines } from './bookmarks'
+import { detachFromSplit, reselectAway } from '../tabs/model'
+import {
+  addUnplacedTabs,
+  attachFolders,
+  DetachedFolder,
+  freeFolderName,
+  planPlacement,
+  skippedLines,
+} from './bookmarks'
 
 /** Where one part of an import goes: bookmarks to the Space, the rest to its profile (IM-06). */
 export interface Destination {
@@ -43,8 +50,8 @@ export interface Job {
   folderName: string
   /** Source profiles' names by key: sub-folder names, and 'matching' destinations' names. */
   profileNames: Map<string, string>
-  /** The folders of the bookmarks being added: a quit or a failure part-way takes them all back (F6). */
-  placing: PlacedFolder[]
+  /** Tabs added that no section shows yet (D62 (3)): a quit or a failure part-way takes back exactly these. */
+  unplaced: TabId[]
 }
 
 /** An import that has ended: only what its summary and Done need are kept (F8). */
@@ -55,8 +62,16 @@ export interface EndedJob {
 
 export const IMPORT_UNDO_LABEL = 'Import Bookmarks'
 const PROGRESS_EVERY_MS = 100
-/** Pinned items added per store update: a few milliseconds of work each. */
-const PLACE_CHUNK = 250
+/**
+ * Tabs added per store update while an import's folder is out of sight (D62 (3)). Every Orbit window takes each part
+ * in tens of milliseconds, so none freezes for long (N3); one update of 20,000 froze the browser window for a second.
+ */
+const PART_TABS = 1000
+/** After each part, main waits this many times as long as the part took it (at least MIN_PAUSE_MS): windows keep up. */
+const PAUSE_FACTOR = 2.5
+const MIN_PAUSE_MS = 20
+/** Why bookmarks made for a Space didn't go in: it was deleted while they were added. */
+export const SPACE_GONE = 'Their Space was deleted while they were added'
 
 /** Runs imports one after another; tells every Orbit UI how they go (`import.progress`). */
 export class ImportJobs {
@@ -68,6 +83,8 @@ export class ImportJobs {
   private sent = 0
   private sendTimer: NodeJS.Timeout | undefined
   private release = new Map<string, () => void>()
+  /** e2e only: awaited as bookmarks are made, with how many are, so a test can quit part-way (D62). */
+  testPause: ((made: number) => Promise<void> | undefined) | undefined
 
   constructor(private readonly ctx: MainContext) {}
 
@@ -106,7 +123,7 @@ export class ImportJobs {
       destinations: new Map(),
       folderName,
       profileNames,
-      placing: [],
+      unplaced: [],
     }
     this.jobs.set(id, job)
     this.latest = id
@@ -114,7 +131,7 @@ export class ImportJobs {
     this.queue = run.catch(() => undefined)
     run.catch((err: unknown) => {
       console.error('[import] failed:', err)
-      // Bookmarks are all or nothing: a part-filled folder goes (F6).
+      // Bookmarks are shown whole or not at all (D62): the tabs added out of sight go.
       this.takeBack(job)
       job.status.phase = 'failed'
       job.status.error = err instanceof Error ? err.message : String(err)
@@ -152,8 +169,8 @@ export class ImportJobs {
   }
 
   /**
-   * Quit: every import stops where it is (nothing more is read, D58), and the bookmarks being added
-   * are taken back, so the next launch shows no part-filled folder (F6). Runs before the state's last write.
+   * Quit: every import stops where it is (nothing more is read, D58), and the tabs of bookmarks being added out of sight
+   * are taken back, so the next launch shows nothing of them (D62). Runs before the state's last write.
    */
   quit(): void {
     for (const job of this.jobs.values()) {
@@ -163,24 +180,33 @@ export class ImportJobs {
     }
   }
 
-  /** Removes the folders of bookmarks still being added, with everything in them, in one store update (F6). */
+  /**
+   * Takes back the tabs an import added that no section shows yet: exactly its own, by id (D62 (1)). Nothing of the
+   * user's can be among them. One the user reached anyway (the command bar finds every tab) goes from where it is now
+   * (D62 (2)).
+   */
   private takeBack(job: Job): void {
-    const placing = job.placing.splice(0)
     const state = this.ctx.store.state
-    // Walked in the state, not the draft: a draft would wrap each of the (up to 200,000) tabs it reads.
-    const parts = placing.flatMap((p) =>
-      p.folderId && state.folders[p.folderId] ? [itemsUnder(state, p.folderId)] : [],
-    )
-    if (parts.length === 0) return
+    const ids = job.unplaced.splice(0).filter((id) => state.tabs[id])
+    if (ids.length === 0) return
+    // What the sections hold, found once.
+    const placed = new Set<string>()
+    for (const p of Object.values(state.profiles)) for (const id of p.favorites) placed.add(id)
+    for (const sp of Object.values(state.spaces)) for (const id of [...sp.pinned, ...sp.today]) placed.add(id)
+    for (const f of Object.values(state.folders)) for (const id of f.children) placed.add(id)
+    for (const split of Object.values(state.splits)) for (const id of splitLeaves(split.layout)) placed.add(id)
+    const gone = new Set(ids)
     this.ctx.store.update((d) => {
-      for (const { rootId, folders, tabs } of parts) {
-        reselectAway(d, new Set(tabs))
-        removeItem(d, rootId)
-        for (const id of folders) delete d.folders[id]
-        for (const id of tabs) delete d.tabs[id]
+      reselectAway(d, gone)
+      for (const id of ids) {
+        if (placed.has(id)) {
+          detachFromSplit(d, id)
+          removeItem(d, id)
+        }
+        delete d.tabs[id]
       }
     })
-    for (const { tabs } of parts) for (const id of tabs) this.ctx.tabs.destroy(id)
+    for (const id of ids) this.ctx.tabs.destroy(id)
   }
 
   /** Held imports nobody committed are dropped (onboarding ended with Skip setup, OB-14). */
@@ -320,9 +346,11 @@ export class ImportJobs {
   }
 
   /**
-   * Adds the bookmarks read: one pinned folder per Space (IM-05), with a sub-folder per source profile
-   * when several go to the same Space. They go in store updates of PLACE_CHUNK items, with a turn of
-   * the event loop between, so the windows keep answering (IM-14). One undo step takes it all back.
+   * Adds the bookmarks read: one pinned folder per Space (IM-05), with a sub-folder per source profile when several go
+   * to the same Space. Each folder is made out of sight (D62 (3)): its tabs go into the state a part at a time, where no
+   * section shows them, paced so every window keeps up (N3); then one store update adds the folders and shows them
+   * whole. Until then the sidebar shows none of it, so nothing can be moved into or out of it. One undo step takes the
+   * import back (D62 (4)).
    */
   async addBookmarks(job: Job, item: ImportProgressItem): Promise<void> {
     const bySpace = new Map<SpaceId, { key: string; groups: { title: string; nodes: BookmarkNode[] }[] }[]>()
@@ -335,8 +363,10 @@ export class ImportJobs {
     }
     const now = Date.now()
     const skipped = new Map<string, number>()
-    let added = 0
+    const built: DetachedFolder[] = []
     for (const [spaceId, perProfile] of bySpace) {
+      const space = this.ctx.store.state.spaces[spaceId]
+      if (!space) continue
       const asNodes = (groups: { title: string; nodes: BookmarkNode[] }[]): BookmarkNode[] =>
         groups.flatMap((g) => (g.title ? [{ id: g.title, title: g.title, children: g.nodes }] : g.nodes))
       const nodes: BookmarkNode[] =
@@ -347,31 +377,48 @@ export class ImportJobs {
               title: job.profileNames.get(key) || `Profile ${i + 1}`,
               children: asNodes(groups),
             }))
-      const plan = planPlacement(freeFolderName(this.ctx.store.state, spaceId, job.folderName), nodes)
+      const plan = planPlacement(job.folderName, nodes)
       for (const [reason, n] of plan.skipped) skipped.set(reason, (skipped.get(reason) ?? 0) + n)
-      if (plan.tabs === 0) continue
-      const placed: PlacedFolder = { folderId: '', tabIds: [], folderIds: [], skipped: plan.skipped }
-      job.placing.push(placed)
-      const ids = new Map<number, FolderId>()
-      for (let from = 0; from < plan.steps.length; from += PLACE_CHUNK) {
-        await new Promise((resolve) => setImmediate(resolve))
-        if (job.cancelled) return
-        let more = true
-        this.ctx.store.update((d) => {
-          more = applyPlacement(d, spaceId, plan, from, from + PLACE_CHUNK, placed, ids, now)
-        })
-        item.done = added + placed.tabIds.length
-        this.changed(job)
-        if (!more) break
-      }
-      added += placed.tabIds.length
-      if (!placed.folderId || !this.ctx.store.state.folders[placed.folderId]) continue
-      job.status.folders.push({ folderId: placed.folderId, spaceId })
-      this.recordUndo(placed.folderId)
+      if (plan.tabs > 0) built.push(new DetachedFolder(plan, spaceId, space.profileId, now))
     }
-    // Every folder is filled: they stay.
-    job.placing = []
-    item.done = added
+    let pause = 0
+    for (const folder of built) {
+      while (!folder.whole && this.ctx.store.state.spaces[folder.spaceId]) {
+        await new Promise((resolve) => setTimeout(resolve, pause))
+        if (job.cancelled) return
+        const started = performance.now()
+        const tabs = folder.build(PART_TABS)
+        this.ctx.store.update((d) => addUnplacedTabs(d, tabs))
+        for (const t of tabs) job.unplaced.push(t.id)
+        // Sent to the windows now, so the pause counts their share of the work.
+        this.ctx.store.flush()
+        pause = Math.max(MIN_PAUSE_MS, PAUSE_FACTOR * (performance.now() - started))
+        item.done += tabs.length
+        this.changed(job)
+        await this.testPause?.(item.done)
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, pause))
+    if (job.cancelled) return
+    const state = this.ctx.store.state
+    // Each named now: another folder may have taken the name meanwhile (IM-15).
+    const names = built.map((b) => freeFolderName(state, b.spaceId, job.folderName))
+    // A tab gone meanwhile (Restore Data, say) leaves its folder.
+    for (const b of built) b.keepOnly((id) => !!state.tabs[id])
+    let added: ReturnType<typeof attachFolders> = []
+    this.ctx.store.update((d) => {
+      added = attachFolders(d, built, names)
+    })
+    // Shown: from now on they are the user's (undo takes them back). A Space deleted meanwhile gets none.
+    const shown = new Set(added.map((a) => a.spaceId))
+    const left = built.filter((b) => !shown.has(b.spaceId))
+    job.unplaced = left.flatMap((b) => b.tabs.map((t) => t.id))
+    this.takeBack(job)
+    const lost = left.filter((b) => !this.ctx.store.state.spaces[b.spaceId]).reduce((n, b) => n + b.total, 0)
+    if (lost > 0) skipped.set(SPACE_GONE, lost)
+    item.done = added.reduce((n, a) => n + a.tabs, 0)
+    for (const { folderId, spaceId } of added) job.status.folders.push({ folderId, spaceId })
+    this.recordUndo(added.map((a) => a.folderId))
     job.status.skipped.push(...skippedLines(skipped, item.type === 'links' ? ['link', 'links'] : undefined))
   }
 
@@ -380,51 +427,42 @@ export class ImportJobs {
     job.status.skipped.push(...skips.filter((s) => s.count === undefined || s.count > 0))
   }
 
-  /** ⌘Z takes an import back: its folder goes, with every tab in it; ⌘⇧Z puts it back (TB-18). */
-  private recordUndo(rootId: FolderId): void {
+  /** ⌘Z takes an import back: its folders go, with every tab in them; ⌘⇧Z puts them back (TB-18, D62 (4)). */
+  private recordUndo(rootIds: FolderId[]): void {
     const stack = sidebarUndo()
-    if (!stack) return
+    if (!stack || rootIds.length === 0) return
     const store = this.ctx.store
     const undo = () => {
       const state = store.state
-      const loc = locate(state, rootId)
-      if (!loc) return undefined
-      const snap = subtree(state, rootId)
-      const tabSet = new Set<TabId>(snap.tabs.map((t) => t.id))
+      const parts = rootIds.flatMap((rootId) => {
+        const loc = locate(state, rootId)
+        return loc ? [{ rootId, loc, ...subtree(state, rootId) }] : []
+      })
+      if (parts.length === 0) return undefined
+      const tabSet = new Set<TabId>(parts.flatMap((p) => p.tabs.map((t) => t.id)))
       store.update((d) => {
         reselectAway(d, tabSet)
-        removeItem(d, rootId)
-        for (const f of snap.folders) delete d.folders[f.id]
-        for (const t of snap.tabs) delete d.tabs[t.id]
+        for (const p of parts) {
+          removeItem(d, p.rootId)
+          for (const f of p.folders) delete d.folders[f.id]
+          for (const t of p.tabs) delete d.tabs[t.id]
+        }
       })
       for (const id of tabSet) this.ctx.tabs.destroy(id)
       return () => {
         store.update((d) => {
-          if (!containerItems(d, loc.container)) return
-          for (const f of snap.folders) d.folders[f.id] = structuredClone(f)
-          for (const t of snap.tabs) d.tabs[t.id] = { ...structuredClone(t), asleep: true, loading: false }
-          insertItem(d, loc.container, loc.index, rootId)
+          for (const p of parts) {
+            if (!containerItems(d, p.loc.container)) continue
+            for (const f of p.folders) d.folders[f.id] = structuredClone(f)
+            for (const t of p.tabs) d.tabs[t.id] = { ...structuredClone(t), asleep: true, loading: false }
+            insertItem(d, p.loc.container, p.loc.index, p.rootId)
+          }
         })
-        this.recordUndo(rootId)
+        this.recordUndo(parts.map((p) => p.rootId))
       }
     }
-    stack.push(IMPORT_UNDO_LABEL, undo, Date.now(), () => !store.state.folders[rootId])
+    stack.push(IMPORT_UNDO_LABEL, undo, Date.now(), () => rootIds.every((id) => !store.state.folders[id]))
   }
-}
-
-/** The ids of a folder's folders (itself included) and tabs, at any depth. */
-function itemsUnder(state: OrbitState, rootId: FolderId): { rootId: FolderId; folders: FolderId[]; tabs: TabId[] } {
-  const folders: FolderId[] = []
-  const tabs: TabId[] = []
-  const stack: string[] = [rootId]
-  for (let id = stack.pop(); id !== undefined; id = stack.pop()) {
-    const f = state.folders[id]
-    if (f) {
-      folders.push(id)
-      for (const child of f.children) stack.push(child)
-    } else if (state.tabs[id]) tabs.push(id)
-  }
-  return { rootId, folders, tabs }
 }
 
 /** A folder's own folders and tabs, copied (for undo). */
