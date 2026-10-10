@@ -38,6 +38,24 @@ import type { ComponentType } from 'react'
  *   profile and window Settings acts for with `useSettingsContext()` from `./context`.
  * - `keywords` (optional): more words the search box finds the section by.
  *
+ * A section gets no command-bar action by itself (ST-02: "Shortcut Settings" and the like). Add one
+ * to `SETTINGS_ACTIONS` (src/shared/commands/settings.ts): an `ActionDef` plus where it opens,
+ * `settings: { section: id }` (with `item` to land on one row). Main registers each entry to run
+ * `settings.open(def.settings)` for the window it was chosen from, so this is the whole change:
+ *
+ * ```ts
+ * {
+ *   id: 'settings.shortcuts',
+ *   title: 'Shortcut Settings',
+ *   category: 'App',
+ *   settings: { section: 'shortcuts' },
+ *   keywords: ['keyboard shortcuts', 'remap keys'],
+ * },
+ * ```
+ *
+ * A lane that keeps its own action list does the same by hand: its `ActionDef`, and
+ * `actions.register(id, (c) => commands.run('settings.open', { section: 'shortcuts' }, c))` in main.
+ *
  * Keep pages cheap while Settings sits open in the background: select narrow slices of state
  * (`useOrbit((s) => s.settings.someFlag)`), never whole maps such as `s.tabs`.
  */
