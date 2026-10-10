@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 475 spec’d · 161 built (60 partial) · 227 tested · 0 feel right. 10 more are out of scope and not counted.
+**Totals:** 475 spec’d · 164 built (63 partial) · 233 tested · 0 feel right. 10 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 110 | 136 |
-| P1 | 221 | 44 | 82 |
-| P2 | 80 | 7 | 9 |
+| P1 | 221 | 47 | 87 |
+| P2 | 80 | 7 | 10 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -510,22 +510,22 @@ Spec: `spec/downloads.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| DL-01 | Downloading a file (baseline) | P0 | ✅ | ✅ e2e+unit | – | per-profile sessions save to the profile's folder (OS Downloads), name (1) on collisions, .crdownload until done; a blank tab opened for a download closes; toasts for start/finish; outlives its page; quitting asks while downloads run |
-| DL-02 | Download start animation | P1 | – | – | – |  |
-| DL-03 | In-progress indicator at the bottom of the sidebar | P1 | – | – | – |  |
-| DL-04 | Open a finished download, or show it in its folder | P1 | – | – | – |  |
+| DL-01 | Downloading a file (baseline) | P0 | ✅ | ✅ e2e+unit | – | per-profile sessions save to the profile's folder (OS Downloads), name (1) on collisions, .crdownload until done; a blank tab opened for a download closes; outlives its page; quitting asks while downloads run |
+| DL-02 | Download start animation | P1 | ✅ | ✅ e2e | – | a file icon flies from the page's edge into the Library button (≈0.5 s curved path, ease-out) and the button bounces; one flight per download; reduce motion: a fade on the button. Sidebar hidden: a "Downloading <file>" toast (and "Downloaded"/"Couldn't download"). A Mini Window's downloads show in its main window |
+| DL-03 | In-progress indicator at the bottom of the sidebar | P1 | ✅ | ✅ e2e+unit | – | row above the bottom bar: name truncated in the middle, progress bar, bytes of total, time left (smoothed), ✕ cancels and deletes the partial file; several: newest + "+N", hover or "+N" lists each with its own ✕; done for 4 s, click opens; failed: Resume or Retry, ✕ dismisses; no downloads, no room taken. Right-click: the download's menu |
+| DL-04 | Open a finished download, or show it in its folder | P1 | 🟡 partial | ✅ e2e+unit | – | Open (PDF, images, text, audio, video in an Orbit tab; else the system app), Show in Finder / Show in Folder, Copy File (pastes as the file in file managers), Copy Download Link, Remove from List, Delete File; a moved file shows "File Missing" and Download Again. Missing: Open with… (no cross-platform API to list apps); the Library and recent-files entry points come with DL-05/DL-10 |
 | DL-05 | Recent files on hover over the Library icon | P1 | – | – | – |  |
 | DL-06 | Drag a download out (and into web pages) | P1 | – | – | – |  |
 | DL-07 | Download location setting (per profile) | P1 | – | – | – |  |
-| DL-08 | Remove, clear and delete downloads | P1 | – | – | – |  |
+| DL-08 | Remove, clear and delete downloads | P1 | 🟡 partial | ✅ e2e+unit | – | Remove from List keeps the file; Delete File moves it to the Trash/Recycle Bin (never a permanent delete; stays listed and says so when it can't); downloads.clear empties a profile's list but for running downloads (files stay, partial ones go). The Clear all button comes with the Library's Downloads section (DL-10); clearing browsing data with "Download history" can call downloads.clear |
 | DL-09 | The Library (container view) | P1 | 🟡 partial | ✅ e2e+unit | – | Library container (archive lane): section list on the left with the Archive, History (AR-10) and Backups (AR-11) sections; other lanes add theirs (Media, Downloads, Canvases & Notes, Spaces, Site customizations) through the registry. Reopens to the last section; Esc/⌘W close and the previous tab comes back. Its view is made once Orbit is idle after launch, so even the first open is quick (about 70 ms at 10,000 entries; later opens 10–50 ms) |
 | DL-10 | Library → Downloads section | P1 | – | – | – |  |
 | DL-11 | Library → Media section | P2 | – | – | – |  |
 | DL-12 | Download safety | P1 | – | – | – |  |
 | DL-13 | Files the browser can show inline | P1 | – | – | – |  |
 | DL-14 | Downloads keyboard shortcut and menu | P1 | – | – | – |  |
-| DL-15 | Pause, resume and retry | P1 | – | – | – |  |
-| DL-16 | Downloads in private windows, Little windows and Peek | P2 | – | – | – |  |
+| DL-15 | Pause, resume and retry | P1 | ✅ | ✅ e2e+unit | – | Pause/Resume from the row's menu (and a Resume button on a paused row); a cut-off download shows Resume when the server sent an ETag or Last-Modified (continues with a range request), else Retry (starts again); one cut off by quitting resumes after a restart from its partial file (kept under a hidden second name while the engine shuts down). Downloads never block the tab that started them |
+| DL-16 | Downloads in private windows, Little windows and Peek | P2 | 🟡 partial | ✅ e2e | – | Peek and Mini Window downloads go to the same list as any other. A private (in-memory) session's downloads save to disk but are in no saved list; they are listed while the session has pages and leave when its last page closes. Private windows themselves don't exist yet: tested with a profile on an in-memory session |
 | DL-17 | Dock / taskbar progress | P2 | – | – | – |  |
 | DL-18 | Smart renaming of downloads | OOS | ⛔ out of scope | – | – | the spec leaves it out |
 

@@ -1,6 +1,7 @@
 import { type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, useRef } from 'react'
 import type { WindowState } from '../../../../shared/state'
 import { invoke } from '../../api'
+import { DownloadsTray } from '../../downloads/DownloadsTray'
 import { useOrbit } from '../../store'
 import { MediaTray } from '../media/MediaTray'
 import { SpaceStrip } from '../spaces/SpaceStrip'
@@ -29,6 +30,8 @@ export function Sidebar({ win }: { win: WindowState }) {
       <UndoToast />
       {/* Media lane: transient media tray above the bottom bar (SB-10, MD-09). */}
       <MediaTray />
+      {/* Downloads lane: running downloads, just above the bottom bar (DL-03). */}
+      <DownloadsTray win={win} />
       <SpaceBar win={win} />
       <ResizeHandle width={win.sidebar.width} />
     </aside>

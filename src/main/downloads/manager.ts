@@ -1,17 +1,23 @@
-import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
-import { basename, dirname } from 'node:path'
+import { existsSync, linkSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import type { DownloadItem, Session, WebContents } from 'electron'
+import type { DownloadEntry } from '../../shared/commands/downloads'
 import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
 import type { Download, ProfileId, TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
+import { showsInline } from './file-kinds'
+import type { FileActions } from './files'
 import { freePath, PARTIAL_SUFFIX, safeFilename } from './names'
 import type { DownloadRecord, DownloadStore, ResumeInfo } from './store'
 
-/** How long a finished download stays on the sidebar's indicator (DL-03: about 3–5 s). */
+/** How long a finished download stays on the sidebar's row (DL-03: about 3–5 s). */
 export const DONE_LINGER_MS = 4000
 /** Progress reaches OrbitState at most this often per download. */
 const PROGRESS_INTERVAL_MS = 250
+/** An interruption the engine doesn't get over by itself within this long is reported (DL-02, DL-03). */
+const FAILURE_GRACE_MS = 1000
 
 /** A download the engine is running (or holding, paused or interrupted) in this session. */
 interface Live {
@@ -22,28 +28,52 @@ interface Live {
   finalPath: string
   /** Where it is written until then (`<final>.crdownload`). */
   tempPath: string
-  private: boolean
   /** The window it was started from (feedback goes there). */
   windowId?: WindowId
   lastPush: number
   pushTimer?: NodeJS.Timeout
+  /** Taken off the list while it ran (Remove, Retry, Clear all): nothing of it is kept when it ends. */
+  removed?: boolean
 }
+
+/** A private window's download (DL-16): listed in memory only, while its session has pages. */
+interface PrivateEntry {
+  record: DownloadRecord
+  session: Session
+}
+
+/** What the window a download started from is told (DL-02, DL-03). */
+export type DownloadFeedback = 'started' | 'done' | 'failed'
 
 export interface DownloadManagerOptions {
   /** The folder a profile's downloads are saved to (DL-07). */
   folder: (profileId: ProfileId) => string
-  /** Says something brief on screen (start, finish, failure). */
+  /** The sidebar's start animation and row, or a toast where no sidebar shows them. */
+  feedback: (
+    windowId: WindowId | undefined,
+    event: DownloadFeedback,
+    download: { id: string; filename: string },
+  ) => void
+  /** Says something brief on screen (a file that couldn't be opened or moved to the Trash). */
   notify: (windowId: WindowId | undefined, message: string) => void
   /** A tab that was opened only to download a file and never showed a page: close it (DL-01). */
   closeBlankTab: (tabId: TabId) => void
   /** A profile's list changed. */
   changed: (profileId: ProfileId) => void
+  /** The session a profile downloads in (retry, resume after a restart). */
+  session: (profileId: ProfileId) => Session
+  /** Opening files, showing them in their folder, the Trash. */
+  files: FileActions
+  /** Opens a URL in a new selected tab of a window (files Orbit shows itself, DL-04). */
+  openInTab: (url: string, windowId: WindowId | undefined) => void
 }
 
 /**
  * The downloads flow (DL-01): every profile session's `will-download`. A download is saved straight
  * to its profile's folder under a free name, written as `<name>.crdownload` until complete, and
- * tracked in OrbitState (what the sidebar shows) and the downloads list (DownloadStore).
+ * tracked in OrbitState (what the sidebar shows) and the downloads list (DownloadStore). What can be
+ * done with one: pause, resume (also after a restart) and retry (DL-15); open, show, remove and
+ * delete (DL-04, DL-08). A private session's downloads are in no list on disk (DL-16).
  */
 export class DownloadManager {
   private live = new Map<string, Live>()
@@ -52,6 +82,12 @@ export class DownloadManager {
   /** Final paths of downloads still running, lowercased: two at once never get the same name. */
   private reserved = new Set<string>()
   private lingers = new Map<string, NodeJS.Timeout>()
+  /** Downloads asked to continue after a restart, by partial file: the engine's item comes back through `will-download`. */
+  private resuming = new Map<string, { id: string; url: string }>()
+  private privates = new Map<string, PrivateEntry>()
+  /** Private sessions whose pages have all closed (DL-16). */
+  private closedSessions = new WeakSet<Session>()
+  private quitting = false
 
   constructor(
     private ctx: MainContext,
@@ -74,9 +110,47 @@ export class DownloadManager {
     return n
   }
 
-  /** The record of a download (the list's, or the sidebar's for a private one). */
-  get(id: string): Download | undefined {
-    return this.ctx.store.state.downloads[id] ?? this.list.get(id)
+  /** The record of a download: the list's, a private one's, or only the sidebar's. */
+  get(id: string): DownloadRecord | undefined {
+    return this.list.get(id) ?? this.privates.get(id)?.record ?? this.ctx.store.state.downloads[id]
+  }
+
+  /** A profile's downloads, newest first: its list and its private windows' (DL-10, DL-16). */
+  entries(profileId: ProfileId, limit?: number): DownloadEntry[] {
+    const privates = [...this.privates.values()].map((p) => p.record).filter((r) => r.profileId === profileId)
+    const all = [...privates, ...this.list.list(profileId)].sort((a, b) => b.startedAt - a.startedAt)
+    const some = typeof limit === 'number' ? all.slice(0, Math.max(0, limit)) : all
+    return some.map((r) => this.entry(r))
+  }
+
+  /** A download as the UI shows it: the sidebar's live fields, whether its file is gone, whether it can continue. */
+  entry(record: DownloadRecord): DownloadEntry {
+    const { resume: _resume, ...stored } = record
+    const out: DownloadEntry = { ...stored, ...this.ctx.store.state.downloads[record.id] }
+    if (out.state === 'completed' && !existsSync(out.savePath)) out.missing = true
+    if (out.state === 'interrupted' && !this.live.has(record.id)) out.canResume = this.resumable(record)
+    return out
+  }
+
+  /**
+   * After a restart: a download cut off by quitting shows Resume when its partial file can continue,
+   * else Retry (DL-15).
+   */
+  restore(): void {
+    const stopped = Object.values(this.ctx.store.state.downloads).filter(
+      (d) => d.state === 'interrupted' && !this.live.has(d.id),
+    )
+    if (stopped.length === 0) return
+    const can = stopped.map((d) => {
+      const record = this.list.get(d.id)
+      return [d.id, !!record && this.resumable(record)] as const
+    })
+    this.ctx.store.update((draft) => {
+      for (const [id, value] of can) {
+        const entry = draft.downloads[id]
+        if (entry && entry.canResume !== value) entry.canResume = value
+      }
+    })
   }
 
   /** Cancels a download and deletes its partial file (DL-03 ✕). */
@@ -89,12 +163,16 @@ export class DownloadManager {
     // Interrupted in an earlier run: only its partial file is left.
     const record = this.get(id)
     if (!record || record.state === 'completed' || record.state === 'cancelled') return
-    const tempPath = this.list.get(id)?.resume?.tempPath ?? `${record.savePath}${PARTIAL_SUFFIX}`
-    removeFile(tempPath)
-    this.finish(id, record.profileId, { state: 'cancelled', endedAt: Date.now(), canResume: undefined })
+    removePartial(record)
+    this.finish(id, record.profileId, {
+      state: 'cancelled',
+      endedAt: Date.now(),
+      canResume: undefined,
+      resume: undefined,
+    })
   }
 
-  /** Takes a download off the sidebar's indicator (it stays in the list). */
+  /** Takes a download off the sidebar's row (it stays in the list). */
   dismiss(id: string): void {
     const timer = this.lingers.get(id)
     if (timer) clearTimeout(timer)
@@ -102,12 +180,271 @@ export class DownloadManager {
     if (this.ctx.store.state.downloads[id]) this.ctx.store.update((d) => void delete d.downloads[id])
   }
 
-  /** Writes the list now (quit). */
-  flush(): void {
+  /** Pauses a running download (DL-15). */
+  pause(id: string): void {
+    const live = this.live.get(id)
+    if (live?.item.getState() !== 'progressing' || live.item.isPaused()) return
+    live.item.pause()
+    this.push(live)
+    this.changeState(live, { state: 'paused' })
+  }
+
+  /**
+   * Continues a paused or interrupted download where it stopped (DL-15). One cut off by quitting
+   * continues from its partial file, when the server named a version of the file (an ETag or a
+   * modification date) to check it against. False when it can't continue (retry it).
+   */
+  resume(id: string): boolean {
+    const live = this.live.get(id)
+    if (live) {
+      const { item } = live
+      const state = item.getState()
+      if (state === 'progressing' && item.isPaused()) {
+        item.resume()
+      } else if (state === 'interrupted' && canContinue(item)) {
+        item.resume()
+      } else {
+        return state === 'progressing'
+      }
+      this.push(live)
+      this.changeState(live, { state: 'progressing', canResume: undefined, error: undefined })
+      return true
+    }
+    const record = this.list.get(id)
+    if (record?.state !== 'interrupted' || !record.resume || !this.resumable(record)) return false
+    const r = record.resume
+    this.resuming.set(r.tempPath, { id, url: r.urlChain[r.urlChain.length - 1] ?? record.url })
+    try {
+      // The bytes kept at quit go back under the partial file's name.
+      const kept = keptPath(record)
+      if (existsSync(r.tempPath)) removeFile(kept)
+      else renameSync(kept, r.tempPath)
+      this.opts.session(record.profileId).createInterruptedDownload({
+        path: r.tempPath,
+        urlChain: r.urlChain,
+        offset: statSync(r.tempPath).size,
+        length: record.totalBytes,
+        ...(r.mimeType ? { mimeType: r.mimeType } : {}),
+        ...(r.etag ? { eTag: r.etag } : {}),
+        ...(r.lastModified ? { lastModified: r.lastModified } : {}),
+        ...(r.startTime ? { startTime: r.startTime } : {}),
+      })
+    } catch (err) {
+      this.resuming.delete(r.tempPath)
+      console.error('[downloads] cannot continue an interrupted download:', err)
+      return false
+    }
+    return true
+  }
+
+  /**
+   * Downloads the file again (DL-15 Retry, DL-04 a missing file). One the engine still holds starts
+   * again from the beginning; any other is downloaded anew from its address, as a new download, and
+   * this one leaves the list.
+   */
+  retry(id: string): void {
+    const live = this.live.get(id)
+    if (live && live.item.getState() === 'interrupted' && live.item.canResume()) {
+      // The engine still holds it: it starts again from the beginning, under the same name.
+      live.item.resume()
+      this.push(live)
+      this.changeState(live, { state: 'progressing', receivedBytes: 0, canResume: undefined, error: undefined })
+      return
+    }
+    const record = this.get(id)
+    if (!record) return
+    const ses = this.privates.get(id)?.session ?? this.opts.session(record.profileId)
+    this.remove(id)
+    ses.downloadURL(record.url)
+  }
+
+  /** Takes a download off the list and the sidebar; a finished file stays, a partial one goes (DL-08). */
+  remove(id: string): void {
+    const record = this.get(id)
+    if (!record) return
+    const live = this.live.get(id)
+    if (live) {
+      // Running or held by the engine: stopping it deletes its partial file.
+      live.removed = true
+      live.item.cancel()
+    } else if (record.state !== 'completed') {
+      removePartial(record)
+    }
+    this.forget(id, record.profileId)
+  }
+
+  /**
+   * Moves a finished download's file to the Trash (never a permanent delete) and takes it off the
+   * list (DL-08). A download not finished is removed as Remove from List does. False when the file
+   * couldn't be moved: it stays listed.
+   */
+  async trash(id: string, windowId?: WindowId): Promise<boolean> {
+    const record = this.get(id)
+    if (!record) return false
+    if (record.state === 'completed' && !this.live.has(id) && existsSync(record.savePath)) {
+      try {
+        await this.opts.files.trashItem(record.savePath)
+      } catch (err) {
+        console.error('[downloads] cannot move a download to the Trash:', err)
+        const bin = process.platform === 'win32' ? 'the Recycle Bin' : 'the Trash'
+        this.opts.notify(windowId, `Couldn't move ${record.filename} to ${bin}`)
+        return false
+      }
+    }
+    this.remove(id)
+    return true
+  }
+
+  /**
+   * Clears a profile's list of everything not running ("Clear all", DL-08; clearing "Download
+   * history"); files stay, partial ones go. Returns how many entries went.
+   */
+  clear(profileId: ProfileId): number {
+    const running = (id: string) => this.live.get(id)?.item.getState() === 'progressing'
+    const ids = new Set<string>()
+    for (const r of this.list.list(profileId)) if (!running(r.id)) ids.add(r.id)
+    for (const [id, p] of this.privates) if (p.record.profileId === profileId && !running(id)) ids.add(id)
+    for (const d of Object.values(this.ctx.store.state.downloads)) {
+      if (d.profileId === profileId && !running(d.id)) ids.add(d.id)
+    }
+    for (const id of ids) {
+      const record = this.get(id)
+      const live = this.live.get(id)
+      if (live) {
+        live.removed = true
+        live.item.cancel()
+      } else if (record && record.state !== 'completed') {
+        removePartial(record)
+      }
+      const timer = this.lingers.get(id)
+      if (timer) clearTimeout(timer)
+      this.lingers.delete(id)
+      this.privates.delete(id)
+    }
+    this.list.removeWhere((r) => ids.has(r.id))
+    const shown = Object.keys(this.ctx.store.state.downloads).filter((id) => ids.has(id))
+    if (shown.length > 0) {
+      this.ctx.store.update((d) => {
+        for (const id of shown) delete d.downloads[id]
+      })
+    }
+    if (ids.size > 0) this.opts.changed(profileId)
+    return ids.size
+  }
+
+  /**
+   * Opens a finished download (DL-04): in a new tab when Orbit can show it (PDF, image, text, audio,
+   * video), else with the system's app. False when its file is gone or couldn't be opened.
+   */
+  async open(id: string, windowId?: WindowId): Promise<boolean> {
+    const path = this.finishedFile(id)
+    if (!path) return false
+    if (showsInline(path)) {
+      this.opts.openInTab(pathToFileURL(path).href, windowId)
+      return true
+    }
+    const error = await this.opts.files.openPath(path)
+    if (!error) return true
+    console.error('[downloads] cannot open a download:', error)
+    this.opts.notify(windowId, `Couldn't open ${basename(path)}`)
+    return false
+  }
+
+  /** A finished download's file, when it is still there. */
+  finishedFile(id: string): string | undefined {
+    const record = this.get(id)
+    if (record?.state !== 'completed' || this.live.has(id)) return undefined
+    return existsSync(record.savePath) ? record.savePath : undefined
+  }
+
+  /** Shows the file in its folder (DL-04): the finished file, or the partial one while it downloads. */
+  showInFolder(id: string): boolean {
+    const live = this.live.get(id)
+    const path = live ? live.tempPath : this.finishedFile(id)
+    if (!path || !existsSync(path)) return false
+    this.opts.files.showItemInFolder(path)
+    return true
+  }
+
+  /**
+   * Quitting: running downloads are recorded as they are (bytes so far), and what the engine does
+   * to them while it shuts down is ignored, so they come back interrupted, ready to resume (DL-15).
+   */
+  quit(): void {
+    if (this.quitting) return
+    this.quitting = true
+    for (const live of this.live.values()) {
+      if (live.removed || this.privates.has(live.id)) continue
+      const record = this.list.update(live.id, {
+        receivedBytes: live.item.getReceivedBytes(),
+        totalBytes: live.item.getTotalBytes(),
+      })
+      // The engine deletes partial files as it shuts down: a second name for the file keeps its bytes.
+      if (record && canContinueLater(live.item)) {
+        const kept = keptPath(record)
+        try {
+          rmSync(kept, { force: true })
+          linkSync(live.tempPath, kept)
+        } catch (err) {
+          console.error('[downloads] cannot keep a partial download for later:', err)
+        }
+      }
+    }
     this.list.flushSync()
   }
 
+  /** A private session has pages again (DL-16). */
+  privateSessionOpened(ses: Session): void {
+    this.closedSessions.delete(ses)
+  }
+
+  /**
+   * A private session's last page closed (its window closed, DL-16): its downloads leave every list,
+   * at once when they have ended, when they end otherwise.
+   */
+  privateSessionClosed(ses: Session): void {
+    this.closedSessions.add(ses)
+    const ended = [...this.privates].filter(([id, p]) => p.session === ses && !this.live.has(id)).map(([id]) => id)
+    if (ended.length === 0) return
+    const profiles = new Set<ProfileId>()
+    for (const id of ended) {
+      const p = this.privates.get(id)
+      if (p) profiles.add(p.record.profileId)
+      this.privates.delete(id)
+      const timer = this.lingers.get(id)
+      if (timer) clearTimeout(timer)
+      this.lingers.delete(id)
+    }
+    const shown = ended.filter((id) => this.ctx.store.state.downloads[id])
+    if (shown.length > 0) {
+      this.ctx.store.update((d) => {
+        for (const id of shown) delete d.downloads[id]
+      })
+    }
+    for (const profileId of profiles) this.opts.changed(profileId)
+  }
+
+  /** Can continue from its partial file in a new session (after a restart). */
+  private resumable(record: DownloadRecord): boolean {
+    const r = record.resume
+    if (!r || r.urlChain.length === 0 || !(r.etag || r.lastModified) || record.totalBytes <= 0) return false
+    for (const path of [r.tempPath, keptPath(record)]) {
+      try {
+        return statSync(path).size < record.totalBytes
+      } catch {
+        // not there: the next one
+      }
+    }
+    return false
+  }
+
   private start(ses: Session, item: DownloadItem, contents: WebContents | undefined): void {
+    // An interrupted download asked to continue (createInterruptedDownload) comes back here.
+    const resumed = item.getState() === 'interrupted' ? this.takeResuming(item) : undefined
+    if (resumed) {
+      this.adopt(resumed, item)
+      return
+    }
     const { store, tabs, windows } = this.ctx
     const page = contents && !contents.isDestroyed() ? contents : undefined
     const tabId = page ? tabs.tabIdFor(page) : undefined
@@ -130,18 +467,9 @@ export class DownloadManager {
     const pageUrl = (!blank && page ? page.getURL() : opener?.url) || item.getInitiatorOrigin() || undefined
     const windowId = (tabId ? windows.windowOfTab(tabId) : undefined) ?? windows.focusedWindowId()
     const id = newId('d')
-    const live: Live = {
-      id,
-      item,
-      profileId,
-      finalPath,
-      tempPath,
-      private: !ses.isPersistent(),
-      windowId,
-      lastPush: 0,
-    }
+    const live: Live = { id, item, profileId, finalPath, tempPath, windowId, lastPush: 0 }
     this.live.set(id, live)
-    const record: DownloadRecord = {
+    const record: DownloadRecord = stripUndefined({
       id,
       url: item.getURL(),
       filename: basename(finalPath),
@@ -153,21 +481,74 @@ export class DownloadManager {
       profileId,
       mimeType: item.getMimeType() || undefined,
       pageUrl,
-    }
-    if (live.private) record.private = true
-    store.update((d) => {
-      d.downloads[id] = stripUndefined({ ...record })
     })
-    if (!live.private) {
-      this.list.put({ ...stripUndefined(record), resume: resumeInfo(item, tempPath) })
-      this.opts.changed(profileId)
+    if (ses.isPersistent()) {
+      this.list.put({ ...record, resume: resumeInfo(item, tempPath) })
+    } else {
+      record.private = true
+      this.privates.set(id, { record, session: ses })
     }
+    store.update((d) => {
+      d.downloads[id] = { ...record }
+    })
+    this.opts.changed(profileId)
 
-    item.on('updated', (_event, state) => this.progress(live, state))
-    item.once('done', (_event, state) => this.done(live, state))
-    this.opts.notify(windowId, `Downloading ${record.filename}`)
+    this.listen(live)
+    this.opts.feedback(windowId, 'started', { id, filename: record.filename })
     // A tab opened just for this download (a link to a file in a new tab) closes itself.
     if (blank && tabId) setImmediate(() => this.opts.closeBlankTab(tabId))
+  }
+
+  /** The download asked to continue that this item is (by its partial file, else its address). */
+  private takeResuming(item: DownloadItem): string | undefined {
+    const path = item.getSavePath()
+    let key = path && this.resuming.has(path) ? path : undefined
+    if (!key) {
+      const url = item.getURL()
+      key = [...this.resuming].find(([, r]) => r.url === url)?.[0]
+    }
+    if (!key) return undefined
+    const id = this.resuming.get(key)?.id
+    this.resuming.delete(key)
+    return id
+  }
+
+  /** Takes over the engine's item for a download continuing after a restart, and resumes it (DL-15). */
+  private adopt(id: string, item: DownloadItem): void {
+    const record = this.list.get(id)
+    if (!record) {
+      item.cancel()
+      return
+    }
+    const live: Live = {
+      id,
+      item,
+      profileId: record.profileId,
+      finalPath: record.savePath,
+      tempPath: item.getSavePath() || partialPath(record),
+      windowId: this.ctx.windows.focusedWindowId(),
+      lastPush: 0,
+    }
+    this.live.set(id, live)
+    this.reserved.add(record.savePath.toLowerCase())
+    const { resume: _resume, endedAt: _ended, error: _error, canResume: _canResume, ...shown } = record
+    this.ctx.store.update((d) => {
+      d.downloads[id] = {
+        ...shown,
+        state: 'progressing',
+        receivedBytes: item.getReceivedBytes() || record.receivedBytes,
+        totalBytes: item.getTotalBytes() || record.totalBytes,
+      }
+    })
+    this.list.update(id, { state: 'progressing', endedAt: undefined, error: undefined, canResume: undefined })
+    this.opts.changed(record.profileId)
+    this.listen(live)
+    item.resume()
+  }
+
+  private listen(live: Live): void {
+    live.item.on('updated', (_event, state) => this.progress(live, state))
+    live.item.once('done', (_event, state) => this.done(live, state))
   }
 
   /** A name is taken by a file on disk or by a download still running. */
@@ -176,17 +557,23 @@ export class DownloadManager {
   }
 
   private progress(live: Live, state: 'progressing' | 'interrupted'): void {
+    if (this.quitting || live.removed) return
     const { item } = live
     if (state === 'interrupted') {
-      // The engine keeps it: it can be resumed (DL-15).
+      // The engine keeps it: it may get over it by itself, else it can be resumed or retried (DL-15).
       this.push(live)
       this.changeState(live, {
         state: 'interrupted',
-        canResume: item.canResume(),
+        canResume: canContinue(item),
         receivedBytes: item.getReceivedBytes(),
         totalBytes: item.getTotalBytes(),
       })
-      this.opts.notify(live.windowId, `Couldn't finish downloading ${basename(live.finalPath)}`)
+      const timer = setTimeout(() => {
+        if (this.live.get(live.id) === live && this.ctx.store.state.downloads[live.id]?.state === 'interrupted') {
+          this.opts.feedback(live.windowId, 'failed', { id: live.id, filename: basename(live.finalPath) })
+        }
+      }, FAILURE_GRACE_MS)
+      timer.unref?.()
       return
     }
     const next: Download['state'] = item.isPaused() ? 'paused' : 'progressing'
@@ -210,7 +597,7 @@ export class DownloadManager {
     const { item } = live
     const received = item.getReceivedBytes()
     const total = item.getTotalBytes()
-    const speed = item.isPaused() ? 0 : item.getCurrentBytesPerSecond()
+    const speed = item.isPaused() || item.getState() !== 'progressing' ? 0 : item.getCurrentBytesPerSecond()
     this.ctx.store.update((d) => {
       const entry = d.downloads[live.id]
       if (!entry) return
@@ -226,46 +613,57 @@ export class DownloadManager {
       const entry = d.downloads[live.id]
       if (entry) assign(entry, fields)
     })
-    if (live.private) return
-    this.list.update(live.id, fields)
-    this.opts.changed(live.profileId)
+    this.save(live.id, live.profileId, fields)
+  }
+
+  /** Writes fields of a download's record: the list's, or a private one's. */
+  private save(id: string, profileId: ProfileId, fields: Partial<DownloadRecord>): void {
+    const p = this.privates.get(id)
+    if (p) {
+      const { resume: _resume, ...rest } = fields
+      const next = { ...p.record }
+      assign(next, rest)
+      p.record = next
+    } else if (!this.list.update(id, fields)) {
+      return
+    }
+    this.opts.changed(profileId)
   }
 
   private done(live: Live, state: 'completed' | 'cancelled' | 'interrupted'): void {
     if (live.pushTimer) clearTimeout(live.pushTimer)
     live.pushTimer = undefined
+    // Quitting: the list keeps it as it was (DL-15); the engine keeps or deletes the partial file.
+    if (this.quitting) return
     this.live.delete(live.id)
     this.reserved.delete(live.finalPath.toLowerCase())
     const { item } = live
     const endedAt = Date.now()
-    const name = basename(live.finalPath)
+    if (live.removed) {
+      if (state === 'completed') this.place(live)
+      else removeFile(live.tempPath)
+      return
+    }
     if (state === 'cancelled') {
       removeFile(live.tempPath)
-      this.finish(live.id, live.profileId, { state, endedAt, canResume: undefined }, live.private)
+      this.finish(live.id, live.profileId, { state, endedAt, canResume: undefined, resume: undefined })
       return
     }
     if (state === 'interrupted') {
-      // Not resumable (the engine gave up on it): Retry starts it again (DL-15).
+      // The engine gave up on it: Retry starts it again (DL-15).
       removeFile(live.tempPath)
-      this.finish(
-        live.id,
-        live.profileId,
-        { state, endedAt, canResume: false, receivedBytes: item.getReceivedBytes(), resume: undefined },
-        live.private,
-      )
-      this.opts.notify(live.windowId, `Couldn't download ${name}`)
+      this.finish(live.id, live.profileId, {
+        state,
+        endedAt,
+        canResume: false,
+        receivedBytes: item.getReceivedBytes(),
+        resume: undefined,
+      })
+      this.opts.feedback(live.windowId, 'failed', { id: live.id, filename: basename(live.finalPath) })
       return
     }
-    // Complete: the file gets its real name, a free one if something took it meanwhile.
-    let savePath = live.finalPath
-    try {
-      if (existsSync(savePath)) savePath = freePath(dirname(live.finalPath), name, (p) => this.taken(p))
-      renameSync(live.tempPath, savePath)
-    } catch (err) {
-      console.error('[downloads] cannot move the finished download into place:', err)
-      savePath = live.tempPath
-    }
-    const fields: Partial<DownloadRecord> = {
+    const savePath = this.place(live)
+    this.finish(live.id, live.profileId, {
       state,
       endedAt,
       savePath,
@@ -274,30 +672,48 @@ export class DownloadManager {
       totalBytes: item.getTotalBytes() || item.getReceivedBytes(),
       canResume: undefined,
       resume: undefined,
+    })
+    this.opts.feedback(live.windowId, 'done', { id: live.id, filename: basename(savePath) })
+  }
+
+  /** A complete file gets its real name, a free one if something took it meanwhile. */
+  private place(live: Live): string {
+    let savePath = live.finalPath
+    try {
+      if (existsSync(savePath)) savePath = freePath(dirname(live.finalPath), basename(savePath), (p) => this.taken(p))
+      renameSync(live.tempPath, savePath)
+    } catch (err) {
+      console.error('[downloads] cannot move the finished download into place:', err)
+      savePath = live.tempPath
     }
-    this.finish(live.id, live.profileId, fields, live.private)
-    this.opts.notify(live.windowId, `Downloaded ${basename(savePath)}`)
+    return savePath
   }
 
   /**
    * Final state: written to the list; the sidebar shows a finished download for a few seconds
-   * (DL-03), a failed one until it is retried or dismissed, a cancelled one no more.
+   * (DL-03), a failed one until it is retried or dismissed, a cancelled one no more. A private
+   * download whose window has closed leaves every list (DL-16).
    */
-  private finish(id: string, profileId: ProfileId, fields: Partial<DownloadRecord>, isPrivate = false): void {
+  private finish(id: string, profileId: ProfileId, fields: Partial<DownloadRecord>): void {
     const { resume: _resume, ...shown } = fields
+    const p = this.privates.get(id)
+    const closed = !!p && this.closedSessions.has(p.session)
+    const hide = fields.state === 'cancelled' || closed
     this.ctx.store.update((d) => {
       const entry = d.downloads[id]
       if (!entry) return
-      if (fields.state === 'cancelled') delete d.downloads[id]
+      if (hide) delete d.downloads[id]
       else {
         assign(entry, shown)
         delete entry.speed
       }
     })
-    if (!isPrivate) {
-      this.list.update(id, fields)
+    if (closed) {
+      this.privates.delete(id)
       this.opts.changed(profileId)
+      return
     }
+    this.save(id, profileId, fields)
     if (fields.state === 'completed') {
       const timer = setTimeout(() => {
         this.lingers.delete(id)
@@ -307,12 +723,56 @@ export class DownloadManager {
       this.lingers.set(id, timer)
     }
   }
+
+  /** Off the list and the sidebar. */
+  private forget(id: string, profileId: ProfileId): void {
+    const timer = this.lingers.get(id)
+    if (timer) clearTimeout(timer)
+    this.lingers.delete(id)
+    const wasPrivate = this.privates.delete(id)
+    if (this.ctx.store.state.downloads[id]) this.ctx.store.update((d) => void delete d.downloads[id])
+    if (this.list.remove(id) || wasPrivate) this.opts.changed(profileId)
+  }
+}
+
+/**
+ * An interrupted download the engine can continue where it stopped: the server named a version of
+ * the file to check the rest against (DL-15 Resume; otherwise Retry).
+ */
+function canContinue(item: DownloadItem): boolean {
+  return item.canResume() && !!(item.getETag() || item.getLastModifiedTime()) && item.getReceivedBytes() > 0
 }
 
 /** A page that never showed anything: a new tab whose only navigation became this download. */
 function isBlank(contents: WebContents): boolean {
   const url = contents.getURL()
   return (url === '' || url === 'about:blank') && !contents.navigationHistory.canGoBack()
+}
+
+/** Where a download not running here left its partial file. */
+function partialPath(record: DownloadRecord): string {
+  return record.resume?.tempPath ?? `${record.savePath}${PARTIAL_SUFFIX}`
+}
+
+/**
+ * The second name a partial file gets at quit, to outlive the engine's shutdown (DL-15): hidden,
+ * beside it, and unique to the download.
+ */
+function keptPath(record: DownloadRecord): string {
+  return join(dirname(record.savePath), `.${basename(record.savePath)}.${record.id}${PARTIAL_SUFFIX}`)
+}
+
+/** Deletes what is left of a download that will never continue. */
+function removePartial(record: DownloadRecord): void {
+  removeFile(partialPath(record))
+  removeFile(keptPath(record))
+}
+
+/** An unfinished download that can continue after a restart: the server named a version of the file. */
+function canContinueLater(item: DownloadItem): boolean {
+  const state = item.getState()
+  if (state !== 'progressing' && !(state === 'interrupted' && item.canResume())) return false
+  return !!(item.getETag() || item.getLastModifiedTime()) && item.getReceivedBytes() > 0
 }
 
 function resumeInfo(item: DownloadItem, tempPath: string): ResumeInfo {
@@ -334,7 +794,7 @@ function removeFile(path: string): void {
   }
 }
 
-/** Sets fields on a draft; an undefined value removes the field. */
+/** Sets fields on an entry (or an Immer draft of one); an undefined value removes the field. */
 function assign(target: Download, fields: Partial<Download>): void {
   const t = target as unknown as Record<string, unknown>
   for (const [key, value] of Object.entries(fields)) {
