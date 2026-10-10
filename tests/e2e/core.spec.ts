@@ -1,4 +1,5 @@
 import { mkdtempSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -10,6 +11,7 @@ import {
   action,
   type Fixtures,
   launchOrbit,
+  listenInRange,
   MOD,
   type Orbit,
   openViaCommandBar,
@@ -336,6 +338,36 @@ test('[TB-22] the quit check also catches a promise rejection nothing handled (D
     void Promise.reject(new Error('a rejection nothing handled'))
   })
   await expect.poll(() => orbit.takeUncaught()).toContain('a rejection nothing handled')
+})
+
+test('[TB-22] a tab closed while its history is restoring leaves no rejection behind (D28, archive review F8)', async () => {
+  const { app } = orbit
+  // A page that stops answering once `hang` is set, so restoring a history that ends on it never finishes.
+  let hang = false
+  const slow = createServer((_req, res) => {
+    if (!hang) res.end('<title>Slow</title>')
+  })
+  const port = await listenInRange(slow)
+  try {
+    const tabId = (await run(app, 'tabs.create', { url: fx.url('/page/One') })) as string
+    await tabPage(app, '/page/One')
+    await run(app, 'tabs.navigate', { tabId, url: `http://127.0.0.1:${port}/slow` })
+    await tabPage(app, '/slow')
+    await run(app, 'tabs.create', { url: fx.url('/page/Other') })
+    await tabPage(app, '/page/Other')
+    // Asleep, the tab keeps its history; waking it restores that history, ending on the slow page.
+    await app.evaluate((_e, id) => (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.sleep(id), tabId)
+    hang = true
+    await run(app, 'tabs.activate', { tabId })
+    await expect.poll(async () => (await state(app)).tabs[tabId]?.loading).toBe(true)
+    // Closing it mid-restore made restore's catch load the page into contents already destroyed.
+    await run(app, 'tabs.close', { tabId })
+    await new Promise((r) => setTimeout(r, 1500))
+    expect(orbit.takeUncaught()).toBe('')
+  } finally {
+    slow.closeAllConnections()
+    slow.close()
+  }
 })
 
 test('[TB-02] opening tabs keeps every UI mirror in step without resyncs (review M2, F4)', async () => {
