@@ -14,8 +14,8 @@ const DEFAULT_RADIUS = 10
  */
 export const IDLE_PREPARE_MS = 5000
 /** …checking again this often while Orbit is busy, and making it anyway after this many checks. */
-const IDLE_RETRY_MS = 2000
-const IDLE_CHECKS = 5
+export const IDLE_RETRY_MS = 2000
+export const IDLE_CHECKS = 5
 
 interface LibraryWindow {
   view?: WebContentsView
