@@ -68,7 +68,9 @@ export interface ActionDef {
   preferWebsites?: boolean | 'other'
   /**
    * With "prefer Orbit", the keys still go first to a page whose text field has focus, and the
-   * action runs only when the page leaves them alone (Back and Forward's ⌘[ and ⌘], KS-16).
+   * action runs unless that page uses them (Back and Forward's ⌘[ and ⌘], KS-16). Anywhere else
+   * the action runs at once and the page never sees the key, however busy the page is. With
+   * keyboard focus in a frame, the frame's own text field and handlers decide (D60).
    */
   pageFirstInFields?: boolean
 }
@@ -127,7 +129,9 @@ export const ACTIONS: ActionDef[] = [
     id: 'tab.recentBack',
     title: 'Switch to Recent Tab (Back)',
     category: 'Tabs',
-    mac: ['Ctrl+Shift+Tab', 'Ctrl+`'],
+    // ⌃` steps back too, on every platform, but only while the switcher is up: the key router's
+    // (src/main/keys/router.ts `switcherKey`), so a page gets it the rest of the time (D60, TB-05).
+    mac: ['Ctrl+Shift+Tab'],
     other: ['Ctrl+Shift+Tab'],
     hidden: true,
     fixed: true,
@@ -334,8 +338,9 @@ export const ACTIONS: ActionDef[] = [
     category: 'Sidebar',
     mac: ['Cmd+S'],
     other: ['Ctrl+S'],
-    // SB-11: a web editor's ⌘S / Ctrl+S gets the first press (KS-02).
-    preferWebsites: true,
+    // SB-11: a web editor's Ctrl+S gets the first press on Windows and Linux (KS-02). On macOS ⌘S
+    // prefers Orbit, as every other action does there; people can change it per action (D60).
+    preferWebsites: 'other',
   },
   { id: 'window.new', title: 'New Window', category: 'Window', mac: ['Cmd+N'], other: ['Ctrl+N'] },
   // Alt+F4 closes the window too, as the system's key (KS-05).

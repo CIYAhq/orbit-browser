@@ -34,6 +34,12 @@ describe('[ST-08] the list of shortcuts', () => {
     expect(entry('sidebar.toggle', 'darwin')).toMatchObject({
       title: 'Toggle Sidebar',
       bindings: ['Cmd+S'],
+      // ⌘S prefers Orbit on macOS (D60); Ctrl+S websites elsewhere.
+      priority: 'orbit',
+      isDefault: true,
+    })
+    expect(entry('sidebar.toggle', 'linux')).toMatchObject({
+      bindings: ['Ctrl+S'],
       priority: 'websites',
       isDefault: true,
     })

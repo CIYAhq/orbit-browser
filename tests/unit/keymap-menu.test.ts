@@ -5,9 +5,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
  * The macOS menu bar as installMenu builds it, on any platform: Electron's Menu is replaced by one
  * that keeps the template, and the Archive's own items by stand-ins.
  */
-const menu = vi.hoisted(() => ({ template: [] as MenuItemConstructorOptions[] }))
+const menu = vi.hoisted(() => {
+  type Shown = { isDestroyed: () => boolean; isVisible: () => boolean; isMinimized: () => boolean }
+  const shown: Shown = { isDestroyed: () => false, isVisible: () => true, isMinimized: () => false }
+  return {
+    template: [] as MenuItemConstructorOptions[],
+    /** The windows Electron has; one shown unless a test says otherwise. */
+    shown,
+    windows: [shown] as Shown[],
+    /** Electron's `browser-window-created` listener, once one is added. */
+    created: undefined as ((event: unknown, win: unknown) => void) | undefined,
+  }
+})
 vi.mock('electron', () => ({
-  app: { name: 'Orbit' },
+  app: {
+    name: 'Orbit',
+    on: (event: string, listener: (event: unknown, win: unknown) => void) => {
+      if (event === 'browser-window-created') menu.created = listener
+    },
+  },
+  BrowserWindow: { getAllWindows: () => menu.windows },
   Menu: {
     buildFromTemplate: (template: MenuItemConstructorOptions[]) => {
       menu.template = template
@@ -21,7 +38,7 @@ vi.mock('../../src/main/archive/recently-closed', () => ({ recentlyClosedItems: 
 vi.mock('../../src/main/keys/router', () => ({ keyRouter: { menuRuns: () => true } }))
 
 import type { MainContext } from '../../src/main/context'
-import { installMenu } from '../../src/main/menu'
+import { installMenu, watchWindowsForMenu } from '../../src/main/menu'
 import { ACTIONS_BY_ID, type ActionDef, isFixed } from '../../src/shared/actions'
 import { bindingProblem, setCustomBindings } from '../../src/shared/keymap'
 
@@ -32,6 +49,7 @@ beforeEach(() => Object.defineProperty(process, 'platform', { ...platform, value
 afterEach(() => {
   Object.defineProperty(process, 'platform', platform)
   setCustomBindings(undefined)
+  menu.windows = [menu.shown]
 })
 
 /** The menu built now: each top-level menu by its label or role. */
@@ -43,6 +61,12 @@ function build(): Record<string, MenuItemConstructorOptions[]> {
 }
 
 const find = (items: MenuItemConstructorOptions[], label: string) => items.find((i) => i.label === label)
+
+/** The File menu of the menu last built, without building it again. */
+function fileMenu(): MenuItemConstructorOptions[] {
+  const file = menu.template.find((m) => m.label === 'File')
+  return Array.isArray(file?.submenu) ? file.submenu : []
+}
 
 describe('the macOS menu bar', () => {
   it('[KS-15] keeps the system’s keys: Hide, Hide Others and Quit, the Window menu (⌘M, ⌘`) and the Help menu (⌘? search)', () => {
@@ -99,6 +123,37 @@ describe('the macOS menu bar', () => {
     const own = find(build().File ?? [], 'Open File…')
     expect(own?.accelerator).toBe('Command+Shift+F2')
     expect(own?.registerAccelerator).toBeUndefined()
+  })
+
+  it('[KS-12] with no Orbit window shown, ⌘O is the menu’s own: Open File… takes it (F6)', () => {
+    menu.windows = []
+    const open = find(build().File ?? [], 'Open File…')
+    expect(open?.accelerator).toBe('Command+O')
+    expect(open?.registerAccelerator).toBeUndefined()
+    // A minimized or hidden window has no keys to give the router either.
+    menu.windows = [
+      { ...menu.shown, isMinimized: () => true },
+      { ...menu.shown, isVisible: () => false },
+    ]
+    expect(find(build().File ?? [], 'Open File…')?.registerAccelerator).toBeUndefined()
+    menu.windows = [menu.shown]
+    expect(find(build().File ?? [], 'Open File…')?.registerAccelerator).toBe(false)
+  })
+
+  it('[KS-12] builds the menu again when the last window goes and when one shows again', async () => {
+    build()
+    watchWindowsForMenu(ctx)
+    const listeners = new Map<string, () => void>()
+    menu.created?.({}, { on: (event: string, listener: () => void) => listeners.set(event, listener) })
+    const settled = () => new Promise((resolve) => setImmediate(resolve))
+    menu.windows = []
+    listeners.get('closed')?.()
+    await settled()
+    expect(find(fileMenu(), 'Open File…')?.registerAccelerator).toBeUndefined()
+    menu.windows = [menu.shown]
+    listeners.get('show')?.()
+    await settled()
+    expect(find(fileMenu(), 'Open File…')?.registerAccelerator).toBe(false)
   })
 
   it('[OB-12][OB-13] Help → Keyboard Shortcuts comes after Orbit Help', () => {

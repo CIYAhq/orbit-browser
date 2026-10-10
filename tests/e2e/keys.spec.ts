@@ -8,12 +8,14 @@ import {
   cmd,
   cmdIn,
   type NavFixtures,
+  NEW_TAB_CLICK,
   openTab,
   pressInPage,
   setNativeFullScreen,
   startNavFixtures,
   uiPageOf,
   visit,
+  waitLoaded,
   windowList,
   windowState,
   zoomOf,
@@ -25,7 +27,7 @@ let fx: NavFixtures
 let orbit: Orbit
 
 test.beforeAll(async () => {
-  fx = await startNavFixtures()
+  fx = await startNavFixtures(3370, 3389)
 })
 test.afterAll(async () => {
   await fx.close()
@@ -322,8 +324,14 @@ function presses(page: Page): Promise<number> {
   return page.evaluate(() => (window as unknown as { presses: number }).presses)
 }
 
-test('[KS-02][SB-11] a page that uses ⌘S / Ctrl+S gets the first press and a toast offers Toggle Sidebar; a second press within a second runs it', async () => {
+/** Toggle Sidebar set to prefer websites: its default on Windows and Linux; macOS prefers Orbit (D60). */
+async function sidebarPrefersWebsites(): Promise<void> {
+  if (isMac) await run(orbit.app, 'keys.setPriority', { actionId: 'sidebar.toggle', priority: 'websites' })
+}
+
+test('[KS-02][SB-11] preferring websites, a page that uses ⌘S / Ctrl+S gets the first press and a toast offers Toggle Sidebar; a second press within a second runs it', async () => {
   const { app, shell } = orbit
+  await sidebarPrefersWebsites()
   const page = await pageWithKeys('Editor', { code: 'KeyS', use: true })
   await pressMod('s')
   await expect.poll(() => presses(page)).toBe(1)
@@ -348,7 +356,8 @@ test('[KS-02][SB-11] a page that uses ⌘S / Ctrl+S gets the first press and a t
   expect(await presses(page)).toBe(2)
 })
 
-test('[KS-02][SB-11] a page that leaves ⌘S / Ctrl+S alone sees each press, and each press toggles the sidebar', async () => {
+test('[KS-02][SB-11] preferring websites, a page that leaves ⌘S / Ctrl+S alone sees each press, and each press toggles the sidebar', async () => {
+  await sidebarPrefersWebsites()
   const page = await pageWithKeys('Reader', { code: 'KeyS', use: false })
   await pressMod('s')
   await expect.poll(sidebarVisible).toBe(false)
@@ -358,17 +367,18 @@ test('[KS-02][SB-11] a page that leaves ⌘S / Ctrl+S alone sees each press, and
   expect(await presses(page)).toBe(2)
 })
 
-test('[KS-02][ST-08] set to prefer Orbit, ⌘S / Ctrl+S toggles the sidebar at once and the page never sees it', async () => {
+test('[KS-02][ST-08] ⌘S prefers Orbit on macOS (D60) and Ctrl+S websites on Windows and Linux; preferring Orbit, the sidebar toggles at once and the page never sees the key', async () => {
   const { app } = orbit
-  await run(app, 'keys.setPriority', { actionId: 'sidebar.toggle', priority: 'orbit' })
-  expect((await state(app)).settings.shortcutPriority).toEqual({ 'sidebar.toggle': 'orbit' })
+  // Prefer Orbit: macOS's default; on Windows and Linux a choice that is stored.
+  if (!isMac) await run(app, 'keys.setPriority', { actionId: 'sidebar.toggle', priority: 'orbit' })
+  expect((await state(app)).settings.shortcutPriority).toEqual(isMac ? undefined : { 'sidebar.toggle': 'orbit' })
   const page = await pageWithKeys('Editor', { code: 'KeyS', use: true })
   await pressMod('s')
   await expect.poll(sidebarVisible).toBe(false)
   expect(await presses(page)).toBe(0)
-  // Back to the default: the page has the first press again.
+  // Prefer websites (back to the default on Windows and Linux): the page has the first press.
   await run(app, 'keys.setPriority', { actionId: 'sidebar.toggle', priority: 'websites' })
-  expect((await state(app)).settings.shortcutPriority).toBeUndefined()
+  expect((await state(app)).settings.shortcutPriority).toEqual(isMac ? { 'sidebar.toggle': 'websites' } : undefined)
   await pressMod('s')
   await expect.poll(() => presses(page)).toBe(1)
   expect(await sidebarVisible()).toBe(false)
@@ -409,6 +419,7 @@ test('[KS-16][NV-01] in a page text field, ⌘[ / Alt+← goes back only when th
     })
   })
   await c.focus('#box')
+  await focusKnown('/page/FieldC', 'main', 'field')
   await pressInPage(app, '/page/FieldC', key, [...mods])
   await expect
     .poll(() => c.evaluate(() => (window as unknown as { __keys: string[] }).__keys))
@@ -427,6 +438,7 @@ test('[KS-16][NV-01] in a page text field, ⌘[ / Alt+← goes back only when th
 
 test('[KS-02][KS-16] while a page is on its way, Orbit takes its keys at once: ⌘S / Ctrl+S toggles the sidebar, and ⌘[ / Alt+← in a text field goes back', async () => {
   const { app } = orbit
+  await sidebarPrefersWebsites()
   const [key, mods] = isMac ? (['[', ['meta']] as const) : (['Left', ['alt']] as const)
   const id = await openTab(app, fx.url('/page/WayA'))
   await visit(app, id, fx.url('/page/WayB'))
@@ -473,6 +485,216 @@ test('[KS-16][TB-18] ⌘Z / Ctrl+Z in a page text field undoes the typing, not t
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
   await pressInPage(app, '/page/Typing', 'z', [mod])
   await expect.poll(async () => (await urls()).sort()).toEqual([fx.url('/page/Typing'), fx.url('/page/UndoB')].sort())
+})
+
+// ---------- Keyboard focus in a frame, and pages that are busy (KS-16, KS-02, D60) ----------
+
+type KeysHooks = {
+  __orbitKeys: {
+    focusIn: (urlPart: string) => { frame: string; where: string | null } | null
+    escapes: () => { url: string; used: boolean; stopped: boolean }[]
+  }
+}
+
+/**
+ * Waits until Orbit knows where the keyboard is in the page at `urlPart`: in `frame` ('main' for
+ * the page itself, else the frame's address), on a text field or elsewhere on it ('page').
+ */
+async function focusKnown(urlPart: string, frame: string, where: 'field' | 'page'): Promise<void> {
+  await expect
+    .poll(() =>
+      orbit.app.evaluate((_e, part) => (globalThis as unknown as KeysHooks).__orbitKeys.focusIn(part), urlPart),
+    )
+    .toEqual({ frame, where })
+}
+
+const [BACK_KEY, BACK_MODS] = isMac ? (['[', ['meta']] as const) : (['Left', ['alt']] as const)
+
+/** Runs a script in a frame of the page at `urlPart`, in the frame's own world. */
+function inFrame<T>(urlPart: string, frameUrl: string, code: string): Promise<T> {
+  return orbit.app.evaluate(
+    async ({ webContents }, [part, url, js]) => {
+      const page = webContents.getAllWebContents().find((w) => w.getURL().includes(part))
+      const frame = page?.mainFrame.framesInSubtree.find((f) => f.url === url)
+      if (!frame) throw new Error(`no frame ${url} in ${part}`)
+      return await frame.executeJavaScript(js)
+    },
+    [urlPart, frameUrl, code] as const,
+  ) as Promise<T>
+}
+
+/**
+ * Puts a frame at the top of the page at `urlPart`, showing `/page/<inner>` from the page's own
+ * origin or another one, with a plain button (#plain) in it; returns the frame's address.
+ */
+async function addFrame(urlPart: string, inner: string, crossOrigin: boolean): Promise<string> {
+  const src = crossOrigin ? fx.urlOn('127.0.0.1', `/page/${inner}`) : fx.url(`/page/${inner}`)
+  const page = await tabPage(orbit.app, urlPart)
+  await page.evaluate(
+    (url) =>
+      new Promise<void>((resolve) => {
+        const frame = document.createElement('iframe')
+        frame.style.cssText = 'display:block;width:520px;height:320px;border:0'
+        frame.addEventListener('load', () => resolve(), { once: true })
+        frame.src = url
+        document.body.prepend(frame)
+      }),
+    src,
+  )
+  await inFrame(urlPart, src, `document.body.insertAdjacentHTML('afterbegin', '<button id="plain">Plain</button>')`)
+  return src
+}
+
+/** Clicks an element in a frame as the mouse does, which gives it the keyboard. */
+async function clickInFrame(urlPart: string, frameUrl: string, selector: '#plain' | '#box'): Promise<void> {
+  const page = await tabPage(orbit.app, urlPart)
+  const frame = await page.locator(`iframe[src="${frameUrl}"]`).boundingBox()
+  const at = await inFrame<{ x: number; y: number }>(
+    urlPart,
+    frameUrl,
+    `(() => { const r = document.querySelector('${selector}').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`,
+  )
+  if (!frame) throw new Error('no frame')
+  await page.mouse.click(frame.x + at.x, frame.y + at.y)
+  await expect
+    .poll(() =>
+      inFrame(urlPart, frameUrl, 'document.hasFocus() && document.activeElement && document.activeElement.id'),
+    )
+    .toBe(selector.slice(1))
+}
+
+/** A tab at `<title>-C` that came from `<title>-A` and `<title>-B`, with the keyboard, and a frame in it. */
+async function framedTab(title: string, crossOrigin: boolean): Promise<{ id: string; at: string; frame: string }> {
+  const { app } = orbit
+  const id = await openTab(app, fx.url(`/page/${title}-A`))
+  await visit(app, id, fx.url(`/page/${title}-B`))
+  await visit(app, id, fx.url(`/page/${title}-C`))
+  await cmd(app, 'tabs.focusPage', {})
+  await expect.poll(focusedUrl).toBe(fx.url(`/page/${title}-C`))
+  const frame = await addFrame(`/page/${title}-C`, `${title}-Inner`, crossOrigin)
+  return { id, at: `/page/${title}-C`, frame }
+}
+
+const urlOf = async (tabId: string) => (await state(orbit.app)).tabs[tabId]?.url
+
+for (const crossOrigin of [false, true]) {
+  const kind = crossOrigin ? 'cross-origin' : 'same-origin'
+  const tag = crossOrigin ? 'X' : 'S'
+
+  test(`[KS-16][NV-01] keyboard on a button in a ${kind} frame: ⌘[ / Alt+← goes back, at once`, async () => {
+    const { app } = orbit
+    const { id, at, frame } = await framedTab(`FrameButton${tag}`, crossOrigin)
+    await clickInFrame(at, frame, '#plain')
+    await focusKnown(at, frame, 'page')
+    await pressInPage(app, at, BACK_KEY, [...BACK_MODS])
+    await expect.poll(() => urlOf(id)).toBe(fx.url(`/page/FrameButton${tag}-B`))
+  })
+
+  test(`[KS-16][NV-01] keyboard in a text field of a ${kind} frame that leaves ⌘[ / Alt+← alone: it goes back`, async () => {
+    const { app } = orbit
+    const { id, at, frame } = await framedTab(`FrameField${tag}`, crossOrigin)
+    await clickInFrame(at, frame, '#box')
+    await focusKnown(at, frame, 'field')
+    await pressInPage(app, at, BACK_KEY, [...BACK_MODS])
+    await expect.poll(() => urlOf(id)).toBe(fx.url(`/page/FrameField${tag}-B`))
+  })
+}
+
+test('[KS-16][NV-01] a text field in a frame whose page uses ⌘[ / Alt+← keeps it; on the frame’s button the key goes back one page', async () => {
+  const { app } = orbit
+  const { id, at, frame } = await framedTab('FrameEditor', false)
+  // An editor in the frame that outdents with the key while its field has focus.
+  await inFrame(
+    at,
+    frame,
+    `addEventListener('keydown', (e) => {
+      if (document.activeElement?.id === 'box' && (e.code === 'BracketLeft' || e.code === 'ArrowLeft')) e.preventDefault()
+    })`,
+  )
+  await clickInFrame(at, frame, '#box')
+  await focusKnown(at, frame, 'field')
+  await pressInPage(app, at, BACK_KEY, [...BACK_MODS])
+  await expect.poll(() => inFrame<string[]>(at, frame, 'window.__keys')).toContain(isMac ? '[' : 'ArrowLeft')
+  // On the frame's button the key goes back: one page. Had the first press gone back too, this
+  // would land on A.
+  await clickInFrame(at, frame, '#plain')
+  await focusKnown(at, frame, 'page')
+  await pressInPage(app, at, BACK_KEY, [...BACK_MODS])
+  await expect.poll(() => urlOf(id)).toBe(fx.url('/page/FrameEditor-B'))
+})
+
+test('[KS-02][SB-11] keyboard in a frame: Toggle Sidebar, preferring websites, toggles on the first press when the frame leaves ⌘S / Ctrl+S alone; a frame that uses it gets it first', async () => {
+  const { app, shell } = orbit
+  await sidebarPrefersWebsites()
+  const { at, frame } = await framedTab('FrameSave', false)
+  await clickInFrame(at, frame, '#box')
+  await focusKnown(at, frame, 'field')
+  await pressInPage(app, at, 'S', PRIMARY_MOD)
+  await expect.poll(sidebarVisible).toBe(false)
+  expect(await inFrame<string[]>(at, frame, 'window.__keys')).toContain('s')
+  // A frame that saves with the key: the first press is the frame's, and the toast says so.
+  await inFrame(at, frame, `addEventListener('keydown', (e) => { if (e.code === 'KeyS') e.preventDefault() })`)
+  await pressInPage(app, at, 'S', PRIMARY_MOD)
+  const toast = shell.getByTestId('toast').filter({ hasText: `The page used ${SAVE}` })
+  await expect(toast).toHaveCount(1)
+  expect(await sidebarVisible()).toBe(false)
+  await pressInPage(app, at, 'S', PRIMARY_MOD)
+  await expect.poll(sidebarVisible).toBe(true)
+})
+
+/**
+ * Keeps the renderer of the page at `urlPart` busy for 1.5 s, presses a key there once it is, and
+ * returns how long after the press Orbit `acted`: started a navigation, or toggled the sidebar.
+ */
+function busyPress(
+  urlPart: string,
+  key: string,
+  mods: readonly Mod[],
+  acted: 'navigation' | 'sidebar',
+): Promise<number> {
+  return orbit.app.evaluate(
+    async ({ webContents }, [part, keyCode, modifiers, what]) => {
+      const page = webContents.getAllWebContents().find((w) => w.getURL().includes(part))
+      if (!page) throw new Error(`no page ${part}`)
+      type Windows = Record<string, { sidebar: { visible: boolean } }>
+      const hooks = (globalThis as unknown as { __orbit: { state: () => { windows: Windows } } }).__orbit
+      const sidebar = () => Object.values(hooks.state().windows)[0]?.sidebar.visible
+      // The page says it is busy just before it is.
+      const busy = new Promise((resolve) => page.once('page-title-updated', resolve))
+      void page.executeJavaScript(
+        `document.title = 'Busy'; { const end = Date.now() + 1500; while (Date.now() < end); }`,
+      )
+      await busy
+      const before = sidebar()
+      const navigated = new Promise<void>((resolve) => page.once('did-start-navigation', () => resolve()))
+      const start = performance.now()
+      page.sendInputEvent({ type: 'keyDown', keyCode, modifiers: [...modifiers] })
+      page.sendInputEvent({ type: 'keyUp', keyCode, modifiers: [...modifiers] })
+      if (what === 'navigation') await navigated
+      else while (sidebar() === before) await new Promise((r) => setTimeout(r, 2))
+      return performance.now() - start
+    },
+    [urlPart, key, mods, acted] as const,
+  )
+}
+
+test('[KS-16][NV-01] on a busy page, ⌘[ / Alt+← outside a text field goes back at once: Orbit does not wait for the page (D60)', async () => {
+  const { app } = orbit
+  const id = await openTab(app, fx.url('/page/BusyBackA'))
+  await visit(app, id, fx.url('/page/BusyBackB'))
+  await cmd(app, 'tabs.focusPage', {})
+  await expect.poll(focusedUrl).toBe(fx.url('/page/BusyBackB'))
+  await focusKnown('/page/BusyBackB', 'main', 'page')
+  expect(await busyPress('/page/BusyBackB', BACK_KEY, BACK_MODS, 'navigation')).toBeLessThan(200)
+  await expect.poll(() => urlOf(id)).toBe(fx.url('/page/BusyBackA'))
+})
+
+test('[KS-02][SB-11] on a busy page, a key that prefers websites waits at most 250 ms for the page, then Orbit acts (D60)', async () => {
+  await sidebarPrefersWebsites()
+  await pageWithKeys('BusySave', { code: 'KeyS', use: false })
+  await focusKnown('/page/BusySave', 'main', 'page')
+  expect(await busyPress('/page/BusySave', 'S', PRIMARY_MOD, 'sidebar')).toBeLessThan(600)
+  expect(await sidebarVisible()).toBe(false)
 })
 
 // ---------- Tab, window, split and overlay keys (KS-05, KS-06, KS-09, KS-19) ----------
@@ -616,6 +838,40 @@ test('[KS-06][TB-05] holding ⌃: Tab and ⇧Tab step through recent tabs, W clo
   expect(Object.keys((await state(app)).tabs).sort()).toEqual([b, c, d].sort())
 })
 
+test('[KS-06][TB-05] ⌃` steps back in the recent-tab switcher on every platform, and only while it is up (D60)', async () => {
+  const a = await openTab(orbit.app, fx.url('/page/TickA'))
+  const b = await openTab(orbit.app, fx.url('/page/TickB'))
+  const c = await openTab(orbit.app, fx.url('/page/TickC'))
+  // Most recent first: C, B, A.
+  await selectPage(a, fx.url('/page/TickA'))
+  await selectPage(b, fx.url('/page/TickB'))
+  await selectPage(c, fx.url('/page/TickC'))
+  const ctrl: Mod[] = ['control']
+  const tick: [type: 'keyDown' | 'keyUp', keyCode: string, modifiers: Mod[]][] = [
+    ['keyDown', '`', ctrl],
+    ['keyUp', '`', ctrl],
+  ]
+  // With no switcher up, the key is the page's.
+  const page = await tabPage(orbit.app, '/page/TickC')
+  await keyEvents(tick)
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __keys: string[] }).__keys)).toContain('`')
+  expect(await activeTab()).toBe(c)
+  // ⌃Tab ⌃Tab highlights A; ⌃` steps back to B, and letting go settles there.
+  await keyEvents([
+    ['keyDown', 'Control', ctrl],
+    ['keyDown', 'Tab', ctrl],
+    ['keyUp', 'Tab', ctrl],
+    ['keyDown', 'Tab', ctrl],
+    ['keyUp', 'Tab', ctrl],
+  ])
+  await expect.poll(activeTab).toBe(a)
+  await keyEvents(tick)
+  await expect.poll(activeTab).toBe(b)
+  await keyEvents([['keyUp', 'Control', []]])
+  await expect.poll(focusedUrl).toBe(fx.url('/page/TickB'))
+  expect(await activeTab()).toBe(b)
+})
+
 test('[KS-09][SV-02][SV-16] from a page: ⌃⇧= then Enter on a result shows two panes, ⌃⇧1 focuses the left pane, ⌃⇧] and ⌃⇧[ step, and ⌃⇧− closes the focused pane', async () => {
   const { app, shell } = orbit
   const left = await openTab(app, fx.url('/page/LeftPane'))
@@ -654,6 +910,70 @@ test('[KS-19][PK-09][NV-04] with a Peek open, Esc closes the Peek and the tab un
   await expect.poll(async () => Object.values((await state(app)).windows)[0]?.overlay.kind).toBe('none')
   expect((await state(app)).tabs[id]?.loading).toBe(true)
   await finishLoad(id, '/slow/UnderNext')
+})
+
+/** Esc pressed on pages that were loading, as main saw it: whether the page used it, and whether the load stopped. */
+function escapes(): Promise<{ url: string; used: boolean; stopped: boolean }[]> {
+  return orbit.app.evaluate(() => (globalThis as unknown as KeysHooks).__orbitKeys.escapes())
+}
+
+/** A tab with the keyboard whose page has run its scripts and is still loading: it waits for an image from `/slow/<title>`. */
+async function stillLoading(title: string): Promise<{ id: string; path: string; image: string }> {
+  const { app } = orbit
+  const image = `/slow/${title}Image`
+  const path = `/page/${title}?wait=${encodeURIComponent(image)}`
+  const id = await cmd<string>(app, 'tabs.create', { url: fx.url(path) })
+  await expect.poll(() => fx.hits(image)).toBe(1)
+  await cmd(app, 'tabs.focusPage', {})
+  await expect.poll(focusedUrl).toBe(fx.url(path))
+  expect((await state(app)).tabs[id]?.loading).toBe(true)
+  return { id, path, image }
+}
+
+test('[KS-19][NV-04] Esc on a loading page that uses Esc itself goes to the page, and the load goes on (D59)', async () => {
+  const { app } = orbit
+  const { id, path, image } = await stillLoading('EscUsed')
+  const page = await tabPage(app, `/page/EscUsed`)
+  await page.evaluate(() => {
+    const w = window as unknown as { escapes: number }
+    w.escapes = 0
+    addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return
+      w.escapes++
+      e.preventDefault()
+    })
+  })
+  await pressInPage(app, path, 'Escape')
+  await expect.poll(escapes).toEqual([{ url: fx.url(path), used: true, stopped: false }])
+  expect(await page.evaluate(() => (window as unknown as { escapes: number }).escapes)).toBe(1)
+  expect((await state(app)).tabs[id]?.loading).toBe(true)
+  fx.release(image)
+  await expect.poll(async () => (await state(app)).tabs[id]?.loading).toBe(false)
+})
+
+test('[KS-19][NV-04] Esc on a loading page that leaves Esc alone stops the load (D59)', async () => {
+  const { app } = orbit
+  const { id, path } = await stillLoading('EscLeft')
+  await pressInPage(app, path, 'Escape')
+  await expect.poll(async () => (await state(app)).tabs[id]?.loading).toBe(false)
+  expect(await escapes()).toEqual([{ url: fx.url(path), used: false, stopped: true }])
+})
+
+test('[KS-19][NV-04] what a page tells main about Esc counts only for an Esc pressed there: one sent without a press does nothing (D59)', async () => {
+  const { app } = orbit
+  const { id, path } = await stillLoading('EscStray')
+  // Sent as the page's preload sends it, from the tab's main frame, with no Esc pressed.
+  await app.evaluate(({ ipcMain, webContents }, part) => {
+    const page = webContents.getAllWebContents().find((w) => w.getURL().includes(part))
+    if (!page) throw new Error('no page')
+    ipcMain.emit('orbit-page:escape', { sender: page, senderFrame: page.mainFrame }, true)
+  }, path)
+  expect(await escapes()).toEqual([])
+  expect((await state(app)).tabs[id]?.loading).toBe(true)
+  // The next Esc, left alone by the page, stops the load: the bit sent before it didn't count for it.
+  await pressInPage(app, path, 'Escape')
+  await expect.poll(async () => (await state(app)).tabs[id]?.loading).toBe(false)
+  expect(await escapes()).toEqual([{ url: fx.url(path), used: false, stopped: true }])
 })
 
 test('[KS-05][TB-12][TB-11] Rename Tab, Move Tab to Space… and Archive Tab have no keys until given some, then work from a page', async () => {
@@ -697,6 +1017,37 @@ test('[KS-05][TB-12][TB-11] Rename Tab, Move Tab to Space… and Archive Tab hav
   await pressAnywhere('F8')
   await expect.poll(async () => (await state(app)).spaces[spaceId]?.pinned).toEqual([])
   expect((await state(app)).archive.at(-1)?.url).toBe(fx.url('/page/Named'))
+})
+
+// ---------- Pointer bindings (KS-17): the rows no other test covered ----------
+
+test('[KS-17][NV-01][SB-03] ⌘-click or middle-click on Forward opens the next page in a new tab; the tab stays', async () => {
+  const { app, shell } = orbit
+  const id = await openTab(app, fx.url('/page/AheadA'))
+  await visit(app, id, fx.url('/page/AheadB'))
+  await action(app, 'nav.back')
+  await waitLoaded(app, id, fx.url('/page/AheadA'))
+  await expect.poll(async () => (await state(app)).tabs[id]?.canGoForward).toBe(true)
+  const others = async () => Object.keys((await state(app)).tabs).filter((t) => t !== id)
+  const forward = shell.getByTestId('nav-forward')
+  await forward.click({ modifiers: [NEW_TAB_CLICK] })
+  await expect.poll(async () => (await others()).length).toBe(1)
+  const [first] = await others()
+  await waitLoaded(app, first as string, fx.url('/page/AheadB'))
+  await forward.click({ button: 'middle' })
+  await expect.poll(async () => (await others()).length).toBe(2)
+  const second = (await others()).find((t) => t !== first)
+  await waitLoaded(app, second as string, fx.url('/page/AheadB'))
+  // The tab clicked from keeps its page and stays selected.
+  expect(await activeTab()).toBe(id)
+  expect(await urlOf(id)).toBe(fx.url('/page/AheadA'))
+})
+
+test('[KS-17][SB-08][CB-02] double-clicking the empty part of the sidebar opens the command bar for a new tab', async () => {
+  const { app, shell } = orbit
+  await shell.getByTestId('sidebar-empty-area').dblclick()
+  await expect.poll(async () => (await windowState(app)).overlay).toMatchObject({ kind: 'commandbar', mode: 'new-tab' })
+  await expect((await viewPage(app, 'overlay')).getByTestId('command-input')).toBeFocused()
 })
 
 // ---------- Settings → Shortcuts (ST-08) ----------
@@ -793,18 +1144,22 @@ test('[ST-08][KS-02][TB-04] right-click an action to prefer websites or Orbit an
   const page = await openSettings(app, { section: 'shortcuts' })
   const row = shortcutRow(page, 'sidebar.toggle')
   const menu = page.getByTestId('shortcut-menu')
-  await expect(row).toContainText('Websites first')
+  // Toggle Sidebar prefers websites on Windows and Linux, Orbit on macOS (D60).
+  const [byDefault, other] = isMac ? (['orbit', 'websites'] as const) : (['websites', 'orbit'] as const)
+  const websitesFirst = (on: boolean) =>
+    on ? expect(row).toContainText('Websites first') : expect(row).not.toContainText('Websites first')
+  await websitesFirst(byDefault === 'websites')
   await row.click({ button: 'right' })
-  await expect(menu.getByTestId('shortcut-menu-websites')).toHaveAttribute('aria-checked', 'true')
-  await menu.getByTestId('shortcut-menu-orbit').click()
-  await expect.poll(prioritiesOf).toEqual({ 'sidebar.toggle': 'orbit' })
-  await expect(row).not.toContainText('Websites first')
+  await expect(menu.getByTestId(`shortcut-menu-${byDefault}`)).toHaveAttribute('aria-checked', 'true')
+  await menu.getByTestId(`shortcut-menu-${other}`).click()
+  await expect.poll(prioritiesOf).toEqual({ 'sidebar.toggle': other })
+  await websitesFirst(other === 'websites')
   await row.click({ button: 'right' })
   await menu.getByTestId('shortcut-menu-reset').click()
   await expect.poll(keysOf).toBeUndefined()
   expect(await prioritiesOf()).toBeUndefined()
   await expect(row.getByTestId('shortcut-binding')).toHaveText([isMac ? '⌘S' : 'Ctrl+S'])
-  await expect(row).toContainText('Websites first')
+  await websitesFirst(byDefault === 'websites')
   // At its defaults there is nothing to reset; Esc closes the menu.
   await row.click({ button: 'right' })
   await expect(menu.getByTestId('shortcut-menu-reset')).toBeDisabled()
@@ -1012,10 +1367,16 @@ test('[KS-20][SB-25] in a private window the keys for pinning, Spaces and Clear 
   // The hint shows in the private window.
   const sidebar = await uiPageOf(app, 'shell', priv.id)
   await expect(sidebar.getByTestId('toast').filter({ hasText: HINT }).first()).toBeVisible()
-  // The same from its menus and command bar.
+  // The same from its menus and command bar, the Archive's included.
   await actionIn(priv.id, 'space.new')
   await expect.poll(async () => (await hints())[HINT]).toBe(keys.length + 1)
+  await actionIn(priv.id, 'app.archive')
+  await expect.poll(async () => (await hints())[HINT]).toBe(keys.length + 2)
   expect(await where()).toEqual(before)
+  // Its sidebar has no Clear button next to Today: nothing there archives its tabs.
+  await expect(sidebar.getByTestId('today-divider')).toBeVisible()
+  await expect(sidebar.getByTestId('new-tab-button')).toBeVisible()
+  await expect(sidebar.getByTestId('clear-today')).toHaveCount(0)
   // Keys for its own tabs work: ⌘2 selects the second, the one opened first.
   expect((await state(app)).spaces[priv.spaceId]?.today).toEqual([second, first])
   await pressInPage(app, '/page/PrivTwo', '2', PRIMARY_MOD)
@@ -1067,8 +1428,18 @@ test('[KS-20][KS-10][OB-12] in a Mini Window keys act on its page: ⌘L edits it
   await expect.poll(focusedUrl).toContain('view=mini')
   expect(await typeAnywhere(['q'])).toEqual([expect.stringContaining('view=mini')])
   await expect(address).toHaveValue('q')
+  // Esc closes the field and gives the keyboard back to the page: what is typed next goes there.
   await ui.keyboard.press('Escape')
   await expect(address).toHaveCount(0)
+  await expect.poll(focusedUrl).toBe(fx.url(path))
+  expect(await typeAnywhere(['z'])).toEqual([fx.url(path)])
+  const inMini = await tabPage(app, path)
+  await expect.poll(() => inMini.evaluate(() => (window as unknown as { __keys: string[] }).__keys)).toContain('z')
+  // ⌘Y / Ctrl+H shows History in the browser window behind.
+  await pressInPage(app, path, isMac ? 'Y' : 'H', PRIMARY_MOD)
+  await expect.poll(() => cmdIn(app, main.id, 'library.status')).toMatchObject({ open: true, section: 'history' })
+  await cmdIn(app, main.id, 'library.close')
+  await expect.poll(() => cmdIn(app, main.id, 'library.status')).toMatchObject({ open: false })
   // Help → Keyboard Shortcuts asked with the Mini Window in front opens over the browser window.
   await actionIn(mini.id, 'help.shortcuts')
   await expect

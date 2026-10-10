@@ -22,6 +22,8 @@ describe('[KS-20] keys in a private window', () => {
     for (const id of ['tab.goto.1', 'tab.next', 'tab.close', 'tab.new', 'nav.reload', 'sidebar.toggle', 'page.find']) {
       expect(needsSpaces(id), id).toBe(false)
     }
+    // Nor has it an Archive (SB-25): View Archive says so too.
+    expect(needsSpaces('app.archive')).toBe(true)
   })
 
   it('they do nothing there and say so; elsewhere they run', async () => {

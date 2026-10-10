@@ -42,7 +42,8 @@ const TABLE: [id: string, mac: string[], other: string[]][] = [
   ['tab.next', ['Cmd+Alt+Down', 'Cmd+Shift+]'], ['Ctrl+Alt+Down', 'Ctrl+PageDown']],
   ['tab.previous', ['Cmd+Alt+Up', 'Cmd+Shift+['], ['Ctrl+Alt+Up', 'Ctrl+PageUp']],
   ['tab.recent', ['Ctrl+Tab'], ['Ctrl+Tab']],
-  ['tab.recentBack', ['Ctrl+Shift+Tab', 'Ctrl+`'], ['Ctrl+Shift+Tab']],
+  // ⌃` steps back too, on every platform, but only while the switcher is up (D60): the router's.
+  ['tab.recentBack', ['Ctrl+Shift+Tab'], ['Ctrl+Shift+Tab']],
   // KS-07: ⌃1–9 on macOS, Alt+1–9 elsewhere (Ctrl+1–9 is tabs).
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n): [string, string[], string[]] => [
     `space.goto.${n}`,
@@ -91,8 +92,11 @@ const TABLE: [id: string, mac: string[], other: string[]][] = [
   ['app.archive', [], []],
   ['app.settings', ['Cmd+,'], ['Ctrl+,']],
   ['settings.clearBrowsingData', ['Cmd+Shift+Backspace'], ['Ctrl+Shift+Delete']],
-  // KS-13
+  // KS-13 (View Source and hard reload are under KS-08; the device toolbar's ⇧⌘M / Ctrl+Shift+M
+  // is DevTools' own key, below; developer mode and the task manager aren't built)
   ['devtools.toggle', ['Cmd+Alt+I', 'F12'], ['Ctrl+Shift+I', 'F12']],
+  ['devtools.console', ['Cmd+Alt+J'], ['Ctrl+Shift+J']],
+  ['devtools.inspect', ['Cmd+Alt+C'], []],
   // KS-15: F1 opens help on Windows and Linux; macOS's ⌘? is the system's Help menu search.
   ['help.open', [], ['F1']],
 ]
@@ -107,6 +111,17 @@ describe('[KS-03] the default keymap follows the spec tables on each platform', 
     expect(canonical(defaultShortcutsFor(action, 'darwin'))).toEqual(canonical(mac))
     expect(canonical(defaultShortcutsFor(action, 'linux'))).toEqual(canonical(other))
     expect(canonical(defaultShortcutsFor(action, 'win32'))).toEqual(canonical(other))
+  })
+
+  it('[KS-13] leaves DevTools’ own keys to DevTools: no action has ⇧⌘M / Ctrl+Shift+M (device toolbar)', () => {
+    for (const [platform, accel] of [
+      ['darwin', 'Cmd+Shift+M'],
+      ['linux', 'Ctrl+Shift+M'],
+      ['win32', 'Ctrl+Shift+M'],
+    ] as const) {
+      const owner = ACTIONS.find((a) => defaultShortcutsFor(a, platform).some((k) => canonicalAccelerator(k) === accel))
+      expect(owner?.id, platform).toBeUndefined()
+    }
   })
 
   it('binds each key once per platform, each a binding Orbit accepts', () => {

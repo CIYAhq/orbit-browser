@@ -157,8 +157,11 @@ function AddressField({ url, onDone }: { url: string; onDone: () => void }) {
         onChange={(e) => setText(e.target.value)}
         onBlur={onDone}
         onKeyDown={(e) => {
+          // Esc gives the keyboard back to the page (KS-16). Not on blur: a click on the page has
+          // already moved it there.
           if (e.key === 'Escape') {
             e.preventDefault()
+            void invoke('mini.focusPage', {})
             onDone()
           }
         }}

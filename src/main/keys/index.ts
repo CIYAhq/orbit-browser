@@ -1,11 +1,14 @@
+import { webContents } from 'electron'
 import { ACTIONS } from '../../shared/actions'
 import type { BindResult, ShortcutPriority } from '../../shared/commands/keys'
 import { onKeymapChange, setCustomBindings } from '../../shared/keymap'
 import type { MainContext } from '../context'
-import { installMenu } from '../menu'
+import { installMenu, watchWindowsForMenu } from '../menu'
 import { bind, reset, setPriority, unbind } from './bindings'
+import { escapeLog, listenForEscapes } from './escape'
 import { lastMenuHints } from './menu-hints'
 import { registerOpenFile } from './open-file'
+import { pageFocus } from './page-focus'
 import { keyRouter } from './router'
 import { registerShortcutSheet } from './sheet'
 import { registerSpecialWindows } from './special-windows'
@@ -26,8 +29,9 @@ export function registerKeys(ctx: MainContext): void {
   store.subscribe((next, prev) => {
     if (next.settings.shortcuts !== prev.settings.shortcuts) setCustomBindings(next.settings.shortcuts)
   })
-  // The macOS menu bar shows each item's binding (KS-18).
+  // The macOS menu bar shows each item's binding (KS-18), and with no window up takes ⌘O (KS-12).
   onKeymapChange(() => installMenu(ctx))
+  watchWindowsForMenu(ctx)
 
   const saveBindings = (custom: Record<string, string[]>) =>
     store.update((d) => {
@@ -86,12 +90,28 @@ export function registerKeys(ctx: MainContext): void {
   registerOpenFile(ctx)
   registerSpecialWindows(ctx)
   keyRouter.init(ctx)
+  // Whether a page used an Esc pressed while it loads, from its preload (D59).
+  listenForEscapes((contents) => !!ctx.tabs.tabIdFor(contents))
   commands.register('keys.record', ({ on }, c) => keyRouter.setRecording(on ? c.windowId : undefined))
-  // Tests say which keys the system keeps instead of asking it, and read the keys a menu showed.
+  // Tests say which keys the system keeps instead of asking it, and read the keys a menu showed,
+  // where Orbit knows the keyboard is in a page, and what became of Esc on loading pages.
   if (ctx.e2e) {
     ;(globalThis as unknown as { __orbitKeys: unknown }).__orbitKeys = {
       setSystemClashes: setSystemClashesForTest,
       lastMenuHints,
+      focusIn: (urlPart: string) => {
+        const contents = webContents
+          .getAllWebContents()
+          .find((w) => !w.isDestroyed() && !!ctx.tabs.tabIdFor(w) && w.getURL().includes(urlPart))
+        const now = contents ? pageFocus(contents) : undefined
+        if (!now) return null
+        try {
+          return { frame: now.inFrame ? now.frame.url : 'main', where: now.where ?? null }
+        } catch {
+          return null
+        }
+      },
+      escapes: escapeLog,
     }
   }
 }

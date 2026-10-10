@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { frontendKeys } from '../../src/main/devtools/control'
 import {
   bind,
   MAX_BINDINGS,
@@ -16,10 +17,11 @@ import {
   actionForAccelerator,
   actionForInput,
   buildKeymap,
+  isFixed,
   priorityFor,
   shortcutsFor,
 } from '../../src/shared/actions'
-import { keymapVersion, onKeymapChange, setCustomBindings } from '../../src/shared/keymap'
+import { type KeyInput, keymapVersion, onKeymapChange, setCustomBindings } from '../../src/shared/keymap'
 import type { Settings } from '../../src/shared/state'
 
 const action = (id: string) => {
@@ -156,6 +158,26 @@ describe('[KS-01][ST-08] changing bindings', () => {
     expect(bind(undefined, { actionId: 'sidebar.toggle', accel: 'F7' }, 'linux').result).toEqual({ ok: true })
   })
 
+  it('[D60] macOS refuses a plain ⌃-letter binding: text fields move the caret with them', () => {
+    for (const accel of ['Ctrl+A', 'Ctrl+E', 'Ctrl+N', 'Ctrl+P', 'ctrl+k']) {
+      expect(bind(undefined, { actionId: 'sidebar.toggle', accel }, 'darwin').result, accel).toEqual({
+        ok: false,
+        problem: `⌃${accel.slice(-1).toUpperCase()} is kept for text fields: on macOS, ⌃ with a letter moves the caret.`,
+      })
+    }
+    // ⌃ with another modifier, a digit or an F key is a binding like any other (⌃7 is Space 7's, so
+    // it asks first); so is Ctrl+letter elsewhere.
+    for (const accel of ['Ctrl+Shift+N', 'Ctrl+Alt+N', 'Ctrl+Cmd+N', 'Ctrl+7', 'Ctrl+F7']) {
+      const { result } = bind(undefined, { actionId: 'sidebar.toggle', accel }, 'darwin')
+      expect('problem' in result ? result.problem : undefined, accel).toBeUndefined()
+    }
+    expect(bind(undefined, { actionId: 'sidebar.toggle', accel: 'Ctrl+K' }, 'linux').result).toEqual({ ok: true })
+    // One stored before is dropped when the settings load.
+    expect(normalizeShortcuts({ 'sidebar.toggle': ['Ctrl+N', 'Cmd+Shift+B'] }, 'darwin')).toEqual({
+      'sidebar.toggle': ['Cmd+Shift+B'],
+    })
+  })
+
   it('[KS-15] F1 stays Help on Windows and Linux; on macOS Help has no keys and can be given some', () => {
     for (const platform of ['linux', 'win32']) {
       expect(bind(undefined, { actionId: 'sidebar.toggle', accel: 'F1' }, platform).result).toEqual({
@@ -240,8 +262,10 @@ describe('[KS-01] stored bindings survive a restart only as Orbit can use them',
 
 describe('[KS-02] who gets an action’s keys first', () => {
   it('has defaults per action and platform', () => {
-    expect(priorityFor(action('sidebar.toggle'), 'darwin')).toBe('websites')
+    // ⌘S prefers Orbit on macOS, Ctrl+S websites on Windows and Linux (D60).
+    expect(priorityFor(action('sidebar.toggle'), 'darwin')).toBe('orbit')
     expect(priorityFor(action('sidebar.toggle'), 'linux')).toBe('websites')
+    expect(priorityFor(action('sidebar.toggle'), 'win32')).toBe('websites')
     expect(priorityFor(action('tab.copyUrl'), 'darwin')).toBe('orbit')
     expect(priorityFor(action('tab.copyUrl'), 'win32')).toBe('websites')
     expect(priorityFor(action('tab.new'), 'linux')).toBe('orbit')
@@ -264,5 +288,49 @@ describe('[KS-16] keys a page’s text field may use', () => {
     // They prefer Orbit: outside text fields the page never has them first.
     expect(priorityFor(action('nav.back'), 'darwin')).toBe('orbit')
     expect(priorityFor(action('nav.forward'), 'linux')).toBe('orbit')
+  })
+})
+
+describe('[KS-13] the DevTools keys can be remapped', () => {
+  const press = (key: string, code: string, mods: Partial<KeyInput> = {}): KeyInput => ({
+    key,
+    code,
+    meta: false,
+    control: false,
+    alt: false,
+    shift: false,
+    ...mods,
+  })
+
+  it('open, console, element picker, view source and hard reload: none is fixed', () => {
+    for (const id of ['devtools.toggle', 'devtools.console', 'devtools.inspect', 'page.viewSource', 'nav.hardReload']) {
+      for (const platform of ['darwin', 'linux', 'win32'])
+        expect(isFixed(action(id), platform), `${id} ${platform}`).toBe(false)
+    }
+  })
+
+  it('a remapped open key moves in the router and in the DevTools page itself', () => {
+    const { custom, result } = bind(undefined, { actionId: 'devtools.toggle', accel: 'F9', replace: 'F12' }, 'linux')
+    expect(result).toEqual({ ok: true })
+    setCustomBindings(custom)
+    expect(actionForInput(press('F9', 'F9'), 'linux')?.id).toBe('devtools.toggle')
+    expect(actionForInput(press('F12', 'F12'), 'linux')).toBeUndefined()
+    expect(frontendKeys('linux').toggle.map((k) => k.key)).toEqual(['I', 'F9'])
+  })
+
+  it('the element picker can take ⇧⌘C from Copy URL, as DT-02 says users may', () => {
+    const { custom, result } = bind(
+      undefined,
+      { actionId: 'devtools.inspect', accel: 'Cmd+Shift+C', onConflict: 'clear' },
+      'darwin',
+    )
+    expect(result).toEqual({ ok: true })
+    expect(custom).toEqual({ 'devtools.inspect': ['Cmd+Alt+C', 'Cmd+Shift+C'], 'tab.copyUrl': [] })
+    setCustomBindings(custom)
+    expect(actionForInput(press('C', 'KeyC', { meta: true, shift: true }), 'darwin')?.id).toBe('devtools.inspect')
+    expect(frontendKeys('darwin').inspect).toEqual([
+      { cmd: true, ctrl: false, alt: true, shift: false, key: 'C' },
+      { cmd: true, ctrl: false, alt: false, shift: true, key: 'C' },
+    ])
   })
 })

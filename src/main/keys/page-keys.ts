@@ -4,6 +4,25 @@ import type { WebContents } from 'electron'
 export const KEYS_WORLD = 1020
 
 /**
+ * Whether an element is a text field: one that types or edits text (page script source, shared by
+ * the watcher here and the focus mirror in page-focus.ts).
+ */
+export const EDITABLE = `(el) => {
+  if (!el || el === document.body || el === document.documentElement) return false
+  if (el.isContentEditable) return true
+  const tag = el.tagName
+  if (tag === 'TEXTAREA' || tag === 'SELECT') return true
+  if (tag !== 'INPUT') return false
+  const type = (el.getAttribute('type') || 'text').toLowerCase()
+  return !['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit'].includes(type)
+}`
+
+/** A key press as the page scripts note it: its modifiers and physical key. */
+export function signature(input: Pick<Electron.Input, 'meta' | 'control' | 'alt' | 'shift' | 'code'>): string {
+  return [input.meta, input.control, input.alt, input.shift, input.code].join(',')
+}
+
+/**
  * Notes, for each trusted key press in the page's main frame, whether the page called
  * preventDefault on it once every one of its own handlers has run, and whether keyboard focus was
  * in a text field. `__orbitKeys.verdict` answers for one press. Lives in the page's document, so
@@ -13,21 +32,12 @@ const WATCH = `(() => {
   if (window.__orbitKeys) return true
   const seen = []
   let waiters = []
-  const editable = () => {
-    const el = document.activeElement
-    if (!el || el === document.body || el === document.documentElement) return false
-    if (el.isContentEditable) return true
-    const tag = el.tagName
-    if (tag === 'TEXTAREA' || tag === 'SELECT') return true
-    if (tag !== 'INPUT') return false
-    const type = (el.getAttribute('type') || 'text').toLowerCase()
-    return !['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit'].includes(type)
-  }
+  const editable = ${EDITABLE}
   addEventListener('keydown', (e) => {
     if (!e.isTrusted) return
     const sig = [e.metaKey, e.ctrlKey, e.altKey, e.shiftKey, e.code].join(',')
     const at = Date.now()
-    const inField = editable()
+    const inField = editable(document.activeElement)
     // After the whole dispatch: the page's handlers have all had the event.
     setTimeout(() => {
       seen.push({ sig, at, inField, prevented: e.defaultPrevented })
@@ -75,18 +85,21 @@ export function watchPageKeys(contents: WebContents): void {
 
 /** What the page did with a key press. */
 export type PageVerdict =
-  /** The press reached the page's main frame: whether it called preventDefault, and whether focus was in a text field. */
+  /** The press reached the frame with the keyboard: whether it called preventDefault, and whether focus was in a text field. */
   | { seen: true; prevented: boolean; inField: boolean }
-  /** Not within the wait: the page stopped it before any handler, or focus is in a frame. */
+  /** The main frame's watcher didn't see the press within the wait: a handler of the page that ran first stopped it. */
   | { seen: false }
-  /** The page has no watcher (still loading, or a page Orbit can't script). */
+  /** No answer: the page has no watcher (loading, or a page Orbit can't script), or answered too late. */
   | undefined
 
-/** How long to wait for the page's answer before taking it that the page kept the key. */
-export const VERDICT_WAIT_MS = 250
+/** How long the page's watcher waits for the press to reach it (a little less than ANSWER_WAIT_MS). */
+export const VERDICT_WAIT_MS = 200
 
-/** How long main waits for an answer at all: a page whose renderer is busy or hung answers late. */
-const ANSWER_WAIT_MS = 1000
+/**
+ * How long main waits for the page's answer at all; a page whose renderer is busy or hung answers
+ * late, and no answer counts as the page leaving the key alone (D60).
+ */
+export const ANSWER_WAIT_MS = 250
 
 /**
  * Whether the page can say at once what it did with a key press. Electron runs no isolated-world
@@ -107,7 +120,7 @@ export async function pageVerdict(
   pressedAt: number,
 ): Promise<PageVerdict> {
   if (!pageCanAnswer(contents)) return undefined
-  const sig = [input.meta, input.control, input.alt, input.shift, input.code].join(',')
+  const sig = signature(input)
   const code = `window.__orbitKeys ? window.__orbitKeys.verdict(${JSON.stringify(sig)}, ${pressedAt - 10}, ${VERDICT_WAIT_MS}) : null`
   let timer: NodeJS.Timeout | undefined
   try {

@@ -5,6 +5,7 @@ import { acceleratorFromInput, modifiersOf } from '../../shared/keymap'
 import type { WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import { actionInWindow } from './open-file'
+import { pageFocus, watchPageFocus } from './page-focus'
 import { pageCanAnswer, pageVerdict, watchPageKeys } from './page-keys'
 
 /** A second press of the same keys within this long after the page took the first runs the action (KS-02). */
@@ -40,7 +41,10 @@ export class KeyRouter {
 
   init(ctx: MainContext): void {
     this.ctx = ctx
-    ctx.hooks.tabCreated.push((_tabId, contents) => watchPageKeys(contents))
+    ctx.hooks.tabCreated.push((_tabId, contents) => {
+      watchPageKeys(contents)
+      watchPageFocus(contents)
+    })
     // An action run some other way after a page took its keys (the toast's button, the command
     // bar): the next press of the keys is a first press again. Watches only; never handles.
     ctx.actions.intercept((id) => {
@@ -97,17 +101,23 @@ export class KeyRouter {
   }
 
   /**
-   * W, with Control still held, while switching to a recent tab (⌃Tab) closes the highlighted tab
-   * (KS-06, TB-05); a held W closes one. Returns true when the press was the switcher's: the
-   * caller keeps it from the page and every shortcut (Ctrl+W, Ctrl+Shift+W).
+   * Keys of the recent-tab switcher while it is up (⌃Tab held, KS-06, TB-05), with Control still
+   * held:
+   * - W closes the highlighted tab; a held W closes one.
+   * - ` steps back, on every platform (D60). The rest of the time ⌃` is the page's.
+   * Returns true when the press was the switcher's: the caller keeps it from the page and every
+   * shortcut (Ctrl+W, Ctrl+Shift+W).
    */
   switcherKey(input: Electron.Input, windowOf: () => WindowId | undefined): boolean {
     if (input.type !== 'keyDown' || !input.control || input.meta || input.alt) return false
-    if (input.code !== 'KeyW' && input.key.toLowerCase() !== 'w') return false
+    const close = input.code === 'KeyW' || input.key.toLowerCase() === 'w'
+    const back = !input.shift && (input.code === 'Backquote' || input.key === '`')
+    if (!close && !back) return false
     const windowId = windowOf()
     const recent = this.ctx?.tabs.recentSwitch
     if (!windowId || !recent?.active(windowId)) return false
-    if (!input.isAutoRepeat) recent.closeHighlighted(windowId)
+    if (back) void this.ctx?.actions.run('tab.recentBack', { windowId })
+    else if (!input.isAutoRepeat) recent.closeHighlighted(windowId)
     return true
   }
 
@@ -128,10 +138,13 @@ export class KeyRouter {
    *   about a second runs it: for that press this returns false, and the caller runs the action
    *   at once and keeps the key from the page. A held key's repeats stay the page's.
    * - an action that prefers Orbit but leaves its keys to text fields (Back and Forward's ⌘[ ⌘]):
-   *   the action runs unless focus was in a text field and the page used the press, or the press
-   *   went into a frame Orbit can't see into.
-   * A page whose main frame is loading can't say what it did with a press in time: Orbit takes
-   * the keys at once then.
+   *   outside a text field it runs at once and the page never sees the key, however busy the
+   *   page is (D60). In a text field the page gets the key first, and the action runs unless the
+   *   page used it.
+   * With the keyboard in a frame inside the page, that frame's fields and handlers decide (D60).
+   * No answer from the page within ANSWER_WAIT_MS counts as the page leaving the key alone. A
+   * page whose main frame is loading can't say what it did with a press in time: Orbit takes the
+   * keys at once then.
    */
   leaveToPage(
     contents: WebContents,
@@ -145,16 +158,24 @@ export class KeyRouter {
     if (priority === 'orbit' && !action.pageFirstInFields) return false
     // A page that is loading can't say in time what it did with the key: Orbit takes it at once.
     if (!pageCanAnswer(contents)) return false
+    // Where the keyboard is, known before the press: the page itself or a frame inside it.
+    const focus = pageFocus(contents)
+    const verdict = (pressedAt: number) =>
+      focus ? focus.verdict(input, pressedAt) : pageVerdict(contents, input, pressedAt)
     const key = `${contents.id} ${acceleratorFromInput(input) ?? ''}`
     const windowId = windowOf()
     // Until the page's answer is in, the macOS menu may run the action instead (`menuRuns`).
     const first: FirstPress = { actionId: action.id, until: Number.POSITIVE_INFINITY }
     if (priority === 'orbit') {
+      // Outside a text field the action runs at once (D60); so it does in a frame not known to
+      // have a text field focused.
+      if (focus && (focus.where === 'page' || (focus.inFrame && focus.where !== 'field'))) return false
       this.firstPresses.set(key, first)
-      void pageVerdict(contents, input, Date.now()).then((verdict) => {
+      void verdict(Date.now()).then((answer) => {
         if (this.firstPresses.get(key) === first) this.firstPresses.delete(key)
         if (first.menuRan || contents.isDestroyed()) return
-        if (verdict && (!verdict.seen || (verdict.prevented && verdict.inField))) return
+        // Only a text field whose page used the key keeps it (KS-16).
+        if (answer?.seen && answer.prevented && answer.inField) return
         this.ran(action, windowId)
       })
       return true
@@ -168,14 +189,15 @@ export class KeyRouter {
     if (input.isAutoRepeat) return true
     // Until the page's answer is in, another press counts as the second one.
     this.firstPresses.set(key, first)
-    void pageVerdict(contents, input, Date.now()).then((verdict) => {
+    void verdict(Date.now()).then((answer) => {
       // Whether a second press came (and ran the action) before the answer.
       const waiting = this.firstPresses.get(key) === first
       if (first.menuRan || contents.isDestroyed()) {
         if (waiting) this.firstPresses.delete(key)
         return
       }
-      if (!verdict || (verdict.seen && !verdict.prevented)) {
+      // No answer, or the page saw the press and left it alone.
+      if (!answer || (answer.seen && !answer.prevented)) {
         // The page left the key alone: the press is the action's, besides any second press's.
         if (waiting) this.firstPresses.delete(key)
         this.ran(action, windowId)

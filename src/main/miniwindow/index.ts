@@ -665,6 +665,12 @@ export function registerMiniWindow(ctx: MainContext): void {
     if (items.length === 0) return
     Menu.buildFromTemplate(items).popup({ window: mini.win, x: Math.round(x), y: Math.round(y) })
   })
+  // Esc in the address field: the keyboard goes back to the page, which had it before ⌘L (KS-16, KS-20).
+  commands.register('mini.focusPage', (_args, c) => {
+    const mini = miniOf(c)
+    const contents = mini?.tabId ? tabs.contents(mini.tabId) : undefined
+    if (contents && !contents.isDestroyed()) contents.focus()
+  })
   commands.register('mini.control', ({ op }, c) => {
     const mini = miniOf(c)
     if (!mini || mini.win.isDestroyed()) return
@@ -690,13 +696,16 @@ export function registerMiniWindow(ctx: MainContext): void {
   actions.register('mini.toggleAll', toggleAll)
 
   // In a Mini Window, keys act on its page; sidebar, Space and tab-list keys do nothing (KS-20).
-  // Help → Keyboard Shortcuts and File → Open File… act in the browser window behind (OB-12, KS-12, keys lane).
+  // Help → Keyboard Shortcuts, File → Open File… and the Library's keys (⌘Y / Ctrl+H for History,
+  // ⌘⇧L) act in the browser window behind (OB-12, KS-12, AR-10, keys lane).
   const APP_ACTIONS = new Set([
     'window.new',
     'window.newMini',
     'window.newPrivate',
     'app.settings',
     'app.archive',
+    'app.history',
+    'app.library',
     'help.shortcuts',
     'file.open',
   ])

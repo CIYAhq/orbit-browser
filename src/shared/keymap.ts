@@ -297,6 +297,11 @@ export function bindingProblem(accel: string, platform: string): string | undefi
   }
   const taken = RESERVED[mac ? 'mac' : 'other'][canonical]
   if (taken) return `${formatAccelerator(canonical, platform)} is kept for ${taken}.`
+  // macOS text fields move the caret with ⌃A, ⌃E, ⌃N, ⌃P and the rest, and the command bar moves
+  // its highlight with ⌃N and ⌃P: a binding would take them (D60).
+  if (mac && a.ctrl && !a.cmd && !a.alt && !a.shift && /^[A-Z]$/.test(a.key)) {
+    return `${formatAccelerator(canonical, platform)} is kept for text fields: on macOS, ⌃ with a letter moves the caret.`
+  }
   return undefined
 }
 

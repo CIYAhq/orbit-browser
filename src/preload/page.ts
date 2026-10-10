@@ -12,6 +12,8 @@
  * Orbit's internal pages (`orbit://<page>/`, DT-13) are Orbit's UI in a tab, not web pages: in the
  * main frame of one, and only there, this gives the bridge Orbit's UI has (D53), and patches
  * nothing. See `exposeInternalPage`.
+ *
+ * In every page's main frame, it also tells main whether the page used an Esc (D59, `watchEscape`).
  */
 import { contextBridge, ipcRenderer } from 'electron'
 import type { OrbitBridge, StatePatch } from '../shared/rpc'
@@ -189,6 +191,27 @@ function exposeInternalPage(windowId: string): void {
   }
   contextBridge.exposeInMainWorld('orbit', bridge)
 }
+
+/**
+ * Esc on a loading page (KS-19, D59): once every handler of the page has had a trusted Esc, main
+ * learns one bit, whether the page used it (preventDefault). Main stops the load only if it didn't.
+ * Runs in this preload's own world: nothing is added to the page, and nothing else is sent.
+ */
+function watchEscape(): void {
+  if (window.top !== window) return
+  window.addEventListener(
+    'keydown',
+    (event) => {
+      if (!event.isTrusted || event.key !== 'Escape') return
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
+      // After the whole dispatch: the page's handlers have all run.
+      setTimeout(() => ipcRenderer.send(PAGE_CHANNEL.escape, event.defaultPrevented === true), 0)
+    },
+    true,
+  )
+}
+
+watchEscape()
 
 if (location.protocol === 'orbit:') {
   // An internal page. Main says no (null) to anything but a tab's main frame showing one.

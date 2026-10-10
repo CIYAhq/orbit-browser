@@ -107,7 +107,7 @@ export const SidebarItems = memo(function SidebarItems({
         >
           {simple ? header : <SpaceHeader space={space}>{header}</SpaceHeader>}
           {!simple && <PinnedSection space={space} />}
-          <TodayBlock space={space} />
+          <TodayBlock space={space} clear={!simple} />
           <ItemList
             key={`today:${space.id}`}
             containerKey={`today:${space.id}`}
@@ -221,10 +221,13 @@ const PinnedSection = memo(function PinnedSection({ space }: { space: Space }) {
   )
 })
 
-/** Divider with Clear (TD-04) and the "+ New Tab" row (SB-07): one drop slot between pinned and Today. */
-function TodayBlock({ space }: { space: Space }) {
+/**
+ * Divider with Clear (TD-04) and the "+ New Tab" row (SB-07): one drop slot between pinned and Today.
+ * A private window's list has no Clear: its tabs have no Archive to go to (SB-25, KS-20).
+ */
+function TodayBlock({ space, clear }: { space: Space; clear: boolean }) {
   const y = useRowShift('divider')
-  const hasToday = space.today.length > 0
+  const hasToday = clear && space.today.length > 0
   // The button's tooltip follows a remapped shortcut (KS-18).
   const clearShortcut = useShortcutLabel('tabs.clearToday')
   return (

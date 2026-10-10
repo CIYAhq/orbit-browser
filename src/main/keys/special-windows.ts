@@ -11,7 +11,10 @@ import type { MainContext } from '../context'
 /** What the hint says. */
 export const PRIVATE_WINDOW_HINT = 'Not available in a private window'
 
-/** Actions on pinned tabs, Favorites, folders and Today's Clear (⌘D, ⌘⇧K…); every Space action is one too. */
+/**
+ * Actions on pinned tabs, Favorites, folders, Today's Clear and the Archive (⌘D, ⌘⇧K…); every Space
+ * action is one too. A private window keeps nothing in the Archive (SB-25).
+ */
 const NEEDS_SPACES = new Set([
   'tab.togglePin',
   'tab.favorite',
@@ -20,6 +23,7 @@ const NEEDS_SPACES = new Set([
   'pinned.toggleCollapsed',
   'folder.new',
   'tabs.clearToday',
+  'app.archive',
 ])
 
 /** Whether an action needs the Spaces, pinned tabs, Favorites or folders a private window doesn't have. */
