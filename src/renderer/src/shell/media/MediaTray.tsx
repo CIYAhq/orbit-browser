@@ -11,7 +11,7 @@ import {
   useState,
 } from 'react'
 import { inCall, mediaSubtitle, mediaTitle, trayTabIds } from '../../../../shared/media'
-import type { TabId } from '../../../../shared/state'
+import type { TabId, WindowId } from '../../../../shared/state'
 import { invoke } from '../../api'
 import { useOrbit, useOrbitShallow } from '../../store'
 import { Favicon } from '../../ui/Favicon'
@@ -31,8 +31,8 @@ const FADE = { duration: 0.12, ease: QUICK_EASE }
  * in the background, newest on top, just above the bottom bar. It slides up when a playing tab is
  * left and down when it goes (FL-32, MD-16); with reduced motion it only fades.
  */
-export const MediaTray = memo(function MediaTray() {
-  const ids = useOrbitShallow(trayTabIds)
+export const MediaTray = memo(function MediaTray({ windowId }: { windowId: WindowId }) {
+  const ids = useOrbitShallow((s) => trayTabIds(s, windowId))
   const reduce = useReducedMotion()
   const variants = reduce
     ? {

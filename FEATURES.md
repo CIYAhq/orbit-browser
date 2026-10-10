@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 174 built (72 partial) · 251 tested · 0 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 201 built (71 partial) · 280 tested · 0 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
-| P0 | 174 | 111 | 136 |
-| P1 | 219 | 54 | 104 |
+| P0 | 174 | 131 | 158 |
+| P1 | 219 | 61 | 111 |
 | P2 | 79 | 9 | 11 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -20,34 +20,34 @@ Spec: `spec/sidebar.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| SB-01 | Sidebar-first window layout | P0 | 🟡 partial | – | – | scaffold; audit vs spec |
-| SB-02 | Sidebar anatomy (top to bottom) | P0 | 🟡 partial | – | – | scaffold; audit vs spec |
-| SB-03 | Top row: window controls and navigation buttons | P0 | 🟡 partial | – | – | scaffold |
-| SB-04 | Address display at the top of the sidebar | P0 | 🟡 partial | – | – | scaffold |
-| SB-05 | Favorites grid placement | P0 | 🟡 partial | – | – | scaffold |
+| SB-01 | Sidebar-first window layout | P0 | ✅ | ✅ e2e | – | sidebar on the left with controls, navigation, address and every tab; the page an inset rounded card beside it in the Space theme; no tab strip |
+| SB-02 | Sidebar anatomy (top to bottom) | P0 | ✅ | ✅ e2e | – | top row, address, Favorites, title row, pinned, divider, + New Tab, Today, empty area, bottom bar in that order; title row to empty area scroll together, the rest stays; trays come with SB-10, the Library button with SB-09 |
+| SB-03 | Top row: window controls and navigation buttons | P0 | ✅ | ✅ e2e | – | traffic lights (Linux: window controls), sidebar toggle, Back/Forward/Reload with disabled and Stop states; long-press/right-click history menu; Cmd/middle-click into a new tab; Esc or double-click stops; toggle gives way first when narrow |
+| SB-04 | Address display at the top of the sidebar | P0 | ✅ | ✅ e2e+unit | – | host only (focused pane, or the Peek's page while one shows; during a navigation Orbit started, where it is going), click or Cmd+L edits that full URL; an address without a host says what it is (view-source: and the host, a blob by the host that made it, data: and its type, else the address shortened); warning icon for plain http (no padlock), copy-link button, site controls button (NV-16) at the right end |
+| SB-05 | Favorites grid placement | P0 | ✅ | ✅ e2e | – | Favorites between the address and the title row, outside the scrolling list; same grid, same place across Spaces of one profile |
 | SB-06 | Space title row placement | P0 | ✅ | ✅ e2e | – | title row: inline rename, hover profile badge and … menu (pinned caret is PN-09) |
 | SB-07 | "+ New Tab" row | P0 | ✅ | ✅ e2e | – | + New Tab row with press animation opens the command bar |
 | SB-08 | Empty sidebar area: double-click, drag, right-click | P1 | – | – | – |  |
 | SB-09 | Bottom bar: Library, Space switcher, "+" menu | P0 | 🟡 partial | ✅ e2e | – | switcher, + menu and the Library button (opens the Library); the recent-files hover popover belongs to the downloads lane |
 | SB-10 | Transient trays above the bottom bar | P1 | 🟡 partial | ✅ e2e | – | media tray and call controls (media lane), above the bottom bar, pushing the list up; download progress and the update banner belong to other lanes |
-| SB-11 | Show / hide the sidebar | P0 | 🟡 partial | – | – | scaffold |
-| SB-12 | Hover to reveal the hidden sidebar | P0 | – | – | – |  |
+| SB-11 | Show / hide the sidebar | P0 | ✅ | ✅ e2e | – | Cmd+S / Ctrl+S, toggle button, View menu and command bar; the sidebar slides out as the card widens (one curve, reversible mid-way); the page views, which can't move in step, keep out of its way while it slides (where they end as it shows, where they were as it hides; the page colour fills the rest); back at the same width, scroll and selected tab; per window, persisted; new windows show it |
+| SB-12 | Hover to reveal the hidden sidebar | P0 | ✅ | ✅ e2e | – | left 6 px edge brings a floating card in its own view over the page, which never moves; main decides whether the pointer moved (not from where it was when the sidebar hid, so Cmd+S at the edge doesn't) and reads it for 300 ms after it leaves a page or the shell, so a flick to the edge (or onto the Linux resize border) brings the card; 0 ms dwell; stays while hovered (16 px band), while a field in it is edited, the command bar is open or a native menu is up in the window (one Chromium refuses counts as closed); goes 400 ms after the pointer moves on, at once on a click into the page (the click reaches the page); not over full-screen video; stays out while the pointer is on another window over it, until it comes back (review A-F1) |
 | SB-13 | Feedback when things happen while the sidebar is hidden | P1 | – | – | – |  |
-| SB-14 | Resize the sidebar width | P0 | 🟡 partial | – | – | scaffold |
+| SB-14 | Resize the sidebar width | P0 | ✅ | ✅ e2e | – | drag the edge 1:1 with a live width, clamped 180-420 with no drift; double-click resets to 248; 40 px past the minimum hides (width kept); saved per window |
 | SB-15 | Narrow ("compact") sidebar rendering | P1 | – | – | – |  |
 | SB-16 | Sidebar position (left / right) | P2 | – | – | – |  |
 | SB-17 | Optional top toolbar | P1 | – | – | – |  |
 | SB-18 | Developer-mode tab chrome | P2 | – | – | – |  |
-| SB-19 | Inset rounded page frame ("card" look) | P0 | 🟡 partial | – | – | scaffold |
-| SB-20 | Top-of-window behaviour and window dragging | P1 | – | – | – |  |
-| SB-21 | Dim the sidebar when the window is inactive | P1 | – | – | – |  |
+| SB-19 | Inset rounded page frame ("card" look) | P0 | ✅ | ✅ e2e | – | 8 px margins (6 px with the sidebar hidden), 10 px corners on every page and pane while loading, hidden or floating; fine edge and shadow; native and video full screen drop the frame; the card and the page view take the page background colour so resizes show no white |
+| SB-20 | Top-of-window behaviour and window dragging | P1 | 🟡 partial | – | – | macOS: traffic lights hidden with the sidebar, shown (moved in) with the floating card; the rest of the hidden-sidebar chrome is not built |
+| SB-21 | Dim the sidebar when the window is inactive | P1 | ✅ | ✅ e2e | – | an inactive window's sidebar (and its floating card) fades to 84% over 150 ms on blur and is back at once on focus; no fade with reduced motion |
 | SB-22 | Keyboard focus and navigation inside the sidebar | P2 | ✅ | ✅ e2e | – | Cmd/Ctrl+Shift+E focuses the sidebar; arrows, Enter, Escape, F2 |
 | SB-23 | Scrolling, auto-reveal of the active tab and overflow indicator | P1 | ✅ | ✅ e2e | – | selected tab scrolled into view (smooth, then settles); pill points to it while it is out of view; rows use content-visibility |
 | SB-24 | Sidebar colouring follows the Space theme | P0 | 🟡 partial | ✅ e2e+unit | – | theme gradient + grain on sidebar and frame, tinted selection; the neutral theme is a solid soft grey/near-black, not a translucent material yet |
-| SB-25 | Incognito window sidebar | P1 | – | – | – |  |
+| SB-25 | Incognito window sidebar | P1 | ✅ | ✅ e2e | – | private window sidebar: top bar and address, a Private label with icon and a plain note, then only its own tabs; no Spaces, Favorites or pinned tabs (and their actions do nothing); + and Cmd/Ctrl+T open the command bar, which a new private window starts with |
 | SB-26 | Platform notes (Windows / Linux) | P2 | – | – | – |  |
-| SB-27 | Link status pill | P1 | – | – | – |  |
-| SB-28 | Page loading indicator | P1 | – | – | – |  |
+| SB-27 | Link status pill | P1 | ✅ | ✅ e2e+unit | – | hovering (or focusing) a link shows a theme-styled pill with where it goes (no scheme) at the bottom-left of that page card, in its own small view; the full URL after 1.5 s on the link, kept for the next links while it stays up; moves to the other corner when the pointer comes within 24 px, out of the way if near both; goes 120 ms after the link is left; not on Peek pages |
+| SB-28 | Page loading indicator | P1 | ✅ | ✅ e2e | – | loading indicator at the top centre of the shown page card (the focused pane; Mini Windows too), in its own view over the page, after 150 ms; it leaves the window when hidden; shows in native full screen, not over a page in HTML full screen (back when that ends if still loading); tab rows keep their favicon loading ring |
 
 ## Tabs, Pinned tabs, Favorites, Today tabs & auto-archive, Folders
 
@@ -56,7 +56,7 @@ Spec: `spec/tabs.md`
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
 | TB-01 | Tab row anatomy and states | P0 | ✅ | ✅ e2e+unit | – | row: favicon/emoji, title or breadcrumb, hover close, audio, selected pill, dimmed when asleep |
-| TB-02 | Create a new tab | P0 | ✅ | ✅ e2e | – | Cmd+T / + New Tab / link drop / Cmd+Alt+V paste; background link tabs gesture-gated |
+| TB-02 | Create a new tab | P0 | ✅ | ✅ e2e | – | Cmd+T / + New Tab / link drop (a local file address dropped opens nothing, D49) / Cmd+Alt+V paste; background link tabs gesture-gated |
 | TB-03 | Where new tabs are inserted | P0 | ✅ | ✅ e2e+unit | – | single rule todayInsertIndex(): top of Today |
 | TB-04 | Switching between tabs (pointer and keyboard) | P0 | ✅ | ✅ e2e+unit | – | click, Cmd+1-9 (Favorites setting, Cmd+9 last), Cmd+Alt+Up/Down skip collapsed rows |
 | TB-05 | Recent-tab switcher (Ctrl+Tab) | P1 | 🟡 partial | ✅ e2e | – | Ctrl+Tab / Ctrl+Shift+Tab step through the 5 most recent tabs while Ctrl is held (keyboard only); no overlay list yet |
@@ -202,7 +202,7 @@ Spec: `spec/split-view.md`
 | SV-05 | Create by dropping a tab onto another tab row | P0 | ✅ | ✅ e2e+unit | – | resting a dragged tab on a tab or split row's middle band (~400 ms) highlights that half; dropping makes or extends a split there, undoable with Cmd/Ctrl+Z; quick drags reorder as usual |
 | SV-06 | Create from a multi-selection | P0 | ✅ | ✅ e2e+unit | – | Open in Split View in the tab menu for a 2-4 tab multi-selection (sidebar order); more than 4 is disabled with the hint |
 | SV-07 | Create from the "+" menu or the window's split button | P1 | 🟡 partial | ✅ unit | – | New Split View and Add Split Right/Left/Above/Below actions plus newSplitMenuItems(); the '+' menu and title-bar button belong to the sidebar chrome |
-| SV-08 | Open a link into a split | P1 | 🟡 partial | ✅ e2e+unit | – | Open Link in Split View in the page's link menu; Option-click and dragging links not built |
+| SV-08 | Open a link into a split | P1 | 🟡 partial | ✅ e2e+unit | – | Open Link in Split View in the page's link menu; Option/Alt-click a link opens it beside the page (the engine download is cancelled); dragging links not built |
 | SV-09 | Option-click a tab row | P1 | ✅ | ✅ e2e+unit | – | Alt-click a tab row joins it (the selected tab duplicates beside itself); Alt-click a split row separates |
 | SV-10 | Notes and canvases in a split | P2 | – | – | – |  |
 | SV-11 | Layouts and flipping orientation | P0 | ✅ | ✅ e2e+unit | – | row/column trees, 3-4 pane arrangements from where panes are added, flip transposes keeping ratios |
@@ -228,24 +228,24 @@ Spec: `spec/navigation.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| NV-01 | Back and forward | P0 | – | – | – |  |
+| NV-01 | Back and forward | P0 | ✅ | ✅ e2e+unit | – | buttons and keys (Cmd+Left/Right only outside text fields), history menu with favicons that closes on tab switch, Cmd/middle-click opens the entry in a background tab with its history; mouse side buttons are Chromium's; Backspace inert |
 | NV-02 | Trackpad two-finger swipe back/forward | P1 | – | – | – |  |
-| NV-03 | Reload and hard reload | P0 | – | – | – |  |
-| NV-04 | Stop loading | P1 | – | – | – |  |
-| NV-05 | Find in page | P0 | – | – | – |  |
-| NV-06 | Page zoom | P0 | – | – | – |  |
+| NV-03 | Reload and hard reload | P0 | ✅ | ✅ e2e+unit | – | Cmd/Ctrl+R, F5; hard reload Cmd+Shift+R, Ctrl+Shift+R, Shift+F5, Ctrl+F5; Cmd/middle-click Reload duplicates with history; keyboard focus goes to the page |
+| NV-04 | Stop loading | P1 | ✅ | ✅ e2e+unit | – | Esc in the page while loading (overlays take it first), Cmd+. on macOS, double-click Reload, Stop (x) state; a typed address, Back/Forward or Reload shows where it is going at once and stays when stopped; the loading indicator goes |
+| NV-05 | Find in page | P0 | ✅ | ✅ e2e+unit | – | floating bar over the active page's top-right corner; finds as you type, n/m count, No matches; Enter/Cmd+G/F3 next, Shift+Enter/Shift+Cmd+G/Shift+F3 previous, buttons; Esc closes and keeps the match selected; per tab (hidden on switch, back with text and place); starts from the selection, else the last search; IME commits; keys typed for the bar before it has the keyboard (a new window's first moments, a busy bar) wait up to 5 s and then go into it in order, text as text (any character); it takes the keyboard when it shows, even later than that; shortcuts and IME composition are not held; Cmd+J jumps to the selection (macOS); Edit > Find menu; does nothing while a Peek is open, so the keyboard stays in it (finding in a Peek is PK-11) |
+| NV-06 | Page zoom | P0 | ✅ | ✅ e2e+unit | – | Chromium steps 25-500% on Cmd+=/Cmd+-/Cmd+0 and Ctrl+wheel (Win/Linux), in a Peek (with a toast) and a Mini Window (no indicator there) too; per host in each profile (all its tabs), remembered across launches (written on quit), dropped with a deleted profile; indicator with Reset over the page for 1.5 s (longer while hovered); pinch is visual zoom and Cmd+0 undoes it too |
 | NV-07 | Print | P1 | – | – | – |  |
-| NV-08 | Clicking links: plain and modified clicks | P0 | – | – | – |  |
-| NV-09 | Links with target=_blank and script-opened windows | P0 | – | ✅ e2e | – |  |
-| NV-10 | New window | P0 | – | – | – |  |
-| NV-11 | Private (incognito) window | P0 | – | – | – |  |
-| NV-12 | Page context menu | P0 | – | – | – |  |
+| NV-08 | Clicking links: plain and modified clicks | P0 | 🟡 partial | ✅ e2e+unit | – | Cmd/middle-click background tab (toast Opened in a new tab while the sidebar is hidden) and Shift+Cmd foreground tab at the top of Today; Shift-click a new window when Peek is off; the page itself opens these (a link click in an isolated world, with the gesture), so they are requested as its click is: Referer, Sec-Fetch-Site, no SameSite=Strict cookie across sites; Option/Alt-click split view instead of the engine download; a local file opens in a new tab, window, Mini Window or split view only for a local file page whose frames are all local too, whatever the engine lets through: Orbit can't tell which frame asked, so a frame of any other origin (a web page's, or an opaque one: sandboxed, data:) refuses Cmd-, Shift- and Cmd+Option-clicks, target=_blank and window.open, and a toast names the file; a plain click without a target still opens it (D49); Cmd+Option-click a Mini Window and Shift-click Peek through the peek lane; hover pill is SB-27; still requested as if typed (Sec-Fetch-Site none, Strict cookies sent), with the page as Referer: the page menu Open Link in New Tab and New Window, Option-click split view, a blocked pop-up Open; without a Referer too: Peek, Mini Window and routing-rule links (peek lane), a pop-up window own links, Open Link in Private Window (on purpose); a link in a frame from another origin is opened from the top page, without a Referer; not built: dragging links |
+| NV-09 | Links with target=_blank and script-opened windows | P0 | ✅ | ✅ e2e+unit | – | target=_blank and window.open without size: selected tab at the top of Today with its opener; with size: a small window without sidebar titled with the host (Not secure marked), the opener can close it; pop-ups without a click blocked, shown in the address display with Open and Always Allow for the site; a web page, or a local page with a frame of another origin (web or opaque), gets no tab, window or pop-up of a local file, nor one offered there, and a toast names the file (D49); a tab that only downloads closes and reselects its opener |
+| NV-10 | New window | P0 | 🟡 partial | ✅ e2e | – | Cmd/Ctrl+N (SP-24): same Spaces and pinned tabs, cascaded, command bar open, full screen follows; links opened in new windows (Shift-click, link menu) cascade too; the Ctrl+Cmd+N blank window (TB-17) is not built |
+| NV-11 | Private (incognito) window | P0 | ✅ | ✅ e2e+unit | – | Cmd/Ctrl+Shift+N, File menu, macOS Dock menu, Windows taskbar task, orbit --private-window (with links, they open in it and never in a Mini Window): in-memory session shared by open private windows, wiped when the last closes; no state, history, favicon, archive, site-choice or reopen record kept; own Space-less sidebar, dark look, Private label with a plain note; command bar sees only private tabs; extension rules are EX-10 |
+| NV-12 | Page context menu | P0 | ✅ | ✅ e2e | – | native menu: page (Back, Forward, Reload, Save Page As: complete for a local page, else as a single file or its HTML alone, so no local file a web page or web frame names is copied, D49; Print, View Page Source), link (New Tab, which toasts Opened in a new tab while the sidebar is hidden; Split View, New Window, Private Window, Copy, Save Link As; a local file link or image on a page that is not a local file keeps only its Copy items, D49; a script, page source or data link has no open items), selection (Copy, Search engine, Look Up on macOS), image, video and audio (Loop and Show Controls, ticked as the element is, greyed where the engine cannot: an audio player keeps its controls; then the media lane Picture in Picture on a video), editable (suggestions, Add to Dictionary, edit roles, Paste and Match Style, Writing Direction), Inspect last; Peek and Mini Window items come from their lanes; media items in a frame inside the page act on the frame element playing the same source; P2 Translate and Share Quote not built |
 | NV-13 | Load-error pages | P1 | – | – | – |  |
 | NV-14 | Crashed or unresponsive tab | P1 | – | ✅ e2e | – |  |
-| NV-15 | Permission prompts | P0 | – | ✅ e2e | – |  |
-| NV-16 | Site controls panel | P0 | – | – | – |  |
-| NV-17 | Copy the current URL | P0 | – | – | – |  |
-| NV-18 | Links from other apps (Orbit as the default browser) | P0 | – | ✅ e2e | – |  |
+| NV-15 | Permission prompts | P0 | ✅ | ✅ e2e+unit | – | prompt under the address display, as wide as it (over the page's top-left while the sidebar is hidden), for the shown tab or else a split view pane that waits: camera, mic, location, notifications, clipboard, MIDI, idle, windows, fonts, local network, serial/USB/HID choosers, screen share, file access; Allow while visiting / Allow this time / Never allow, or Block / Allow; a press answers only once the prompt has shown for 500 ms and 500 ms after the press before; Esc dismisses; kept per profile and site (private in memory); a frame from another site can't ask for notifications or use the page's; pages read undecided as default/prompt (a PermissionStatus change event doesn't fire for a decision made in Orbit, and the patched getters and requestPermission show their source to toString); a notification click brings its tab forward (page notifications, not service-worker ones; only from a frame allowed notifications, once per 500 ms); Peek, Mini Window and pop-ups ask in a dialog over their own window (Allow, Block, Not Now; Esc keeps nothing; the same request asks once); the recording indicators wait on TB-15; toolbar anchor waits on SB-17, Site settings is ST-13 |
+| NV-16 | Site controls panel | P0 | 🟡 partial | ✅ e2e+unit | – | button at the address's right end and the Site Controls action (never shows the hidden sidebar): host and connection, switches for permissions the site used or asked for (pop-ups too), devices, zoom with reset, Reset permissions, Clear cookies and site data, Reload hint; Esc or a click outside closes; auto PiP, Peek, Developer mode, Tweaks, extensions, capture and the all-sites link wait on their features |
+| NV-17 | Copy the current URL | P0 | 🟡 partial | ✅ e2e | – | copy button = Cmd+Shift+C (clean URL, Copied toast); one-time shortcut tip when the URL is copied from the command bar; the Win/Linux page-first offer waits on KS-02 |
+| NV-18 | Links from other apps (Orbit as the default browser) | P0 | ✅ | ✅ e2e | – | summary of MW-02/05/09/10/11: links from other apps open a Mini Window or follow routing rules, else a Today tab in the most recent Space; never in a private window (e2e); a launch with --private-window takes its links to a private window (NV-11); rules UI is ST-09, Archive restores AR-05 |
 | NV-19 | Links that open other apps (external protocols) | P1 | – | – | – |  |
 | NV-20 | Full screen | P1 | – | ✅ e2e | – |  |
 | NV-21 | Save page and view source | P2 | – | – | – |  |
@@ -270,7 +270,7 @@ Spec: `spec/peek.md`
 | PK-08 | Open a Peek in Split View | P1 | ✅ | ✅ e2e | – | the card slides to the right half, then split.addTab makes the source and the live Peek page one split in the source's place (a pinned source gives a pinned split), the page focused; from a full split the Peek stays open and the SV-25 toast shows |
 | PK-09 | Close a Peek | P0 | ✅ | ✅ e2e+unit | – | Esc (after fullscreen), ⌘W, ×, click outside; archived as from 'peek' |
 | PK-10 | Reopen a Peek closed by mistake | P1 | ✅ | ✅ e2e | – | ⌘Z right after closing, or ⌘⇧T, reopens on the same page with history |
-| PK-11 | Navigating and acting inside a Peek | P1 | 🟡 partial | ✅ e2e | – | links, back/forward, reload, zoom, copy URL, devtools act on the Peek; the sidebar address shows the Peek host; ⌘L makes it a tab and edits it; find in page waits for the find bar (core placeholder) |
+| PK-11 | Navigating and acting inside a Peek | P1 | 🟡 partial | ✅ e2e+unit | – | links, back/forward, reload, zoom, copy URL, devtools act on the Peek; the sidebar address shows the Peek host; ⌘L makes it a tab and edits it; no find in a Peek yet: ⌘F, ⌘G and F3 do nothing while one is open, so the keyboard stays in it (NV-05) |
 | PK-12 | Peek settings | P1 | 🟡 partial | ✅ e2e+unit | – | settings.peekExternalLinks / peekShiftClick honoured; toggles UI belongs to the settings lane |
 | PK-13 | Peek and the sidebar | P0 | ✅ | ✅ e2e | – | no sidebar row; sidebar stays usable; selecting another tab, Space or window dismisses (reopenable) |
 | PK-14 | Canvases, notes and Library items open in Peek | P2 | – | – | – |  |
@@ -353,7 +353,7 @@ Spec: `spec/shortcuts.md`
 | KS-05 | Tabs and windows | P0 | – | – | – |  |
 | KS-06 | Switching tabs | P0 | – | – | – |  |
 | KS-07 | Spaces | P0 | ✅ | ✅ e2e | – | Space shortcuts wired through the action table |
-| KS-08 | Page navigation and page tools | P0 | – | – | – |  |
+| KS-08 | Page navigation and page tools | P0 | 🟡 partial | ✅ e2e+unit | – | Back, Forward, Reload, hard reload, Stop, find (Cmd+F, Cmd+G, Shift+Cmd+G, F3, Ctrl+G), Cmd+J and zoom keys done; print, save page, reader mode and the rest come with their NV items |
 | KS-09 | Split view | P0 | – | – | – |  |
 | KS-10 | Peek and Mini Window | P1 | – | – | – |  |
 | KS-11 | Media | P1 | 🟡 partial | ✅ e2e | – | Space and arrows in the focused player, Cmd/Ctrl+scroll and pinch zoom (tested), hardware media keys via Chromium (untested), Mute Tab action assignable; the calendar meeting shortcut (P2) belongs to TB-21/FV-09 |
@@ -374,8 +374,8 @@ Spec: `spec/feel.md`
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
 | FL-01 | Motion principles and shared tokens | P0 | – | ✅ e2e+unit | – |  |
-| FL-02 | Sidebar show/hide (docked toggle) | P0 | – | – | – |  |
-| FL-03 | Sidebar hover-reveal overlay | P0 | – | – | – |  |
+| FL-02 | Sidebar show/hide (docked toggle) | P0 | ✅ | ✅ e2e | – | 260 ms standard curve drives the sidebar column and the card margins together; interruptible; reduced motion snaps |
+| FL-03 | Sidebar hover-reveal overlay | P0 | ✅ | ✅ e2e | – | 0 ms dwell; card in 200 ms (snappy), out 160 ms (quick); hysteresis band; re-entering while it leaves brings it back |
 | FL-04 | Tab row hover | P0 | – | – | – |  |
 | FL-05 | Tab selection | P0 | – | – | – |  |
 | FL-06 | New-tab insertion | P0 | – | – | – |  |
@@ -387,7 +387,7 @@ Spec: `spec/feel.md`
 | FL-12 | Folder and pinned-section expand/collapse | P1 | – | – | – |  |
 | FL-13 | Space switching: swipe physics, settle and rubber-band | P0 | ✅ | ✅ e2e+unit | – | strip of pages, 1:1 tracking, commit thresholds, settle/rubber-band springs, one-page slides for clicks and keys, reduced motion cross-fade |
 | FL-14 | Theme-colour transition between Spaces | P0 | ✅ | ✅ e2e+unit | – | theme blends with the gesture/spring in OKLab; 200 ms preset blends; light/dark cross-fade |
-| FL-15 | Button press micro-animations | P1 | – | – | – |  |
+| FL-15 | Button press micro-animations | P1 | 🟡 partial | – | – | top row: Back/Forward nudge, Reload glyph turns once, press to 0.94 with pop release, restarts on repeat, none when disabled or reduced motion |
 | FL-16 | Command bar open and close | P0 | ✅ | ✅ e2e | – | motion spring (0.97→1, 4 px drop), 100 ms exit (80 ms after choosing a row) while focus returns at once; fade only with reduced motion; centred in the window |
 | FL-17 | Command bar typing and result updates | P0 | ✅ | ✅ e2e+unit | – | per-keystroke local results, identity-keyed memoized rows, instant highlight; engine suggestions fill free rows without moving the highlight |
 | FL-18 | Split view create and resize | P1 | – | – | – |  |
@@ -395,7 +395,7 @@ Spec: `spec/feel.md`
 | FL-20 | Favorites tiles | P1 | – | – | – |  |
 | FL-21 | Sidebar scrolling and large-sidebar performance | P0 | – | ✅ e2e | – |  |
 | FL-22 | Toasts | P1 | – | – | – |  |
-| FL-23 | Page loading indicator | P1 | – | – | – |  |
+| FL-23 | Page loading indicator | P1 | ✅ | ✅ e2e | – | after 150 ms, a 48x4 theme-accent pill sweeping on a 1.2 s cycle (a pulse with reduced motion); on load end it fills (80 ms) and fades (150 ms), gone 180 ms after; never moves page content |
 | FL-24 | Library and Archive motion | P2 | ✅ | ✅ e2e+unit | – | Library opens with a 220 ms fade and 0.98→1 scale (opacity only with reduced motion) and fades out; sections cross-fade in 90 ms; search answers within 50 ms; restored rows fade and the rows below rise; long lists virtualised; a previewed entry opens and closes with the Peek's motion (FL-19) |
 | FL-25 | Menus, popovers and tooltips | P1 | – | – | – |  |
 | FL-26 | Recent-tab switcher (Ctrl+Tab) | P1 | – | – | – |  |
@@ -416,7 +416,7 @@ Spec: `spec/appearance.md`
 | AP-02 | Theme colours carry through the whole interface | P1 | – | ✅ e2e | – |  |
 | AP-03 | Restore the default (neutral) theme | P1 | – | ✅ unit | – |  |
 | AP-04 | Dark mode quality | P1 | – | ✅ unit | – |  |
-| AP-05 | Private-window appearance | P1 | – | – | – |  |
+| AP-05 | Private-window appearance | P1 | ✅ | ✅ e2e | – | private windows are near-black whatever the theme (frame, sidebar, window background) with hover and selection tuned for black; Private label with icon in the sidebar, not over the page; no Space switcher or Favorites |
 | AP-06 | Inactive-window dimming | P1 | – | – | – |  |
 | AP-07 | Optional top toolbar (look and placement) | P1 | – | – | – |  |
 | AP-08 | Page-colour-aware chrome | P2 | – | – | – |  |

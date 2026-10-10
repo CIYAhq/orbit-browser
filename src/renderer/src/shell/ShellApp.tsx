@@ -2,6 +2,7 @@ import type { CSSProperties } from 'react'
 import { useWindow } from '../store'
 import { useShellTheme } from '../theme'
 import { ContentArea } from './ContentArea'
+import { SidebarEdge } from './chrome/SidebarEdge'
 import { Sidebar } from './sidebar/Sidebar'
 import { Toasts } from './Toasts'
 
@@ -11,10 +12,11 @@ export function ShellApp() {
   // The Space theme is painted as CSS variables by the theme driver (no re-render per frame).
   const theme = useShellTheme(win?.spaceId)
   if (!win) return null
+  const hidden = !win.sidebar.visible
   const style = { '--sidebar-w': `${win.sidebar.width}px` } as CSSProperties
   return (
     <div
-      className={`shell${win.sidebar.visible ? '' : ' shell--sidebar-hidden'}${win.focused ? '' : ' shell--blurred'}`}
+      className={`shell${hidden ? ' shell--sidebar-hidden' : ''}${win.fullscreen ? ' shell--fullscreen' : ''}${win.focused ? '' : ' shell--blurred'}${win.kind === 'private' ? ' shell--private' : ''}`}
       style={style}
       ref={theme.shellRef}
       data-testid="shell"
@@ -24,6 +26,7 @@ export function ShellApp() {
       </div>
       <Sidebar win={win} />
       <ContentArea win={win} />
+      {hidden && win.kind !== 'mini' && <SidebarEdge />}
       <Toasts />
     </div>
   )

@@ -1,0 +1,60 @@
+/* The link status pill (SB-27): its own small transparent view in a bottom corner of the page card.
+   The view is the pill plus a 6 px margin for the shadow (LINK_PILL in src/main/nav/link-pill.ts). */
+html[data-view="link"] body {
+  background: transparent;
+  overflow: hidden;
+}
+
+.link-pill-view {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.link-pill {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  /* Its own width, whatever the view's width is now, so it can be measured. */
+  width: max-content;
+  box-sizing: border-box;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 7px;
+  font:
+    12px / 22px system-ui,
+    sans-serif;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text, #1c1c1f);
+  background: color-mix(in srgb, var(--surface, #fff) 96%, transparent);
+  box-shadow:
+    0 1px 4px rgba(0, 0, 0, 0.16),
+    0 0 0 0.5px rgba(0, 0, 0, 0.14);
+  animation: link-pill-in 100ms ease-out;
+}
+
+/* Off the link: a quick fade (main takes the view away 120 ms after). */
+.link-pill-view.is-leaving .link-pill {
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+}
+
+@keyframes link-pill-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .link-pill {
+    animation: none;
+  }
+  .link-pill-view.is-leaving .link-pill {
+    transition: none;
+  }
+}

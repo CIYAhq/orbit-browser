@@ -24,6 +24,7 @@ import {
 } from 'react'
 import { SPACE_PANELS, type SpacePanel } from '../../../../shared/commands/spaces'
 import { DEFAULT_PROFILE_ID } from '../../../../shared/defaults'
+import { isPrivateProfile } from '../../../../shared/private'
 import type { ColorMode, OverlayState, SpaceId, SpaceTheme } from '../../../../shared/state'
 import { invoke, runAction } from '../../api'
 import { useOrbit } from '../../store'
@@ -249,6 +250,8 @@ function SpaceMenu({ spaceId, x, y, sidebar }: { spaceId: SpaceId; x: number; y:
   const count = useOrbit((s) => s.spaceOrder.length)
   if (!space) return null
   const profileItems: MenuItem[] = Object.values(profiles)
+    // The private windows' profile is not one to pick (NV-11).
+    .filter((p) => !isPrivateProfile(p))
     .sort((a, b) => (a.id === DEFAULT_PROFILE_ID ? -1 : b.id === DEFAULT_PROFILE_ID ? 1 : a.createdAt - b.createdAt))
     .map((p) => ({
       id: `profile-${p.id}`,

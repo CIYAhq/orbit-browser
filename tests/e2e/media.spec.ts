@@ -6,6 +6,7 @@ import type { PlayerHost, PlayerInfo } from '../../src/main/media/player'
 import { formatClock } from '../../src/shared/media'
 import type { TabMedia } from '../../src/shared/state'
 import { FRAME_SLACK, launchOrbit, MOD, type Orbit, state, tabPage, tabView } from './helpers'
+import { choosePageMenu, pageMenu } from './nav-support'
 import { act, activeId, cmd, newTab, tab, tabsHook, waitTab } from './tabs-support'
 
 // ---- Local media fixtures (on ports 3330–3349) ----
@@ -1564,25 +1565,12 @@ test('[MD-02] right-clicking a video offers Picture in Picture, which floats it 
   const { app } = orbit
   const v = await openPlaying(app, '/media/long-video/Film')
   await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
-  // The page's menu is kept for the test instead of being shown.
-  await app.evaluate(({ Menu }) => {
-    Menu.prototype.popup = function (this: Electron.Menu) {
-      ;(globalThis as unknown as { __pageMenu?: Electron.Menu }).__pageMenu = this
-    }
-  })
-  const menu = () =>
-    app.evaluate(() => {
-      const m = (globalThis as unknown as { __pageMenu?: Electron.Menu }).__pageMenu
-      return m ? m.items.map((i) => `${i.label}${i.checked ? ' ✓' : ''}`) : []
-    })
-  const choose = (label: string) =>
-    app.evaluate((_e, l) => {
-      const g = globalThis as unknown as { __pageMenu?: Electron.Menu }
-      const item = g.__pageMenu?.items.find((i) => i.label === l)
-      g.__pageMenu = undefined
-      item?.click()
-      return !!item
-    }, label)
+  // The page's menu, which Orbit keeps for the test instead of showing it (NV-12); ✓ marks a ticked item.
+  const menu = async () => {
+    const m = await pageMenu(app)
+    return m ? m.labels.map((label) => `${label}${m.checked[label] ? ' ✓' : ''}`) : []
+  }
+  const choose = (label: string) => choosePageMenu(app, label)
   const center = await v.page.evaluate(() => {
     const r = (document.getElementById('v') as HTMLVideoElement).getBoundingClientRect()
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 }

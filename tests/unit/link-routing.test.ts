@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   decideLink,
+  framesMayOpen,
+  isLocalFileUrl,
   isMeetingLink,
   type LinkSettings,
   type LinkSource,
+  localFileBlockedMessage,
+  pageMayOpen,
   routeFor,
   sameSite,
 } from '../../src/shared/link-routing'
@@ -139,6 +143,62 @@ describe('meeting links (PK-04)', () => {
     ]) {
       expect(isMeetingLink(url), url).toBe(false)
     }
+  })
+})
+
+describe('local files a page may have Orbit open (D49)', () => {
+  const file = 'file:///tmp/orbit/notes.txt'
+  it('a web page: no local file, nor its source; web and other links stay', () => {
+    expect(pageMayOpen('https://example.com/a', file)).toBe(false)
+    expect(pageMayOpen('http://localhost:3330/page/A', 'FILE:///tmp/x')).toBe(false)
+    expect(pageMayOpen('https://example.com/a', `view-source:${file}`)).toBe(false)
+    expect(pageMayOpen('https://example.com/a', 'https://example.org/b')).toBe(true)
+    expect(pageMayOpen('https://example.com/a', 'mailto:someone@example.com')).toBe(true)
+  })
+  it('a page that is itself a local file opens local files', () => {
+    expect(pageMayOpen('file:///tmp/orbit/index.html', file)).toBe(true)
+    expect(pageMayOpen('file:///tmp/orbit/index.html', 'https://example.org/b')).toBe(true)
+  })
+  it('a page not known (a dropped link), or a blank, data or source page, is not a local file', () => {
+    for (const from of [undefined, '', 'about:blank', 'data:text/html,<a>x</a>', `view-source:${file}`]) {
+      expect(pageMayOpen(from, file)).toBe(false)
+    }
+  })
+  it('a page that asks from a frame Orbit can’t name: a local file only when every frame is local (F1)', () => {
+    const framed = (...origins: string[]) => ({ mainFrame: { framesInSubtree: origins.map((origin) => ({ origin })) } })
+    expect(framesMayOpen(framed('file://'), file)).toBe(true)
+    // An about:blank or srcdoc frame of a local page has its origin.
+    expect(framesMayOpen(framed('file://', 'file://'), file)).toBe(true)
+    expect(framesMayOpen(framed('file://', 'http://localhost:3310'), file)).toBe(false)
+    expect(framesMayOpen(framed('file://', 'null'), file)).toBe(false)
+    expect(framesMayOpen(framed('https://example.com'), file)).toBe(false)
+    expect(framesMayOpen(framed('https://example.com'), `view-source:${file}`)).toBe(false)
+    expect(framesMayOpen(framed('https://example.com', 'null'), 'https://example.org/b')).toBe(true)
+    const gone = {
+      get mainFrame(): never {
+        throw new Error('Render frame was disposed before WebFrameMain could be accessed')
+      },
+    }
+    expect(framesMayOpen(gone, file)).toBe(false)
+    expect(framesMayOpen(gone, 'https://example.org/b')).toBe(true)
+  })
+  it('a local file refused for a page is named in its toast (round 3 fix check F1)', () => {
+    expect(localFileBlockedMessage('file:///tmp/orbit/notes.txt')).toBe('Local file blocked: notes.txt')
+    expect(localFileBlockedMessage('file:///tmp/my%20docs/caf%C3%A9%20menu.pdf')).toBe(
+      'Local file blocked: café menu.pdf',
+    )
+    expect(localFileBlockedMessage('view-source:file:///tmp/orbit/index.html')).toBe('Local file blocked: index.html')
+    expect(localFileBlockedMessage('file:///C:/Users/me/plan.txt')).toBe('Local file blocked: plan.txt')
+    expect(localFileBlockedMessage('file:///home/me/')).toBe('Local file blocked: me')
+    expect(localFileBlockedMessage('file:///tmp/100%.txt')).toBe('Local file blocked: 100%.txt')
+    expect(localFileBlockedMessage('file:///')).toBe('Local file blocked: file:///')
+  })
+  it('which addresses are local files', () => {
+    expect(isLocalFileUrl(file)).toBe(true)
+    expect(isLocalFileUrl(` ${file}`)).toBe(true)
+    expect(isLocalFileUrl('view-source:file:///etc/hosts')).toBe(true)
+    expect(isLocalFileUrl('https://example.com/file:///x')).toBe(false)
+    expect(isLocalFileUrl('filesystem:https://example.com/temporary/x')).toBe(false)
   })
 })
 

@@ -63,8 +63,11 @@ export interface TabCommands {
   'tabs.delete': { args: { id: ItemId }; result: void }
   'tabs.archiveBelow': { args: { tabId: TabId }; result: void }
   'tabs.copyLinks': { args: { tabIds: TabId[]; markdown?: boolean }; result: string }
-  /** Duplicate with history (TB-10): below the original, or at `to`/`index` (⌥-drag, TB-09). */
-  'tabs.duplicate': { args: { tabId: TabId; to?: ContainerRef; index?: number }; result: TabId }
+  /**
+   * Duplicate with history (TB-10): below the original, or at `to`/`index` (⌥-drag, TB-09).
+   * `activate` overrides whether the copy is selected (⌘-click Reload keeps it in the background, NV-03).
+   */
+  'tabs.duplicate': { args: { tabId: TabId; to?: ContainerRef; index?: number; activate?: boolean }; result: TabId }
   'tabs.setMuted': { args: { tabId: TabId; muted: boolean }; result: void }
   'tabs.clearToday': { args: { spaceId?: SpaceId }; result: void }
   /** Collapse or expand a Space's pinned section (PN-09). */

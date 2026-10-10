@@ -1,106 +1,44 @@
-import { ArrowLeft, ArrowRight, Lock, PanelLeft, RotateCw, X } from 'lucide-react'
+import { PanelLeft } from 'lucide-react'
 import type { WindowState } from '../../../../shared/state'
-import { displayHost } from '../../../../shared/url'
-import { invoke, isMac, runAction } from '../../api'
-import { activeTabId } from '../../selectors'
-import { useOrbit } from '../../store'
+import { isMac, runAction } from '../../api'
+import { Address } from '../chrome/Address'
+import { NavButtons } from '../chrome/NavButtons'
+import { PermissionPrompt, useActivePrompt } from '../chrome/PermissionPrompt'
+import { withShortcut } from '../chrome/shortcut-label'
+import { WindowControls } from '../chrome/WindowControls'
+import '../chrome/chrome.css'
 
-/** Window controls, navigation buttons and the address pill. */
-export function TopBar({ win }: { win: WindowState }) {
-  const tab = useOrbit((s) => {
-    // While a Peek is open, the address and the buttons are the Peek page's (PK-11).
-    const overlay = s.windows[win.id]?.overlay
-    const peek = overlay?.kind === 'peek' && overlay.phase !== 'closing' ? overlay.tabId : null
-    const id = peek && s.tabs[peek] ? peek : activeTabId(s, win.id)
-    return id ? s.tabs[id] : undefined
-  })
-  const host = tab ? displayHost(tab.url) : ''
-  const secure = tab?.url.startsWith('https://')
+/**
+ * The top of the sidebar (SB-03, SB-04): window controls (traffic lights on macOS), the sidebar
+ * toggle, Back, Forward and Reload, then the address display. At narrow widths the toggle goes
+ * first; Back and Forward stay. In the floating card (SB-12) the toggle docks the sidebar again.
+ * A site's permission prompt hangs under the address display (NV-15).
+ */
+export function TopBar({ win, floating = false }: { win: WindowState; floating?: boolean }) {
+  const prompt = useActivePrompt(win.id)
   return (
-    <div className="topbar">
+    <div className={`topbar${isMac ? ' topbar--mac' : ''}${prompt ? ' has-prompt' : ''}`} data-testid="topbar">
       <div className="topbar__row">
-        {isMac ? <div className="topbar__traffic-space" /> : <WindowControls />}
+        {isMac ? <div className="topbar__traffic-space" data-testid="traffic-space" /> : <WindowControls />}
         <div className="topbar__spacer" />
-        <IconButton label="Toggle sidebar" testId="toggle-sidebar" onClick={() => runAction('sidebar.toggle')}>
+        <button
+          type="button"
+          className="icon-button topbar__toggle"
+          aria-label="Toggle sidebar"
+          title={withShortcut(floating ? 'Show sidebar' : 'Hide sidebar', 'sidebar.toggle')}
+          data-testid="toggle-sidebar"
+          onClick={() => runAction('sidebar.toggle')}
+        >
           <PanelLeft size={16} />
-        </IconButton>
-        <IconButton label="Back" testId="nav-back" disabled={!tab?.canGoBack} onClick={() => runAction('nav.back')}>
-          <ArrowLeft size={16} />
-        </IconButton>
-        <IconButton
-          label="Forward"
-          testId="nav-forward"
-          disabled={!tab?.canGoForward}
-          onClick={() => runAction('nav.forward')}
-        >
-          <ArrowRight size={16} />
-        </IconButton>
-        <IconButton
-          label={tab?.loading ? 'Stop' : 'Reload'}
-          testId="nav-reload"
-          disabled={!tab}
-          onClick={() => runAction(tab?.loading ? 'nav.stop' : 'nav.reload')}
-        >
-          {tab?.loading ? <X size={16} /> : <RotateCw size={15} />}
-        </IconButton>
+        </button>
+        <NavButtons windowId={win.id} />
       </div>
-      <button
-        type="button"
-        className={`address${tab?.loading ? ' address--loading' : ''}`}
-        data-testid="address-pill"
-        onClick={() => runAction('url.edit')}
-        title={tab?.url}
-      >
-        {secure && <Lock size={11} className="address__lock" />}
-        <span className="address__host">{host || 'Search or enter address'}</span>
-      </button>
-    </div>
-  )
-}
-
-function IconButton(props: {
-  label: string
-  testId?: string
-  disabled?: boolean
-  onClick: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      className="icon-button"
-      aria-label={props.label}
-      title={props.label}
-      data-testid={props.testId}
-      disabled={props.disabled}
-      onClick={props.onClick}
-    >
-      {props.children}
-    </button>
-  )
-}
-
-function WindowControls() {
-  return (
-    <div className="window-controls">
-      <button
-        type="button"
-        aria-label="Close window"
-        className="window-controls__btn window-controls__btn--close"
-        onClick={() => void invoke('window.control', { op: 'close' })}
-      />
-      <button
-        type="button"
-        aria-label="Minimize window"
-        className="window-controls__btn window-controls__btn--min"
-        onClick={() => void invoke('window.control', { op: 'minimize' })}
-      />
-      <button
-        type="button"
-        aria-label="Maximize window"
-        className="window-controls__btn window-controls__btn--max"
-        onClick={() => void invoke('window.control', { op: 'maximize' })}
-      />
+      <Address windowId={win.id} />
+      {prompt && (
+        <div className="perm-prompt-anchor">
+          <PermissionPrompt key={prompt.id} prompt={prompt} />
+        </div>
+      )}
     </div>
   )
 }

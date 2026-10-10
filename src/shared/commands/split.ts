@@ -1,3 +1,4 @@
+import type { PageReferrer } from '../nav'
 import type { LayoutPath, PaneSide, SplitAxis } from '../split'
 import type { ContainerRef, SplitId, TabId } from '../state'
 
@@ -19,8 +20,14 @@ export interface SplitCommands {
   'split.addTab': { args: { tabId: TabId; target: TabId; side?: PaneSide; focus?: boolean }; result: SplitId | null }
   /** New empty pane beside the focused pane, with the command bar open to fill it (SV-02/SV-03). */
   'split.addPane': { args: { side?: PaneSide }; result: void }
-  /** Opens a URL in a new pane beside a tab (link → split, SV-08). */
-  'split.openUrl': { args: { url: string; target: TabId; side?: PaneSide }; result: SplitId | null }
+  /**
+   * Opens a URL in a new pane beside a tab (link → split, SV-08); `referrer` is the page the link
+   * was on, sent as its referrer (review B-F1).
+   */
+  'split.openUrl': {
+    args: { url: string; target: TabId; side?: PaneSide; referrer?: PageReferrer }
+    result: SplitId | null
+  }
   /** Closes one pane; its tab is archived like a closed Today tab (SV-17). */
   'split.closePane': { args: { tabId: TabId }; result: void }
   /** Closes the whole split as one unit (SV-19). */

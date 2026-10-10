@@ -31,6 +31,16 @@ export const FRAME_RADIUS = 10
 /** Follow the frame for at most this long after a sidebar/padding transition starts (review F6). */
 const FOLLOW_CAP_MS = 700
 
+/** True while the shell's sidebar column is mid-transition. */
+function columnSliding(shell: HTMLElement): boolean {
+  return shell
+    .getAnimations()
+    .some(
+      (a) =>
+        a instanceof CSSTransition && a.transitionProperty === 'grid-template-columns' && a.playState === 'running',
+    )
+}
+
 export interface FrameModel {
   /** Leaf for a single tab, a tree for a split, null for an empty window. */
   layout: SplitLayout | null
@@ -98,6 +108,13 @@ export class PaneEngine {
   private ring: HTMLElement | null = null
   private raf = 0
   private followUntil = 0
+  /**
+   * Where the native page views stay while the sidebar slides in or out (SB-11, FL-02). They can't
+   * move in step with the shell's frames, so they keep to the part of the frame the sidebar never
+   * covers: showing, where they will end; hiding, where they were. The page-colour card (SB-19)
+   * fills the rest, in step with the sidebar (review A-M4).
+   */
+  private slide: Box | null = null
   private lastReport = ''
   private cleanup: (() => void)[] = []
   /** Nothing is reported before the first model arrives (avoids hiding the views on mount). */
@@ -121,11 +138,20 @@ export class PaneEngine {
       if (e.target !== content && e.target !== shell) return
       if (e.propertyName !== 'grid-template-columns' && !e.propertyName.startsWith('padding')) return
       this.followUntil = performance.now() + FOLLOW_CAP_MS
+      if (shell && content && e.target === shell && e.propertyName === 'grid-template-columns') {
+        this.startSlide(shell, content)
+      }
       this.schedule()
     }
     const onEnd = (e: TransitionEvent) => {
       if (e.target !== content && e.target !== shell) return
-      requestAnimationFrame(() => this.inFrameDo(() => this.measure() && this.relayout(false)))
+      requestAnimationFrame(() =>
+        this.inFrameDo(() => {
+          // A reversal cancels one slide and runs another: the slide is over once no column transition runs.
+          if (this.slide && !(shell && columnSliding(shell))) this.endSlide()
+          else if (this.measure()) this.relayout(false)
+        }),
+      )
     }
     document.addEventListener('transitionrun', onRun)
     document.addEventListener('transitionend', onEnd)
@@ -427,8 +453,51 @@ export class PaneEngine {
     this.inFrameDo(() => this.step(now))
   }
 
+  /** The sidebar's column started to slide: the views keep to where the frame is both now and at the end. */
+  private startSlide(shell: HTMLElement, content: HTMLElement): void {
+    const end = this.endFrame(shell, content)
+    // A reversal starts from where the views are, not from where the frame has got to.
+    const kept = end && intersect(this.slide ?? this.frame, end)
+    this.slide = kept && kept.width >= 1 && kept.height >= 1 ? kept : null
+  }
+
+  /** The slide ended: the views go where the frame now is. */
+  private endSlide(): void {
+    this.slide = null
+    this.lastReport = ''
+    this.measure()
+    this.relayout(false)
+  }
+
+  /**
+   * Where the frame will be once the running sidebar and padding transitions end: measured with
+   * them at their end, then put back where they were, all before the frame is drawn.
+   */
+  private endFrame(shell: HTMLElement, content: HTMLElement): Box | null {
+    if (!this.host) return null
+    const running = [...shell.getAnimations(), ...content.getAnimations()].filter(
+      (a): a is CSSTransition =>
+        a instanceof CSSTransition &&
+        (a.transitionProperty === 'grid-template-columns' || a.transitionProperty.startsWith('padding')),
+    )
+    const times = new Map(running.map((a) => [a, a.currentTime]))
+    try {
+      for (const [a, time] of times) {
+        const end = Number(a.effect?.getComputedTiming().endTime ?? 0)
+        // Just short of the end, so the transition never finishes (or sends its end event) here.
+        if (time !== null && end > 0) a.currentTime = end - 0.01
+      }
+      const r = this.host.getBoundingClientRect()
+      return { x: r.left, y: r.top, width: r.width, height: r.height }
+    } finally {
+      for (const [a, time] of times) if (time !== null) a.currentTime = time
+    }
+  }
+
   private step(now: number): void {
     this.raf = 0
+    // An end event that never came: the slide ends with the time cap.
+    if (this.slide && now >= this.followUntil) this.endSlide()
     let moving = false
     for (const anim of this.anims.values()) {
       const a = anim.x.step(now)
@@ -527,21 +596,26 @@ export class PaneEngine {
   }
 
   private sendReport(): void {
+    const frame = this.slide ?? this.frame
     const panes: { tabId: TabId; rect: Box }[] = []
-    for (const [tabId, anim] of this.anims) {
+    for (const [tabId, r] of this.reportedRects(frame)) {
       if (tabId === DROP_PANE || this.model.blank.has(tabId)) continue
-      const r = rectOf(anim)
-      const rect = intersect(
-        { x: this.frame.x + r.x, y: this.frame.y + r.y, width: r.width, height: r.height },
-        this.frame,
-      )
+      const rect = intersect({ x: frame.x + r.x, y: frame.y + r.y, width: r.width, height: r.height }, frame)
       if (rect.width < 1 || rect.height < 1) continue
       panes.push({ tabId, rect })
     }
-    const key = JSON.stringify([panes, this.frame])
+    const key = JSON.stringify([panes, frame])
     if (key === this.lastReport) return
     this.lastReport = key
-    window.orbit.send('layout.panes', { panes, radius: FRAME_RADIUS, seq: getSeq(), frame: { ...this.frame } })
+    window.orbit.send('layout.panes', { panes, radius: FRAME_RADIUS, seq: getSeq(), frame: { ...frame } })
+  }
+
+  /** The panes in `frame`: as drawn, or (the sidebar sliding) laid out in the part of the frame kept for the views. */
+  private reportedRects(frame: Box): [TabId, Box][] {
+    if (!this.slide) return [...this.anims].map(([tabId, anim]) => [tabId, rectOf(anim)])
+    const layout = this.displayLayout()
+    const local = { x: 0, y: 0, width: frame.width, height: frame.height }
+    return (layout ? layoutBoxes(layout, local, PANE_GAP).panes : []).map((p) => [p.tabId, p.rect])
   }
 
   /** Forces the next report even if nothing changed (e.g. after main dropped one). */

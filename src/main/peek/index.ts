@@ -6,9 +6,10 @@ import type {
   WebContentsWillNavigateEventParams,
   WindowOpenHandlerResponse,
 } from 'electron'
-import { app, WebContentsView } from 'electron'
+import { WebContentsView } from 'electron'
 import { decideLink, type LinkHow, type LinkSettings, type LinkSource, routeFor } from '../../shared/link-routing'
 import { PEEK_RADIUS, peekCard, peekStart } from '../../shared/peek-geometry'
+import { isPrivateTab } from '../../shared/private'
 import type { Rect } from '../../shared/rpc'
 import { layoutLeaves, MAX_PANES, SPLIT_FULL_MESSAGE } from '../../shared/split'
 import type { OrbitState, SpaceId, Tab, TabId, WindowId } from '../../shared/state'
@@ -20,7 +21,7 @@ import { activateInDraft, todayInsertIndex } from '../tabs/model'
 import type { SavedHistory } from '../tabs/runtime'
 import { activeTabOf } from '../windows'
 import { archiveFloating, floatingTab, keepFloatingPagesOutOfTabClose } from './floating'
-import { ClickTracker, HeldModifiers, isMiniClick, PAGE_WORLD, type PageClick } from './input'
+import { ClickTracker, heldModifiers, isMiniClick, PAGE_WORLD, type PageClick } from './input'
 import { runPageAction } from './page-actions'
 
 /** A Peek card open in a window: a floating tab whose view sits above the overlay, in the card. */
@@ -75,10 +76,8 @@ export function registerPeek(ctx: MainContext): void {
   const { store, commands, actions, windows, tabs } = ctx
   const sessions = new Map<WindowId, Session>()
   const closed: ClosedPeek[] = []
-  const held = new HeldModifiers()
-  const clicks = new ClickTracker(held)
-  app.on('web-contents-created', (_event, contents) => held.watch(contents))
-  app.on('browser-window-blur', () => held.reset())
+  // One tracker for the app: ⌥-click split view reads the same keys (nav lane).
+  const clicks = new ClickTracker(heldModifiers())
   /** When a sidebar tab last closed: ⌘⇧T reopens a Peek only if it closed after that. */
   let lastTabCloseAt = 0
   let undo: { windowId: WindowId; until: number } | undefined
@@ -584,7 +583,9 @@ export function registerPeek(ctx: MainContext): void {
 
   const sourceOf = (tabId: TabId, contents: WebContents): LinkSource | undefined => {
     const tab = store.state.tabs[tabId]
-    if (!tab) return undefined
+    // A private window's links stay in private windows: no Peek there, and a Mini Window would
+    // carry them into a normal profile (NV-11). The usual new-tab and new-window handling applies.
+    if (!tab || isPrivateTab(store.state, tabId)) return undefined
     const url = contents.getURL() || tab.url
     if (tab.floating === 'peek') return { kind: 'peek', url }
     if (tab.floating === 'mini') return { kind: 'mini', url }

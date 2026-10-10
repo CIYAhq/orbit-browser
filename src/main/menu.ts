@@ -67,7 +67,33 @@ export function installMenu(ctx: MainContext): void {
         item('page.print'),
       ],
     },
-    { role: 'editMenu' },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'pasteAndMatchStyle' },
+        { role: 'delete' },
+        { role: 'selectAll' },
+        { type: 'separator' },
+        // Find in page (NV-05).
+        {
+          label: 'Find',
+          submenu: [
+            item('page.find', 'Find…'),
+            item('page.findNext'),
+            item('page.findPrevious'),
+            item('page.jumpToSelection'),
+          ],
+        },
+        { type: 'separator' },
+        { label: 'Speech', submenu: [{ role: 'startSpeaking' }, { role: 'stopSpeaking' }] },
+      ],
+    },
     {
       label: 'View',
       submenu: [

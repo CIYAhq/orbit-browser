@@ -126,10 +126,13 @@ const Pane = memo(function Pane(props: {
   single: boolean
 }) {
   const { tabId, engine, blank, focused, single } = props
+  // The page's own background under it, for the moments the page hasn't drawn (SB-19).
+  const pageColor = useOrbit((s) => (blank ? undefined : s.tabs[tabId]?.pageColor))
   return (
     <div
       ref={(el) => engine.registerPane(tabId, el)}
       className={`pane${single ? ' pane--single' : ''}${blank ? ' pane--blank' : ''}${focused ? ' is-focused' : ''}`}
+      style={pageColor ? { backgroundColor: pageColor } : undefined}
       data-testid="split-pane"
       data-tab-id={tabId}
       data-focused={focused ? 'true' : undefined}

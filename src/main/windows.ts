@@ -1,12 +1,23 @@
 import { join } from 'node:path'
 import { BrowserWindow, nativeTheme, screen, type WebContents, WebContentsView, webContents } from 'electron'
-import { actionForInput } from '../shared/actions'
-import { createWindowState } from '../shared/defaults'
+import { actionForInput, outsideTextActionFor } from '../shared/actions'
+import { createWindowState, DEFAULT_SIDEBAR_WIDTH } from '../shared/defaults'
+import { isPrivateSpace, PRIVATE_PALETTE } from '../shared/private'
 import type { Rect, RendererView } from '../shared/rpc'
-import type { ColorMode, OrbitState, OverlayState, SpaceId, TabId, WindowId, WindowState } from '../shared/state'
+import type {
+  ColorMode,
+  OrbitState,
+  OverlayState,
+  SidebarState,
+  SpaceId,
+  TabId,
+  WindowId,
+  WindowState,
+} from '../shared/state'
 import { paletteFor } from '../shared/theme'
 import { splitLeaves, splitOfTab } from '../shared/tree'
 import type { MainContext } from './context'
+import { focusIsEditable } from './nav/focus'
 import { fastSwitchPanes } from './split/layout'
 
 interface Pane {
@@ -23,6 +34,8 @@ interface WindowRecord {
   visible: Set<TabId>
   panes: Pane[]
   radius: number
+  /** The corner radius each shown page was given (0 in full screen) (SB-19). */
+  corners: Map<TabId, number>
   /** Last single-pane content rect: lets tab switches swap views without a renderer round trip. */
   lastSingleRect?: Rect
   /** Last reported content frame (all panes together); used to lay out split views on the fast path. */
@@ -36,6 +49,61 @@ interface WindowRecord {
   refocusPage?: boolean
   /** Tab whose page is in HTML fullscreen (video): its view fills the window. */
   htmlFullscreen?: TabId
+  /**
+   * The hidden sidebar's floating card (SB-12): its own view, made once the sidebar is hidden and
+   * placed in the window only while the card is out (or sliding away).
+   */
+  floating?: WebContentsView
+  /** The floating card is out (`sidebar.peeking`). */
+  floatingShown: boolean
+  /** Pending removal of the floating view after its card slid away. */
+  floatingTimer?: ReturnType<typeof setTimeout>
+  /** Pending start of the floating view's renderer, once the sidebar's hide animation is over. */
+  floatingPrewarm?: ReturnType<typeof setTimeout>
+  /** Pending release of the floating view's renderer after the sidebar stayed docked a while. */
+  floatingDispose?: ReturnType<typeof setTimeout>
+  /** macOS: pending return of the traffic lights once a docking sidebar has slid in. */
+  buttonsTimer?: ReturnType<typeof setTimeout>
+  /**
+   * The page tools (find bar, zoom indicator; NV-05, NV-06): a small view over the active page's
+   * top-right corner, started a little after the window opens and placed only while it shows something.
+   */
+  tools?: WebContentsView
+  /** The page tools are wanted on screen: from showTools() to hideTools(). */
+  toolsShown: boolean
+  /**
+   * The page tools' page has loaded. Only then does their view go into the window: a view placed
+   * while its page loads takes the keyboard from the page (round 2 fix check, M3).
+   */
+  toolsReady: boolean
+  toolsPrewarm?: ReturnType<typeof setTimeout>
+  /**
+   * A permission prompt over the active page's top-left corner while the sidebar is hidden (NV-15;
+   * with the sidebar showing, the prompt is part of it). Started when first needed.
+   */
+  prompt?: WebContentsView
+  /** The prompt is wanted on screen: from showPrompt() to hidePrompt(). */
+  promptShown: boolean
+  /**
+   * The prompt view's page has loaded. Only then does the view go into the window: a view placed
+   * while its page loads takes the keyboard from the page (fix check A, F1).
+   */
+  promptReady: boolean
+  /**
+   * What the prompt view's page was last told (`prompt:placed`): whether the view is on screen,
+   * placed and not under a page cover. Unset for a new page, which asks when it loads.
+   */
+  promptSaid?: boolean
+  /**
+   * Other modules' small views over the pages (createUiView): the loading indicator (SB-28), the
+   * link pill (SB-27), page dialogs (NV-24). Kept above the pages, closed with the window.
+   */
+  uiViews: Set<WebContentsView>
+  /**
+   * A view over the whole page area while it is open, such as the Library (AR-02): the page tools,
+   * the prompt and the small views above stay under it, with the page (setPageCover).
+   */
+  cover?: WebContentsView
 }
 
 /** A tab view placed in a window. */
@@ -48,8 +116,29 @@ interface Attachment {
 
 /** How long the overlay view stays up after closing so its exit animation can play (FL-16). */
 const OVERLAY_EXIT_MS = 110
+/** The page tools' renderer starts this long after the window shows (NV-05: ⌘F finds the bar ready). */
+const TOOLS_PREWARM_MS = 1500
+
+/** The floating sidebar's card sits this far from the window's edges (SB-12, SB-19). */
+export const FLOAT_INSET = 6
+/** macOS: where the traffic lights sit in the docked sidebar's top row (SB-03, SB-20). */
+const TRAFFIC_LIGHTS = { x: 16, y: 17 }
+/** Room right of the floating card for its shadow; the pointer there still counts as over it (FL-03). */
+export const FLOAT_BAND = 16
+/** The docked sidebar's slide (FL-02): the shell's `--sidebar-dur`. */
+const SIDEBAR_SLIDE_MS = 260
+/** The floating view stays up this long while its card slides away (FL-03: quick timing, 160 ms)… */
+const FLOAT_EXIT_MS = 200
+/** …and this long when the sidebar docks, while the docked one slides in beneath it. */
+const FLOAT_DOCK_MS = SIDEBAR_SLIDE_MS + 20
+/** The floating view's renderer starts once the docked sidebar has slid away (not during the slide). */
+const FLOAT_PREWARM_MS = SIDEBAR_SLIDE_MS
+/** …and is let go after the sidebar has stayed docked this long. */
+const FLOAT_DISPOSE_MS = 60_000
 
 const isMac = process.platform === 'darwin'
+/** How far a new window sits down and right of the one it was opened from (NV-10, SP-24). */
+const CASCADE = 28
 /** Isolated world for Orbit's own small page scripts (the page can't tamper with them). */
 const EXIT_FULLSCREEN_WORLD = 1001
 
@@ -91,6 +180,16 @@ export function shownTabs(state: OrbitState, windowId: WindowId): Set<TabId> {
   return new Set(split ? splitLeaves(split.layout) : [active])
 }
 
+/**
+ * A view's web contents while its page is alive. Once the page is gone `view.webContents` is
+ * undefined, so it is never dereferenced blindly: an exception in a timer or handler would block
+ * quitting (D28).
+ */
+export function viewContents(view: WebContentsView | undefined): WebContents | undefined {
+  const contents = view?.webContents as WebContents | undefined
+  return contents && !contents.isDestroyed() ? contents : undefined
+}
+
 /** The active tab of a window's current space. */
 export function activeTabOf(state: OrbitState, windowId: WindowId): TabId | null {
   const win = state.windows[windowId]
@@ -111,6 +210,9 @@ export class WindowManager {
   private uiContents = new Map<number, WindowId>()
   /** Each tab's view that is placed in a window, and which window. Compared by view, not tab id. */
   private attached = new Map<TabId, Attachment>()
+  private layoutListeners: ((windowId: WindowId) => void)[] = []
+  private createdListeners: ((windowId: WindowId, win: BrowserWindow) => void)[] = []
+  private toolsReadyListeners: ((windowId: WindowId) => void)[] = []
   /** Tabs whose page closed its own web contents (window.close()): not reopened until selected again. */
   private selfClosed = new Set<TabId>()
   private floatingOwners: ((tabId: TabId) => WindowId | undefined)[] = []
@@ -236,6 +338,23 @@ export class WindowManager {
   }
 
   /**
+   * Where a window opened from `fromWindowId` goes: the same size, a step down and right of it,
+   * back at the screen's corner when that would leave the screen (NV-10, SP-24). Undefined when
+   * the source is in full screen or gone.
+   */
+  cascadeFrom(fromWindowId: WindowId | undefined): WindowState['bounds'] {
+    const source = fromWindowId ? this.get(fromWindowId) : undefined
+    if (!source || source.isDestroyed() || source.isFullScreen()) return undefined
+    const b = source.getNormalBounds()
+    const area = screen.getDisplayMatching(b).workArea
+    let x = b.x + CASCADE
+    let y = b.y + CASCADE
+    if (x + b.width > area.x + area.width) x = area.x + CASCADE
+    if (y + b.height > area.y + area.height) y = area.y + CASCADE
+    return { x, y, width: b.width, height: b.height }
+  }
+
+  /**
    * Opens a window for an existing window state, or a new one showing `spaceId`. With no main
    * window open, the last closed main window comes back (its bounds, Space and tabs).
    */
@@ -243,7 +362,9 @@ export class WindowManager {
     const state = this.ctx.store.state
     let winState = existing ?? this.takeClosedMain(spaceId)
     if (!winState) {
-      const space = spaceId ?? state.windows[this.focusedWindowId() ?? '']?.spaceId ?? state.spaceOrder[0]
+      // A window opened from a private one shows a normal Space (NV-11).
+      const focused = state.windows[this.focusedWindowId() ?? '']?.spaceId
+      const space = spaceId ?? (focused && !isPrivateSpace(state, focused) ? focused : undefined) ?? state.spaceOrder[0]
       if (!space) throw new Error('No spaces')
       winState = createWindowState(space)
       const created = winState
@@ -266,7 +387,7 @@ export class WindowManager {
       show: false,
       title: 'Orbit',
       backgroundColor: windowBackground(this.ctx.store.state, winState.spaceId) ?? '#e9eaf5',
-      ...(isMac ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 17 } } : { frame: false }),
+      ...(isMac ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: TRAFFIC_LIGHTS } : { frame: false }),
       webPreferences: { ...uiWebPreferences(id, 'shell'), backgroundThrottling: false },
     })
     if (winState.maximized) win.maximize()
@@ -281,10 +402,20 @@ export class WindowManager {
       visible: new Set(),
       panes: [],
       radius: 10,
+      corners: new Map(),
       minPaneSeq: 0,
       overlayShown: false,
+      floatingShown: false,
+      toolsShown: false,
+      toolsReady: false,
+      promptShown: false,
+      promptReady: false,
+      uiViews: new Set(),
     }
     this.records.set(id, rec)
+    // macOS: the traffic lights live in the sidebar's top row (SB-20).
+    if (isMac && !winState.sidebar.visible) win.setWindowButtonVisibility(false)
+    for (const listener of this.createdListeners) listener(id, win)
 
     win.once('ready-to-show', () => {
       this.ctx.perf.mark(`window:${id}:ready-to-show`)
@@ -293,6 +424,12 @@ export class WindowManager {
       setTimeout(() => {
         if (!win.isDestroyed()) this.ensureOverlay(rec)
       }, 120)
+      if (!this.ctx.store.state.windows[id]?.sidebar.visible) this.prewarmFloating(rec, 600)
+      // The page tools start once the window has settled, so ⌘F finds a ready bar.
+      rec.toolsPrewarm = setTimeout(() => {
+        rec.toolsPrewarm = undefined
+        if (!win.isDestroyed()) this.ensureTools(rec)
+      }, TOOLS_PREWARM_MS)
     })
     win.on('focus', () => {
       this.lastFocused = id
@@ -306,13 +443,17 @@ export class WindowManager {
     win.on('enter-full-screen', () => {
       this.setRuntime(id, { fullscreen: true })
       this.settleHtmlFullscreen(rec)
+      // The frame goes (SB-19): square corners now, the margins as the shell lays out again.
+      if (!rec.htmlFullscreen) this.applyPanes(id, rec.panes, rec.radius)
     })
     win.on('leave-full-screen', () => {
       this.setRuntime(id, { fullscreen: false })
       this.settleHtmlFullscreen(rec)
+      if (!rec.htmlFullscreen) this.applyPanes(id, rec.panes, rec.radius)
     })
     win.on('resize', () => {
       if (rec.overlayShown) this.fitOverlay(rec)
+      if (rec.floatingShown) this.fitFloating(rec)
       if (rec.htmlFullscreen) this.applyPanes(id, rec.panes, rec.radius)
     })
     const saveBounds = () => {
@@ -344,6 +485,16 @@ export class WindowManager {
     }
     win.on('closed', () => {
       clearTimeout(rec.overlayHideTimer)
+      clearTimeout(rec.floatingTimer)
+      clearTimeout(rec.floatingPrewarm)
+      clearTimeout(rec.floatingDispose)
+      clearTimeout(rec.buttonsTimer)
+      clearTimeout(rec.toolsPrewarm)
+      viewContents(rec.floating)?.close()
+      viewContents(rec.tools)?.close()
+      viewContents(rec.prompt)?.close()
+      for (const view of rec.uiViews) viewContents(view)?.close()
+      rec.uiViews.clear()
       this.records.delete(id)
       for (const [tabId, entry] of [...this.attached]) {
         if (entry.windowId === id) {
@@ -351,7 +502,7 @@ export class WindowManager {
           this.ctx.tabs.sleep(tabId)
         }
       }
-      if (rec.overlay && !rec.overlay.webContents.isDestroyed()) rec.overlay.webContents.close()
+      viewContents(rec.overlay)?.close()
       if (this.quitting) return
       if (this.ctx.store.state.windows[id]?.kind === 'main' && !this.hasOpenMain()) {
         // The last main window: keep its state. Linux and Windows quit right after this and
@@ -411,8 +562,70 @@ export class WindowManager {
   sendToWindow(windowId: WindowId, channel: string, payload: unknown): void {
     const rec = this.records.get(windowId)
     if (!rec) return
-    if (!rec.win.isDestroyed()) rec.win.webContents.send(`orbit:${channel}`, payload)
-    if (rec.overlay && !rec.overlay.webContents.isDestroyed()) rec.overlay.webContents.send(`orbit:${channel}`, payload)
+    // While the floating sidebar is out, what the sidebar shows (a rename field, the new-Space
+    // flow, an undo toast) happens there and not in the hidden, docked one.
+    const floating = this.floatingContents(windowId)
+    const forSidebar = channel.startsWith('sidebar:') || channel.startsWith('spaces:')
+    if (floating && forSidebar) floating.send(`orbit:${channel}`, payload)
+    else if (!rec.win.isDestroyed()) rec.win.webContents.send(`orbit:${channel}`, payload)
+    viewContents(rec.overlay)?.send(`orbit:${channel}`, payload)
+  }
+
+  /** The corner radius a shown page was last given (SB-19), for tests. */
+  cornerOf(tabId: TabId): number | undefined {
+    const entry = this.attached.get(tabId)
+    return entry ? this.records.get(entry.windowId)?.corners.get(tabId) : undefined
+  }
+
+  /** The floating sidebar's web contents while its card is out (SB-12). */
+  floatingContents(windowId: WindowId): WebContents | undefined {
+    const rec = this.records.get(windowId)
+    return rec?.floatingShown ? viewContents(rec.floating) : undefined
+  }
+
+  /** Where Orbit's sidebar is drawn: the floating card while it is out, else the window's shell. */
+  sidebarContents(windowId: WindowId): WebContents | undefined {
+    const rec = this.records.get(windowId)
+    if (!rec || rec.win.isDestroyed()) return undefined
+    return this.floatingContents(windowId) ?? rec.win.webContents
+  }
+
+  /** True while a page of the window is in HTML full screen (a video). */
+  inHtmlFullscreen(windowId: WindowId): boolean {
+    return !!this.records.get(windowId)?.htmlFullscreen
+  }
+
+  /** A tab view's place in its window (window coordinates), while attached. */
+  tabViewBounds(tabId: TabId): Rect | undefined {
+    const entry = this.attached.get(tabId)
+    if (!entry || !this.records.get(entry.windowId)?.visible.has(tabId)) return undefined
+    return entry.view.getBounds()
+  }
+
+  /** The page under a point of a window (window coordinates), with the point in the page's coordinates. */
+  pageAt(windowId: WindowId, x: number, y: number): { contents: WebContents; x: number; y: number } | undefined {
+    const rec = this.records.get(windowId)
+    if (!rec) return undefined
+    for (const tabId of rec.visible) {
+      const b = this.tabViewBounds(tabId)
+      const contents = this.liveContents(tabId)
+      if (!b || !contents) continue
+      if (x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height) return { contents, x: x - b.x, y: y - b.y }
+    }
+    return undefined
+  }
+
+  /** Test/debug view of a window's floating sidebar. */
+  floatingInfo(windowId: WindowId): { exists: boolean; placed: boolean; shown: boolean; bounds?: Rect } {
+    const rec = this.records.get(windowId)
+    const view = rec?.floating
+    if (!rec || !view || !viewContents(view)) return { exists: false, placed: false, shown: false }
+    return {
+      exists: true,
+      placed: rec.win.contentView.children.includes(view),
+      shown: rec.floatingShown,
+      bounds: view.getBounds(),
+    }
   }
 
   /** Positions tab views where the shell says panes are; hides tabs no longer shown. */
@@ -421,6 +634,8 @@ export class WindowManager {
     if (!rec || rec.win.isDestroyed()) return
     rec.panes = panes
     rec.radius = radius
+    // Native full screen has no frame: square corners (SB-19).
+    const corner = this.ctx.store.state.windows[windowId]?.fullscreen ? 0 : radius
     const wanted = new Set(panes.map((p) => p.tabId))
     for (const tabId of rec.visible) {
       if (wanted.has(tabId)) continue
@@ -436,7 +651,8 @@ export class WindowManager {
       if (!view) continue
       this.attach(rec, pane.tabId, view)
       view.setBounds(roundRect(pane.rect))
-      view.setBorderRadius(radius)
+      view.setBorderRadius(corner)
+      rec.corners.set(pane.tabId, corner)
       view.setVisible(true)
       // A tab whose page crashed while in the background reloads when it is shown again.
       if (!rec.visible.has(pane.tabId) && view.webContents.isCrashed()) view.webContents.reload()
@@ -447,6 +663,261 @@ export class WindowManager {
     // A Peek's overlay covers the page area, which just moved or resized.
     if (rec.overlayShown) this.fitOverlay(rec)
     this.focusIfNewlyShown(rec, shownBefore)
+    for (const listener of this.layoutListeners) listener(windowId)
+  }
+
+  /** Runs after a window's pages were laid out again (tab switch, resize, split, full screen). */
+  onLayout(listener: (windowId: WindowId) => void): void {
+    this.layoutListeners.push(listener)
+  }
+
+  /** Runs for each main window as it is created, before it shows. */
+  onWindowCreated(listener: (windowId: WindowId, win: BrowserWindow) => void): void {
+    this.createdListeners.push(listener)
+  }
+
+  /** Runs once a window's page tools have loaded their page: from then on showTools() places them. */
+  onToolsReady(listener: (windowId: WindowId) => void): void {
+    this.toolsReadyListeners.push(listener)
+  }
+
+  /** The page tools' web contents (NV-05, NV-06), started if it wasn't yet. */
+  toolsContents(windowId: WindowId): WebContents | undefined {
+    const rec = this.records.get(windowId)
+    if (!rec || rec.win.isDestroyed()) return undefined
+    return viewContents(this.ensureTools(rec))
+  }
+
+  /**
+   * Places the page tools at `bounds` (window coordinates): above the pages, under the floating
+   * sidebar and the overlay. Not before their page has loaded (round 2 fix check, M3): the nav
+   * module shows them again then (onToolsReady). Returns whether they are in the window.
+   */
+  showTools(windowId: WindowId, bounds: Rect): boolean {
+    const rec = this.records.get(windowId)
+    if (!rec || rec.win.isDestroyed()) return false
+    const view = this.ensureTools(rec)
+    view.setBounds(roundRect(bounds))
+    rec.toolsShown = true
+    if (!rec.toolsReady) return false
+    const parent = rec.win.contentView
+    const children = parent.children
+    const at = children.indexOf(view)
+    const above = [rec.overlay, rec.floating, rec.cover]
+      .map((v) => (v ? children.indexOf(v) : -1))
+      .filter((i) => i >= 0)
+    const ceiling = above.length > 0 ? Math.min(...above) : -1
+    if (ceiling < 0) {
+      if (at !== children.length - 1) parent.addChildView(view)
+    } else if (at !== ceiling - 1) {
+      parent.addChildView(view, at >= 0 && at < ceiling ? ceiling - 1 : ceiling)
+    }
+    view.setVisible(true)
+    return true
+  }
+
+  /**
+   * Takes the page tools out of the window. The keyboard goes back to the page when they had it,
+   * or when nothing has it in the focused window (round 2 fix check, M3).
+   */
+  hideTools(windowId: WindowId): void {
+    const rec = this.records.get(windowId)
+    const view = rec?.tools
+    if (!rec || !view || !rec.toolsShown) return
+    rec.toolsShown = false
+    const contents = viewContents(view)
+    const focused = webContents.getFocusedWebContents()
+    if ((!focused || focused === contents) && !rec.overlayShown && rec.win.isFocused()) this.focusActiveTab(rec.id)
+    this.removeChild(rec, view)
+  }
+
+  /** Test/debug view of a window's page tools; `ready`: their page has loaded. */
+  toolsInfo(windowId: WindowId): { exists: boolean; ready: boolean; placed: boolean; bounds?: Rect } {
+    const rec = this.records.get(windowId)
+    const view = rec?.tools
+    if (!rec || !view || !viewContents(view)) return { exists: false, ready: false, placed: false }
+    const placed = rec.win.contentView.children.includes(view)
+    return { exists: true, ready: rec.toolsReady, placed, bounds: view.getBounds() }
+  }
+
+  /**
+   * Places the permission prompt's view at `bounds` (window coordinates): above the pages, under
+   * the floating sidebar and the overlay (NV-15), and under a page cover such as the Library. Its
+   * page hears `prompt:placed` each time the view goes on or off screen, where under a cover counts
+   * as off: the card's choices wait a moment each time it shows (tellPrompt).
+   */
+  showPrompt(windowId: WindowId, bounds: Rect): void {
+    const rec = this.records.get(windowId)
+    if (!rec || rec.win.isDestroyed()) return
+    const view = this.ensurePrompt(rec)
+    const next = roundRect(bounds)
+    const current = view.getBounds()
+    if (
+      current.x !== next.x ||
+      current.y !== next.y ||
+      current.width !== next.width ||
+      current.height !== next.height
+    ) {
+      view.setBounds(next)
+    }
+    rec.promptShown = true
+    // Not before its page has loaded (fix check A, F1): ensurePrompt() places it then.
+    if (rec.promptReady) this.placePrompt(rec, view)
+  }
+
+  private placePrompt(rec: WindowRecord, view: WebContentsView): void {
+    this.placeAbovePages(rec, view)
+    view.setVisible(true)
+    this.tellPrompt(rec)
+  }
+
+  /** Takes the permission prompt's view out of the window; keyboard focus in it goes back to the page. */
+  hidePrompt(windowId: WindowId): void {
+    const rec = this.records.get(windowId)
+    const view = rec?.prompt
+    if (!rec || !view || !rec.promptShown) return
+    rec.promptShown = false
+    const contents = viewContents(view)
+    const focused = !!contents && webContents.getFocusedWebContents() === contents
+    if (focused && !rec.overlayShown && rec.win.isFocused()) this.focusActiveTab(rec.id)
+    this.removeChild(rec, view)
+    this.tellPrompt(rec)
+  }
+
+  /**
+   * Whether a view covers the window's pages (the Library, AR-02): what acts on the shown page,
+   * find and zoom, leaves it alone meanwhile (fix check A, M2).
+   */
+  hasPageCover(windowId: WindowId): boolean {
+    return !!this.records.get(windowId)?.cover
+  }
+
+  /**
+   * Whether a window's permission prompt view is on screen: placed, and not under a page cover
+   * (the prompt view's page asks when it loads; after that it hears each change).
+   */
+  promptOnScreen(windowId: WindowId): boolean {
+    const rec = this.records.get(windowId)
+    return !!rec && rec.promptShown && rec.promptReady && !rec.cover
+  }
+
+  /**
+   * Tells the prompt view's page when the view goes on or off screen (`prompt:placed`), once per
+   * change. Under a page cover counts as off screen: clicks go to the cover, and the card's choices
+   * wait a moment again once the cover has gone (fix check B, M1).
+   */
+  private tellPrompt(rec: WindowRecord): void {
+    const onScreen = rec.promptShown && rec.promptReady && !rec.cover
+    if (rec.promptSaid === onScreen) return
+    rec.promptSaid = onScreen
+    viewContents(rec.prompt)?.send('orbit:prompt:placed', onScreen)
+  }
+
+  /** Test/debug view of a window's permission prompt view; `covered`: placed under a page cover. */
+  promptInfo(windowId: WindowId): { exists: boolean; placed: boolean; covered: boolean; bounds?: Rect } {
+    const rec = this.records.get(windowId)
+    const view = rec?.prompt
+    if (!rec || !view || !viewContents(view)) return { exists: false, placed: false, covered: false }
+    const placed = rec.win.contentView.children.includes(view)
+    return { exists: true, placed, covered: placed && !!rec.cover, bounds: view.getBounds() }
+  }
+
+  /**
+   * A small transparent Orbit UI view for another module (the loading indicator, SB-28; the link
+   * pill, SB-27; page dialogs, NV-24): out of the window until showUiView(), then above the window's
+   * pages (under the overlay and the floating sidebar) until hideUiView(); closed with the window.
+   */
+  createUiView(windowId: WindowId, view: RendererView): WebContentsView | undefined {
+    const rec = this.records.get(windowId)
+    if (!rec || rec.win.isDestroyed()) return undefined
+    const created = new WebContentsView({ webPreferences: uiWebPreferences(rec.id, view) })
+    created.setBackgroundColor('#00000000')
+    created.setVisible(false)
+    this.registerUi(created.webContents, rec.id)
+    this.reloadUiOnCrash(created.webContents, view)
+    this.attachShortcuts(created.webContents)
+    this.hardenUi(created.webContents)
+    loadRenderer(created.webContents, view)
+    rec.uiViews.add(created)
+    return created
+  }
+
+  /**
+   * Shows a createUiView() view at `bounds` (window coordinates), placing it above the pages again;
+   * `focus` gives it the keyboard.
+   */
+  showUiView(windowId: WindowId, view: WebContentsView, bounds: Rect, focus = false): void {
+    const rec = this.records.get(windowId)
+    if (!rec || rec.win.isDestroyed() || !rec.uiViews.has(view) || !viewContents(view)) return
+    const next = roundRect(bounds)
+    const current = view.getBounds()
+    if (
+      current.x !== next.x ||
+      current.y !== next.y ||
+      current.width !== next.width ||
+      current.height !== next.height
+    ) {
+      view.setBounds(next)
+    }
+    this.placeAbovePages(rec, view)
+    if (!view.getVisible()) view.setVisible(true)
+    if (focus) viewContents(view)?.focus()
+  }
+
+  /**
+   * Takes a createUiView() view out of the window, as hideTools() does: a view only made invisible
+   * would stay above every page, a full-screen one included (review A-M1). Keyboard focus in it
+   * goes back to the page.
+   */
+  hideUiView(windowId: WindowId, view: WebContentsView): void {
+    const rec = this.records.get(windowId)
+    if (!rec || rec.win.isDestroyed() || !rec.uiViews.has(view) || !viewContents(view)) return
+    const placed = rec.win.contentView.children.includes(view)
+    if (!view.getVisible() && !placed) return
+    const focused = webContents.getFocusedWebContents() === viewContents(view)
+    view.setVisible(false)
+    if (placed) this.removeChild(rec, view)
+    if (focused && !rec.overlayShown && rec.win.isFocused()) this.focusActiveTab(rec.id)
+  }
+
+  /**
+   * Sets the view that covers a window's page area while it is open (the Library, AR-02), or clears
+   * it once that view has hidden. The page tools, the permission prompt and the small views over
+   * the page (loading indicator, link pill) belong to the page: while a cover is set they go under
+   * it, not over it, and the prompt counts as off screen. The overlay and the floating sidebar stay
+   * above it. The cover places itself above the pages, and sets itself again after it moves.
+   */
+  setPageCover(windowId: WindowId, view: WebContentsView | undefined): void {
+    const rec = this.records.get(windowId)
+    if (!rec || rec.win.isDestroyed()) return
+    rec.cover = view
+    this.tellPrompt(rec)
+    if (!view) return
+    const children = rec.win.contentView.children
+    for (const small of [rec.tools, rec.prompt, ...rec.uiViews]) {
+      if (small && children.includes(small)) this.placeAbovePages(rec, small)
+    }
+  }
+
+  /**
+   * Puts a small view above every page, under the overlay, the floating sidebar and a page cover;
+   * leaves it be when it already is.
+   */
+  private placeAbovePages(rec: WindowRecord, view: WebContentsView): void {
+    const parent = rec.win.contentView
+    const children = parent.children
+    const at = children.indexOf(view)
+    const ceilings = [rec.overlay, rec.floating, rec.cover]
+      .map((v) => (v ? children.indexOf(v) : -1))
+      .filter((i) => i >= 0)
+    const ceiling = ceilings.length > 0 ? Math.min(...ceilings) : children.length
+    let topPage = -1
+    for (const entry of this.attached.values()) {
+      if (entry.windowId === rec.id) topPage = Math.max(topPage, children.indexOf(entry.view))
+    }
+    if (at > topPage && at < ceiling) return
+    if (ceiling >= children.length) parent.addChildView(view)
+    else parent.addChildView(view, at >= 0 && at < ceiling ? ceiling - 1 : ceiling)
   }
 
   /** A page that just appeared for the focused tab or pane (e.g. a split pane filled late) takes keyboard focus. */
@@ -493,6 +964,7 @@ export class WindowManager {
     this.placeOnTop(rec, entry.view)
     entry.view.setBounds({ x: 0, y: 0, width, height })
     entry.view.setBorderRadius(0)
+    rec.corners.set(tabId, 0)
   }
 
   private setHtmlFullscreen(tabId: TabId, contentsId: number, on: boolean): void {
@@ -501,6 +973,13 @@ export class WindowManager {
       const rec = entry?.contentsId === contentsId ? this.records.get(entry.windowId) : undefined
       if (!rec) return
       rec.htmlFullscreen = tabId
+      // A floating sidebar never covers a full-screen video (SB-12).
+      if (this.ctx.store.state.windows[rec.id]?.sidebar.peeking) {
+        this.ctx.store.update((d) => {
+          const w = d.windows[rec.id]
+          if (w) w.sidebar.peeking = false
+        })
+      }
       this.applyPanes(rec.id, rec.panes, rec.radius)
       return
     }
@@ -575,7 +1054,10 @@ export class WindowManager {
     contents.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown') return
       const action = actionForInput(input, process.platform)
-      if (!action || !this.ctx.actions.has(action.id)) return
+      if (!action || !this.ctx.actions.has(action.id)) {
+        this.runOutsideText(contents, input)
+        return
+      }
       event.preventDefault()
       const windowId = this.windowIdFor(contents) ?? this.focusedWindowId()
       // Close Tab in a window that isn't an Orbit window (a page's popup) closes that window.
@@ -584,6 +1066,20 @@ export class WindowManager {
         return
       }
       void this.ctx.actions.run(action.id, { windowId })
+    })
+  }
+
+  /**
+   * Keys that edit text inside a field but are Orbit actions elsewhere (⌘← and ⌘→ go back and
+   * forward on macOS, KS-16, NV-01). The key is never taken from the page: the action runs only
+   * once it is clear that focus is not in a text field.
+   */
+  private runOutsideText(contents: WebContents, input: Electron.Input): void {
+    const action = outsideTextActionFor(input, process.platform)
+    if (!action || !this.ctx.actions.has(action.id)) return
+    const windowId = this.windowIdFor(contents) ?? this.focusedWindowId()
+    void focusIsEditable(contents).then((editable) => {
+      if (!editable && !contents.isDestroyed()) void this.ctx.actions.run(action.id, { windowId })
     })
   }
 
@@ -654,7 +1150,12 @@ export class WindowManager {
     const parent = rec.win.contentView
     const children = parent.children
     const at = children.indexOf(view)
-    const overlayAt = rec.overlay ? children.indexOf(rec.overlay) : -1
+    // The overlay, the floating sidebar (SB-12), the page tools (NV-05), a permission prompt
+    // (NV-15) and other modules' small views (createUiView) stay above every page.
+    const above = [rec.overlay, rec.floating, rec.tools, rec.prompt, ...rec.uiViews]
+      .map((v) => (v ? children.indexOf(v) : -1))
+      .filter((i) => i >= 0)
+    const overlayAt = above.length > 0 ? Math.min(...above) : -1
     if (overlayAt < 0) {
       if (at < 0 || at !== children.length - 1) parent.addChildView(view)
       return
@@ -714,6 +1215,7 @@ export class WindowManager {
         // The same overlay changed (e.g. a Peek's phase or area): keep its place and focus.
         else this.fitOverlay(rec)
       }
+      if (now.sidebar !== before?.sidebar) this.onSidebar(rec, now.sidebar, before?.sidebar)
       const tabNow = activeTabOf(next, rec.id)
       const tabBefore = before ? activeTabOf(prev, rec.id) : null
       if (tabNow !== tabBefore) {
@@ -770,6 +1272,200 @@ export class WindowManager {
     if (tabId && !rec.overlayShown) this.liveContents(tabId)?.focus()
   }
 
+  /**
+   * The sidebar was hidden, docked, revealed floating or resized (SB-11, SB-12, SB-14). The floating
+   * card's renderer starts once the sidebar is hidden, so the first reveal is quick, and goes again
+   * after the sidebar has stayed docked for a while.
+   */
+  private onSidebar(rec: WindowRecord, now: SidebarState, before: SidebarState | undefined): void {
+    if (now.visible !== before?.visible || now.peeking !== before?.peeking) this.applyWindowButtons(rec, now, before)
+    if (now.visible) {
+      clearTimeout(rec.floatingPrewarm)
+      rec.floatingPrewarm = undefined
+      if (rec.floating && !rec.floatingDispose) {
+        rec.floatingDispose = setTimeout(() => this.disposeFloating(rec), FLOAT_DISPOSE_MS)
+      }
+    } else {
+      clearTimeout(rec.floatingDispose)
+      rec.floatingDispose = undefined
+      if (!now.peeking) this.prewarmFloating(rec, FLOAT_PREWARM_MS)
+    }
+    if (now.peeking && !before?.peeking) this.showFloating(rec)
+    else if (!now.peeking && before?.peeking) this.hideFloating(rec, now.visible ? FLOAT_DOCK_MS : FLOAT_EXIT_MS)
+    else if (now.peeking && now.width !== before?.width) this.fitFloating(rec)
+  }
+
+  /**
+   * macOS: the traffic lights belong to the sidebar's top row. While it is hidden they show only
+   * with the floating card, moved in with it (the card sits inset from the window's corner) (SB-20).
+   */
+  private applyWindowButtons(rec: WindowRecord, now: SidebarState, before: SidebarState | undefined): void {
+    if (!isMac || rec.win.isDestroyed()) return
+    clearTimeout(rec.buttonsTimer)
+    rec.buttonsTimer = undefined
+    const later = (ms: number, fn: () => void) => {
+      rec.buttonsTimer = setTimeout(() => {
+        rec.buttonsTimer = undefined
+        if (!rec.win.isDestroyed()) fn()
+      }, ms)
+    }
+    const docked = () => rec.win.setWindowButtonPosition(TRAFFIC_LIGHTS)
+    if (now.peeking) {
+      rec.win.setWindowButtonPosition({ x: TRAFFIC_LIGHTS.x + FLOAT_INSET, y: TRAFFIC_LIGHTS.y + FLOAT_INSET })
+      rec.win.setWindowButtonVisibility(true)
+    } else if (!now.visible) {
+      rec.win.setWindowButtonVisibility(false)
+      docked()
+    } else if (before?.peeking) {
+      // Docked from the floating card: they move over once the card has gone.
+      later(FLOAT_DOCK_MS, docked)
+    } else if (before && !before.visible) {
+      // Shown: they appear once the sidebar has slid in under them.
+      docked()
+      later(SIDEBAR_SLIDE_MS, () => rec.win.setWindowButtonVisibility(true))
+    } else {
+      docked()
+      rec.win.setWindowButtonVisibility(true)
+    }
+  }
+
+  private prewarmFloating(rec: WindowRecord, delay: number): void {
+    if (rec.floating || rec.floatingPrewarm) return
+    rec.floatingPrewarm = setTimeout(() => {
+      rec.floatingPrewarm = undefined
+      const sidebar = this.ctx.store.state.windows[rec.id]?.sidebar
+      if (!rec.win.isDestroyed() && sidebar && !sidebar.visible) this.ensureFloating(rec)
+    }, delay)
+  }
+
+  /** The floating sidebar's view (SB-12): a transparent view at the window's left edge. */
+  private ensureFloating(rec: WindowRecord): WebContentsView {
+    if (rec.floating && viewContents(rec.floating)) return rec.floating
+    clearTimeout(rec.floatingPrewarm)
+    rec.floatingPrewarm = undefined
+    const view = new WebContentsView({ webPreferences: uiWebPreferences(rec.id, 'sidebar') })
+    view.setBackgroundColor('#00000000')
+    this.registerUi(view.webContents, rec.id)
+    this.reloadUiOnCrash(view.webContents, 'sidebar')
+    this.attachShortcuts(view.webContents)
+    this.hardenUi(view.webContents)
+    loadRenderer(view.webContents, 'sidebar')
+    rec.floating = view
+    return view
+  }
+
+  /** Puts the floating sidebar above the pages (below the overlay); its card slides in (FL-03). */
+  private showFloating(rec: WindowRecord): void {
+    if (rec.win.isDestroyed()) return
+    clearTimeout(rec.floatingTimer)
+    rec.floatingTimer = undefined
+    const view = this.ensureFloating(rec)
+    rec.floatingShown = true
+    this.fitFloating(rec)
+    const parent = rec.win.contentView
+    const children = parent.children
+    const at = children.indexOf(view)
+    const overlayAt = rec.overlay ? children.indexOf(rec.overlay) : -1
+    if (overlayAt < 0) {
+      if (at !== children.length - 1) parent.addChildView(view)
+    } else if (at !== overlayAt - 1) {
+      parent.addChildView(view, at >= 0 && at < overlayAt ? overlayAt - 1 : overlayAt)
+    }
+    view.setVisible(true)
+  }
+
+  /** The card slides away (or stays while the docked sidebar slides in), then the view leaves the window. */
+  private hideFloating(rec: WindowRecord, afterMs: number): void {
+    rec.floatingShown = false
+    const view = rec.floating
+    const contents = viewContents(view)
+    if (!view || !contents) return
+    // Keyboard focus in the card goes back to the page.
+    if (webContents.getFocusedWebContents() === contents && !rec.overlayShown) this.focusActiveTab(rec.id)
+    clearTimeout(rec.floatingTimer)
+    rec.floatingTimer = setTimeout(() => {
+      rec.floatingTimer = undefined
+      if (!rec.floatingShown && !rec.win.isDestroyed()) this.removeChild(rec, view)
+    }, afterMs)
+  }
+
+  private fitFloating(rec: WindowRecord): void {
+    const view = rec.floating
+    if (!view || rec.win.isDestroyed()) return
+    const [width = 0, height = 0] = rec.win.getContentSize()
+    const sidebar = this.ctx.store.state.windows[rec.id]?.sidebar.width ?? DEFAULT_SIDEBAR_WIDTH
+    view.setBounds({ x: 0, y: 0, width: Math.min(width, FLOAT_INSET + sidebar + FLOAT_BAND), height })
+  }
+
+  private disposeFloating(rec: WindowRecord): void {
+    rec.floatingDispose = undefined
+    const view = rec.floating
+    if (!view || rec.floatingShown || !this.ctx.store.state.windows[rec.id]?.sidebar.visible) return
+    clearTimeout(rec.floatingTimer)
+    rec.floatingTimer = undefined
+    rec.floating = undefined
+    if (!rec.win.isDestroyed()) this.removeChild(rec, view)
+    viewContents(view)?.close()
+  }
+
+  /** The page tools' view (NV-05, NV-06): transparent, sized by the nav module to what it shows. */
+  private ensureTools(rec: WindowRecord): WebContentsView {
+    if (rec.tools && viewContents(rec.tools)) return rec.tools
+    clearTimeout(rec.toolsPrewarm)
+    rec.toolsPrewarm = undefined
+    const view = new WebContentsView({ webPreferences: uiWebPreferences(rec.id, 'tools') })
+    view.setBackgroundColor('#00000000')
+    this.registerUi(view.webContents, rec.id)
+    this.reloadUiOnCrash(view.webContents, 'tools')
+    this.attachShortcuts(view.webContents)
+    this.hardenUi(view.webContents)
+    loadRenderer(view.webContents, 'tools')
+    rec.tools = view
+    rec.toolsShown = false
+    rec.toolsReady = false
+    const contents = view.webContents
+    // Into the window once its page has loaded (round 2 fix check, M3), when the nav module shows it.
+    contents.on('did-finish-load', () => {
+      if (rec.tools !== view || rec.win.isDestroyed()) return
+      rec.toolsReady = true
+      for (const listener of this.toolsReadyListeners) listener(rec.id)
+    })
+    // A crash takes their page away until it has loaded again (round 3 fix check, F6): they leave the
+    // window until then, and the keyboard goes back to the page if they had it.
+    contents.on('render-process-gone', () => {
+      if (rec.tools !== view || rec.win.isDestroyed()) return
+      rec.toolsReady = false
+      if (!rec.win.contentView.children.includes(view)) return
+      const focused = webContents.getFocusedWebContents()
+      this.removeChild(rec, view)
+      if ((!focused || focused === contents) && !rec.overlayShown && rec.win.isFocused()) this.focusActiveTab(rec.id)
+    })
+    return view
+  }
+
+  /** The permission prompt's view (NV-15): transparent, sized by the permissions module to its card. */
+  private ensurePrompt(rec: WindowRecord): WebContentsView {
+    if (rec.prompt && viewContents(rec.prompt)) return rec.prompt
+    const view = new WebContentsView({ webPreferences: uiWebPreferences(rec.id, 'prompt') })
+    view.setBackgroundColor('#00000000')
+    this.registerUi(view.webContents, rec.id)
+    this.reloadUiOnCrash(view.webContents, 'prompt')
+    this.attachShortcuts(view.webContents)
+    this.hardenUi(view.webContents)
+    loadRenderer(view.webContents, 'prompt')
+    rec.prompt = view
+    rec.promptShown = false
+    rec.promptReady = false
+    rec.promptSaid = undefined
+    // Into the window once its page has loaded, if it is still wanted then (fix check A, F1).
+    view.webContents.once('did-finish-load', () => {
+      if (rec.prompt !== view || rec.win.isDestroyed()) return
+      rec.promptReady = true
+      if (rec.promptShown) this.placePrompt(rec, view)
+    })
+    return view
+  }
+
   /** The transparent overlay view (command bar, Peek chrome, menus), created on first need. */
   private ensureOverlay(rec: WindowRecord): WebContentsView {
     if (rec.overlay) return rec.overlay
@@ -812,7 +1508,7 @@ export class WindowManager {
     }
     rec.overlayHideTimer = setTimeout(() => {
       rec.overlayHideTimer = undefined
-      if (rec.overlayShown || rec.win.isDestroyed() || overlay.webContents.isDestroyed()) return
+      if (rec.overlayShown || rec.win.isDestroyed() || !viewContents(overlay)) return
       try {
         overlay.setVisible(false)
       } catch {
@@ -867,6 +1563,8 @@ function syncAppearance(appearance: ColorMode): void {
 export function windowBackground(state: OrbitState, spaceId: SpaceId | undefined): string | undefined {
   const space = spaceId ? state.spaces[spaceId] : undefined
   if (!space) return undefined
+  // Private windows are near-black whatever the theme (AP-05).
+  if (isPrivateSpace(state, space.id)) return PRIVATE_PALETTE.windowBackground
   // The theme source follows settings.appearance, so this is the global light/dark choice.
   return paletteFor(space.theme, nativeTheme.shouldUseDarkColors).windowBackground
 }

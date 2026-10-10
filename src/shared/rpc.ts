@@ -16,6 +16,7 @@ import type { ExtensionCommands } from './commands/extensions'
 import type { HistoryCommands } from './commands/history'
 import type { ImportCommands } from './commands/import'
 import type { MediaCommands, MediaEvents } from './commands/media'
+import type { NavCommands } from './commands/nav'
 import type { PeekCommands, PeekEvents } from './commands/peek'
 import type { SettingsCommands } from './commands/settings'
 import type { SpaceCommands } from './commands/spaces'
@@ -37,6 +38,7 @@ export interface OrbitCommands
     SettingsCommands,
     DownloadCommands,
     ImportCommands,
+    NavCommands,
     MediaCommands {}
 
 export interface OrbitEvents extends CoreEvents, PeekEvents, MediaEvents {}
@@ -61,7 +63,24 @@ export interface Rect {
 }
 
 /** Which UI a renderer instance is showing. */
-export type RendererView = 'shell' | 'overlay' | 'mini' | 'settings' | 'strip' | 'library' | 'pip' | 'onboarding'
+export type RendererView =
+  | 'shell'
+  | 'overlay'
+  | 'mini'
+  | 'settings'
+  | 'strip'
+  | 'sidebar'
+  | 'tools'
+  | 'prompt'
+  /** The page loading indicator (SB-28) and the link status pill (SB-27), chrome lane. */
+  | 'loading'
+  | 'link'
+  /** Archive lane: the Library view. */
+  | 'library'
+  /** Media lane: the picture-in-picture window. */
+  | 'pip'
+  /** Settings lane: the first-run onboarding window (OB-01). */
+  | 'onboarding'
 
 /** The API the preload exposes on `window.orbit` to Orbit's own UI renderers. */
 export interface OrbitBridge {

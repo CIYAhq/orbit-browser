@@ -63,7 +63,8 @@ export function offlineArgs(args: string[] = []): string[] {
 
 /**
  * Launches the built app (out/) with an isolated profile directory. `args` are extra Chromium
- * switches. Like Playwright's pages, the main process sees no reduced-motion preference unless
+ * switches (e.g. `--host-resolver-rules` to give the local fixture server another host name).
+ * Like Playwright's pages, the main process sees no reduced-motion preference unless
  * `reducedMotion` asks for one: some CI images (GitHub's macOS runner) turn the system setting on.
  */
 export async function launchOrbit(
@@ -85,7 +86,8 @@ export async function launchOrbit(
   evaluateBetweenTasks(app)
   const takeUncaught = checkQuit(app)
   const shell = await viewPage(app, 'shell')
-  await shell.getByTestId('sidebar').waitFor()
+  // Attached rather than visible: a window restored with its sidebar hidden (SB-11) has one too.
+  await shell.getByTestId('sidebar').waitFor({ state: 'attached' })
   await waitOffline(app)
   return { app, shell, userData, takeUncaught }
 }
