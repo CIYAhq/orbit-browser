@@ -25,7 +25,7 @@ export interface Credit {
 
 const PACKAGE_IN_PATH = /\/node_modules\/(?:@[^/]+\/)?[^/]+(?=\/)/g
 const LICENCE_FILE = /^(licen[cs]e|copying)([.-].*)?$/i
-/** A value import of a package (not `import type`), e.g. `react` from `react-dom/client`. */
+/** A value import of a package (not `import type`): `react-dom` from `react-dom/client`. */
 const PACKAGE_IMPORT = /^import (?!type )[^;]*? from '((?:@[^/']+\/)?[^./'][^/']*)/gm
 
 /** The directory of the npm package a bundled module came from (the innermost node_modules), if any. */
