@@ -32,6 +32,8 @@ export interface NavFixtures {
   urlOn: (host: string, path: string) => string
   /** How many requests a path has had. */
   hits: (path: string) => number
+  /** Sends the pages a `/slow/` path is holding back now. */
+  release: (path: string) => void
   /** The Cache-Control header of the latest request for a path (a hard reload sends no-cache). */
   cacheControl: (path: string) => string | undefined
   /** What the latest request for a path said about where it came from, or undefined before one. */
@@ -153,7 +155,8 @@ function tone(seconds: number): Buffer {
  * Routes:
  * - `/page/<title>?bg=<css colour>&text=<words>`: a page (see `page()`), optionally in another
  *   background and with some text.
- * - `/slow/<title>?ms=N`: the page after N ms (default 30 s): keeps a tab loading.
+ * - `/slow/<title>?ms=N`: the page after N ms (default 30 s), or when the test releases it: keeps
+ *   a tab loading.
  * - `/slow-reload/<title>`: the page at once on the first request, then slowly (30 s) on reloads.
  * - `/page/<title>?open=<path>`: the page, opening `<path>` in a pop-up as it loads (no click).
  * - `/page/<title>?away=<url>`: the page with a link (#away) to `<url>`.
@@ -167,6 +170,8 @@ export async function startNavFixtures(): Promise<NavFixtures> {
   const cacheControl = new Map<string, string | undefined>()
   const sentFrom = new Map<string, SentFrom>()
   const pending = new Set<ServerResponse>()
+  /** The held-back pages per path, to send early (`release`). */
+  const held = new Map<string, Set<() => void>>()
   const sockets = new Set<Socket>()
   const server = createServer((req, res) => {
     const u = new URL(req.url ?? '/', 'http://localhost')
@@ -197,9 +202,18 @@ export async function startNavFixtures(): Promise<NavFixtures> {
     }
     const later = (ms: number) => {
       pending.add(res)
-      const timer = setTimeout(send, ms)
+      const waiting = held.get(u.pathname) ?? new Set<() => void>()
+      held.set(u.pathname, waiting)
+      const done = () => {
+        clearTimeout(timer)
+        waiting.delete(done)
+        send()
+      }
+      const timer = setTimeout(done, ms)
+      waiting.add(done)
       res.on('close', () => {
         clearTimeout(timer)
+        waiting.delete(done)
         pending.delete(res)
       })
     }
@@ -253,6 +267,9 @@ export async function startNavFixtures(): Promise<NavFixtures> {
     url: (path) => `http://localhost:${port}${path}`,
     urlOn: (host, path) => `http://${host}:${port}${path}`,
     hits: (path) => hits.get(path) ?? 0,
+    release: (path) => {
+      for (const done of [...(held.get(path) ?? [])]) done()
+    },
     cacheControl: (path) => cacheControl.get(path),
     sentFrom: (path) => sentFrom.get(path),
     close: () =>

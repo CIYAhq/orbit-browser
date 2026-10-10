@@ -28,6 +28,7 @@ import {
   waitLoaded,
   windowState,
 } from './nav-support'
+import { settled } from './tabs-support'
 
 let fx: NavFixtures
 let orbit: Orbit
@@ -467,9 +468,14 @@ test('[SB-11] ⌘S hides the sidebar and the page card takes the window; again b
   await cmd(app, 'window.setSidebar', { width: 300 })
   const scroll = shell.getByTestId('sidebar-scroll')
   await expect.poll(() => scroll.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(200)
+  // Scrolled once the rows have grown in and the sidebar has its new width: rows still growing
+  // above the visible ones would move the scroll position (review A-F9).
+  await expect.poll(async () => (await shell.getByTestId('sidebar').boundingBox())?.width).toBe(300)
+  await settled(shell)
   await scroll.evaluate((el) => {
     el.scrollTop = 120
   })
+  expect(await scroll.evaluate((el) => el.scrollTop)).toBe(120)
   const size = await contentSize()
 
   await shell.keyboard.press(`${MOD}+S`)

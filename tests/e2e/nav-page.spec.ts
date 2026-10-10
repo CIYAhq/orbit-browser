@@ -176,7 +176,9 @@ test('[SB-28][FL-23] a slow page shows the loading indicator at the top centre o
   const { app } = orbit
   const id = await openTab(app, page('Start'))
   const before = (await loading(app)).shown
-  await cmd(app, 'tabs.navigate', { tabId: id, url: fx.url('/slow/Slowly?ms=1500') })
+  // The page comes when the test lets it, however slow the machine (review A-F9).
+  const slow = fx.url('/slow/Slowly')
+  await cmd(app, 'tabs.navigate', { tabId: id, url: slow })
   await expect.poll(async () => (await state(app)).tabs[id]?.loading).toBe(true)
   // Out after the page has been loading a little while, for this tab.
   await expect.poll(async () => (await loading(app)).visible).toBe(true)
@@ -197,7 +199,8 @@ test('[SB-28][FL-23] a slow page shows the loading indicator at the top centre o
     'loading-sweep',
   )
   // The page arrives: the pill finishes, then its view goes.
-  await waitLoaded(app, id, fx.url('/slow/Slowly?ms=1500'))
+  fx.release('/slow/Slowly')
+  await waitLoaded(app, id, slow)
   await expect.poll(async () => (await loading(app)).visible, { timeout: 2000 }).toBe(false)
 })
 
