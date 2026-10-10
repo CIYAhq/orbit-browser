@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 475 spec’d · 184 built (76 partial) · 265 tested · 0 feel right. 10 more are out of scope and not counted.
+**Totals:** 472 spec’d · 184 built (76 partial) · 265 tested · 0 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 111 | 136 |
-| P1 | 221 | 61 | 115 |
-| P2 | 80 | 12 | 14 |
+| P1 | 219 | 61 | 115 |
+| P2 | 79 | 12 | 14 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -549,7 +549,7 @@ Spec: `spec/settings.md`
 | ST-12 | Privacy & security, and clearing browsing data | P1 | 🟡 partial | ✅ e2e+unit | – | privacy promise (Orbit sends nothing); Clear browsing data per profile (⌘⇧⌫ / Ctrl+Shift+Delete): history by time range; cookies and site data, and the cache, always from all time (Electron has no range), so they start ticked only for All time; Secure DNS (Automatic, Off, Cloudflare, Google, Quad9); graphics acceleration lives in Advanced. No HTTPS-first or Safe Browsing (not in Electron), no per-site clearing here |
 | ST-13 | Site settings (permissions) page | P1 | – | – | – |  |
 | ST-14 | Languages, spell check and translation | P2 | – | – | – |  |
-| ST-15 | Passwords and autofill settings | P1 | – | – | – |  |
+| ST-15 | Passwords and autofill settings | P1 | ⛔ out of scope | – | – | the settings of a password manager and an autofill store, which Orbit doesn't have (IM-08 and IM-11 are out of scope too, D52) |
 | ST-16 | Session restore on launch | P1 | – | – | – |  |
 | ST-17 | About Orbit | P1 | ✅ | ✅ e2e+unit | – | Settings → About: logo, version (a click copies it), build date, Chromium and Electron versions, system, Check for updates, release notes, Copy build info. Licence and Open-source credits open credits.html, built with the app (D43): Orbit's and Electron's licences, a link to the LICENSES.chromium.html Electron ships, and the licence of each npm package whose code ships. Release notes and help need access to the private repository for now |
 | ST-18 | Account, sign-in and sync sections | OOS | ⛔ out of scope | – | – | the spec leaves it out |
@@ -570,10 +570,10 @@ Spec: `spec/import.md`
 | IM-05 | Mapping bookmarks into Orbit (pinned tabs and folders) | P1 | ✅ | ✅ e2e+unit | – | one pinned folder "Imported from <Browser>" ("Imported bookmarks" from a file) at the end of the target Space's pinned section: the source's top-level groups and nested folders kept, in order, as closed sub-folders (the folder itself closed above 1,000 items); several profiles into one Space each get a sub-folder by name; each bookmark a pinned tab with its title and address, asleep, with no favicon or request until opened; bookmarklets, saved searches, browser-only and non-web addresses skipped and counted; Firefox tags and separators left out; no Favorites made; one undo step takes it all back. 2,000 bookmarks take about 0.1 s, added in parts, with the longest main-process stall about 30–50 ms |
 | IM-06 | Target Space and profile for imported data | P1 | ✅ | ✅ e2e | – | the last step: the profile (it gets the history) and the Space (its pinned section gets the bookmarks): the current Space by default, the first one in onboarding, or New Space… with a name. Several source profiles: "Make a matching Orbit profile and Space for each" makes them, in order, named after the source profiles, each getting its own profile's history. Private windows' profiles aren't offered and never get history |
 | IM-07 | History import | P1 | ✅ | ✅ e2e+unit | – | Chromium's History, Firefox's places.sqlite and Safari's History.db (macOS-unverified), read from copies a window of rows at a time, into the chosen profile's history: each page with its title, visit and typed counts and its newest visits (up to 20). History (⌘Y / Ctrl+H) lists them and the command bar suggests and completes them at once; no tab is made and nothing loads. Left out: browsers' own pages, hidden pages, frame loads (Chromium subframes; Firefox embeds, framed links, downloads). History keeps the 50,000 most recent pages: a larger history keeps its newest and the summary counts the rest. 100,000 pages take about 2 s, with main's longest stall about 50–110 ms and none in the windows; the profile's history is written once, as a snapshot |
-| IM-08 | Password import | P1 | – | – | – |  |
+| IM-08 | Password import | P1 | ⛔ out of scope | – | – | Orbit has no password manager to import into: the spec has no row for one (OT-11), and Electron has none. IM-03 offers no Passwords type, and IM-12 and IM-13 take no passwords CSV (D52) |
 | IM-09 | Extension import (Chromium-family sources) | P1 | 🟡 partial | ✅ e2e+unit | – | A Chromium-family profile's extensions are listed on the types step, from its Preferences and Secure Preferences (read from copies; a name kept only in the manifest is read from it, in its default language): pinned ones first, the browser's own left out. The row is off and says they aren't importable yet; unpacked ones never come over. Not built: installing them fresh from the store with one summary confirmation, pinning the pinned ones, and the ad-blocker de-duplication (blockers are already marked), because the extensions lane's install path isn't on main yet. Firefox add-ons aren't listed (the spec covers Chromium-family sources) |
 | IM-10 | Cookies / signed-in sessions import | P2 | – | – | – |  |
-| IM-11 | Autofill addresses and payment cards import | P2 | – | – | – |  |
+| IM-11 | Autofill addresses and payment cards import | P2 | ⛔ out of scope | – | – | Orbit has no store for addresses and cards to import into: the spec has no row for one (OT-12), and Electron has none (D52) |
 | IM-12 | Bringing data over from Arc (user-facing exports only) | P1 | ✅ | ✅ e2e+unit | – | Paste a list of links (one address per line, "Title — address" with a dash, bar or tab, Markdown links, bullets): one pinned folder named by the user, a pinned tab per link in order, asleep; lines that aren't links are counted in the summary. ⌘V / Ctrl+V on the sidebar (outside a text field) with two or more links on the clipboard opens the same import with them filled in. The other routes (a bookmarks file, notes, canvases, site styles) are explained in the import window's help, which reads nothing from another browser; passwords are out of scope (D52) |
 | IM-13 | Import from files (standard formats) | P1 | ✅ | ✅ e2e+unit | – | bookmarks HTML (the Netscape format; Chromium- and Firefox-style exports tested) and a .txt list of links, from From a file… or dropped on the import window or the sidebar. Bookmarks map as IM-05 into "Imported bookmarks"; links as IM-12; a file with neither says "No bookmarks found in this file" and imports nothing; a cut-off file imports what it holds; 64 MB at most. No passwords CSV (D52) |
 | IM-14 | Progress, summary and errors | P1 | ✅ | ✅ e2e+unit | – | progress per data type (a spinner, then a check), then a summary with counts per type and the skipped items with reasons; Done shows the imported folder in the sidebar (its Space, the pinned section open, the folder in view); the browser window stays responsive meanwhile. A file the source browser holds (it can't be copied) shows "Chrome is using some of its files. Quit Chrome and try again, or import the rest" with Try again; the types it could read can still be imported. History shows the pages read, then added; Done says they're in History and the command bar; what History can't keep is listed with the reason |
