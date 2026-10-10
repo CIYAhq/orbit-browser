@@ -927,6 +927,38 @@ test('[FV-02][SV-23] a Favorite split never comes apart past 12 Favorites: Separ
   expect(JSON.stringify((await state(orbit.app)).splits[splitId]?.layout)).not.toContain(panes[0])
 })
 
+test('[FV-02][SV-23] Duplicate and Open in Split View never make a 13th Favorite from a Favorite split (PR #10 review M1)', async () => {
+  const panes = [await openTab(orbit.app, 'P3'), await openTab(orbit.app, 'P2'), await openTab(orbit.app, 'P1')]
+  const s = await state(orbit.app)
+  const spaceId = s.tabs[panes[0] as string]?.spaceId as string
+  const profileId = s.spaces[spaceId]?.profileId as string
+  const favorites = { kind: 'favorites', profileId }
+  for (let i = 0; i < 11; i++) {
+    const id = await run(orbit.app, 'tabs.create', { url: fx.url(`/page/F${i}`), activate: false })
+    expect(await run(orbit.app, 'tabs.move', { id, to: favorites, index: i }), `Favorite ${i}`).toBe(true)
+  }
+  const splitId = (await run(orbit.app, 'split.create', { tabIds: panes })) as string
+  await run(orbit.app, 'tabs.move', { id: splitId, to: favorites, index: 11 })
+  const tiles = async () => (await state(orbit.app)).profiles[profileId]?.favorites ?? []
+  await expect.poll(async () => (await tiles()).length).toBe(12)
+  // A copy of the split would be a 13th tile beside it.
+  expect(await run(orbit.app, 'split.duplicate', { splitId })).toBeNull()
+  await expect(orbit.shell.getByTestId('toast').last()).toContainText('Favorites are full (12 max)')
+  expect(await tiles()).toHaveLength(12)
+  // A pane split with a Today tab would leave its split as a new tile, also a 13th.
+  const today = await openTab(orbit.app, 'Today')
+  expect(await run(orbit.app, 'split.create', { tabIds: [panes[0], today] })).toBeNull()
+  expect(await tiles()).toHaveLength(12)
+  expect(JSON.stringify((await state(orbit.app)).splits[splitId]?.layout)).toContain(panes[0])
+  // With room for one more tile, both work as usual.
+  await run(orbit.app, 'tabs.move', { id: (await tiles())[0], to: { kind: 'today', spaceId }, index: 0 })
+  expect(await run(orbit.app, 'split.duplicate', { splitId })).toBeTruthy()
+  await expect.poll(async () => (await tiles()).length).toBe(12)
+  await run(orbit.app, 'tabs.move', { id: (await tiles())[0], to: { kind: 'today', spaceId }, index: 0 })
+  expect(await run(orbit.app, 'split.create', { tabIds: [panes[0], today] })).toBeTruthy()
+  await expect.poll(async () => (await tiles()).length).toBe(12)
+})
+
 test('[SV-17] a reopened pane returns to its exact spot beside a stacked pair', async () => {
   const b = await openTab(orbit.app, 'StackTop')
   const a = await openTab(orbit.app, 'LeftTall')

@@ -4,6 +4,7 @@
  * themselves. Every helper keeps the invariants: 2–4 panes per split, canonical layout,
  * a tab in at most one place.
  */
+import { produce } from 'immer'
 import { MAX_FAVORITES } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
 import {
@@ -231,6 +232,22 @@ export function overflowsFavorites(d: OrbitState, splitId: SplitId, tiles: numbe
   return count - 1 + tiles > MAX_FAVORITES
 }
 
+/** Whether `container` is a Favorites grid with no room for one more tile (FV-02). */
+export function favoritesFull(d: OrbitState, container: ContainerRef): boolean {
+  return container.kind === 'favorites' && (d.profiles[container.profileId]?.favorites.length ?? 0) >= MAX_FAVORITES
+}
+
+/**
+ * Whether `recipe` would take a profile's Favorites past the limit (FV-02). It runs on a
+ * throwaway copy of the state; only a grid that grows counts.
+ */
+export function growsFavoritesPastLimit(d: OrbitState, recipe: (draft: OrbitState) => void): boolean {
+  const after = produce(d, recipe)
+  return Object.values(after.profiles).some(
+    (p) => p.favorites.length > MAX_FAVORITES && p.favorites.length > (d.profiles[p.id]?.favorites.length ?? 0),
+  )
+}
+
 /** Replaces a pane's tab with another open tab (which leaves its own place). The old tab goes to Today. */
 export function swapIntoPaneInDraft(d: OrbitState, paneTab: TabId, incoming: TabId): boolean {
   const splitId = splitOfTab(d, paneTab)
@@ -414,8 +431,9 @@ export function restoreUnitInDraft(d: OrbitState, unit: SplitUnit, now = Date.no
   const canonical = normalizeLayout(layout)
   if (!canonical || canonical.type === 'leaf') return undefined
   const first = present[0] as TabId
+  // Its old place, unless that is a full Favorites grid (FV-02): then Today.
   const where =
-    unit.location && containerItems(d, unit.location.container)
+    unit.location && containerItems(d, unit.location.container) && !favoritesFull(d, unit.location.container)
       ? unit.location
       : (() => {
           const today = todayOf(d, first)
