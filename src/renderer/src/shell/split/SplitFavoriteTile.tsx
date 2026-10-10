@@ -1,10 +1,10 @@
 import { motion } from 'motion/react'
 import { memo, useState } from 'react'
 import { invoke } from '../../api'
+import { POP, SNAPPY } from '../../motion'
 import { getOrbitState, useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
 import { pressItem } from '../sidebar/drag'
-import { POP, SNAPPY } from '../sidebar/motion-tokens'
 import { clearSelection, useDrag } from '../sidebar/ui-state'
 import { focusedPaneOf, lastFocusedPane, paneOrderKey } from './selectors'
 

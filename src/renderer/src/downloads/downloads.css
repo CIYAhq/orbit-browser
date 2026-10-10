@@ -214,19 +214,17 @@ button.dl-row__main:hover {
   will-change: transform, opacity;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .dl-row__btn,
-  .dl-row__fill {
-    transition: none;
-  }
-  .dl-row__btn:active {
-    transform: none;
-  }
-  .dl-row__bar.is-indeterminate .dl-row__fill {
-    animation: none;
-    width: 100%;
-    opacity: 0.5;
-  }
+.reduce-motion .dl-row__btn,
+.reduce-motion .dl-row__fill {
+  transition: none;
+}
+.reduce-motion .dl-row__btn:active {
+  transform: none;
+}
+.reduce-motion .dl-row__bar.is-indeterminate .dl-row__fill {
+  animation: none;
+  width: 100%;
+  opacity: 0.5;
 }
 
 /* DL-12: a download held back as possibly harmful waits for Keep or Discard. */

@@ -149,12 +149,9 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .upd {
-    animation: none;
-  }
-
-  .upd__more {
-    transition: none;
-  }
+.reduce-motion .upd {
+  animation: none;
+}
+.reduce-motion .upd__more {
+  transition: none;
 }

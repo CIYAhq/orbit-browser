@@ -2,6 +2,7 @@ import { Folder } from 'lucide-react'
 import { motion } from 'motion/react'
 import { isFolderId, isTabId } from '../../../../shared/ids'
 import { rowTitle } from '../../../../shared/tabs'
+import { tween } from '../../motion'
 import { useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
 import { ghostOpacity, ghostScale, ghostX, ghostY } from './drag'
@@ -39,7 +40,8 @@ export function DragGhost() {
         // The lifted shadow eases off while the row settles (FL-10).
         boxShadow: settling ? SHADOW_REST : ghost.ids.length > 1 ? SHADOW_STACK : SHADOW_LIFT,
       }}
-      transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1], boxShadow: { duration: 0.15 } }}
+      // FL-10: the morph takes about 200 ms (snappy); the shadow fades over about 150 ms.
+      transition={{ ...tween('snappy'), boxShadow: { duration: 0.15 } }}
     >
       <GhostContent id={first} tile={asTile} />
       {ghost.ids.length > 1 && <span className="drag-ghost__count">{ghost.ids.length}</span>}

@@ -13,12 +13,12 @@ import type { ItemId, OrbitState, TabId } from '../../../../shared/state'
 import { isAwayFromPinned, rowTitle } from '../../../../shared/tabs'
 import { splitOfTab, tabsInItem, visibleTabOrder } from '../../../../shared/tree'
 import { invoke, isMac } from '../../api'
+import { EASE, REDUCED, reducedMotion, SNAPPY, SNAPPY_EXIT, STANDARD, tween } from '../../motion'
 import { activeTabId } from '../../selectors'
 import { getOrbitState, useMirror, useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
 import { CaptureIndicator } from '../media/CaptureIndicator'
 import { pressItem } from './drag'
-import { QUICK_EASE, reducedMotion, SNAPPY, SNAPPY_EASE, STANDARD } from './motion-tokens'
 import { RenameField } from './RenameField'
 import { SplitRow } from './SplitRow'
 import {
@@ -35,7 +35,14 @@ import {
 export const INDENT = 14
 
 const ROW_SPRING = SNAPPY
-const EASE_OUT = SNAPPY_EASE
+/**
+ * FL-12: a chevron turns over about 150–180 ms; a folder or the pinned section opens with the
+ * snappy spring and closes a little quicker (its exit spring). Springs, so a click mid-way turns the
+ * height around from its current speed (FL-01).
+ */
+export const CHEVRON = { duration: 0.16, ease: EASE.snappy }
+export const REVEAL = { height: SNAPPY, opacity: tween('quick') }
+export const CONCEAL = { height: SNAPPY_EXIT, opacity: tween('quick', { exit: true }) }
 /** Rows beyond this many in a batch leave together (FL-11 caps the sweep at about 450 ms). */
 const MAX_STAGGER_ROWS = 12
 
@@ -49,9 +56,20 @@ const rowVariants: Variants = {
   shown: {
     height: 'auto',
     opacity: 1,
-    transition: { height: ROW_SPRING, opacity: { duration: 0.12, delay: 0.07, ease: QUICK_EASE } },
+    // FL-06: the content fades in over the last 60 % of the growth.
+    transition: { height: ROW_SPRING, opacity: tween('quick', { delay: 0.07 }) },
   },
   exit: (c: { stagger?: boolean; index?: number } | undefined) => {
+    if (reducedMotion()) {
+      // FL-28: no slide and no stagger. Closing rows, or a whole Clear, fade out together, then
+      // their room closes at once.
+      const fade = REDUCED.fadeMs / 1000
+      return {
+        height: 0,
+        opacity: 0,
+        transition: { opacity: { duration: fade }, height: { duration: 0, delay: fade } },
+      }
+    }
     const delay = c?.stagger ? Math.min(c.index ?? 0, MAX_STAGGER_ROWS) * 0.025 : 0
     return {
       height: 0,
@@ -59,8 +77,8 @@ const rowVariants: Variants = {
       x: c?.stagger ? -24 : -12,
       transition: {
         height: { ...ROW_SPRING, delay: delay + 0.04 },
-        opacity: { duration: c?.stagger ? 0.16 : 0.13, ease: QUICK_EASE, delay },
-        x: { duration: c?.stagger ? 0.16 : 0.13, ease: QUICK_EASE, delay },
+        opacity: { duration: c?.stagger ? 0.16 : 0.13, ease: EASE.quick, delay },
+        x: { duration: c?.stagger ? 0.16 : 0.13, ease: EASE.quick, delay },
       },
     }
   },
@@ -571,7 +589,7 @@ const FolderRow = memo(function FolderRow({
             className="folder-row__chevron-wrap"
             initial={false}
             animate={{ rotate: open ? 90 : 0 }}
-            transition={{ duration: 0.16, ease: EASE_OUT }}
+            transition={CHEVRON}
           >
             <ChevronRight size={13} />
           </motion.span>
@@ -613,16 +631,8 @@ const FolderRow = memo(function FolderRow({
             key="children"
             className="folder__children"
             initial={reducedMotion() ? false : { height: 0, opacity: 0 }}
-            animate={{
-              height: 'auto',
-              opacity: 1,
-              transition: { height: { duration: 0.2, ease: EASE_OUT }, opacity: { duration: 0.12 } },
-            }}
-            exit={{
-              height: 0,
-              opacity: 0,
-              transition: { height: { duration: 0.18, ease: EASE_OUT }, opacity: { duration: 0.1 } },
-            }}
+            animate={{ height: 'auto', opacity: 1, transition: REVEAL }}
+            exit={{ height: 0, opacity: 0, transition: CONCEAL }}
           >
             <ItemList
               containerKey={`folder:${folderId}`}

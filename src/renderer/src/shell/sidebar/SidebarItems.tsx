@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, ChevronDown, Plus } from 'lucide-react'
-import { AnimatePresence, MotionConfig, motion } from 'motion/react'
+import { AnimatePresence, motion } from 'motion/react'
 import {
   memo,
   type DragEvent as ReactDragEvent,
@@ -17,6 +17,7 @@ import type { Space, SpaceId } from '../../../../shared/state'
 import { containerKey, locate, sectionOf, splitOfTab } from '../../../../shared/tree'
 import { engineForSpace, parseInput } from '../../../../shared/url'
 import { invoke, isMac, runAction } from '../../api'
+import { OrbitMotionConfig, reducedMotion } from '../../motion'
 import { activeTabId } from '../../selectors'
 import { getOrbitState, useOrbit } from '../../store'
 import { DragGhost } from './DragGhost'
@@ -24,7 +25,7 @@ import { setDragContext } from './drag'
 import { Favorites } from './Favorites'
 import { FolderSearch } from './FolderSearch'
 import { IconPicker } from './IconPicker'
-import { ItemList, TabRow, useRowShift } from './ItemList'
+import { CHEVRON, CONCEAL, ItemList, REVEAL, TabRow, useRowShift } from './ItemList'
 import { clearSelection, startRename, useDrag, useIconPicker, useKeyboardFocus, useSelection } from './ui-state'
 
 /**
@@ -83,7 +84,7 @@ export const SidebarItems = memo(function SidebarItems({
   if (!space) return null
 
   return (
-    <MotionConfig reducedMotion="user">
+    <OrbitMotionConfig>
       <div className="sidebar-items" ref={rootRef}>
         {!simple && (
           <div className="sidebar-items__favorites" data-favorites-layer>
@@ -135,7 +136,7 @@ export const SidebarItems = memo(function SidebarItems({
         <FolderSearch />
         <DragGhost />
       </div>
-    </MotionConfig>
+    </OrbitMotionConfig>
   )
 })
 
@@ -165,7 +166,7 @@ function SpaceHeader({ space, children }: { space: Space; children: ReactNode })
           className="space-header__caret-glyph"
           initial={false}
           animate={{ rotate: collapsed ? -90 : 0 }}
-          transition={{ duration: 0.16 }}
+          transition={CHEVRON}
         >
           <ChevronDown size={13} />
         </motion.span>
@@ -195,12 +196,8 @@ const PinnedSection = memo(function PinnedSection({ space }: { space: Space }) {
             key="pinned"
             className="pinned-section"
             initial={{ height: 0, opacity: 0 }}
-            animate={{
-              height: 'auto',
-              opacity: 1,
-              transition: { height: { duration: 0.2 }, opacity: { duration: 0.12 } },
-            }}
-            exit={{ height: 0, opacity: 0, transition: { height: { duration: 0.18 }, opacity: { duration: 0.1 } } }}
+            animate={{ height: 'auto', opacity: 1, transition: REVEAL }}
+            exit={{ height: 0, opacity: 0, transition: CONCEAL }}
           >
             <ItemList
               key={`pinned:${space.id}`}
@@ -255,6 +252,7 @@ function TodayBlock({ space }: { space: Space }) {
         data-testid="new-tab-button"
         onClick={() => runAction('tab.new')}
       >
+        {/* FL-15: the "+" scales to about 0.92 and back in about 150 ms (its own timing). */}
         <motion.span className="new-tab-button__plus" whileTap={{ scale: 0.92 }} transition={{ duration: 0.15 }}>
           <Plus size={16} strokeWidth={2} />
         </motion.span>
@@ -440,8 +438,6 @@ function useAutoReveal(scrollRef: React.RefObject<HTMLDivElement | null>, select
     go: () => rowOf(active)?.scrollIntoView({ block: 'center', behavior: 'smooth' }),
   }
 }
-
-const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
 function rowIn(scroll: HTMLElement | null, id: string): HTMLElement | null {
   return scroll?.querySelector<HTMLElement>(`[data-slot][data-key="${id}"]`) ?? null

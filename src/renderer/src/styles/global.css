@@ -20,13 +20,14 @@
   --gutter: 8px;
   /* With the sidebar hidden the page card keeps this margin on all four sides (SB-19). */
   --gutter-hidden: 6px;
-  /* The sidebar's show/hide (FL-02): the standard token. */
-  --sidebar-dur: 260ms;
-  --sidebar-ease: cubic-bezier(0.2, 0.9, 0.1, 1);
-  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --ease-spring: cubic-bezier(0.25, 1.2, 0.4, 1);
-  --dur-fast: 120ms;
-  --dur: 200ms;
+  /* Older names for the motion tokens (FL-01, motion/motion.css). The sidebar's show/hide (FL-02)
+     is the standard token. */
+  --sidebar-dur: var(--motion-standard);
+  --sidebar-ease: var(--ease-standard);
+  --ease-out: var(--ease-snappy);
+  --ease-spring: var(--ease-pop);
+  --dur-fast: var(--motion-quick);
+  --dur: var(--motion-snappy);
   --text: #1c1c1f;
   --text-muted: rgba(28, 28, 31, 0.56);
   --hover: rgba(0, 0, 0, 0.05);
@@ -133,13 +134,11 @@ html.is-resizing * {
   transition: none;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .shell,
-  .content,
-  .sidebar,
-  .shell--sidebar-hidden .sidebar {
-    transition: none;
-  }
+.reduce-motion .shell,
+.reduce-motion .content,
+.reduce-motion .sidebar,
+.reduce-motion .shell--sidebar-hidden .sidebar {
+  transition: none;
 }
 
 .frame {
@@ -200,10 +199,8 @@ html.is-resizing * {
   transition: opacity 150ms ease-out;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .shell--blurred .sidebar > * {
-    transition: none;
-  }
+.reduce-motion .shell--blurred .sidebar > * {
+  transition: none;
 }
 
 .topbar {
@@ -532,7 +529,7 @@ html.is-resizing * {
 
 /* Split view row (split lane, SV-21): one pill, one segment per pane. */
 .split-row {
-  animation: split-row-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: split-row-in 220ms var(--ease-snappy);
   position: relative;
   display: flex;
   align-items: center;
@@ -852,7 +849,7 @@ html[data-view="strip"] body {
 .pane-strip.is-leaving {
   opacity: 0;
   pointer-events: none;
-  transition: opacity 110ms cubic-bezier(0.2, 0, 0, 1);
+  transition: opacity 110ms var(--ease-quick);
 }
 
 @keyframes pane-strip-in {
@@ -897,13 +894,11 @@ html[data-view="strip"] body {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .split-row,
-  .pane--blank,
-  .pane--drop,
-  .pane-strip {
-    animation-duration: 1ms;
-  }
+.reduce-motion .split-row,
+.reduce-motion .pane--blank,
+.reduce-motion .pane--drop,
+.reduce-motion .pane-strip {
+  animation-duration: 1ms;
 }
 
 /* Space bar: see src/renderer/src/shell/spaces/spaces.css (spaces lane). */
@@ -1498,11 +1493,9 @@ html.is-dragging-tab * {
   color: var(--text-muted);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .reveal-pill {
-    transition: none;
-    animation: none;
-  }
+.reduce-motion .reveal-pill {
+  transition: none;
+  animation: none;
 }
 
 /* ---------- Overlay ---------- */
@@ -1767,4 +1760,11 @@ html[data-view="overlay"] body {
 
 .cmdbar__remove:hover {
   color: var(--cmd-text);
+}
+
+/* Reduce Transparency (FL-28): the dragged row drops its blur; it is opaque anyway. */
+@media (prefers-reduced-transparency: reduce) {
+  .drag-ghost {
+    backdrop-filter: none;
+  }
 }

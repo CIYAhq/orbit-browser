@@ -21,6 +21,7 @@ import {
   swapPanes,
 } from '../../../../shared/split'
 import type { SplitLayout, TabId } from '../../../../shared/state'
+import { waapi } from '../../motion'
 import { getSeq } from '../../store'
 import { prefersReducedMotion, SNAPPY, SpringValue, STANDARD } from './spring'
 
@@ -404,7 +405,7 @@ export class PaneEngine {
         { opacity: 1, transform: `${at} scale(1)` },
         { opacity: 0, transform: `${at} scale(0.96)` },
       ],
-      { duration: 200, easing: 'cubic-bezier(0.2, 0, 0, 1)', fill: 'forwards' },
+      { ...waapi('snappy'), fill: 'forwards' },
     )
     fade.onfinish = () => el.remove()
     fade.oncancel = () => el.remove()

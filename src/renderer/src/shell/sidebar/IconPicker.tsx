@@ -2,6 +2,7 @@ import { motion } from 'motion/react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { isFolderId } from '../../../../shared/ids'
 import { invoke } from '../../api'
+import { POPOVER } from '../../motion'
 import { useIconPicker } from './ui-state'
 
 /** A compact emoji set with search words (TB-12, FD-07). Any emoji can also be typed or pasted. */
@@ -102,7 +103,7 @@ export function IconPicker() {
       aria-label="Choose icon"
       initial={{ opacity: 0, scale: 0.97 }}
       animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.15, ease: [0.2, 0.8, 0.2, 1] }}
+      transition={POPOVER.in}
     >
       <input
         ref={input}

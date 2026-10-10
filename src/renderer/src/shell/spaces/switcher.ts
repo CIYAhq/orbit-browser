@@ -3,6 +3,7 @@ import { THEME_PRESETS } from '../../../../shared/defaults'
 import type { SpaceId, SpaceTheme } from '../../../../shared/state'
 import { mixPalettes, type Palette } from '../../../../shared/theme'
 import { invoke, perfMark } from '../../api'
+import { cubicBezier, EASE, REDUCED, REDUCED_SETTLE } from '../../motion'
 import { getOrbitState } from '../../store'
 import { cachedPalette, isDarkNow, prefersReducedMotion, themeDriver } from '../../theme'
 import {
@@ -584,7 +585,7 @@ export class SpaceSwitcher {
   private springTo(target: number, velocity: number, spring: SpringParams, reduced = false): void {
     this.stopAnim()
     if (reduced) {
-      this.anim = animate(this.x, target, { duration: 0.12, ease: 'easeOut' })
+      this.anim = animate(this.x, target, REDUCED_SETTLE)
     } else {
       this.anim = animate(this.x, target, {
         type: 'spring',
@@ -592,8 +593,11 @@ export class SpaceSwitcher {
         damping: spring.damping,
         mass: 1,
         velocity,
-        restDelta: 0.4,
-        restSpeed: 8,
+        // At rest once what is left is under half a pixel and slower than 40 px/s (under a pixel a
+        // frame): the last snap is invisible, and the strip does not creep sub-pixel for another
+        // 100 ms (the standard spring's 0.3 % overshoot is 0.6 px over a page). FL-29: ≤ 350 ms.
+        restDelta: 0.5,
+        restSpeed: 40,
       })
     }
     const anim = this.anim
@@ -639,11 +643,19 @@ export class SpaceSwitcher {
     this.newPage = undefined
     this.setSlots([{ k: 0, id: active }])
     const el = this.track
+    // FL-28: a 120–150 ms cross-fade of the sidebar content and theme, done within 150 ms of the key.
     if (el) {
-      el.animate([{ opacity: 0.15 }, { opacity: 1 }], { duration: 140, easing: 'ease-out' })
+      const fade = el.animate([{ opacity: 0.15 }, { opacity: 1 }], {
+        duration: REDUCED.fadeMs,
+        easing: cubicBezier(EASE.instant),
+      })
+      // Timed from the frame before, not from when it is ready to play: the fade moves in the first
+      // frame that shows the new Space instead of holding its start for a frame.
+      const now = document.timeline.currentTime
+      if (typeof now === 'number') fade.startTime = now
     }
     const theme = getOrbitState().spaces[active]?.theme
-    if (theme) themeDriver.fadeTo(cachedPalette(theme, isDarkNow()), 140)
+    if (theme) themeDriver.fadeTo(cachedPalette(theme, isDarkNow()), REDUCED.fadeMs)
   }
 
   // ---- Per-frame painting ----

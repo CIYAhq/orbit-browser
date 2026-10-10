@@ -29,6 +29,7 @@ const CHECKS: { [K in keyof Required<SettingsPatch>]: Check } = {
   hardwareAcceleration: bool,
   secureDns: (v) => (SECURE_DNS_CHOICES as readonly unknown[]).includes(v),
   updateChecks: bool,
+  reduceMotion: bool,
 }
 
 /**

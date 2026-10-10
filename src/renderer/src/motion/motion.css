@@ -1,0 +1,26 @@
+/*
+ * FL-01's motion tokens as custom properties, the same values as src/shared/motion.ts
+ * (motion-tokens.test.ts keeps them in step). Exits take about 0.7× their entrance:
+ * calc(var(--motion-snappy) * var(--motion-exit)). A surface whose spec gives its own number keeps
+ * that duration at its rule, on a token's curve.
+ *
+ * Reduced motion (FL-28): the renderer puts `reduce-motion` on <html> when the OS asks for it or
+ * Orbit's own setting forces it; rules under `.reduce-motion` follow both.
+ */
+:root {
+  --motion-instant: 90ms;
+  --motion-quick: 130ms;
+  --motion-snappy: 200ms;
+  --motion-standard: 270ms;
+  --motion-pop: 240ms;
+  --motion-gentle: 250ms;
+  --motion-exit: 0.7;
+  --ease-instant: cubic-bezier(0, 0, 0.58, 1);
+  --ease-quick: cubic-bezier(0.2, 0, 0, 1);
+  --ease-snappy: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-standard: cubic-bezier(0.2, 0.9, 0.1, 1);
+  --ease-pop: cubic-bezier(0.3, 1.35, 0.55, 1);
+  --ease-gentle: cubic-bezier(0.42, 0, 0.58, 1);
+  /* Reduced motion's cross-fade (FL-28: about 100–150 ms). */
+  --motion-fade: 120ms;
+}

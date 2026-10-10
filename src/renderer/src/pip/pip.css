@@ -26,7 +26,7 @@ html[data-view="pip"] body {
 .pip__middle,
 .pip__bottom {
   opacity: 0;
-  transition: opacity 140ms cubic-bezier(0.2, 0, 0, 1);
+  transition: opacity 140ms var(--ease-quick);
 }
 
 .pip.is-hover .pip__shade,
@@ -262,10 +262,8 @@ html[data-still] .pip {
   cursor: nwse-resize;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .pip__btn,
-  .pip__progress::before,
-  .pip__progress-fill {
-    transition: none;
-  }
+.reduce-motion .pip__btn,
+.reduce-motion .pip__progress::before,
+.reduce-motion .pip__progress-fill {
+  transition: none;
 }

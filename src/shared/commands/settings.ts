@@ -91,7 +91,7 @@ export const SETTINGS_ACTIONS: SettingsActionDef[] = [
     title: 'Appearance Settings',
     category: 'App',
     settings: { section: 'appearance' },
-    keywords: ['theme', 'dark mode', 'light mode', 'match system'],
+    keywords: ['theme', 'dark mode', 'light mode', 'match system', 'reduce motion', 'animations'],
   },
   {
     id: 'settings.links',
@@ -166,6 +166,13 @@ export const SETTINGS_LANE_ACTIONS: ActionDef[] = [
     category: 'App',
     keywords: ['update', 'upgrade', 'new version', 'software update'],
   },
+  // Turns Orbit's own reduced motion on or off (FL-28; src/main/motion.ts).
+  {
+    id: 'app.toggleReduceMotion',
+    title: 'Toggle Reduce Motion',
+    category: 'App',
+    keywords: ['reduced motion', 'animations', 'accessibility', 'motion sickness'],
+  },
 ]
 
 /** The built-in search engines, in the order Settings and onboarding list them (ST-06, OB-08). */
@@ -208,6 +215,7 @@ export type SettingsPatch = Partial<
     | 'hardwareAcceleration'
     | 'secureDns'
     | 'updateChecks'
+    | 'reduceMotion'
   >
 >
 

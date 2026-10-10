@@ -250,11 +250,19 @@ test('[FL-14] switching from a blue to an orange Space blends the hues in every 
   expect(Math.min(...contrasts)).toBeGreaterThanOrEqual(4.5)
 })
 
-test('[FL-28] with reduced motion the shortcut cross-fades to the next Space in under 150 ms, with no sliding', async () => {
+/** ⌘⌥→ with reduced motion on: the next Space cross-fades in under 150 ms and nothing slides. */
+async function reducedSwitch(how: 'system' | 'setting'): Promise<void> {
   const { app, shell } = orbit
-  // Playwright emulates "no preference" on every page it drives, whatever the launch switch says:
-  // the OS setting reaches the shell as this media feature.
-  await shell.emulateMedia({ reducedMotion: 'reduce' })
+  if (how === 'system') {
+    // Playwright emulates "no preference" on every page it drives, whatever the launch switch says:
+    // the OS setting reaches the shell as this media feature.
+    await shell.emulateMedia({ reducedMotion: 'reduce' })
+  } else {
+    // Orbit's own setting forces it while the OS (as Playwright emulates it) asks for none.
+    expect(await shell.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(false)
+    await run(app, 'settings.update', { reduceMotion: true })
+  }
+  await expect(shell.locator('html')).toHaveClass(/\breduce-motion\b/)
   await createSpace(app, { name: 'Beta', activate: false })
   await settled(shell)
   const keys = await mainInputs(app)
@@ -273,9 +281,24 @@ test('[FL-28] with reduced motion the shortcut cross-fades to the next Space in 
   const shown = r.frames.find((f) => f.els.name?.text === 'Beta')
   const faded = r.frames.filter((f) => Number(f.els.trackOpacity?.style?.opacity ?? 1) < 0.999)
   const settledAt = faded.length ? (faded.at(-1)?.t ?? 0) + (faded.at(-1)?.dt ?? 0) : shown?.t
-  note('FL-28', 'reduced: horizontal movement', slid, '0 px', 'px')
-  note('FL-28', 'reduced: shortcut → new Space shown', shown ? shown.t - t0 : undefined, '1 frame')
-  note('FL-28', 'reduced: shortcut → cross-fade done', settledAt !== undefined ? settledAt - t0 : undefined, '< 150 ms')
+  const by = how === 'system' ? 'system' : 'Orbit setting'
+  note('FL-28', `reduced (${by}): horizontal movement`, slid, '0 px', 'px')
+  note('FL-28', `reduced (${by}): shortcut → new Space shown`, shown ? shown.t - t0 : undefined, '1 frame')
+  note(
+    'FL-28',
+    `reduced (${by}): shortcut → cross-fade done`,
+    settledAt !== undefined ? settledAt - t0 : undefined,
+    '< 150 ms',
+  )
   expect(slid).toBeLessThanOrEqual(0.5)
+  expect(faded.length).toBeGreaterThan(0)
   expect(settledAt !== undefined ? settledAt - t0 : Number.POSITIVE_INFINITY).toBeLessThan(150 * FRAME_SLACK + FRAME)
+}
+
+test('[FL-28] with the system asking for reduced motion the shortcut cross-fades to the next Space in under 150 ms, with no sliding', async () => {
+  await reducedSwitch('system')
+})
+
+test("[FL-28][AP-17] Orbit's Reduce motion setting alone does the same", async () => {
+  await reducedSwitch('setting')
 })

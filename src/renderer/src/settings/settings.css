@@ -531,11 +531,9 @@ html[data-platform="darwin"] .settings__page {
   outline: none;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .settings *,
-  html[data-theme-fade] .settings * {
-    transition: none !important;
-  }
+.reduce-motion .settings *,
+html.reduce-motion[data-theme-fade] .settings * {
+  transition: none !important;
 }
 
 /* Visually hidden, read by screen readers. */
@@ -735,10 +733,8 @@ html[data-platform="darwin"] .settings__page {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .st-dialog[open] {
-    animation: none;
-  }
+.reduce-motion .st-dialog[open] {
+  animation: none;
 }
 
 .st-dialog__title {
@@ -898,10 +894,8 @@ html[data-platform="darwin"] .settings__page {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .st-spin {
-    animation: none;
-  }
+.reduce-motion .st-spin {
+  animation: none;
 }
 
 /* About (ST-17, UP-07): Orbit's logo over the version. */

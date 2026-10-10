@@ -1,5 +1,5 @@
 import { Mic, MicOff, Pause, PictureInPicture2, Play, SkipBack, SkipForward, Video, VideoOff, X } from 'lucide-react'
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
+import { AnimatePresence, motion } from 'motion/react'
 import {
   type CSSProperties,
   memo,
@@ -13,9 +13,9 @@ import {
 import { inCall, mediaSubtitle, mediaTitle, trayTabIds } from '../../../../shared/media'
 import type { TabId, WindowId } from '../../../../shared/state'
 import { invoke } from '../../api'
+import { SNAPPY, tween, useReducedMotion } from '../../motion'
 import { useOrbit, useOrbitShallow } from '../../store'
 import { Favicon } from '../../ui/Favicon'
-import { QUICK_EASE, SNAPPY } from '../sidebar/motion-tokens'
 import './media.css'
 
 /**
@@ -24,7 +24,7 @@ import './media.css'
  */
 const toPlayer = new Set<TabId>()
 
-const FADE = { duration: 0.12, ease: QUICK_EASE }
+const FADE = tween('quick')
 
 /**
  * The sidebar media tray (MD-09, MD-10, MD-14; sidebar.md SB-10): one controller per tab playing

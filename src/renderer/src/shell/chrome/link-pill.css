@@ -50,11 +50,9 @@ html[data-view="link"] body {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .link-pill {
-    animation: none;
-  }
-  .link-pill-view.is-leaving .link-pill {
-    transition: none;
-  }
+.reduce-motion .link-pill {
+  animation: none;
+}
+.reduce-motion .link-pill-view.is-leaving .link-pill {
+  transition: none;
 }

@@ -4,12 +4,12 @@ import { MAX_FAVORITES } from '../../../../shared/defaults'
 import { isSplitId, isTabId } from '../../../../shared/ids'
 import { isAwayFromPinned, tabTitle } from '../../../../shared/tabs'
 import { invoke, isMac } from '../../api'
+import { POP, SNAPPY } from '../../motion'
 import { activeTabId } from '../../selectors'
 import { useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
 import { SplitFavoriteTile } from '../split/SplitFavoriteTile'
 import { pressItem } from './drag'
-import { POP, SNAPPY } from './motion-tokens'
 import { clearSelection, useDrag } from './ui-state'
 
 /** Stable empty list (a fresh [] per call would re-render forever). */

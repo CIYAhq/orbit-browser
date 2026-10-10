@@ -161,9 +161,7 @@ html[data-view="tools"] body {
   background: var(--tools-line);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .find-bar,
-  .zoom-pill {
-    animation-name: none;
-  }
+.reduce-motion .find-bar,
+.reduce-motion .zoom-pill {
+  animation-name: none;
 }

@@ -452,3 +452,26 @@ test('[FL-16] Escape fades and shrinks the bar out over 100–120 ms; choosing a
   expect(esc.best.ms).toBeLessThanOrEqual(120 * FRAME_SLACK + FRAME)
   expect(enter.best.ms).toBeLessThanOrEqual(80 * FRAME_SLACK + FRAME)
 })
+
+test('[FL-28] with Orbit set to reduce motion the bar only fades: no scale or drop in any frame, in or out', async () => {
+  const { app } = orbit
+  const overlay = await viewPage(app, 'overlay')
+  // The OS (as Playwright emulates it) asks for no reduction: only Orbit's setting asks.
+  await run(app, 'settings.update', { reduceMotion: true })
+  await expect(overlay.locator('html')).toHaveClass(/\breduce-motion\b/)
+  const rec = await record(overlay, BAR, { hidden: true, maxMs: 2000 })
+  await keysThroughMain(app, 'view=shell', 'T', [MOD_KEY])
+  await expect(overlay.getByTestId('command-bar')).toBeVisible()
+  await overlay.waitForTimeout(250)
+  await keysThroughMain(app, 'view=overlay', 'Escape', [])
+  await overlayGone(app)
+  const r = await rec.stop()
+  const shapes = r.frames.filter((f) => f.els.bar).map((f) => scaleAndY(f.els.bar?.style?.transform))
+  const opacities = r.frames.filter((f) => f.els.bar).map((f) => f.els.bar?.opacity ?? 0)
+  const moved = Math.max(0, ...shapes.map((s) => Math.max(Math.abs(s.scale - 1) * 300, Math.abs(s.y))))
+  note('FL-28', 'reduced: bar scale or drop, largest (px at the edge)', moved, '0 px', 'px')
+  expect(shapes.length).toBeGreaterThan(2)
+  expect(moved).toBeLessThanOrEqual(0.5)
+  // It still fades: some frames between clear and opaque.
+  expect(opacities.some((o) => o > 0.05 && o < 0.95)).toBe(true)
+})

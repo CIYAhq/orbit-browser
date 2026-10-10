@@ -23,13 +23,14 @@ import {
 } from '../../../shared/peek-geometry'
 import type { OverlayState } from '../../../shared/state'
 import { invoke, perfMark } from '../api'
+import { REDUCED, reducedMotion } from '../motion'
 import './peek.css'
 
 type PeekOverlay = Extract<OverlayState, { kind: 'peek' }>
 type Phase = NonNullable<PeekOverlay['phase']> | 'open'
 
-/** Reduced motion: the card fades in and out in place. */
-const FADE_MS = 130
+/** Reduced motion: the card fades in and out in place (FL-28). */
+const FADE_MS = REDUCED.fadeMs
 const BUTTON = 28
 const BUTTON_GAP = 8
 /** The grab handle above the card (PK-06): its hit area, centred over the card's top edge. */
@@ -37,8 +38,6 @@ const HANDLE_HIT_W = 160
 const HANDLE_HIT_H = 30
 /** A trackpad swipe has ended when no wheel event came for this long. */
 const WHEEL_END_MS = 120
-
-const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
 
 /** One drawn frame of the card: where it is, its corners, and how visible the chrome and dim are. */
 interface Frame {
@@ -140,7 +139,7 @@ class PeekAnimator {
     this.stop()
     const a = this.area()
     const card = peekCard(a)
-    const reduced = reduceMotion.matches
+    const reduced = reducedMotion()
     const settled = this.settler()
 
     if (phase === 'open') {
@@ -219,7 +218,7 @@ class PeekAnimator {
       page: true,
     }
     const settled = this.settler()
-    if (reduceMotion.matches) {
+    if (reducedMotion()) {
       this.tween(
         FADE_MS,
         (t) => this.draw({ rect: start.rect, radius: start.radius, dim: start.dim * (1 - t), chrome: 0, page: false }),
@@ -317,7 +316,7 @@ class PeekAnimator {
         page: true,
       })
     }
-    if (reduceMotion.matches) {
+    if (reducedMotion()) {
       this.tween(FADE_MS, step)
       return
     }

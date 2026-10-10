@@ -3,22 +3,21 @@
  * controller (switcher.ts) feeds them gesture samples and runs the springs.
  */
 
-/** Spring as stiffness/damping for mass 1, from FL-01's response (s) and damping ratio. */
-export interface SpringParams {
-  stiffness: number
-  damping: number
-}
+import { SPRING, type Spring, springFrom } from '../../motion/tokens'
 
-export function springFrom(response: number, ratio: number): SpringParams {
-  return { stiffness: (2 * Math.PI) ** 2 / response ** 2, damping: (4 * Math.PI * ratio) / response }
-}
+/** A spring for mass 1 (FL-01's motion tokens, src/renderer/src/motion). */
+export type SpringParams = Spring
 
-/** Settle after a swipe: response 0.32 s, ratio 0.95 (≤ 1 % overshoot). */
-export const SETTLE_SPRING = springFrom(0.32, 0.95)
-/** Rubber-band release: response 0.3 s, ratio 1.0. */
+/**
+ * Settle after a swipe (FL-13: response 0.30–0.35 s, ratio 0.9–1.0, ≤ 1 % overshoot, a typical settle
+ * 200–320 ms after the fingers lift): response 0.30 s, ratio 0.90 comes to rest in 250–280 ms from
+ * rest over a third to three quarters of the width (0.32 s / 0.95 took 315–360 ms).
+ */
+export const SETTLE_SPRING = springFrom(0.3, 0.9)
+/** Rubber-band release: response 0.3 s, ratio 1.0 (FL-13). */
 export const RUBBER_SPRING = springFrom(0.3, 1)
-/** Clicks and shortcuts: FL-01 "standard" token (0.32 s / 0.88 ≈ stiffness 386, damping 35). */
-export const STANDARD_SPRING = springFrom(0.32, 0.88)
+/** Clicks and shortcuts: FL-01's standard token (0.32 s / 0.88 ≈ stiffness 386, damping 35). */
+export const STANDARD_SPRING = SPRING.standard
 
 /** Movement before a gesture is classified (FL-13: 8–10 px). */
 export const RECOGNIZE_PX = 9

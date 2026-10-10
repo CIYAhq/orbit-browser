@@ -952,17 +952,15 @@ html[data-view] .space-menu__item.is-danger .space-menu__icon {
   background: var(--hover);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .space-menu,
-  .space-panel,
-  .space-dialog,
-  .space-undo,
-  .space-dialog-backdrop {
-    animation: none;
-  }
-  .space-dot,
-  .theme-editor__handle,
-  .theme-editor__preset {
-    transition: none;
-  }
+.reduce-motion .space-menu,
+.reduce-motion .space-panel,
+.reduce-motion .space-dialog,
+.reduce-motion .space-undo,
+.reduce-motion .space-dialog-backdrop {
+  animation: none;
+}
+.reduce-motion .space-dot,
+.reduce-motion .theme-editor__handle,
+.reduce-motion .theme-editor__preset {
+  transition: none;
 }

@@ -1,4 +1,4 @@
-import { reducedMotion } from '../shell/sidebar/motion-tokens'
+import { reducedMotion } from '../motion'
 
 /** The flight's length (DL-02: about 400–600 ms, ease-out). */
 const FLIGHT_MS = 520

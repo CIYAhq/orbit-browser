@@ -4,6 +4,7 @@ import type { Tab } from '../../../../shared/state'
 import { tabTitle } from '../../../../shared/tabs'
 import { tabsInItem } from '../../../../shared/tree'
 import { invoke } from '../../api'
+import { POPOVER } from '../../motion'
 import { useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
 import { useFolderSearch } from './ui-state'
@@ -78,7 +79,7 @@ export function FolderSearch() {
       aria-label={`Search ${folderName ?? 'folder'}`}
       initial={{ opacity: 0, scale: 0.97 }}
       animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.15, ease: [0.2, 0.8, 0.2, 1] }}
+      transition={POPOVER.in}
     >
       <input
         ref={input}

@@ -18,7 +18,6 @@ import {
   Menu,
   type MenuItemConstructorOptions,
   screen,
-  systemPreferences,
   type WebContents,
   WebContentsView,
 } from 'electron'
@@ -47,6 +46,7 @@ import {
 import type { Rect } from '../../shared/rpc'
 import type { TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
+import { reducedMotion } from '../motion'
 import { displayedTabs } from '../tabs/model'
 import { loadRenderer, rendererEntry, uiWebPreferences } from '../windows'
 
@@ -281,7 +281,7 @@ export class PipPlayer {
         }
       }
     }
-    if (from && (from.width < 8 || from.height < 8 || !richMotion())) from = undefined
+    if (from && (from.width < 8 || from.height < 8 || !!reducedMotion(this.ctx))) from = undefined
     const start = from ?? target
     const ms = ENTER_MS
 
@@ -385,7 +385,7 @@ export class PipPlayer {
       release()
       void this.showStill(null)
     }
-    const fade = isMac && richMotion() && (why === 'close' || why === 'off' || why === 'ended')
+    const fade = isMac && !reducedMotion(this.ctx) && (why === 'close' || why === 'off' || why === 'ended')
     const back = this.backing?.tabId === s.tabId ? this.backing : undefined
     this.backing = undefined
     if (win && !win.isDestroyed() && win.isVisible() && why === 'returned' && back?.to && this.still) {
@@ -447,7 +447,14 @@ export class PipPlayer {
   /** The video's place in the page on screen, if the motion back there can be seen (MD-16). */
   private homeOnScreen(s: Session, windowId: WindowId): Rect | undefined {
     const source = this.ctx.windows.get(windowId)
-    if (!s.home || !richMotion() || !source || source.isDestroyed() || !source.isVisible() || source.isMinimized())
+    if (
+      !s.home ||
+      reducedMotion(this.ctx) ||
+      !source ||
+      source.isDestroyed() ||
+      !source.isVisible() ||
+      source.isMinimized()
+    )
       return undefined
     const content = source.getContentBounds()
     const to = { ...s.home, x: content.x + s.home.x, y: content.y + s.home.y }
@@ -642,7 +649,7 @@ export class PipPlayer {
       if (p?.corner === corner && p.size === size) return
       d.settings.pipPlacement = { corner, size }
     })
-    const rich = richMotion()
+    const rich = !reducedMotion(this.ctx)
     this.lastSettle = { from: now, to: target, ms: rich ? null : RELEASE_MS }
     if (rich) this.animateSpring(now, target, velocity)
     else this.animateTimed(now, target, RELEASE_MS, undefined, EASE_OUT_CURVE)
@@ -893,17 +900,4 @@ function velocityOf(samples: { x: number; y: number; t: number }[]): { x: number
   if (!first || !last || last.t - first.t < 8) return { x: 0, y: 0 }
   const dt = (last.t - first.t) / 1000
   return { x: (last.x - first.x) / dt, y: (last.y - first.y) / dt }
-}
-
-/**
- * No reduced motion asked for (FL-28): macOS Reduce Motion, Windows animation effects, the GTK
- * animation setting, or Chromium's force switches. The same signal as the pages'
- * prefers-reduced-motion (`shouldRenderRichAnimation` ignores the switches).
- */
-function richMotion(): boolean {
-  try {
-    return !systemPreferences.getAnimationSettings().prefersReducedMotion
-  } catch {
-    return true
-  }
 }
