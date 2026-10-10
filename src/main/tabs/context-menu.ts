@@ -1,5 +1,6 @@
 import { type ContextMenuParams, clipboard, Menu, type MenuItemConstructorOptions, type WebContents } from 'electron'
 import type { TabId } from '../../shared/state'
+import { engineFor, searchUrl } from '../../shared/url'
 import type { MainContext } from '../context'
 import { linkPeekMenuItems } from '../peek/menu'
 import { linkSplitMenuItem } from '../split/menu'
@@ -56,10 +57,10 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
       {
         label: `Search for “${text}${params.selectionText.length > 40 ? '…' : ''}”`,
         click: () => {
-          const engine = ctx.store.state.settings.searchEngine
-          void import('../../shared/url').then(({ searchUrl }) =>
-            openInNewTab(searchUrl(engine, params.selectionText.trim()), true),
-          )
+          // The engine of the tab's profile, as for a search typed in its Space (ST-06).
+          const state = ctx.store.state
+          const engine = engineFor(state, state.tabs[tabId]?.profileId)
+          openInNewTab(searchUrl(engine, params.selectionText.trim()), true)
         },
       },
       { type: 'separator' },
