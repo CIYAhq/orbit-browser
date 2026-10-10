@@ -559,6 +559,8 @@ test('[SV-25][SV-05] a full split row shows no drop target: a tab resting on it 
   await orbit.shell.mouse.down()
   await orbit.shell.mouse.move(a.x + 40, a.y + a.height / 2 - 6, { steps: 2 })
   await orbit.shell.mouse.move(to.x + to.width * 0.75, to.y + to.height * 0.5, { steps: 10 })
+  // The drag is live, so the check below can't pass because no drag started (PR #10 review F7).
+  await expect(orbit.shell.locator('html')).toHaveClass(/\bis-dragging-tab\b/)
   // Well past the rest that makes a split on a row with room (400 ms).
   await orbit.shell.waitForTimeout(900)
   expect(await orbit.shell.locator('.row-slot.is-split-target').count()).toBe(0)
@@ -742,13 +744,13 @@ test('[SV-13] resizing the window keeps each pane’s proportion', async () => {
   expect(pa.width / pb.width).toBeCloseTo(0.7 / 0.3, 1)
 })
 
-test('[SV-26] a new pane grows in with a spring and a closed one fades out', async () => {
-  const b = await openTab(orbit.app, 'Grow2')
-  const a = await openTab(orbit.app, 'Grow1')
-  await expect.poll(async () => (await tabView(orbit.app, a))?.visible).toBe(true)
-  // Sample the new pane's card width every frame, timed from when the card enters the page. The
-  // sampler runs before the pane is added: started alongside the command it could begin late and
-  // miss the growth (CI saw a first sample at 94 %). It stops by itself, so it can't hang the test.
+/**
+ * Adds `tabId` beside `target` and samples the new pane's card width every frame, timed from when the
+ * card enters the page. The sampler runs before the pane is added: started alongside the command it
+ * could begin late and miss the growth (CI saw a first sample at 94 %). It stops by itself, so it
+ * can't hang the test.
+ */
+async function growIn(tabId: string, target: string): Promise<GrowProbe> {
   await orbit.shell.evaluate((id) => {
     const probe: GrowProbe = { insertedAt: 0, ticks: 0, samples: [], done: false }
     ;(window as unknown as { __grow: GrowProbe }).__grow = probe
@@ -769,8 +771,8 @@ test('[SV-26] a new pane grows in with a spring and a closed one fades out', asy
       else requestAnimationFrame(tick)
     }
     requestAnimationFrame(tick)
-  }, b)
-  expect(await run(orbit.app, 'split.addTab', { tabId: b, target: a, side: 'right' })).toBeTruthy()
+  }, tabId)
+  expect(await run(orbit.app, 'split.addTab', { tabId, target, side: 'right' })).toBeTruthy()
   const probe = () => orbit.shell.evaluate(() => (window as unknown as { __grow: GrowProbe }).__grow)
   await expect
     .poll(async () => {
@@ -778,18 +780,44 @@ test('[SV-26] a new pane grows in with a spring and a closed one fades out', asy
       return p.done ? 'done' : `${p.ticks} frames, card ${p.insertedAt ? 'in' : 'not in'} the page`
     })
     .toBe('done')
-  const { samples, insertedAt, ticks } = await probe()
-  expect(insertedAt, `the new pane never appeared (${ticks} frames)`).toBeGreaterThan(0)
+  const result = await probe()
+  expect(result.insertedAt, `the new pane never appeared (${result.ticks} frames)`).toBeGreaterThan(0)
+  return result
+}
+
+test('[SV-26] a new pane grows in with a spring and a closed one fades out', async () => {
+  const a = await openTab(orbit.app, 'Grow1')
+  await expect.poll(async () => (await tabView(orbit.app, a))?.visible).toBe(true)
+  // The spring runs on the clock, so a frame that comes late already shows more of it: the shape is
+  // checked on frames that came in time (at 100 ms it is about half grown). A starved renderer can
+  // miss them; then that pane is closed and a new one grows in, up to three rounds (as for timing
+  // budgets, D46), so the test never passes without seeing the shape (PR #10 review F6). On the
+  // macOS CI VM a frame can take 100–200 ms (D17), so there only the end state is checked.
+  let grown: { tabId: string; samples: GrowProbe['samples'] } | undefined
+  const rounds: string[] = []
+  for (let round = 1; round <= 3 && !grown; round++) {
+    const b = (await run(orbit.app, 'tabs.create', {
+      url: fx.url(`/page/Grow${round + 1}`),
+      activate: false,
+    })) as string
+    const { samples } = await growIn(b, a)
+    const early = samples.filter((s) => s.t <= 100).length
+    const by300 = samples.filter((s) => s.t <= 300).length
+    if (FRAME_SLACK !== 1 || (early > 0 && by300 >= 8)) grown = { tabId: b, samples }
+    else {
+      rounds.push(`round ${round}: ${early} frames by 100 ms, ${by300} by 300 ms`)
+      await run(orbit.app, 'split.closePane', { tabId: b })
+    }
+  }
+  if (!grown) throw new Error(`frames never came in time to show the grow-in (${rounds.join('; ')})`)
+  const { tabId: b, samples } = grown
   const final = samples[samples.length - 1]?.w ?? 0
   // It starts small and grows over several frames (a spring, not a jump), settles within 1 px
   // in well under a second (about 330 ms on an idle machine), without visible overshoot.
-  // The spring runs on the clock, so a frame that comes late already shows more of it: the shape
-  // is checked on frames that came in time (here, at 100 ms, it is about half grown). On the macOS
-  // CI VM a frame can take 100–200 ms (D17), so there only the end state is checked.
-  const early = samples.filter((s) => s.t <= 100)
-  if (FRAME_SLACK === 1 && early[0]) expect(early[0].w).toBeLessThan(final * 0.8)
-  if (FRAME_SLACK === 1 && samples.filter((s) => s.t <= 300).length >= 8)
+  if (FRAME_SLACK === 1) {
+    expect(samples.filter((s) => s.t <= 100)[0]?.w).toBeLessThan(final * 0.8)
     expect(samples.filter((s) => s.w > 1 && s.w < final - 1).length).toBeGreaterThan(1)
+  }
   const settledAt = samples.find((s) => Math.abs(s.w - final) <= 1)
   expect(settledAt?.t ?? 1000).toBeLessThan(FRAME_SLACK === 1 ? 650 : 900)
   expect(Math.max(...samples.map((s) => s.w))).toBeLessThan(final + 4)
