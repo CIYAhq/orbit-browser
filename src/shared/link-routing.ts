@@ -69,10 +69,12 @@ export interface PageFrames {
 
 /**
  * `pageMayOpen` for a page that asked for `url` from a frame Orbit can't name: a new window, tab or
- * pop-up it requested, a pop-up blocked on it, or a save of it (D49; round 2 fix check M1, F1). A
- * local file only when every frame may open it, by each frame's origin: a frame from elsewhere counts
- * as a web page (F2), and an about:blank frame a local page made counts as local. A page that went
- * away opens no local file.
+ * pop-up it requested (a modified click, a `target=_blank` link, `window.open`), a pop-up blocked on
+ * it, or a save of it (D49; round 2 fix check M1, F1). A local file only when every frame may open
+ * it, by each frame's origin: any frame whose origin isn't a local file's counts as a web page, a web
+ * page's (F2) or an opaque one (a sandboxed or `data:` frame), even one the page made itself; an
+ * about:blank or srcdoc frame a local page made has the page's origin and counts as local. A page
+ * that went away opens no local file.
  */
 export function framesMayOpen(page: PageFrames, url: string): boolean {
   if (pageMayOpen(undefined, url)) return true
@@ -80,6 +82,31 @@ export function framesMayOpen(page: PageFrames, url: string): boolean {
     return page.mainFrame.framesInSubtree.every((frame) => pageMayOpen(frame.origin, url))
   } catch {
     return false
+  }
+}
+
+/**
+ * The toast for a local file Orbit refused to open for a page (D49): it names the file, so a click
+ * that opens nothing says why (round 3 fix check F1).
+ */
+export function localFileBlockedMessage(url: string): string {
+  return `Local file blocked: ${fileNameOf(url)}`
+}
+
+/** A local file's name, from its address (the last part of its path, decoded). */
+function fileNameOf(url: string): string {
+  let path: string
+  try {
+    path = new URL(url.trim().replace(/^view-source:/i, '')).pathname
+  } catch {
+    return url
+  }
+  const name = path.split('/').filter(Boolean).at(-1)
+  if (!name) return url
+  try {
+    return decodeURIComponent(name)
+  } catch {
+    return name
   }
 }
 
