@@ -21,6 +21,7 @@ import {
   tabView,
   viewPage,
 } from './helpers'
+import { choosePageMenu, pageMenu } from './nav-support'
 import { clickInTab } from './peek-helpers'
 
 /**
@@ -278,34 +279,12 @@ const counts = () =>
     }
   })
 
-/** From now on, native popup menus are recorded instead of shown. */
-async function recordMenus(): Promise<void> {
-  await orbit.app.evaluate(({ Menu }) => {
-    const g = globalThis as unknown as { __shownMenu?: unknown }
-    Menu.prototype.popup = function popup(this: unknown) {
-      g.__shownMenu = this
-    }
-  })
-}
+/** The labels of the page menu last opened (kept instead of shown in tests); separators left out. */
+const shownMenu = async () => ((await pageMenu(orbit.app))?.labels ?? []).filter((label) => label !== '-')
 
-type RecordedMenu = { items: { label: string; type: string; click: () => void }[] }
-
-const shownMenu = () =>
-  orbit.app.evaluate(() =>
-    ((globalThis as unknown as { __shownMenu?: RecordedMenu }).__shownMenu?.items ?? [])
-      .filter((i) => i.type !== 'separator')
-      .map((i) => i.label),
-  )
-
-/** Clicks an item of the menu last shown; the menu is gone afterwards, as on screen. */
-function clickShownMenu(label: string): Promise<void> {
-  return orbit.app.evaluate((_e, name) => {
-    const g = globalThis as unknown as { __shownMenu?: RecordedMenu }
-    const item = g.__shownMenu?.items.find((i) => i.label === name)
-    if (!item) throw new Error(`no ${name} in the menu`)
-    g.__shownMenu = undefined
-    item.click()
-  }, label)
+/** Chooses an item of the page menu last opened; the menu is gone afterwards, as on screen. */
+async function clickShownMenu(label: string): Promise<void> {
+  if (!(await choosePageMenu(orbit.app, label))) throw new Error(`no ${label} in the menu`)
 }
 
 // ---- DT-01 ----
@@ -435,7 +414,6 @@ test('[DT-01] a link DevTools open becomes a selected tab', async () => {
 
 test('[DT-02] right-click → Inspect opens DevTools on that element; with DevTools open it just selects', async () => {
   const tabId = await openPage('Inspect')
-  await recordMenus()
   await clickOn(tabId, '#target', 'right')
   await expect.poll(shownMenu).toContain('Inspect')
   expect((await shownMenu()).at(-1)).toBe('Inspect')
