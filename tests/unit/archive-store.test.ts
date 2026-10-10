@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ArchiveStore, dayStart, MAX_HISTORY_ENTRIES, trimHistory } from '../../src/main/archive/store'
 import type { ArchivedTab } from '../../src/shared/state'
 
@@ -253,6 +253,46 @@ describe('ArchiveStore persistence (AR-01)', () => {
     await t.load()
     expect(t.size).toBe(101)
     expect(t.has(late.id)).toBe(true)
+  })
+
+  it('[AR-07] clearing a profile takes its pages off the disk, not only out of the list; also during a compaction (review M5)', async () => {
+    const file = tmpFile()
+    const s = new ArchiveStore(file, { writeDelayMs: 1 })
+    await s.load()
+    s.add(Array.from({ length: 1000 }, () => entry()))
+    const workEntries = (from: number) =>
+      Array.from({ length: 50 }, (_, i) =>
+        entry({ profileId: 'p-work', url: `https://work.test/${from + i}`, title: `Work ${from + i}` }),
+      )
+    const work = workEntries(0)
+    const back = { url: 'https://work-history.test/', title: 'Back' }
+    s.add(
+      work,
+      new Map([
+        [work[0]?.id as string, { entries: [back, { url: 'https://work.test/0', title: 'Work 0' }], index: 1 }],
+      ]),
+    )
+    s.flushSync()
+    expect(readFileSync(file, 'utf8')).toContain('https://work-history.test/')
+    expect(s.clear('p-work')).toHaveLength(50)
+    const clean = () => {
+      const text = readFileSync(file, 'utf8')
+      expect(text).not.toContain('work.test')
+      expect(text).not.toContain('work-history.test')
+    }
+    await vi.waitFor(clean)
+    // A clear while the log is being rewritten (the rewrite started with those entries in it).
+    s.add(workEntries(100))
+    s.flushSync()
+    const compacting = s.compact()
+    s.clear('p-work')
+    await compacting
+    await vi.waitFor(clean)
+    s.close()
+    const t = new ArchiveStore(file)
+    await t.load()
+    expect(t.size).toBe(1000)
+    clean()
   })
 
   it('[AR-01] ignores torn or foreign lines in the log', async () => {

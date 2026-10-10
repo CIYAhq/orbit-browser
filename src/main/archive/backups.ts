@@ -1,9 +1,17 @@
 import { mkdir, open, readdir, readFile, rename, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { BackupInfo } from '../../shared/commands/archive'
-import type { OrbitState } from '../../shared/state'
+import type { OrbitState, ProfileId } from '../../shared/state'
 import { DAY_MS } from './retention'
-import { buildSnapshot, parseSnapshot, type SidebarSnapshot, sidebarHash, snapshotCounts } from './snapshot'
+import { isPrivateOrGone } from './service'
+import {
+  buildSnapshot,
+  parseSnapshot,
+  type SidebarSnapshot,
+  sidebarHash,
+  snapshotCounts,
+  snapshotWithout,
+} from './snapshot'
 import { dayStart } from './store'
 
 /** A backup's id and file name (without `.json`): `<taken at>-<Spaces>-<tabs>-<fingerprint>`. */
@@ -148,6 +156,38 @@ export class BackupStore {
     })
   }
 
+  /**
+   * Rewrites each backup without the data of profiles that are gone (PR-08): their Favorites, their
+   * Spaces and what only those held. A backup left with no Space goes. Files that can't be read
+   * stay as they are. Returns how many backups changed.
+   */
+  dropProfiles(isGone: (profileId: ProfileId) => boolean): Promise<number> {
+    return this.serial(async () => {
+      let changed = 0
+      for (const b of await this.readList()) {
+        const file = join(this.dir, `${b.id}.json`)
+        let snap: SidebarSnapshot | undefined
+        try {
+          snap = parseSnapshot(JSON.parse(await readFile(file, 'utf8')))
+        } catch {
+          snap = undefined
+        }
+        const next = snap && snapshotWithout(snap, isGone)
+        if (!next) continue
+        changed++
+        if (next.spaceOrder.length > 0) {
+          const { spaces, tabs } = snapshotCounts(next)
+          const id = `${next.at}-${spaces}-${tabs}-${sidebarHash(next)}`
+          await writeAtomic(join(this.dir, `${id}.json`), JSON.stringify(next))
+          if (id === b.id) continue
+        }
+        await rm(file, { force: true })
+      }
+      if (changed > 0) this.onChange?.()
+      return changed
+    })
+  }
+
   /** A backup's content; undefined when there is no such backup or it cannot be read. */
   read(id: unknown): Promise<SidebarSnapshot | undefined> {
     const info = parseBackupId(id)
@@ -205,6 +245,37 @@ export function scheduleBackups(
   return () => {
     clearTimeout(first)
     clearInterval(timer)
+    off()
+  }
+}
+
+/** How long after launch the backups are checked for profiles deleted before (PR-08). */
+export const PROFILE_SWEEP_MS = 20_000
+
+/**
+ * A deleted profile's data leaves the backups too (PR-08), as it leaves the Archive: when a profile
+ * leaves the state, and once shortly after launch (for a deletion Orbit quit before finishing),
+ * each backup is rewritten without the profiles that are gone. Returns a function that stops it.
+ */
+export function dropDeletedProfiles(
+  ctx: { store: { state: OrbitState; subscribe(fn: (next: OrbitState, prev: OrbitState) => void): () => void } },
+  backups: Pick<BackupStore, 'dropProfiles'>,
+  sweepMs = PROFILE_SWEEP_MS,
+): () => void {
+  const run = (state: OrbitState) => {
+    backups
+      .dropProfiles((id) => !state.profiles[id])
+      .catch((err) => console.error('[backups] could not remove a deleted profile from the backups', err))
+  }
+  const off = ctx.store.subscribe((next, prev) => {
+    if (next.profiles === prev.profiles) return
+    // A private window's profile leaves nothing in the backups: its closing needs no rewrite.
+    if (Object.keys(prev.profiles).some((id) => !next.profiles[id] && !isPrivateOrGone(prev, id))) run(next)
+  })
+  const sweep = setTimeout(() => run(ctx.store.state), sweepMs)
+  sweep.unref?.()
+  return () => {
+    clearTimeout(sweep)
     off()
   }
 }

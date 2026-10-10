@@ -113,6 +113,60 @@ function snapshotTab(tab: Tab): SnapshotTab {
   return copy as SnapshotTab
 }
 
+/**
+ * A backup without the data of profiles that are gone (PR-08): their Favorites, their Spaces, and
+ * the folders, split views and tabs only those held. Undefined when nothing of theirs is in it.
+ */
+export function snapshotWithout(
+  snap: SidebarSnapshot,
+  isGone: (profileId: ProfileId) => boolean,
+): SidebarSnapshot | undefined {
+  const touched =
+    Object.keys(snap.favorites).some(isGone) ||
+    Object.values(snap.spaces).some((s) => isGone(s.profileId)) ||
+    Object.values(snap.tabs).some((t) => isGone(t.profileId))
+  if (!touched) return undefined
+  const out: SidebarSnapshot = {
+    v: SNAPSHOT_VERSION,
+    at: snap.at,
+    spaceOrder: [],
+    spaces: {},
+    favorites: {},
+    folders: {},
+    splits: {},
+    tabs: {},
+  }
+  const add = (id: ItemId): void => {
+    if (isTabId(id)) {
+      const tab = snap.tabs[id]
+      if (tab && !isGone(tab.profileId)) out.tabs[id] = tab
+    } else if (isFolderId(id)) {
+      const folder = snap.folders[id]
+      if (!folder || out.folders[id]) return
+      out.folders[id] = folder
+      for (const child of folder.children) add(child)
+    } else if (isSplitId(id)) {
+      const split = snap.splits[id]
+      if (!split || out.splits[id]) return
+      out.splits[id] = split
+      for (const tabId of splitLeaves(split.layout)) add(tabId)
+    }
+  }
+  for (const [profileId, list] of Object.entries(snap.favorites)) {
+    if (isGone(profileId)) continue
+    out.favorites[profileId] = list
+    for (const id of list) add(id)
+  }
+  for (const spaceId of snap.spaceOrder) {
+    const space = snap.spaces[spaceId]
+    if (!space || isGone(space.profileId)) continue
+    out.spaceOrder.push(spaceId)
+    out.spaces[spaceId] = space
+    for (const id of [...space.pinned, ...space.today]) add(id)
+  }
+  return out
+}
+
 /** How many Spaces and tabs a backup holds (its list row says so). */
 export function snapshotCounts(snap: SidebarSnapshot): { spaces: number; tabs: number } {
   return { spaces: snap.spaceOrder.length, tabs: Object.keys(snap.tabs).length }

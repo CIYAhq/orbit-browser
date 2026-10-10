@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -6,6 +6,7 @@ import {
   BACKUP_EVERY_MS,
   BackupStore,
   backupsToKeep,
+  dropDeletedProfiles,
   FIRST_BACKUP_MS,
   parseBackupId,
   scheduleBackups,
@@ -16,6 +17,7 @@ import { buildSnapshot, restoreSidebar, sidebarHash } from '../../src/main/archi
 import { ArchiveStore } from '../../src/main/archive/store'
 import type { MainContext } from '../../src/main/context'
 import { floatingTab } from '../../src/main/peek/floating'
+import { deleteProfileInDraft } from '../../src/main/spaces/model'
 import { Store } from '../../src/main/store'
 import { makeTab } from '../../src/main/tabs/model'
 import { TabOps } from '../../src/main/tabs/ops'
@@ -362,6 +364,58 @@ describe('Sidebar backups (AR-11)', () => {
     w.tab(w.b, 'https://b.test/2')
     const third = await new BackupStore(dir).take(w.store.state, at(0, 9, 20))
     expect(readdirSync(dir).sort()).toEqual([first.id, second.id, third.id].map((id) => `${id}.json`).sort())
+  })
+
+  it('[AR-11] a deleted profile leaves the backups too: its Favorites, its Spaces and their tabs (review M5, PR-08)', async () => {
+    const w = await world()
+    const dir = mkdtempSync(join(tmpdir(), 'orbit-backups-'))
+    dirs.push(dir)
+    const backups = new BackupStore(dir)
+    // Work: a Favorite, and a Space with a tab, beside Default's sidebar.
+    const work = createProfile('Work')
+    const ws = createSpace('Work', work.id)
+    const fav = makeTab({ spaceId: ws.id, profileId: work.id, url: 'https://work-favorite.test/', title: 'Fav' })
+    const inWs = makeTab({ spaceId: ws.id, profileId: work.id, url: 'https://work-tab.test/', title: 'Work tab' })
+    w.store.update((d) => {
+      d.profiles[work.id] = { ...work, favorites: [fav.id] }
+      d.spaces[ws.id] = { ...ws, today: [inWs.id] }
+      d.spaceOrder.push(ws.id)
+      d.tabs[fav.id] = fav
+      d.tabs[inWs.id] = inWs
+    })
+    const both = await backups.take(w.store.state, Date.now() - 3 * MIN)
+    expect(both).toMatchObject({ spaces: 3, tabs: 3 })
+    // A backup whose only Space is Work's has nothing left once Work goes.
+    const onlyWork = await backups.take({ ...w.store.state, spaceOrder: [ws.id] }, Date.now() - 2 * MIN)
+    const stop = dropDeletedProfiles(w.ctx, backups)
+    try {
+      // profiles.delete: refused while a Space uses the profile, so the Space goes first.
+      w.store.update((d) => {
+        delete d.spaces[ws.id]
+        d.spaceOrder = d.spaceOrder.filter((id) => id !== ws.id)
+        delete d.tabs[inWs.id]
+      })
+      w.store.update((d) => {
+        deleteProfileInDraft(d, work.id)
+      })
+      const onDisk = () => readdirSync(dir).map((name) => readFileSync(join(dir, name), 'utf8'))
+      await vi.waitFor(() => {
+        const text = onDisk().join('\n')
+        expect(text).not.toContain('work-favorite.test')
+        expect(text).not.toContain('work-tab.test')
+        expect(text).not.toContain(work.id)
+      })
+      // Default's sidebar stays, under a name with the new counts; the Work-only backup is gone.
+      const list = await backups.list()
+      expect(list.map((b) => [b.at, b.spaces, b.tabs])).toEqual([[both.at, 2, 1]])
+      expect(readdirSync(dir)).not.toContain(`${onlyWork.id}.json`)
+      const kept = await backups.read(list[0]?.id)
+      expect(kept?.spaceOrder).toEqual([w.a, w.b])
+      expect(Object.keys(kept?.tabs ?? {})).toEqual([w.keep])
+      expect(kept?.favorites).toEqual({ [DEFAULT_PROFILE_ID]: [] })
+    } finally {
+      stop()
+    }
   })
 
   it('[AR-11] backups are taken after launch and within five minutes of a change, only then', () => {

@@ -9,7 +9,7 @@ import type { MainContext } from '../context'
 import { installMenu } from '../menu'
 import type { CallContext } from '../registry'
 import { findMenuItem, menuLabels } from '../tabs/menus'
-import { BackupStore, scheduleBackups } from './backups'
+import { BackupStore, dropDeletedProfiles, scheduleBackups } from './backups'
 import { historyMenuItems, historyQuery, historyRows } from './history-view'
 import { provideArchiveSource } from './inbox'
 import { LibraryHost } from './library'
@@ -58,9 +58,12 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
   const backups = new BackupStore(join(ctx.paths.userData, 'backups'))
   backups.onChange = () => windows.broadcast('orbit:backups.changed', {})
   const stopBackups = scheduleBackups(ctx, backups)
+  // A deleted profile's data leaves the backups, as it leaves the Archive (PR-08).
+  const stopProfileDrops = dropDeletedProfiles(ctx, backups)
   app.on('before-quit', () => {
     stopRetention()
     stopBackups()
+    stopProfileDrops()
     store.close()
   })
 

@@ -13,7 +13,8 @@
  *   of order; `flushSync()` writes what is queued (quit).
  * - The log is rewritten (snapshot to a temp file, then rename) at load when more than half of it is
  *   dead, and later once dead records outnumber live ones. The snapshot is built in chunks between
- *   other work; records logged meanwhile are appended to it before the rename.
+ *   other work; records logged meanwhile are appended to it before the rename. A clear (Clear
+ *   Archive, a deleted profile) rewrites it at once, so what it removed leaves the disk.
  * - Pages' saved scroll and form state (`pageState`) stay in memory only: on disk an entry keeps
  *   the URLs and titles of its history, which is enough to rebuild back/forward.
  *
@@ -371,6 +372,8 @@ export class ArchiveStore {
     for (const id of gone) this.forget(id)
     this.deadRecords += gone.length + 1
     this.log({ t: 'c', p: profileId, at })
+    // Cleared means gone from the disk too (AR-07, PR-08): the log is rewritten without them now.
+    this.compactSoon(true)
     this.changed()
     return gone
   }
@@ -480,6 +483,7 @@ export class ArchiveStore {
       return
     }
     let lines = 0
+    let cleared = false
     for (const line of text.split('\n')) {
       if (!line) continue
       lines++
@@ -489,11 +493,14 @@ export class ArchiveStore {
       } catch {
         continue
       }
+      const size = this.items.length
       this.replay(rec)
+      if (rec.t === 'c' && this.items.length < size) cleared = true
     }
     this.deadRecords = Math.max(0, lines - this.items.length)
     this.changed()
-    if (this.deadRecords > this.items.length) this.compactSoon()
+    // A clear whose rewrite did not happen (Orbit quit first) still has its entries on disk.
+    if (cleared || this.deadRecords > this.items.length) this.compactSoon()
   }
 
   private replay(rec: LogRecord): void {
@@ -526,13 +533,21 @@ export class ArchiveStore {
 
   private compacting: Promise<void> | undefined
   private compactTimer: ReturnType<typeof setTimeout> | undefined
+  /** A clear came while the log was being rewritten from entries it removed: rewrite once more. */
+  private compactAgain = false
 
   private maybeCompact(): void {
     if (this.deadRecords > Math.max(500, this.items.length)) this.compactSoon()
   }
 
-  private compactSoon(): void {
-    if (this.compacting || this.compactTimer || !this.file) return
+  /** Rewrites the log soon. `again`: also when a rewrite is under way (it may hold what just went). */
+  private compactSoon(again = false): void {
+    if (!this.file) return
+    if (this.compacting) {
+      if (again) this.compactAgain = true
+      return
+    }
+    if (this.compactTimer) return
     this.compactTimer = setTimeout(() => {
       this.compactTimer = undefined
       void this.compact()
@@ -544,6 +559,10 @@ export class ArchiveStore {
     if (!this.compacting) {
       this.compacting = this.rewrite().finally(() => {
         this.compacting = undefined
+        if (this.compactAgain) {
+          this.compactAgain = false
+          this.compactSoon()
+        }
       })
     }
     return this.compacting
