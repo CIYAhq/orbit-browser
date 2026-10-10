@@ -3,6 +3,7 @@
  */
 import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
+import { isMediaBusy } from '../../shared/media'
 import { noteSplitFocus, removePane } from '../../shared/split'
 import type { ItemId, OrbitState, Space, SpaceId, Tab, TabId, WindowId } from '../../shared/state'
 import {
@@ -257,7 +258,8 @@ export function autoArchiveCandidates(state: OrbitState, now: number): ItemId[] 
         .map((t) => state.tabs[t])
         .filter((t): t is Tab => !!t)
       if (tabs.length === 0) continue
-      if (tabs.some((t) => shown.has(t.id) || t.audible)) continue
+      // Tabs playing media, in picture-in-picture or using camera/microphone stay (MD-12).
+      if (tabs.some((t) => shown.has(t.id) || isMediaBusy(t))) continue
       const last = Math.max(...tabs.map((t) => t.lastActiveAt))
       if (now - last >= after) out.push(id)
     }
@@ -279,7 +281,7 @@ export function sleepCandidates(state: OrbitState, now: number, awake: Iterable<
   const out: TabId[] = []
   for (const id of awake) {
     const tab = state.tabs[id]
-    if (!tab || shown.has(id) || tab.audible) continue
+    if (!tab || shown.has(id) || isMediaBusy(tab)) continue
     const limit = sectionOf(state, id) === 'favorite' ? after * FAVORITE_WARM_FACTOR : after
     if (now - tab.lastActiveAt >= limit) out.push(id)
   }
