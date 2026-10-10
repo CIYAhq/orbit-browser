@@ -7,6 +7,7 @@ import { ACTIONS, formatAccelerator, shortcutsFor } from '../../shared/actions'
 import { isFolderId, isSplitId, isTabId } from '../../shared/ids'
 import type { ArchivedTab, FolderId, ItemId, OrbitState, ProfileId, SpaceId, Tab, TabId } from '../../shared/state'
 import { splitLeaves } from '../../shared/tree'
+import { type ArchiveSource, archiveSource } from '../archive/inbox'
 import { hostOf, urlKeyOf } from '../history/store'
 import { initials } from './match'
 import type { ActionDoc, ArchiveDoc, FolderDoc, SpaceDoc, TabDoc } from './rank'
@@ -18,6 +19,9 @@ interface Layout {
   split: Map<TabId, TabId[]>
   folders: FolderDoc[]
 }
+
+/** Archived tabs the bar ranks per profile, newest first (main's cap before the Archive store). */
+export const ARCHIVE_DOCS_MAX = 5000
 
 /** Actions the bar never lists (they open the bar itself). */
 const NOT_IN_BAR = new Set(['tab.new', 'url.edit'])
@@ -49,7 +53,7 @@ export class SourceCache {
   private tabDocCache = new WeakMap<Tab, TabDoc>()
   private tabsRef: unknown[] = []
   private tabDocs: TabDoc[] = []
-  private archiveRef: { list?: ArchivedTab[]; profileId?: ProfileId } = {}
+  private archiveRef: { list?: ArchivedTab[]; source?: ArchiveSource; version?: number; profileId?: ProfileId } = {}
   private archiveDocs: ArchiveDoc[] = []
   private spacesRef: unknown[] = []
   private spaceDocs: SpaceDoc[] = []
@@ -79,8 +83,35 @@ export class SourceCache {
     return docs
   }
 
-  /** Archived tabs of one profile (CB-05 item 3). */
+  /**
+   * Archived tabs of one profile, newest first so ties go to the most recent entry (CB-05 item 3):
+   * the whole Archive (AR-04), up to ARCHIVE_DOCS_MAX. `state.archive` only holds the recent ones;
+   * it is the source until the Archive log has been read.
+   */
   archive(state: OrbitState, profileId: ProfileId): ArchiveDoc[] {
+    const source = archiveSource()
+    if (source?.ready) {
+      const ref = this.archiveRef
+      if (ref.source === source && ref.version === source.version && ref.profileId === profileId)
+        return this.archiveDocs
+      this.archiveRef = { source, version: source.version, profileId }
+      const docs: ArchiveDoc[] = []
+      for (const { e, titleLower, urlKey } of source.newestFirst(profileId)) {
+        if (!e.url || e.url === 'about:blank') continue
+        docs.push({
+          id: e.id,
+          title: e.title,
+          url: e.url,
+          spaceId: e.spaceId,
+          archivedAt: e.archivedAt,
+          titleLower,
+          urlKey,
+        })
+        if (docs.length >= ARCHIVE_DOCS_MAX) break
+      }
+      this.archiveDocs = docs
+      return docs
+    }
     if (this.archiveRef.list === state.archive && this.archiveRef.profileId === profileId) return this.archiveDocs
     this.archiveRef = { list: state.archive, profileId }
     // The archive is oldest-first; newest first here so ties go to the most recent entry.

@@ -1,0 +1,123 @@
+import { describe, expect, it } from 'vitest'
+import { initials } from '../../src/main/commandbar/match'
+import { type ActionDoc, type ArchiveDoc, type RankInput, rank } from '../../src/main/commandbar/rank'
+import { HistoryStore, urlKeyOf } from '../../src/main/history/store'
+import { ACTIONS_BY_ID } from '../../src/shared/actions'
+import { DEFAULT_SITE_SEARCH } from '../../src/shared/defaults'
+
+const NOW = 1_800_000_000_000
+const DAY = 24 * 3600_000
+
+function input(query: string, extra: Partial<RankInput> = {}): RankInput {
+  return {
+    query,
+    mode: 'new-tab',
+    now: NOW,
+    engine: { name: 'Google', search: 'https://www.google.com/search?q=%s' },
+    tabs: [],
+    activeTabId: null,
+    currentSpaceId: 's-a',
+    spaceNames: { 's-a': 'Home' },
+    history: [],
+    hosts: [],
+    archive: [],
+    spaces: [{ id: 's-a', name: 'Home', icon: '', nameLower: 'home' }],
+    actions: [],
+    siteSearches: DEFAULT_SITE_SEARCH,
+    ...extra,
+  }
+}
+
+const doc = (id: string, title: string, url: string, archivedAt: number): ArchiveDoc => ({
+  id,
+  title,
+  url,
+  spaceId: 's-a',
+  archivedAt,
+  titleLower: title.toLowerCase(),
+  urlKey: urlKeyOf(url),
+})
+
+describe('Archived tabs in the command bar (AR-04, review N3)', () => {
+  it('[AR-04] two equally matching archived tabs list the most recently archived first, also when both have history', () => {
+    const older = doc('a-old', 'Team report', 'https://a.example/report-x', NOW - 3 * DAY)
+    const newer = doc('a-new', 'Team report', 'https://b.example/report-x', NOW - 2 * DAY)
+    // The command bar's archive list is newest first.
+    const archive = [newer, older]
+    const archivedIds = (history: HistoryStore | undefined) =>
+      rank(
+        input('team report', {
+          archive,
+          ...(history ? { history: history.entries(), hosts: history.hostList() } : {}),
+        }),
+      )
+        .results.filter((r) => r.kind === 'archived')
+        .map((r) => [r.archiveId, r.score])
+    // Without history rows.
+    const plain = archivedIds(undefined)
+    expect(plain.map(([id]) => id)).toEqual(['a-new', 'a-old'])
+    expect(plain[0]?.[1]).toBe(plain[1]?.[1])
+    // Both pages are in history too, the older one visited more: its history row ranks higher, and
+    // the archived rows (preferred over history for the same URL) must not take that order.
+    const history = new HistoryStore('/nonexistent/never-written.jsonl', { now: () => NOW })
+    for (let i = 0; i < 5; i++) history.record(older.url, { title: older.title, at: NOW - 4 * DAY })
+    history.record(newer.url, { title: newer.title, at: NOW - 4 * DAY })
+    const withHistory = archivedIds(history)
+    expect(withHistory.map(([id]) => id)).toEqual(['a-new', 'a-old'])
+    // One row per page: no history row left for either.
+    const all = rank(input('team report', { archive, history: history.entries(), hosts: history.hostList() })).results
+    expect(all.filter((r) => r.kind === 'history' && (r.url === older.url || r.url === newer.url))).toEqual([])
+  })
+
+  it('[AR-09] a page closed a moment ago ranks where its history row would; older archived tabs stay after history', () => {
+    const history = new HistoryStore('/nonexistent/never-written.jsonl', { now: () => NOW })
+    // Two pages that match the same; the other one was visited more.
+    const closed = 'https://closed.example/notes'
+    const visited = 'https://visited.example/notes'
+    history.record(closed, { title: 'Meeting notes', at: NOW - 3600_000 })
+    for (let i = 0; i < 4; i++) history.record(visited, { title: 'Meeting notes', at: NOW - 3600_000 })
+    const ranked = (archive: ArchiveDoc[]) =>
+      rank(input('meeting notes', { archive, history: history.entries(), hosts: history.hostList() })).results
+    const historyScore = ranked([]).find((r) => r.url === closed)?.score ?? 0
+    expect(historyScore).toBeGreaterThan(0)
+    // Closed two minutes ago: one row for it, marked archived (choosing it restores), at its history score.
+    const justClosed = ranked([doc('a-now', 'Meeting notes', closed, NOW - 120_000)])
+    const row = justClosed.find((r) => r.url === closed)
+    expect(row).toMatchObject({ kind: 'archived', archiveId: 'a-now' })
+    expect(row?.score).toBeGreaterThanOrEqual(historyScore)
+    expect(justClosed.filter((r) => r.url === closed)).toHaveLength(1)
+    // Archived days ago: it ranks with the archived tabs, after history pages that match as well.
+    const old = ranked([doc('a-old', 'Meeting notes', closed, NOW - 3 * DAY)])
+    const oldRow = old.find((r) => r.url === closed)
+    expect(oldRow).toMatchObject({ kind: 'archived' })
+    expect(oldRow?.score ?? 0).toBeLessThan(old.find((r) => r.url === visited)?.score ?? 0)
+  })
+})
+
+/** An action as the command bar lists it (sources.ts): title, category and keywords, lowercased. */
+const actionDoc = (id: string): ActionDoc => {
+  const a = ACTIONS_BY_ID[id]
+  if (!a) throw new Error(`no action ${id}`)
+  const titleLower = a.title.toLowerCase()
+  return {
+    id,
+    title: a.title,
+    titleLower,
+    keywords: [a.category.toLowerCase(), ...(a.keywords ?? []).map((k) => k.toLowerCase())],
+    initials: initials(titleLower),
+    needsTab: false,
+  }
+}
+
+describe('Clear Archive in the command bar (AR-07)', () => {
+  it('[AR-07] typing "clear archive" puts Clear Archive… on top, not Clear Today Tabs (whose keyword is "archive")', () => {
+    const actions = ['tabs.clearToday', 'app.archive', 'archive.clear'].map(actionDoc)
+    for (const q of ['clear archive', 'Clear  Archive', 'clear arch']) {
+      expect(rank(input(q, { actions })).results[0]).toMatchObject({ kind: 'action', actionId: 'archive.clear' })
+    }
+    // Words matched one by one still find the others.
+    expect(rank(input('clear today', { actions })).results[0]).toMatchObject({ actionId: 'tabs.clearToday' })
+    const archiveWord = rank(input('archive', { actions })).results.map((r) => r.actionId)
+    expect(archiveWord).toEqual(expect.arrayContaining(['tabs.clearToday', 'app.archive', 'archive.clear']))
+  })
+})

@@ -217,6 +217,8 @@ export type OverlayState =
       phase?: 'closing' | 'expanding' | 'splitting'
       /** The page's background colour, for the card that fades out when the Peek closes. */
       background?: string
+      /** The Archive entry the Peek previews from the Library (AR-06): the card can offer `archive.restorePreview`. */
+      archiveEntry?: string
     }
   | { kind: 'panel'; panel: string; nonce: number; params?: Record<string, string | number | boolean> }
 
@@ -297,6 +299,10 @@ export interface Settings {
   countFavoritesInShortcuts: boolean
   /** ⌘9 selects the last tab (true) or the 9th item (false) (TB-04). */
   lastTabOnCmd9: boolean
+  /** The Library section used last: the Library reopens there (AR-02, DL-09). */
+  librarySection: string
+  /** Archive entries older than this many days are deleted (AR-08). 0 = kept forever. */
+  archiveKeepDays: number
 }
 
 /** "URL contains …" or "URL is exactly …" → a Space (ST-09 link routing). */
@@ -308,6 +314,8 @@ export interface LinkRule {
 
 export interface ArchivedTab {
   id: string
+  /** The tab it was (AR-01): a restore reuses the id; a tab that comes back takes its entry along. */
+  tabId?: TabId
   url: string
   title: string
   /** Not stored by the tabs lane (keeps state small): look icons up with `tabs.favicon`. */
@@ -322,6 +330,18 @@ export interface ArchivedTab {
   section?: 'today' | 'pinned'
   /** Where the page was when it closed, when not in the sidebar (the Archive's "Mini Window" filter, AR-01). */
   from?: 'mini' | 'peek'
+  /** The split view it was a pane of, when the whole split went at once: it comes back as one unit (SV-19, SV-24). */
+  split?: ArchivedSplit
+}
+
+/** A split view archived as one unit, as each of its panes' Archive entries keeps it (SV-19, SV-24). */
+export interface ArchivedSplit {
+  id: SplitId
+  /** Its arrangement and sizes; the leaves are its panes' tab ids (`ArchivedTab.tabId`). */
+  layout: SplitLayout
+  name?: string
+  /** The pane focused last. */
+  focus?: TabId
 }
 
 export interface Download {
