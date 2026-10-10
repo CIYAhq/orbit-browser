@@ -521,9 +521,12 @@ test('[TB-22] relaunch restores windows, Spaces, pinned, Favorites, Today, folde
   await waitTab(app, t2, '/page/Two')
   await shell.keyboard.press('Escape')
   // The window's size comes back on relaunch.
-  const bw = await app.browserWindow(shell)
   // Small enough for a 1024×768 CI screen (macOS clamps windows to the work area).
-  await bw.evaluate((w) => w.setBounds({ x: 40, y: 40, width: 900, height: 600 }))
+  await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()
+      .find((w) => w.webContents.getURL().includes('view=shell'))
+      ?.setBounds({ x: 40, y: 40, width: 900, height: 600 }),
+  )
   await app.close()
 
   orbit = await launchOrbit({ userData })
@@ -536,9 +539,13 @@ test('[TB-22] relaunch restores windows, Spaces, pinned, Favorites, Today, folde
   expect(after.profiles[PROFILE]?.favorites).toEqual([fav])
   const w = Object.values(after.windows)[0]
   expect(w?.activeTab[sA]).toBe(t2)
-  const shown = await (await orbit.app.browserWindow(orbit.shell)).evaluate((bw) => bw.getBounds())
-  expect(shown.width).toBe(900)
-  expect(shown.height).toBe(600)
+  const shown = await orbit.app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()
+      .find((w) => w.webContents.getURL().includes('view=shell'))
+      ?.getBounds(),
+  )
+  expect(shown?.width).toBe(900)
+  expect(shown?.height).toBe(600)
   // Only the selected tab comes back loaded.
   await waitTab(orbit.app, t2, '/page/Two')
   expect(await liveTabs(orbit.app)).toEqual([t2])

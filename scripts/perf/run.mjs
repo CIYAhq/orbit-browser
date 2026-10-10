@@ -6,6 +6,7 @@
  * scenarios in Chromium on the same machine.
  *
  * Linux: xvfb-run -a -s "-screen 0 1440x900x24" node scripts/perf/run.mjs [--runs 5] [--out perf-results/latest.json]
+ *   [--port 3350] (the fixture server's first port; it takes the next free one up to 3399)
  */
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -22,6 +23,7 @@ const opt = (name, fallback) => {
 const RUNS = Number(opt('runs', '5'))
 const OUT = resolve(opt('out', 'perf-results/latest.json'))
 const SKIP_CHROME = args.includes('--no-chrome')
+const FIRST_PORT = Number(opt('port', '3350'))
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const median = (xs) => {
   const s = [...xs].sort((a, b) => a - b)
@@ -45,7 +47,7 @@ async function startFixtures() {
     res.writeHead(200, { 'content-type': 'text/html' })
     res.end(PAGE(n))
   })
-  let port = 3350
+  let port = FIRST_PORT
   await new Promise((ok, fail) => {
     server.on('error', (err) =>
       err.code === 'EADDRINUSE' && port < 3399 ? server.listen(++port, '127.0.0.1') : fail(err),
@@ -77,9 +79,18 @@ function treeRssMb(rootPid) {
 
 // ---------- Orbit helpers ----------
 const MAIN = resolve('out/main/index.js')
+/**
+ * Offline, as in the e2e tests (tests/e2e/helpers.ts): a dead local proxy, which loopback (the
+ * fixture server) bypasses, and no host name resolves but localhost. Orbit and the Chromium baseline
+ * both run with these.
+ */
+const OFFLINE = [
+  '--proxy-server=http://127.0.0.1:9',
+  '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1',
+]
 async function launchOrbit(userData) {
   const app = await electron.launch({
-    args: process.platform === 'linux' ? ['--no-sandbox', MAIN] : [MAIN],
+    args: [...(process.platform === 'linux' ? ['--no-sandbox'] : []), ...OFFLINE, MAIN],
     env: { ...process.env, ORBIT_E2E: '1', ORBIT_USER_DATA: userData },
   })
   const deadline = Date.now() + 30_000
@@ -169,9 +180,11 @@ async function orbitInteractive(fx) {
   }
   await sleep(1500)
   const rss10 = treeRssMb(pid)
-  // Put every background tab to sleep and measure what is freed.
+  // Put every background tab to sleep and measure what is freed. Between tasks, as __orbit.run does:
+  // the inspector could otherwise run this part-way through other main-process code.
   await app.evaluate(
-    (_e, ids) => {
+    async (_e, ids) => {
+      await new Promise((r) => setImmediate(r))
       for (const id of ids) globalThis.__orbit.ctx.tabs.sleep(id)
     },
     tabs.slice(0, -1),
@@ -214,8 +227,10 @@ async function orbitInteractive(fx) {
     const t0 = Date.now()
     const inMain = await app.evaluate(async (_e, id) => {
       const o = globalThis.__orbit
+      // Start between tasks, as __orbit.run does, but time the command alone, not that hop.
+      await new Promise((r) => setImmediate(r))
       const s = performance.now()
-      await o.run('tabs.activate', { tabId: id }, o.windowIds()[0])
+      await o.ctx.commands.run('tabs.activate', { tabId: id }, { windowId: o.windowIds()[0] })
       const visible = o.ctx.tabs.get(id)?.getVisible() ?? false
       return { ms: performance.now() - s, visible }
     }, target)
@@ -420,14 +435,14 @@ async function chromeBaseline(fx) {
   for (let i = 0; i < RUNS; i++) {
     const dir = mkdtempSync(join(tmpdir(), 'chrome-perf-'))
     const t0 = Date.now()
-    const ctx = await chromium.launchPersistentContext(dir, { headless: false })
+    const ctx = await chromium.launchPersistentContext(dir, { headless: false, args: OFFLINE })
     const page = ctx.pages()[0] ?? (await ctx.newPage())
     await page.goto(fx.url(`c${i}`))
     coldStart.push(Date.now() - t0)
     await ctx.close()
     rmSync(dir, { recursive: true, force: true })
   }
-  const server = await chromium.launchServer({ headless: false })
+  const server = await chromium.launchServer({ headless: false, args: OFFLINE })
   const pid = server.process().pid
   const browser = await chromium.connect(server.wsEndpoint())
   const ctx = await browser.newContext()

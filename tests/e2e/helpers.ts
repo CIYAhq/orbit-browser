@@ -31,9 +31,35 @@ export interface Orbit {
 /**
  * Tests stay offline. Orbit runs behind a dead local proxy, which loopback (where the fixture pages
  * are served) bypasses, so a search or a link to a real site gets its URL but loads nothing.
+ * No host name resolves either, except localhost: Chromium looks up a link's host before anyone
+ * clicks it, and that lookup would leave the machine (PR #10 review F2).
  */
 const DEAD_PROXY = '127.0.0.1:9'
-const OFFLINE = `--proxy-server=http://${DEAD_PROXY}`
+const RESOLVER_RULES = '--host-resolver-rules='
+/**
+ * These rules don't stop an mDNS lookup: Chromium still multicasts the mapped name on the local
+ * network. Nothing in Orbit or the tests asks for one (`resolveHost` with `source: 'mdns'`).
+ */
+const NO_LOOKUPS = 'MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1'
+/** Hosts a test may exclude from the rules: Chromium or the hosts file answers them, on this machine. */
+const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|::1|[\w.-]+\.localhost)$/
+
+/**
+ * The switches that keep Orbit offline. A test's own resolver rules go first, so its MAP rules win
+ * (the first MAP that matches a host does), and every other host still fails to resolve. Chromium
+ * checks every EXCLUDE before any MAP, wherever it is in the list, and an excluded host is looked up
+ * for real, so a test may only exclude loopback hosts (PR #19 review F3).
+ */
+export function offlineArgs(args: string[] = []): string[] {
+  const own = args.filter((a) => a.startsWith(RESOLVER_RULES)).map((a) => a.slice(RESOLVER_RULES.length))
+  for (const rule of own.flatMap((r) => r.split(','))) {
+    const host = /^\s*EXCLUDE\s+(\S+)\s*$/i.exec(rule)?.[1]
+    if (host !== undefined && !LOOPBACK_HOST.test(host)) {
+      throw new Error(`a test's resolver rules exclude ${host}, which would be looked up for real`)
+    }
+  }
+  return [`--proxy-server=http://${DEAD_PROXY}`, `${RESOLVER_RULES}${[...own, NO_LOOKUPS].join(', ')}`]
+}
 
 /**
  * Launches the built app (out/) with an isolated profile directory. `args` are extra Chromium
@@ -47,7 +73,9 @@ export async function launchOrbit(
   for (const old of quitAlone) await old.close()
   const userData = opts.userData ?? mkdtempSync(join(tmpdir(), 'orbit-e2e-'))
   const motion = opts.reducedMotion ? '--force-prefers-reduced-motion' : '--force-prefers-no-reduced-motion'
-  const args = [OFFLINE, motion, ...(opts.args ?? []), resolve('out/main/index.js')]
+  const extra = opts.args ?? []
+  const rest = extra.filter((a) => !a.startsWith(RESOLVER_RULES))
+  const args = [...offlineArgs(extra), motion, ...rest, resolve('out/main/index.js')]
   // Linux CI/dev boxes often lack the setuid sandbox helper; macOS runs fully sandboxed.
   if (process.platform === 'linux') args.unshift('--no-sandbox')
   const app = await electron.launch({
@@ -86,7 +114,9 @@ async function waitOffline(app: ElectronApplication): Promise<void> {
 /**
  * Playwright runs main-process evaluates through the inspector, which can interrupt main-process
  * code part-way, even inside a store update. A change made there is lost when that update finishes:
- * a background tab a test had just created vanished. Each evaluate starts in a task of its own instead.
+ * a background tab a test had just created vanished. Each evaluate and evaluateHandle starts in a
+ * task of its own instead. A handle's own `evaluate` (such as `app.browserWindow(page)`'s) still
+ * runs by interrupt, so tests reach main-process objects through `app.evaluate`.
  */
 export function evaluateBetweenTasks(app: ElectronApplication): void {
   const evaluate = app.evaluate.bind(app)
@@ -97,9 +127,34 @@ export function evaluateBetweenTasks(app: ElectronApplication): void {
         await new Promise((resolve) => setImmediate(resolve))
         return new Function(`return (${source})`)()(electron, a)
       },
-      [fn.toString(), arg] as const,
+      [functionSource(fn), arg] as const,
     )
   }) as ElectronApplication['evaluate']
+  const evaluateHandle = app.evaluateHandle.bind(app)
+  app.evaluateHandle = ((fn: unknown, arg?: unknown) => {
+    if (typeof fn !== 'function') return evaluateHandle(fn as never, arg as never)
+    return evaluateHandle(
+      async (electron, [source, a]) => {
+        await new Promise((resolve) => setImmediate(resolve))
+        return new Function(`return (${source})`)()(electron, a)
+      },
+      [functionSource(fn), arg] as const,
+    )
+  }) as ElectronApplication['evaluateHandle']
+}
+
+/**
+ * A function's source as an expression. A method shorthand (`m(a) {…}`) becomes a function, as in
+ * Playwright's own evaluate (PR #10 review F4).
+ */
+function functionSource(fn: { toString(): string }): string {
+  const source = fn.toString()
+  try {
+    new Function(`(${source})`)
+    return source
+  } catch {
+    return source.startsWith('async ') ? `async function ${source.slice('async '.length)}` : `function ${source}`
+  }
 }
 
 /**
