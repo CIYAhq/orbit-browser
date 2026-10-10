@@ -1,6 +1,6 @@
-import { readFile, stat } from 'node:fs/promises'
-import { basename } from 'node:path'
-import { BrowserWindow, dialog } from 'electron'
+import { readFile, stat, writeFile } from 'node:fs/promises'
+import { basename, join } from 'node:path'
+import { app, BrowserWindow, dialog } from 'electron'
 import { ACTIONS_BY_ID } from '../../shared/actions'
 import type {
   ImportDataType,
@@ -16,10 +16,11 @@ import type { HistoryService } from '../history'
 import type { CallContext } from '../registry'
 import { type FoundSource, findSources, inspectProfile, publicSource } from './browsers'
 import { withScratch } from './copy'
+import { pinnedExport } from './export'
 import { cleanTree, FILE_FOLDER_NAME, LINKS_FOLDER_NAME, linkNodes, MAX_FILE_BYTES, parseFile } from './files'
 import { historyTask } from './history'
 import { ImportJobs, type Task } from './jobs'
-import { countBookmarks, NO_BOOKMARKS } from './netscape'
+import { countBookmarks, NO_BOOKMARKS, writeBookmarksHtml } from './netscape'
 import { importPlaces } from './places'
 import { IMPORT_WINDOW_ID, ImportWindow } from './window'
 
@@ -186,7 +187,20 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
   commands.register('import.commit', ({ jobId }) => jobs.commit(jobId))
   commands.register('import.close', () => win.close())
   commands.register('import.suggest', ({ jobId, url, accepted }) => jobs.suggest(jobId, url, accepted === true))
-  commands.register('import.exportPinned', async () => null)
+  // Export pinned items as bookmarks (IM-17): the system's save dialog, then a bookmarks file.
+  commands.register('import.exportPinned', async ({ profileId, includeToday }, c) => {
+    const parent = (c.windowId ? windows.get(c.windowId) : undefined) ?? BrowserWindow.getFocusedWindow()
+    const options: Electron.SaveDialogOptions = {
+      title: 'Export Pinned Items as Bookmarks',
+      defaultPath: join(app.getPath('documents'), 'Orbit pinned items.html'),
+      filters: [{ name: 'Bookmarks', extensions: ['html'] }],
+    }
+    const picked = parent ? await dialog.showSaveDialog(parent, options) : await dialog.showSaveDialog(options)
+    if (picked.canceled || !picked.filePath) return null
+    const nodes = pinnedExport(store.state, { profileId, includeToday: includeToday === true })
+    await writeFile(picked.filePath, writeBookmarksHtml(nodes), 'utf8')
+    return picked.filePath
+  })
 
   // Done (IM-14): the browser window shows the imported folder, in its Space, pinned section open.
   commands.register('import.reveal', async ({ jobId }, c) => {
@@ -208,6 +222,9 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
   })
 
   actions.register('app.import', ({ windowId }) => win.open(windowId))
+  actions.register('app.exportPinned', async ({ windowId }) => {
+    await commands.run('import.exportPinned', {}, { windowId })
+  })
 
   // Onboarding's import is held until Start browsing commits it; ending another way adds nothing (OB-14).
   store.subscribe((next, prev) => {
