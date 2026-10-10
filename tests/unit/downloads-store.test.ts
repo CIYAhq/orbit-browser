@@ -118,6 +118,28 @@ describe('downloads list', () => {
     expect(store.list().map((r) => r.id)).toEqual(['d-1'])
   })
 
+  it('[DL-12][DL-15] past the limit, a held or resumable download keeps its entry: no partial file is left without one', () => {
+    const dir = tmp()
+    const store = new DownloadStore(join(dir, 'downloads.json'), 3)
+    const held = record('d-held', { savePath: join(dir, 'setup.exe'), danger: 'file-type' })
+    const cut = join(dir, 'big.iso.crdownload')
+    writeFileSync(`${held.savePath}${PARTIAL_SUFFIX}`, 'held back')
+    writeFileSync(cut, 'half of it')
+    store.put(held)
+    store.put(record('d-cut', { savePath: join(dir, 'big.iso'), state: 'interrupted', resume: resumeOf(cut) }))
+    store.put(record('d-failed', { state: 'interrupted' }))
+    for (const id of ['d-1', 'd-2', 'd-3']) store.put(record(id))
+    expect(store.list().map((r) => r.id)).toEqual(['d-3', 'd-cut', 'd-held'])
+    const partials = readdirSync(dir).filter((f) => f.endsWith(PARTIAL_SUFFIX))
+    expect(partials.sort()).toEqual(['big.iso.crdownload', 'setup.exe.crdownload'])
+    const theirs = store.list().flatMap((r) => [r.resume?.tempPath, `${r.savePath}${PARTIAL_SUFFIX}`])
+    for (const f of partials) expect(theirs, f).toContain(join(dir, f))
+    // Once it has its file, a download goes like any other.
+    store.update('d-held', { danger: undefined })
+    store.put(record('d-4'))
+    expect(store.list().map((r) => r.id)).toEqual(['d-4', 'd-3', 'd-cut'])
+  })
+
   it('an update with an undefined field removes it', () => {
     const store = new DownloadStore(join(tmp(), 'downloads.json'))
     store.put(record('d-1', { state: 'interrupted', canResume: true, resume: resumeOf('/x') }))

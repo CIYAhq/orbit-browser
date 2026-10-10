@@ -5,7 +5,8 @@
  *
  * - Loaded on first use: nothing is read at startup.
  * - Writes are debounced and atomic (temp file, then rename); `flushSync` writes at quit.
- * - At most `max` entries: the oldest finished ones go first, running ones never.
+ * - At most `max` entries: the oldest finished ones go first. Never one whose partial file is on
+ *   disk (running, paused, resumable or held back), which nothing would remove then.
  * - A download still running in the file was cut off by a crash or a quit: it loads as interrupted.
  */
 import { mkdirSync, readFileSync, renameSync, type Stats, writeFileSync } from 'node:fs'
@@ -56,6 +57,14 @@ export function isItsFile(record: Pick<DownloadRecord, 'file'>, stats: Stats): b
 }
 
 export const MAX_DOWNLOADS = 1000
+
+/**
+ * A download whose partial file is (or may be) on disk: running or paused, resumable (DL-15, its
+ * `resume` names the file), or held back as possibly harmful (DL-12). Its entry is what removes it.
+ */
+function hasPartialFile(r: DownloadRecord): boolean {
+  return r.state === 'progressing' || r.state === 'paused' || !!r.resume || !!r.danger
+}
 const WRITE_DELAY_MS = 500
 
 const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -235,7 +244,7 @@ export class DownloadStore {
     if (excess <= 0) return
     for (const r of this.records.values()) {
       if (excess <= 0) break
-      if (r.state === 'progressing' || r.state === 'paused') continue
+      if (hasPartialFile(r)) continue
       this.records.delete(r.id)
       excess--
     }
