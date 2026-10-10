@@ -79,16 +79,14 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
       { type: 'separator' },
     )
   } else if (params.selectionText) {
+    // The engine of the tab's profile, as for a search typed in its Space (ST-06); the item names it.
+    const state = ctx.store.state
+    const engine = engineFor(state, state.tabs[tabId]?.profileId)
     items.push(
       { role: 'copy' },
       {
-        label: searchLabel(ctx, params.selectionText),
-        click: () => {
-          // The engine of the tab's profile, as for a search typed in its Space (ST-06).
-          const state = ctx.store.state
-          const engine = engineFor(state, state.tabs[tabId]?.profileId)
-          openInNewTab(searchUrl(engine, params.selectionText.trim()), true)
-        },
+        label: searchLabel(engine, params.selectionText),
+        click: () => openInNewTab(searchUrl(engine, params.selectionText.trim()), true),
       },
       ...lookUpItems(contents, params.selectionText),
       { type: 'separator' },

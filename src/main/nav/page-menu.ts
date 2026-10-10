@@ -3,7 +3,6 @@ import { app, type ContextMenuParams, dialog, type MenuItemConstructorOptions, t
 import { type PageReferrer, referrerPolicyName } from '../../shared/nav'
 import { isPrivateTab } from '../../shared/private'
 import type { TabId, WindowId } from '../../shared/state'
-import { SEARCH_ENGINES } from '../../shared/url'
 import type { MainContext } from '../context'
 import type { TabPage } from '../tabs/ops'
 import { NAV_WORLD } from './focus'
@@ -82,9 +81,8 @@ export function saveLinkItem(contents: WebContents, url: string): MenuItemConstr
   return { label: 'Save Link As…', click: () => contents.downloadURL(url) }
 }
 
-/** Search [engine] for “…” (the search engine named, NV-12). */
-export function searchLabel(ctx: MainContext, selection: string): string {
-  const engine = SEARCH_ENGINES[ctx.store.state.settings.searchEngine] ?? SEARCH_ENGINES.google
+/** Search [engine] for “…”, naming the engine the item searches with (NV-12). */
+export function searchLabel(engine: { name: string }, selection: string): string {
   const text = selection.trim()
   return `Search ${engine.name} for “${text.slice(0, 40)}${text.length > 40 ? '…' : ''}”`
 }
