@@ -27,7 +27,9 @@ env:
 jobs:
   checks:
     name: Typecheck, lint, unit tests
-    runs-on: ubuntu-latest
+    # Pinned: `ubuntu-latest` moves to Ubuntu 26 from 2026-10-19. The e2e job's apt packages
+    # (xvfb, libasound2t64) are only known to work on 24.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -42,7 +44,7 @@ jobs:
 
   e2e-linux:
     name: E2E (Linux, Xvfb)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
