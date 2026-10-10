@@ -837,7 +837,8 @@ test('[DL-08] Clear all takes finished downloads off the list; running and resum
   expect((await list()).map((d) => d.filename).sort()).toEqual(['resumable.bin', 'running.bin'])
   expect(existsSync(join(folder(), 'done.csv'))).toBe(true)
   await expect.poll(() => existsSync(join(folder(), 'failed.bin.crdownload'))).toBe(false)
-  await expect(rows()).toHaveCount(2)
+  // The sidebar keeps both (it lists them only while hovered: count them, not the rows it shows).
+  await expect(orbit.shell.getByTestId('downloads-tray')).toHaveAttribute('data-count', '2')
   // The one kept for later still continues where it stopped.
   server.repair('resumable.bin')
   expect(await run(orbit.app, 'downloads.resume', { id: await idOf('resumable.bin') })).toBe(true)
