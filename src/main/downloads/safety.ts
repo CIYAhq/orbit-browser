@@ -44,6 +44,8 @@ export interface FileOrigin {
   url: string
   /** The page it was downloaded from. */
   pageUrl?: string
+  /** Downloaded in a private window: its marker names no address (DL-16). */
+  private?: boolean
 }
 
 /** A URL fit to keep in a marker: http(s) only, without user name or password. */
@@ -60,11 +62,14 @@ function markerUrl(url: string | undefined): string | undefined {
   }
 }
 
-/** Windows' Zone.Identifier stream: from the Internet zone (3), with the addresses when there are. */
+/**
+ * Windows' Zone.Identifier stream: from the Internet zone (3), with the addresses when there are. A
+ * private window's download says only where it is from: the zone (DL-16).
+ */
 export function zoneIdentifier(origin: FileOrigin): string {
   const lines = ['[ZoneTransfer]', 'ZoneId=3']
-  const referrer = markerUrl(origin.pageUrl)
-  const host = markerUrl(origin.url)
+  const referrer = origin.private ? undefined : markerUrl(origin.pageUrl)
+  const host = origin.private ? undefined : markerUrl(origin.url)
   if (referrer) lines.push(`ReferrerUrl=${referrer}`)
   if (host) lines.push(`HostUrl=${host}`)
   return `${lines.join('\r\n')}\r\n`

@@ -115,6 +115,14 @@ describe('[DL-12] download safety', () => {
     expect(zoneIdentifier({ url: 'blob:https://example.com/123' })).toBe('[ZoneTransfer]\r\nZoneId=3\r\n')
   })
 
+  it("[DL-16] a private window's download: Windows' marker gives its zone and no address", async () => {
+    const origin = { url: 'https://files.example/setup.exe', pageUrl: 'https://example.com/download', private: true }
+    expect(zoneIdentifier(origin)).toBe('[ZoneTransfer]\r\nZoneId=3\r\n')
+    const write = vi.fn(async () => {})
+    expect(await markFromInternet('C:\\d\\setup.exe', origin, 'win32', { write })).toBe(true)
+    expect(write).toHaveBeenCalledWith('C:\\d\\setup.exe:Zone.Identifier', '[ZoneTransfer]\r\nZoneId=3\r\n')
+  })
+
   it("macOS' marker: downloaded, when, by Orbit", () => {
     expect(quarantineValue(Date.UTC(2026, 9, 10, 12))).toBe(
       `0081;${(Date.UTC(2026, 9, 10, 12) / 1000).toString(16)};Orbit;`,
