@@ -12,30 +12,40 @@ import { execFile } from 'node:child_process'
 import { writeFile } from 'node:fs/promises'
 import { extensionOf } from '../../shared/commands/downloads'
 
-/** File types that can harm the computer when opened (by extension). */
-const DANGEROUS = new Set(
-  [
-    // Windows programs, installers and scripts
-    'exe msi msix msixbundle appx appxbundle bat cmd com scr pif cpl hta vbs vbe js jse wsf wsh ps1 psm1 reg lnk',
-    // macOS installers and disk images, scripts
-    'dmg pkg mpkg command app',
-    // Linux packages and installers
-    'deb rpm appimage run',
-    // other programs
-    'jar apk',
-  ]
-    .join(' ')
-    .split(' '),
+const words = (...lines: string[]) => new Set(lines.join(' ').split(' '))
+
+/** File types that can harm the computer when opened (by extension), on every system. */
+const DANGEROUS = words(
+  // Windows programs and installers (run elsewhere too: Wine, a shared drive), PowerShell
+  'exe msi msix msixbundle appx appxbundle bat cmd com ps1 psm1',
+  // macOS installers, and scripts Terminal runs when opened
+  'dmg pkg mpkg app command tool terminal',
+  // Linux packages, installers and launchers
+  'deb rpm appimage run desktop',
+  // scripts an installed interpreter runs when opened
+  'sh bash zsh py pl rb',
+  // disk images: opened, they mount as a drive whose files have no marker
+  'iso img vhd vhdx',
+  // other programs
+  'jar jnlp apk',
 )
 
-/** Windows only treats a .js file as a program (Windows Script Host). */
-const WINDOWS_ONLY = new Set(['js', 'jse', 'wsf', 'wsh', 'vbs', 'vbe', 'hta', 'pif', 'scr', 'cpl', 'reg', 'lnk'])
+/** File types only Windows runs when opened (a .js file is a program there: Windows Script Host). */
+const ON_WINDOWS = words(
+  // scripts
+  'js jse vbs vbe wsf wsh wsc sct hta msh msh1 msh2 mshxml msh1xml msh2xml ps1xml ps2 ps2xml psc1 psc2',
+  // shortcuts and Explorer files that run, open or fetch something elsewhere
+  'lnk pif scr url scf settingcontent-ms library-ms searchconnector-ms',
+  // settings, installer parts, system and add-in code, consoles, troubleshooters, remote desktops
+  'reg inf cpl msc msp mst msu dll xll application appref-ms diagcab rdp',
+  // compiled help, which runs its pages' scripts
+  'chm',
+)
 
 /** A file that is held back until the user keeps it (DL-12). */
 export function isDangerous(name: string, platform: string = process.platform): boolean {
   const ext = extensionOf(name)
-  if (!DANGEROUS.has(ext)) return false
-  return platform === 'win32' || !WINDOWS_ONLY.has(ext)
+  return DANGEROUS.has(ext) || (platform === 'win32' && ON_WINDOWS.has(ext))
 }
 
 /** Where a file came from, for its marker. */

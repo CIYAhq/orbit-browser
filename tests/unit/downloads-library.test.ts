@@ -117,6 +117,27 @@ describe('[DL-12] download safety', () => {
     }
   })
 
+  it("holds back scripts an interpreter runs, launchers and disk images everywhere; more of Windows' own types there", () => {
+    const everywhere =
+      'run.sh go.bash x.zsh tool.py t.pl r.rb app.desktop disk.iso disk.img d.vhd d.VHDX x.command y.tool'
+    for (const name of `${everywhere} z.terminal start.jnlp`.split(' ')) {
+      for (const platform of ['linux', 'darwin', 'win32'])
+        expect(isDangerous(name, platform), `${name} (${platform})`).toBe(true)
+    }
+    const windows =
+      'help.chm site.url x.settingcontent-ms a.scf setup.inf c.msc p.msp t.mst u.msu lib.dll add.xll ' +
+      'go.application go.appref-ms fix.diagcab desk.rdp s.wsc s.sct m.msh m.msh1xml p.ps1xml p.psc1 l.library-ms ' +
+      's.searchconnector-ms'
+    for (const name of windows.split(' ')) {
+      expect(isDangerous(name, 'win32'), name).toBe(true)
+      expect(isDangerous(name, 'linux'), name).toBe(false)
+    }
+    for (const name of 'notes.txt readme.md page.html photo.svg sheet.xlsx shell.sh.txt archive.tar.gz'.split(' ')) {
+      for (const platform of ['linux', 'darwin', 'win32'])
+        expect(isDangerous(name, platform), `${name} (${platform})`).toBe(false)
+    }
+  })
+
   it("Windows' marker: from the Internet zone, with the page and the file's address but no password", () => {
     expect(
       zoneIdentifier({ url: 'https://me:secret@files.example/setup.exe', pageUrl: 'https://example.com/download' }),
