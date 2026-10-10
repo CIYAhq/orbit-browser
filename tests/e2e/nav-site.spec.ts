@@ -228,6 +228,81 @@ test('[NV-15] notifications ask with Block and Allow; Esc dismisses and the site
   expect(await p.evaluate(() => Notification.permission)).toBe('granted')
 })
 
+type DialogInfo = { message: string; detail: string; buttons: string[]; parent: number | null; requests: number }
+type DialogHooks = {
+  __orbitNav: { permissionDialogs: () => DialogInfo[]; answerPermissionDialog: (button: string) => boolean }
+}
+/** The plain permission dialogs open for pages without a sidebar (Peek, Mini Window, pop-up), oldest first. */
+const permissionDialogs = (app: ElectronApplication) =>
+  app.evaluate(() => (globalThis as unknown as DialogHooks).__orbitNav.permissionDialogs())
+/** Answers the oldest permission dialog with a button, or `cancel` (Esc, or closing it). */
+const answerDialog = (app: ElectronApplication, button: string) =>
+  app.evaluate((_e, b) => (globalThis as unknown as DialogHooks).__orbitNav.answerPermissionDialog(b), button)
+/** The id of the first window whose own page's address contains `part`. */
+const browserWindowId = (app: ElectronApplication, part: string) =>
+  app.evaluate(
+    ({ BrowserWindow }, p) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().includes(p))?.id ?? null,
+    part,
+  )
+/** The id of the window that shows the web page at `url`. */
+const windowWithPage = (app: ElectronApplication, url: string) =>
+  app.evaluate(
+    ({ BrowserWindow }, u) =>
+      BrowserWindow.getAllWindows().find((w) =>
+        w.contentView.children.some((v) => (v as Electron.WebContentsView).webContents?.getURL() === u),
+      )?.id ?? null,
+    url,
+  )
+const focusedWindowId = (app: ElectronApplication) =>
+  app.evaluate(({ BrowserWindow }) => BrowserWindow.getFocusedWindow()?.id ?? null)
+
+test('[NV-15][MW-03] a Mini Window’s page asks in a dialog over its own window; the same request twice asks once; Esc keeps nothing (review B-F2)', async () => {
+  const { app } = orbit
+  const url = page('MiniAsks')
+  await cmd<string>(app, 'mini.open', { url })
+  const p = await tabPage(app, url)
+  const mini = await windowWithPage(app, url)
+  const main = await browserWindowId(app, 'view=shell')
+  expect(mini).not.toBeNull()
+  // The Mini Window has come forward (it takes the focus as it shows); then the main window has the focus.
+  await expect.poll(() => focusedWindowId(app)).toBe(mini)
+  await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id ?? -1)?.focus(), main)
+  await expect.poll(() => focusedWindowId(app)).toBe(main)
+  const both = () => p.evaluate(() => (window as unknown as { __both?: string[] | null }).__both ?? null)
+  const askTwice = () =>
+    p.evaluate(() => {
+      const w = window as unknown as { __both?: string[] | null }
+      w.__both = null
+      void Promise.all([Notification.requestPermission(), Notification.requestPermission()]).then((r) => {
+        w.__both = r
+      })
+    })
+  await askTwice()
+  await expect
+    .poll(() => permissionDialogs(app))
+    .toEqual([
+      {
+        message: `${host()} wants to:`,
+        detail: 'Show notifications',
+        buttons: ['Allow', 'Block', 'Not Now'],
+        parent: mini,
+        requests: 2,
+      },
+    ])
+  // Over the page's window, not the one that had the focus.
+  expect(await focusedWindowId(app)).toBe(main)
+  // Esc (or closing it) is this time no, and keeps nothing: the site may ask again.
+  expect(await answerDialog(app, 'cancel')).toBe(true)
+  await expect.poll(both).toEqual(['default', 'default'])
+  expect(await p.evaluate(() => Notification.permission)).toBe('default')
+  await askTwice()
+  await expect.poll(async () => (await permissionDialogs(app)).length).toBe(1)
+  expect(await answerDialog(app, 'Allow')).toBe(true)
+  await expect.poll(both).toEqual(['granted', 'granted'])
+  expect(await p.evaluate(() => Notification.permission)).toBe('granted')
+  expect(await permissionDialogs(app)).toEqual([])
+})
+
 test('[NV-15] a frame from another site can’t ask for notifications in the page’s name, nor use the page’s', async () => {
   const { app, shell } = orbit
   const { p } = await open(app, page('Host'))

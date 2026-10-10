@@ -17,7 +17,7 @@ import { registerPageColor } from './page-color'
 import { type PageMenuTestHooks, pageMenuTestHooks, setLinkOpeners } from './page-menu'
 import { type PageToolsInfo, registerPageTools } from './page-tools'
 import { registerPendingUrl } from './pending-url'
-import { registerPermissions } from './permissions'
+import { type PermissionDialogInfo, registerPermissions } from './permissions'
 import { type PrivateWindows, registerPrivate } from './private'
 import { type RevealHoldInfo, registerSidebarReveal } from './sidebar-reveal'
 import { registerSiteControls } from './site-controls'
@@ -33,6 +33,10 @@ export interface NavTestHooks extends LinksTestHooks, PageMenuTestHooks {
   tools: (windowId?: WindowId) => PageToolsInfo
   /** A window's permission prompt view (default: the first): placed while the sidebar is hidden (NV-15). */
   prompt: (windowId?: WindowId) => { placed: boolean; bounds?: { x: number; y: number; width: number; height: number } }
+  /** The plain permission dialogs open for pages without a sidebar (Peek, Mini Window, pop-up), oldest first. */
+  permissionDialogs: () => PermissionDialogInfo[]
+  /** Answers the oldest permission dialog with a button's label, or `cancel` (Esc). */
+  answerPermissionDialog: (button: string) => boolean
   /** The corner radius of a shown page's card (0 without a frame: full screen) (SB-19). */
   corner: (tabId: TabId) => number | null
   /** The floating sidebar of a window (default: the first): its view, and what keeps it out (SB-12). */
@@ -367,6 +371,8 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
       corner: (tabId) => windows.cornerOf(tabId) ?? null,
       tools: (windowId) => pageTools.info(windowId ?? windows.ids()[0] ?? ''),
       prompt: (windowId) => permissions.info(windowId ?? windows.ids()[0] ?? ''),
+      permissionDialogs: () => permissions.dialogs(),
+      answerPermissionDialog: (button) => permissions.answerDialog(button),
       floating: (windowId) => {
         const id = windowId ?? windows.ids()[0] ?? ''
         return { ...windows.floatingInfo(id), hold: reveal.hold(id) ?? null }

@@ -5,6 +5,7 @@ import {
   type DesktopCapturerSource,
   desktopCapturer,
   dialog,
+  type MessageBoxOptions,
   type Rectangle,
   type WebContents,
 } from 'electron'
@@ -83,7 +84,31 @@ export interface Permissions {
   pageState(profileId: ProfileId, origin: string, kinds: PermissionKind[]): PagePermissionState
   /** Test hooks. */
   info(windowId: WindowId): { placed: boolean; bounds?: Rectangle }
+  /** The plain dialogs asking for pages without a sidebar, oldest first (ORBIT_E2E: they wait for `answerDialog`). */
+  dialogs(): PermissionDialogInfo[]
+  /** Answers the oldest dialog with one of its buttons, or `cancel` (Esc, or closing it). */
+  answerDialog(button: string): boolean
 }
+
+/** A plain permission dialog as tests see it. */
+export interface PermissionDialogInfo {
+  message: string
+  detail: string
+  buttons: string[]
+  /** The id of the window it is over (`BrowserWindow.id`), or null for none. */
+  parent: number | null
+  /** How many of the page's requests wait for its answer (the same request asked again shares it). */
+  requests: number
+}
+
+/**
+ * The plain dialog's buttons. Esc or closing it is Not Now: nothing is kept and the site may ask
+ * again, as with the sidebar prompt's dismiss (review B-F2).
+ */
+const DIALOG_BUTTONS = ['Allow', 'Block', 'Not Now']
+const DIALOG_ALLOW = 0
+const DIALOG_BLOCK = 1
+const DIALOG_NOT_NOW = 2
 
 /**
  * Permission prompts (NV-15). A site asking for the camera, microphone, location, notifications,
@@ -281,7 +306,42 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
     enqueue(pending)
   }
 
-  /** Pages without a sidebar (pop-up windows, Mini Windows, Peek): a plain dialog asks instead. */
+  /** Dialogs on screen, by page and request: the same request again waits for the same answer. */
+  const dialogsOpen = new Map<string, ((granted: boolean) => void)[]>()
+  /** Under ORBIT_E2E the dialogs wait for the test to answer (a real one would wait for a person). */
+  const testDialogs: (PermissionDialogInfo & { cancelId: number; answer: (response: number) => void })[] = []
+
+  const showDialog = (
+    parent: BrowserWindow | null,
+    options: MessageBoxOptions,
+    callbacks: unknown[],
+  ): Promise<number> => {
+    if (ctx.e2e) {
+      return new Promise((resolve) => {
+        const entry = {
+          message: options.message,
+          detail: options.detail ?? '',
+          buttons: options.buttons ?? [],
+          parent: parent?.id ?? null,
+          cancelId: options.cancelId ?? 0,
+          get requests() {
+            return callbacks.length
+          },
+          answer: (response: number) => {
+            testDialogs.splice(testDialogs.indexOf(entry), 1)
+            resolve(response)
+          },
+        }
+        testDialogs.push(entry)
+      })
+    }
+    return (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options)).then((r) => r.response)
+  }
+
+  /**
+   * Pages without a sidebar (pop-up windows, Mini Windows, Peek): a plain dialog asks instead, over
+   * the page's own window (review B-F2).
+   */
   const askInDialog = (
     profileId: ProfileId,
     contents: WebContents,
@@ -289,20 +349,29 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
     kinds: PermissionKind[],
     callback: (granted: boolean) => void,
   ) => {
-    if (ctx.e2e) return callback(false)
-    const parent = BrowserWindow.getFocusedWindow()
-    const options = {
-      type: 'question' as const,
-      buttons: ['Allow', 'Block'],
-      defaultId: 1,
-      cancelId: 1,
+    const key = `${contents.id}|${origin}|${kinds.join(',')}`
+    const waiting = dialogsOpen.get(key)
+    if (waiting) {
+      waiting.push(callback)
+      return
+    }
+    const callbacks = [callback]
+    dialogsOpen.set(key, callbacks)
+    const own = BrowserWindow.fromWebContents(contents)
+    const parent = own && !own.isDestroyed() ? own : BrowserWindow.getFocusedWindow()
+    const options: MessageBoxOptions = {
+      type: 'question',
+      buttons: DIALOG_BUTTONS,
+      defaultId: DIALOG_BLOCK,
+      cancelId: DIALOG_NOT_NOW,
       message: `${siteLabel(origin)} wants to:`,
       detail: kinds.map((k) => PERMISSION_ASK[k]).join('\n'),
     }
-    void (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options)).then(({ response }) => {
-      const allowed = response === 0
-      for (const k of kinds) prefs.setPermission(profileId, origin, k, allowed ? 'allow' : 'block')
-      if (!contents.isDestroyed()) callback(allowed)
+    void showDialog(parent, options, callbacks).then((response) => {
+      dialogsOpen.delete(key)
+      const choice = response === DIALOG_ALLOW ? 'allow' : response === DIALOG_BLOCK ? 'block' : undefined
+      if (choice) for (const k of kinds) prefs.setPermission(profileId, origin, k, choice)
+      if (!contents.isDestroyed()) for (const cb of callbacks) cb(choice === 'allow')
     })
   }
 
@@ -674,6 +743,21 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
     info: (windowId) => {
       const placed = windows.promptInfo(windowId)
       return { placed: placed.placed, bounds: placed.placed ? placed.bounds : undefined }
+    },
+    dialogs: () =>
+      testDialogs.map(({ message, detail, buttons, parent, requests }) => ({
+        message,
+        detail,
+        buttons,
+        parent,
+        requests,
+      })),
+    answerDialog: (button) => {
+      const open = testDialogs[0]
+      const response = button === 'cancel' ? (open?.cancelId ?? -1) : (open?.buttons.indexOf(button) ?? -1)
+      if (!open || response < 0) return false
+      open.answer(response)
+      return true
     },
   }
 }
