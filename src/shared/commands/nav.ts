@@ -1,4 +1,4 @@
-import type { FindState, ZoomIndicator } from '../nav'
+import type { FindState, LinkPillContent, ZoomIndicator } from '../nav'
 import type { PermissionKind, PromptChoice, SiteControlsInfo } from '../site'
 import type { TabId } from '../state'
 
@@ -93,4 +93,8 @@ export interface NavCommands {
   'site.revokeDevice': { args: { tabId: TabId; key: string }; result: void }
   /** Deletes the tab's site's cookies and stored data. */
   'site.clearData': { args: { tabId: TabId }; result: void }
+  /** What the link status pill's view shows now (it asks when it loads), or null (SB-27). */
+  'nav.linkPill': { args: Record<string, never>; result: LinkPillContent | null }
+  /** How wide the link pill came out for the content numbered `key`, so its view fits it. */
+  'nav.linkPillSize': { args: { key: number; width: number }; result: void }
 }

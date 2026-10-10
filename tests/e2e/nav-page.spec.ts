@@ -1,10 +1,19 @@
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
-import { launchOrbit, type Orbit, state } from './helpers'
-import { cmd, type NavFixtures, openTab, pressInPage, startNavFixtures, waitLoaded, windowState } from './nav-support'
+import { launchOrbit, type Orbit, state, tabPage } from './helpers'
+import {
+  cmd,
+  type NavFixtures,
+  openTab,
+  pageMouse,
+  pressInPage,
+  startNavFixtures,
+  waitLoaded,
+  windowState,
+} from './nav-support'
 
 /**
- * A page's life in its card: the inactive window's sidebar (SB-21), the loading indicator (SB-28)
- * and the address while a page is on its way (NV-04).
+ * A page's life in its card: the inactive window's sidebar (SB-21), the loading indicator (SB-28),
+ * the address while a page is on its way (NV-04) and the link status pill (SB-27).
  */
 
 let fx: NavFixtures
@@ -34,22 +43,46 @@ interface LoadingInfo {
   pending: boolean
 }
 
-type NavHooks = { __orbitNav: { loading: (windowId?: string) => LoadingInfo } }
+interface LinkPillInfo {
+  visible: boolean
+  tabId: string | null
+  url: string | null
+  text: string | null
+  expanded: boolean
+  side: 'left' | 'right'
+  bounds?: { x: number; y: number; width: number; height: number }
+  expandedAfter: number | null
+}
+
+type NavHooks = {
+  __orbitNav: { loading: (windowId?: string) => LoadingInfo; linkPill: (windowId?: string) => LinkPillInfo }
+}
 
 function loading(app: ElectronApplication): Promise<LoadingInfo> {
   return app.evaluate(() => (globalThis as unknown as NavHooks).__orbitNav.loading())
 }
 
-/** The loading indicator's own page (`view=loading`), once it has started. */
-async function loadingPage(app: ElectronApplication): Promise<Page> {
+function linkPill(app: ElectronApplication): Promise<LinkPillInfo> {
+  return app.evaluate(() => (globalThis as unknown as NavHooks).__orbitNav.linkPill())
+}
+
+/** A view's own page (`view=<name>`), once it has started. */
+async function viewPageOf(app: ElectronApplication, name: string): Promise<Page> {
   let found: Page | undefined
   await expect
     .poll(() => {
-      found = app.windows().find((p) => p.url().includes('view=loading'))
+      found = app.windows().find((p) => p.url().includes(`view=${name}`))
       return !!found
     })
     .toBe(true)
   return found as Page
+}
+
+/** The middle of an element of a tab's page, in the page's coordinates. */
+async function middleOf(tab: Page, selector: string): Promise<{ x: number; y: number }> {
+  const box = await tab.locator(selector).boundingBox()
+  if (!box) throw new Error(`no ${selector}`)
+  return { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) }
 }
 
 /** A tab's page bounds in its window (window coordinates). */
@@ -119,7 +152,7 @@ test('[SB-28][FL-23] a slow page shows the loading indicator at the top centre o
   // Centred on the card, just inside its top edge.
   expect(Math.abs(info.bounds.x + info.bounds.width / 2 - (card.x + card.width / 2))).toBeLessThanOrEqual(1)
   expect(info.bounds.y - card.y).toBe(2)
-  const view = await loadingPage(app)
+  const view = await viewPageOf(app, 'loading')
   const indicator = view.getByTestId('loading-indicator')
   await expect(indicator).toHaveAttribute('data-state', 'loading')
   // The sweep moves (an indeterminate animation).
@@ -134,6 +167,8 @@ test('[SB-28][FL-23] a slow page shows the loading indicator at the top centre o
 test('[SB-28][FL-23] a load shorter than the delay never shows the indicator; switching tabs takes it away', async () => {
   const { app } = orbit
   const id = await openTab(app, page('Quick'))
+  // The tab's first load may have shown it (a slow machine): wait until it has finished and gone.
+  await expect.poll(async () => (await loading(app)).visible || (await loading(app)).pending).toBe(false)
   const before = (await loading(app)).shown
   // A load that starts and ends within the delay (a cached page), whatever the machine's speed: the
   // page's own start and stop, back to back. The indicator waits out the delay after a start…
@@ -200,4 +235,63 @@ test('[NV-04] a page’s own navigation shows only once it commits', async () =>
   // The page is still the old one: so is the address.
   await expect(pill).toHaveText(`localhost:${fx.port}`)
   expect((await state(app)).tabs[id]?.pendingUrl).toBeUndefined()
+})
+
+test('[SB-27] hovering a link shows where it goes at the bottom-left of the card, in full after 1.5 s; it goes off the link', async () => {
+  const { app } = orbit
+  const id = await openTab(app, page('Pill'))
+  const tab = await tabPage(app, '/page/Pill')
+  const link = await middleOf(tab, '#next')
+  await pageMouse(app, '/page/Pill', 'mouseMove', link.x, link.y)
+  await expect.poll(async () => (await linkPill(app)).visible).toBe(true)
+  const short = await linkPill(app)
+  expect(short).toMatchObject({ tabId: id, url: page('Pill-next'), expanded: false, side: 'left' })
+  expect(short.text).toBe(`localhost:${fx.port}/page/Pill-next`)
+  // In the card's bottom-left corner, inside it.
+  const card = await pageBounds(app, id)
+  if (!card || !short.bounds) throw new Error('no bounds')
+  expect(short.bounds.x).toBe(card.x)
+  expect(short.bounds.y + short.bounds.height).toBe(card.y + card.height)
+  expect(short.bounds.width).toBeLessThan(card.width / 2)
+  // Drawn in the Space's theme.
+  const view = await viewPageOf(app, 'link')
+  await expect(view.getByTestId('link-pill')).toHaveText(short.text as string)
+  expect(await view.getByTestId('link-pill-view').getAttribute('style')).toContain('--surface')
+  // Still on the link after about 1.5 s: the full URL.
+  await expect.poll(async () => (await linkPill(app)).expanded, { timeout: 5000 }).toBe(true)
+  const full = await linkPill(app)
+  expect(full.text).toBe(page('Pill-next'))
+  expect(full.expandedAfter).toBeGreaterThanOrEqual(1450)
+  await expect(view.getByTestId('link-pill')).toHaveText(page('Pill-next'))
+  await expect(view.getByTestId('link-pill')).toHaveAttribute('data-expanded', 'true')
+  // Off the link: it goes.
+  const title = await middleOf(tab, '#title')
+  await pageMouse(app, '/page/Pill', 'mouseMove', title.x + 200, title.y)
+  await expect.poll(async () => (await linkPill(app)).visible).toBe(false)
+  expect((await linkPill(app)).url).toBeNull()
+})
+
+test('[SB-27] the pill moves to the other corner when the pointer comes near it, and goes with its tab', async () => {
+  const { app } = orbit
+  const id = await openTab(app, page('Corner'))
+  const tab = await tabPage(app, '/page/Corner')
+  // A link right in the corner where the pill would be.
+  await tab.evaluate(() => {
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<a id="corner" href="/page/Elsewhere" style="position:fixed;left:10px;bottom:10px">Corner link</a>',
+    )
+  })
+  const corner = await middleOf(tab, '#corner')
+  await pageMouse(app, '/page/Corner', 'mouseMove', corner.x, corner.y)
+  await expect.poll(async () => (await linkPill(app)).visible).toBe(true)
+  const info = await linkPill(app)
+  expect(info.side).toBe('right')
+  const card = await pageBounds(app, id)
+  if (!card || !info.bounds) throw new Error('no bounds')
+  expect(info.bounds.x + info.bounds.width).toBe(card.x + card.width)
+  expect(info.bounds.y + info.bounds.height).toBe(card.y + card.height)
+  // Another tab: the pill goes with its page.
+  await openTab(app, page('Other'))
+  await expect.poll(async () => (await linkPill(app)).visible).toBe(false)
 })

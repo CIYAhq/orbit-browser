@@ -17,6 +17,7 @@
   "SB-23": {"built": "yes", "note": "selected tab scrolled into view (smooth, then settles); pill points to it while it is out of view; rows use content-visibility"},
   "SB-24": {"built": "partial", "note": "theme gradient + grain on sidebar and frame, tinted selection; the neutral theme is a solid soft grey/near-black, not a translucent material yet"},
   "SB-25": {"built": "yes", "note": "private window sidebar: top bar and address, a Private label with icon and a plain note, then only its own tabs; no Spaces, Favorites or pinned tabs (and their actions do nothing); + and Cmd/Ctrl+T open the command bar, which a new private window starts with"},
+  "SB-27": {"built": "yes", "note": "hovering (or focusing) a link shows a theme-styled pill with where it goes (no scheme) at the bottom-left of that page card, in its own small view; the full URL after 1.5 s on the link, kept for the next links while it stays up; moves to the other corner when the pointer comes within 24 px, out of the way if near both; goes 120 ms after the link is left; not on Peek pages"},
   "SB-28": {"built": "yes", "note": "loading indicator at the top centre of the shown page card (the focused pane; Mini Windows too), in its own view over the page, after 150 ms; shows in full screen; tab rows keep their favicon loading ring"},
   "TB-01": {"built": "yes", "note": "row: favicon/emoji, title or breadcrumb, hover close, audio, selected pill, dimmed when asleep"},
   "TB-02": {"built": "yes", "note": "Cmd+T / + New Tab / link drop / Cmd+Alt+V paste; background link tabs gesture-gated"},

@@ -8,6 +8,7 @@ import type { TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
 import type { TabOps } from '../tabs/ops'
+import { type LinkPillInfo, registerLinkPill } from './link-pill'
 import { type LinksTestHooks, registerLinks } from './links'
 import { type LoadingInfo, registerLoading } from './loading'
 import { openUrlInNewWindow } from './new-window'
@@ -44,6 +45,8 @@ export interface NavTestHooks extends LinksTestHooks, PageMenuTestHooks {
   }
   /** A window's page loading indicator (default: the first) (SB-28). */
   loading: (windowId?: WindowId) => LoadingInfo
+  /** A window's link status pill (default: the first) (SB-27). */
+  linkPill: (windowId?: WindowId) => LinkPillInfo
 }
 
 interface ShownMenu {
@@ -87,6 +90,7 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
   // The address while a page is on its way or failed (NV-04, NV-13), and the loading indicator (SB-28).
   const pending = registerPendingUrl(ctx)
   const loading = registerLoading(ctx)
+  const linkPill = registerLinkPill(ctx)
 
   const go = (tabId: TabId, button: NavButton) => {
     if (button === 'back') return commands.run('tabs.back', { tabId })
@@ -349,6 +353,7 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
         return { ...windows.floatingInfo(id), hold: reveal.hold(id) ?? null }
       },
       loading: (windowId) => loading.info(windowId ?? windows.ids()[0] ?? ''),
+      linkPill: (windowId) => linkPill.info(windowId ?? windows.ids()[0] ?? ''),
     }
     ;(globalThis as unknown as { __orbitNav: NavTestHooks }).__orbitNav = hooks
   }

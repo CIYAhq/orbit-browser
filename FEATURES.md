@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 166 built (44 partial) · 217 tested · 0 feel right.
+**Totals:** 485 spec’d · 167 built (44 partial) · 218 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
 | P0 | 174 | 117 | 140 |
-| P1 | 221 | 45 | 72 |
+| P1 | 221 | 46 | 73 |
 | P2 | 83 | 4 | 5 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -47,7 +47,7 @@ Spec: `spec/sidebar.md`
 | SB-24 | Sidebar colouring follows the Space theme | P0 | 🟡 partial | ✅ e2e+unit | – | theme gradient + grain on sidebar and frame, tinted selection; the neutral theme is a solid soft grey/near-black, not a translucent material yet |
 | SB-25 | Incognito window sidebar | P1 | ✅ | ✅ e2e | – | private window sidebar: top bar and address, a Private label with icon and a plain note, then only its own tabs; no Spaces, Favorites or pinned tabs (and their actions do nothing); + and Cmd/Ctrl+T open the command bar, which a new private window starts with |
 | SB-26 | Platform notes (Windows / Linux) | P2 | – | – | – |  |
-| SB-27 | Link status pill | P1 | – | – | – |  |
+| SB-27 | Link status pill | P1 | ✅ | ✅ e2e+unit | – | hovering (or focusing) a link shows a theme-styled pill with where it goes (no scheme) at the bottom-left of that page card, in its own small view; the full URL after 1.5 s on the link, kept for the next links while it stays up; moves to the other corner when the pointer comes within 24 px, out of the way if near both; goes 120 ms after the link is left; not on Peek pages |
 | SB-28 | Page loading indicator | P1 | ✅ | ✅ e2e | – | loading indicator at the top centre of the shown page card (the focused pane; Mini Windows too), in its own view over the page, after 150 ms; shows in full screen; tab rows keep their favicon loading ring |
 
 ## Tabs, Pinned tabs, Favorites, Today tabs & auto-archive, Folders

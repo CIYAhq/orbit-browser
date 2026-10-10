@@ -65,6 +65,14 @@ async function boot(): Promise<void> {
         <LoadingApp />
       </StrictMode>,
     )
+  } else if (view === 'link') {
+    // The link status pill at the bottom of the page card (chrome lane, SB-27).
+    const { LinkPillApp } = await import('./shell/chrome/LinkPillApp')
+    root.render(
+      <StrictMode>
+        <LinkPillApp />
+      </StrictMode>,
+    )
   } else if (view === 'strip') {
     // Split view pane strip (split lane, SV-12): a tiny transparent view over a pane's top edge.
     const { PaneStripApp } = await import('./shell/split/PaneStripApp')

@@ -186,3 +186,38 @@ export function findTextFromSelection(selection: string, max = 200): string {
   const line = selection.split(/\r?\n/).find((l) => l.trim() !== '') ?? ''
   return line.trim().slice(0, max)
 }
+
+/** What the link status pill shows (SB-27), numbered so its view can say how wide it came out. */
+export interface LinkPillContent {
+  key: number
+  url: string
+  /** linkPillText(url, expanded). */
+  text: string
+  /** The full URL, after a hover of about 1.5 s. */
+  expanded: boolean
+  /** The pill's widest (CSS px); longer text ends in an ellipsis. */
+  maxWidth: number
+}
+
+/** The longest address the link pill takes (a data: URL can be megabytes). */
+export const LINK_PILL_MAX_URL = 2048
+
+/**
+ * The link status pill's text (SB-27): where a hovered link goes, without `http://` or `https://`
+ * (and without the lone `/` of a bare host); expanded, the full URL. Percent-escapes and
+ * punycode host names stay as they are, so a link can't pass for another.
+ */
+export function linkPillText(url: string, expanded: boolean): string {
+  const shown = url.length > LINK_PILL_MAX_URL ? `${url.slice(0, LINK_PILL_MAX_URL)}…` : url
+  if (expanded) return shown
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return shown
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return shown
+  const path = parsed.pathname === '/' && !parsed.search && !parsed.hash ? '' : parsed.pathname
+  const short = `${parsed.host}${path}${parsed.search}${parsed.hash}`
+  return short.length > LINK_PILL_MAX_URL ? `${short.slice(0, LINK_PILL_MAX_URL)}…` : short
+}
