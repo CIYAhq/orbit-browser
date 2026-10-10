@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { MAX_FAVORITES } from '../../shared/defaults'
 import { isFolderId, isSplitId, isTabId, newId } from '../../shared/ids'
 import type {
   ArchivedTab,
@@ -302,6 +303,46 @@ function reachable(state: OrbitState, roots: readonly ItemId[], out: Set<ItemId>
   }
 }
 
+/** The tabs an item holds: itself, a folder's tabs all the way down, a split view's panes. */
+function tabsOfItem(state: OrbitState, id: ItemId, out: TabId[] = []): TabId[] {
+  if (isFolderId(id)) for (const child of state.folders[id]?.children ?? []) tabsOfItem(state, child, out)
+  else if (isSplitId(id)) {
+    const split = state.splits[id]
+    if (split) out.push(...splitLeaves(split.layout))
+  } else out.push(id)
+  return out
+}
+
+/**
+ * At most MAX_FAVORITES Favorites per profile (D33, FV-02). A backup with more (taken before the
+ * limit) brings back the first ones; the rest go to the top of Today in the profile's first Space,
+ * as Today tabs, or, with no Space of that profile, stay out. `n` is a normalized copy.
+ */
+function capFavorites(n: OrbitState, profiles: readonly ProfileId[]): OrbitState {
+  let capped = false
+  for (const id of profiles) {
+    const profile = n.profiles[id]
+    if (!profile || profile.favorites.length <= MAX_FAVORITES) continue
+    const overflow = profile.favorites.slice(MAX_FAVORITES)
+    profile.favorites = profile.favorites.slice(0, MAX_FAVORITES)
+    const home = n.spaceOrder.find((spaceId) => n.spaces[spaceId]?.profileId === id)
+    const space = home ? n.spaces[home] : undefined
+    if (space) space.today = [...overflow, ...space.today]
+    for (const item of overflow) {
+      for (const tabId of tabsOfItem(n, item)) {
+        const tab = n.tabs[tabId]
+        if (!tab) continue
+        delete tab.pinnedUrl
+        delete tab.pinnedTitle
+        delete tab.pinnedResolvedUrl
+      }
+    }
+    capped = true
+  }
+  // Normalized again, the tabs that moved take their new Space (and those left out go).
+  return capped ? normalizeState(n) : n
+}
+
 /**
  * Works out how the sidebar goes back to a backup (AR-11). Spaces, their pinned and Today items and
  * the Favorites of each profile the backup knows become what they were; Spaces added since go.
@@ -313,7 +354,8 @@ function reachable(state: OrbitState, roots: readonly ItemId[], out: Set<ItemId>
  * Left alone: Spaces outside the Space list (a private window's) and Spaces of private or gone
  * profiles, with their tabs and the windows that show them; Favorites of private profiles and of
  * profiles the backup does not know; pages in a Peek or Mini Window. A Space whose profile was
- * deleted since does not come back (its data is gone, PR-08).
+ * deleted since does not come back (its data is gone, PR-08). A profile gets at most
+ * MAX_FAVORITES Favorites back; the rest land in Today (D33).
  */
 export function planRestore(state: OrbitState, snap: SidebarSnapshot, look: RestoreLookups, now: number): RestorePlan {
   // Spaces the restore leaves as they are, with everything in them and the windows that show them:
@@ -346,17 +388,20 @@ export function planRestore(state: OrbitState, snap: SidebarSnapshot, look: Rest
   // each item in one place, split views with two panes or more, tabs in their container's profile.
   const without = <T>(list: Record<string, T>) =>
     Object.fromEntries(Object.entries(list).filter(([id]) => !kept.has(id)))
-  const n = normalizeState(
-    structuredClone({
-      spaces: Object.fromEntries(spaceIds.map((id) => [id, snap.spaces[id]])),
-      spaceOrder: spaceIds,
-      profiles: Object.fromEntries(
-        liveProfiles.map((id) => [id, { ...state.profiles[id], favorites: snap.favorites[id] ?? [] }]),
-      ),
-      tabs: without(snap.tabs),
-      folders: without(snap.folders),
-      splits: without(snap.splits),
-    }) as Partial<OrbitState>,
+  const n = capFavorites(
+    normalizeState(
+      structuredClone({
+        spaces: Object.fromEntries(spaceIds.map((id) => [id, snap.spaces[id]])),
+        spaceOrder: spaceIds,
+        profiles: Object.fromEntries(
+          liveProfiles.map((id) => [id, { ...state.profiles[id], favorites: snap.favorites[id] ?? [] }]),
+        ),
+        tabs: without(snap.tabs),
+        folders: without(snap.folders),
+        splits: without(snap.splits),
+      }) as Partial<OrbitState>,
+    ),
+    restoredProfiles,
   )
 
   const tabs: Record<TabId, Tab> = {}

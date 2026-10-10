@@ -334,6 +334,43 @@ describe('Sidebar backups (AR-11)', () => {
     expect(s.tabs[peek.id]).toMatchObject({ floating: 'peek', spaceId: w.a })
   })
 
+  it('[AR-11] a backup with more than 12 Favorites brings back 12; the rest go to the top of Today (review F7, D33)', async () => {
+    const w = await world()
+    // A backup taken before the limit holds 14 Favorites.
+    const favs = Array.from({ length: 14 }, (_, i) =>
+      makeTab({
+        spaceId: w.a,
+        profileId: DEFAULT_PROFILE_ID,
+        url: `https://fav${i}.test/`,
+        title: `Fav ${i}`,
+        pinnedUrl: `https://fav${i}.test/`,
+        pinnedTitle: `Fav ${i}`,
+      }),
+    )
+    const ids = favs.map((t) => t.id)
+    w.store.update((d) => {
+      for (const t of favs) d.tabs[t.id] = t
+      const profile = d.profiles[DEFAULT_PROFILE_ID]
+      if (profile) profile.favorites = [...ids]
+    })
+    const snap = buildSnapshot(w.store.state, at(0, 9))
+    // Since then the last one closed; the 13th is still open.
+    w.store.update((d) => {
+      const profile = d.profiles[DEFAULT_PROFILE_ID]
+      if (profile) profile.favorites = ids.slice(0, 13)
+      delete d.tabs[ids[13] as TabId]
+    })
+    restoreSidebar(w.ctx, w.archive, snap, at(0, 10))
+    const s = w.store.state
+    expect(s.profiles[DEFAULT_PROFILE_ID]?.favorites).toEqual(ids.slice(0, 12))
+    expect(s.spaces[w.a]?.today.slice(0, 2)).toEqual(ids.slice(12))
+    // Today tabs: no pinned address; the open one keeps its page, the closed one comes back asleep.
+    expect(s.tabs[ids[12] as TabId]).toMatchObject({ spaceId: w.a, url: 'https://fav12.test/' })
+    expect(s.tabs[ids[12] as TabId]?.pinnedUrl).toBeUndefined()
+    expect(s.tabs[ids[13] as TabId]).toMatchObject({ spaceId: w.a, url: 'https://fav13.test/', asleep: true })
+    expect(s.tabs[ids[13] as TabId]?.pinnedUrl).toBeUndefined()
+  })
+
   it('[AR-11] backups on disk: one when the sidebar changed, newest first, read back; a damaged one is not restored', async () => {
     const w = await world()
     const dir = mkdtempSync(join(tmpdir(), 'orbit-backups-'))
