@@ -100,7 +100,9 @@ async function waitOffline(app: ElectronApplication): Promise<void> {
 /**
  * Playwright runs main-process evaluates through the inspector, which can interrupt main-process
  * code part-way, even inside a store update. A change made there is lost when that update finishes:
- * a background tab a test had just created vanished. Each evaluate starts in a task of its own instead.
+ * a background tab a test had just created vanished. Each evaluate and evaluateHandle starts in a
+ * task of its own instead. A handle's own `evaluate` (such as `app.browserWindow(page)`'s) still
+ * runs by interrupt, so tests reach main-process objects through `app.evaluate`.
  */
 function evaluateBetweenTasks(app: ElectronApplication): void {
   const evaluate = app.evaluate.bind(app)
@@ -111,9 +113,34 @@ function evaluateBetweenTasks(app: ElectronApplication): void {
         await new Promise((resolve) => setImmediate(resolve))
         return new Function(`return (${source})`)()(electron, a)
       },
-      [fn.toString(), arg] as const,
+      [functionSource(fn), arg] as const,
     )
   }) as ElectronApplication['evaluate']
+  const evaluateHandle = app.evaluateHandle.bind(app)
+  app.evaluateHandle = ((fn: unknown, arg?: unknown) => {
+    if (typeof fn !== 'function') return evaluateHandle(fn as never, arg as never)
+    return evaluateHandle(
+      async (electron, [source, a]) => {
+        await new Promise((resolve) => setImmediate(resolve))
+        return new Function(`return (${source})`)()(electron, a)
+      },
+      [functionSource(fn), arg] as const,
+    )
+  }) as ElectronApplication['evaluateHandle']
+}
+
+/**
+ * A function's source as an expression. A method shorthand (`m(a) {…}`) becomes a function, as in
+ * Playwright's own evaluate (PR #10 review F4).
+ */
+function functionSource(fn: { toString(): string }): string {
+  const source = fn.toString()
+  try {
+    new Function(`(${source})`)
+    return source
+  } catch {
+    return source.startsWith('async ') ? `async function ${source.slice('async '.length)}` : `function ${source}`
+  }
 }
 
 /**
