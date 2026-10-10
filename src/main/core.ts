@@ -87,6 +87,6 @@ export function registerCore(ctx: MainContext): void {
     if (!win) return
     void commands.run('window.setSidebar', { visible: !win.sidebar.visible }, { windowId })
   })
-  // window.new is registered by the spaces lane (SP-24: same Space, command bar open, cascade).
-  actions.register('app.settings', (c) => ctx.toast(windowOf(c), 'Settings are coming soon'))
+  // window.new is registered by the spaces lane (SP-24: same Space, command bar open, cascade), and
+  // app.settings by the settings module: this placeholder's handler would only be replaced.
 }
