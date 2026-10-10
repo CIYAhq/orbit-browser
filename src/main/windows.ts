@@ -82,6 +82,11 @@ interface WindowRecord {
    * link pill (SB-27), page dialogs (NV-24). Kept above the pages, closed with the window.
    */
   uiViews: Set<WebContentsView>
+  /**
+   * A view over the whole page area while it is open, such as the Library (AR-02): the page tools,
+   * the prompt and the small views above stay under it, with the page (setPageCover).
+   */
+  cover?: WebContentsView
 }
 
 /** A tab view placed in a window. */
@@ -668,7 +673,9 @@ export class WindowManager {
     const parent = rec.win.contentView
     const children = parent.children
     const at = children.indexOf(view)
-    const above = [rec.overlay, rec.floating].map((v) => (v ? children.indexOf(v) : -1)).filter((i) => i >= 0)
+    const above = [rec.overlay, rec.floating, rec.cover]
+      .map((v) => (v ? children.indexOf(v) : -1))
+      .filter((i) => i >= 0)
     const ceiling = above.length > 0 ? Math.min(...above) : -1
     if (ceiling < 0) {
       if (at !== children.length - 1) parent.addChildView(view)
@@ -803,12 +810,35 @@ export class WindowManager {
     if (focused && !rec.overlayShown && rec.win.isFocused()) this.focusActiveTab(rec.id)
   }
 
-  /** Puts a small view above every page, under the overlay and the floating sidebar; leaves it be when it already is. */
+  /**
+   * Sets the view that covers a window's page area while it is open (the Library, AR-02), or clears
+   * it. The page tools, the permission prompt and the small views over the page (loading indicator,
+   * link pill) belong to the page: while a cover is set they go under it, not over it. The overlay
+   * and the floating sidebar stay above it. The cover places itself above the pages, and sets itself
+   * again after it moves.
+   */
+  setPageCover(windowId: WindowId, view: WebContentsView | undefined): void {
+    const rec = this.records.get(windowId)
+    if (!rec || rec.win.isDestroyed()) return
+    rec.cover = view
+    if (!view) return
+    const children = rec.win.contentView.children
+    for (const small of [rec.tools, rec.prompt, ...rec.uiViews]) {
+      if (small && children.includes(small)) this.placeAbovePages(rec, small)
+    }
+  }
+
+  /**
+   * Puts a small view above every page, under the overlay, the floating sidebar and a page cover;
+   * leaves it be when it already is.
+   */
   private placeAbovePages(rec: WindowRecord, view: WebContentsView): void {
     const parent = rec.win.contentView
     const children = parent.children
     const at = children.indexOf(view)
-    const ceilings = [rec.overlay, rec.floating].map((v) => (v ? children.indexOf(v) : -1)).filter((i) => i >= 0)
+    const ceilings = [rec.overlay, rec.floating, rec.cover]
+      .map((v) => (v ? children.indexOf(v) : -1))
+      .filter((i) => i >= 0)
     const ceiling = ceilings.length > 0 ? Math.min(...ceilings) : children.length
     let topPage = -1
     for (const entry of this.attached.values()) {

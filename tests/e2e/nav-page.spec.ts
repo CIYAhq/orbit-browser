@@ -1,5 +1,5 @@
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
-import { launchOrbit, type Orbit, state, tabPage } from './helpers'
+import { action, launchOrbit, type Orbit, run, state, tabPage } from './helpers'
 import {
   cmd,
   type NavFixtures,
@@ -7,6 +7,8 @@ import {
   pageMouse,
   pressInPage,
   startNavFixtures,
+  toolsInfo,
+  viewStack,
   waitLoaded,
   windowState,
 } from './nav-support'
@@ -372,4 +374,34 @@ test('[SB-27] the pill moves to the other corner when the pointer comes near it,
   // Another tab: the pill goes with its page.
   await openTab(app, page('Other'))
   await expect.poll(async () => (await linkPill(app)).visible).toBe(false)
+})
+
+test('[SB-28][NV-05][AR-02] a page’s find bar and loading indicator stay under the Library while it is open, and are over the page again once it closes', async () => {
+  const { app } = orbit
+  const id = await openTab(app, page('Covered'))
+  await action(app, 'page.find')
+  await expect.poll(async () => (await toolsInfo(app)).placed).toBe(true)
+  await run(app, 'library.open', {})
+  await expect
+    .poll(() => run(app, 'library.testInfo') as Promise<{ open: boolean; visible: boolean }>)
+    .toMatchObject({ open: true, visible: true })
+  /** Whether a view is above the page and under the Library. */
+  const covered = (stack: string[], view: string) =>
+    stack.indexOf(view) > stack.indexOf(`page:${id}`) && stack.indexOf(view) < stack.indexOf('view=library')
+  await expect.poll(async () => covered(await viewStack(app), 'view=tools')).toBe(true)
+  // A slow load in the page under the Library: its indicator goes under the Library too.
+  const slow = fx.url('/slow/Covered')
+  await cmd(app, 'tabs.navigate', { tabId: id, url: slow })
+  await expect.poll(async () => (await loading(app)).visible).toBe(true)
+  const stack = await viewStack(app)
+  expect(covered(stack, 'view=loading')).toBe(true)
+  expect(covered(stack, 'view=tools')).toBe(true)
+  // The Library closes: both are over the page again.
+  await run(app, 'library.close', {})
+  await expect.poll(async () => (await viewStack(app)).includes('view=library')).toBe(false)
+  const after = await viewStack(app)
+  expect(after.indexOf('view=tools')).toBeGreaterThan(after.indexOf(`page:${id}`))
+  expect(after.indexOf('view=loading')).toBeGreaterThan(after.indexOf(`page:${id}`))
+  fx.release('/slow/Covered')
+  await waitLoaded(app, id, slow)
 })

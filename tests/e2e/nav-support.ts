@@ -287,7 +287,10 @@ type Hooks = {
     flush: () => unknown
     ctx: {
       windows: { get: (id: string) => Electron.BrowserWindow | undefined }
-      tabs: { contents: (id: string) => Electron.WebContents | undefined }
+      tabs: {
+        contents: (id: string) => Electron.WebContents | undefined
+        tabIdFor: (contents: Electron.WebContents) => string | undefined
+      }
     }
   }
   __orbitNav: {
@@ -470,6 +473,25 @@ export async function closeWindow(app: ElectronApplication, windowId: string): P
   await app.evaluate((_e, id) => {
     ;(globalThis as unknown as Hooks).__orbit.ctx.windows.get(id)?.close()
   }, windowId)
+}
+
+/**
+ * The first window's shown views from the bottom up: `page:<tab id>` for a page, `view=<name>` for
+ * Orbit's own (the Library, the page tools, the loading indicator…).
+ */
+export function viewStack(app: ElectronApplication): Promise<string[]> {
+  return app.evaluate(() => {
+    const { __orbit } = globalThis as unknown as Hooks
+    const win = __orbit.ctx.windows.get(__orbit.windowIds()[0] as string)
+    return (win?.contentView.children ?? []).flatMap((child) => {
+      const contents = (child as Electron.WebContentsView).webContents
+      if (!child.getVisible() || !contents || contents.isDestroyed()) return []
+      const tabId = __orbit.ctx.tabs.tabIdFor(contents)
+      if (tabId) return [`page:${tabId}`]
+      const view = /[?&]view=([a-z]+)/.exec(contents.getURL())?.[1]
+      return view ? [`view=${view}`] : []
+    })
+  })
 }
 
 /** Writes the state file now (it is otherwise written a moment after each change). */
