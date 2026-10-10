@@ -208,6 +208,33 @@ describe('downloads list', () => {
     expect(store.get('d-2')?.file).toBeUndefined()
     expect(store.get('d-3')?.file).toBeUndefined()
   })
+
+  it('[DL-04][DL-07] a download whose file a later one replaced stays "File Missing" across restarts (D56)', () => {
+    const file = join(tmp(), 'downloads.json')
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        downloads: [
+          record('d-1', { replaced: true }),
+          { ...record('d-2'), replaced: 'yes' },
+          record('d-3', { state: 'interrupted', replaced: true }),
+          record('d-4'),
+        ],
+      }),
+    )
+    const store = new DownloadStore(file)
+    expect(['d-1', 'd-2', 'd-3', 'd-4'].map((id) => store.get(id)?.replaced)).toEqual([
+      true,
+      undefined,
+      undefined,
+      undefined,
+    ])
+    // Written back as read.
+    store.update('d-4', { replaced: true })
+    store.flushSync()
+    expect(new DownloadStore(file).get('d-4')?.replaced).toBe(true)
+  })
 })
 
 describe('downloads in saved state', () => {

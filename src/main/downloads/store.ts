@@ -27,9 +27,9 @@ export interface ResumeInfo {
 }
 
 /**
- * A finished file as it went into place (DL-04, DL-08): its size and when it was last written. A
- * different file at its path (put there after it was moved away, or a later download saved over it,
- * DL-07) isn't its file: Orbit neither opens nor deletes that one, and the download shows "File Missing".
+ * A finished file as it went into place (DL-08): its size and when it was last written. Only Delete
+ * File checks it (D56): it moves a file to the Trash only while it is still the one downloaded, not
+ * one edited since or another put at its path. Open and the rest act on whatever file is there.
  */
 export interface FileIdentity {
   size: number
@@ -40,6 +40,11 @@ export interface DownloadRecord extends Download {
   resume?: ResumeInfo
   /** Its finished file, as it went into place. */
   file?: FileIdentity
+  /**
+   * A later download put its file at this one's path (DL-07): this one's file is gone, whatever is
+   * there now, and it shows "File Missing" (D56).
+   */
+  replaced?: boolean
 }
 
 export function identityOf(stats: Stats): FileIdentity {
@@ -47,8 +52,8 @@ export function identityOf(stats: Stats): FileIdentity {
 }
 
 /**
- * Whether a file on disk is the one a finished download put in place. A download with no identity
- * kept (held back, DL-12, or listed by an older Orbit) goes by its path alone.
+ * Whether a file on disk is still the one a finished download put in place: same size and date. A
+ * download with no identity kept (held back, DL-12, or listed by an older Orbit) goes by its path alone.
  */
 export function isItsFile(record: Pick<DownloadRecord, 'file'>, stats: Stats): boolean {
   if (!stats.isFile()) return false
@@ -102,6 +107,7 @@ function readRecord(value: unknown): DownloadRecord | undefined {
   if (state === 'completed' && isRecord(f) && isNumber(f.size) && isNumber(f.mtimeMs)) {
     record.file = { size: f.size, mtimeMs: f.mtimeMs }
   }
+  if (state === 'completed' && value.replaced === true) record.replaced = true
   const r = value.resume
   if (isRecord(r) && Array.isArray(r.urlChain) && typeof r.tempPath === 'string') {
     record.resume = {

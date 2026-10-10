@@ -118,7 +118,10 @@ export interface DownloadLocation {
 
 /** An entry of the downloads list. */
 export interface DownloadEntry extends Download {
-  /** A finished download whose file was moved or deleted (DL-04 "File missing"). */
+  /**
+   * A finished download with no file at its path (moved or deleted), or whose file a later download
+   * replaced (DL-04 "File missing", D56).
+   */
   missing?: boolean
   /** The finished file's `file://` URL (thumbnails, previews). */
   fileUrl?: string

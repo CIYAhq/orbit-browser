@@ -177,7 +177,7 @@ export class DownloadManager {
 
   /**
    * A profile's downloads as the UI shows them (DL-10), newest first. Whether finished files are
-   * still there (theirs, not another file put at their path) is checked off the main thread, all at once.
+   * still there is checked off the main thread, all at once.
    */
   async entries(profileId: ProfileId, limit?: number): Promise<DownloadEntry[]> {
     const records = this.records(profileId, limit)
@@ -185,7 +185,7 @@ export class DownloadManager {
       records.map((r) =>
         r.state === 'completed'
           ? stat(fileOf(r)).then(
-              (s) => isItsFile(r, s),
+              (s) => !r.replaced && s.isFile(),
               () => false,
             )
           : true,
@@ -199,10 +199,10 @@ export class DownloadManager {
    * continue. `exists`: whether its file is there, when already known.
    */
   entry(record: DownloadRecord, exists?: boolean): DownloadEntry {
-    const { resume: _resume, file: _file, ...stored } = record
+    const { resume: _resume, file: _file, replaced: _replaced, ...stored } = record
     const out: DownloadEntry = { ...stored, ...this.ctx.store.state.downloads[record.id] }
     if (out.state === 'completed') {
-      if (!(exists ?? fileAt(record) === 'its')) out.missing = true
+      if (!(exists ?? hasFile(record))) out.missing = true
       else if (!out.danger) out.fileUrl = pathToFileURL(out.savePath).href
     }
     if (out.state === 'interrupted' && !this.live.has(record.id)) out.canResume = this.resumable(record)
@@ -360,6 +360,7 @@ export class DownloadManager {
       endedAt: Date.now(),
       file,
     })
+    this.replaced(id, savePath)
     void this.mark(id, savePath, record, file)
     return true
   }
@@ -390,15 +391,16 @@ export class DownloadManager {
   /**
    * Moves a finished download's file to the Trash (never a permanent delete) and takes it off the
    * list (DL-08). A download not finished is removed as Remove from List does. False when the file
-   * couldn't be moved: it stays listed.
+   * couldn't be moved, or isn't the one downloaded any more: it stays listed.
    */
   async trash(id: string, windowId?: WindowId): Promise<boolean> {
     const record = this.get(id)
     if (!record) return false
     const file = record.state === 'completed' && !record.danger && !this.live.has(id) ? fileAt(record) : 'none'
-    if (file === 'other') {
-      // Another file is at its path now: that one stays, and so does the entry, as "File Missing" (DL-04).
-      this.opts.changed(record.profileId)
+    const bin = process.platform === 'win32' ? 'the Recycle Bin' : 'the Trash'
+    if (file === 'changed') {
+      // Edited since, or another file put at its path: not Orbit's to delete (D56). Both stay.
+      this.opts.notify(windowId, `${record.filename} changed after it was downloaded, so it wasn't moved to ${bin}`)
       return false
     }
     if (file === 'its') {
@@ -406,7 +408,6 @@ export class DownloadManager {
         await this.opts.files.trashItem(record.savePath)
       } catch (err) {
         console.error('[downloads] cannot move a download to the Trash:', err)
-        const bin = process.platform === 'win32' ? 'the Recycle Bin' : 'the Trash'
         this.opts.notify(windowId, `Couldn't move ${record.filename} to ${bin}`)
         return false
       }
@@ -480,11 +481,14 @@ export class DownloadManager {
     return false
   }
 
-  /** A finished download's file, when it is still there: its own, not another one put at its path. */
+  /**
+   * A finished download's file, when there is one at its path: whatever file is there, edited or not
+   * (D56), unless a later download replaced it.
+   */
   finishedFile(id: string): string | undefined {
     const record = this.get(id)
     if (record?.state !== 'completed' || record.danger || this.live.has(id)) return undefined
-    return fileAt(record) === 'its' ? record.savePath : undefined
+    return hasFile(record) ? record.savePath : undefined
   }
 
   /** Shows the file in its folder (DL-04): the finished file, or the partial one while it downloads. */
@@ -891,7 +895,7 @@ export class DownloadManager {
     }
     const savePath = await this.place(live)
     const origin = this.get(live.id)
-    // Known from now on by its size and date (DL-04): a different file at its path isn't its file.
+    // Known from now on by its size and date: Delete File trashes only this file (D56).
     const file = identityAt(savePath)
     this.finish(live.id, live.profileId, {
       state: 'completed',
@@ -904,6 +908,7 @@ export class DownloadManager {
       resume: undefined,
       file,
     })
+    this.replaced(live.id, savePath)
     if (origin) void this.mark(live.id, savePath, origin, file)
     this.opts.feedback(live.windowId, 'done', notice(live, basename(savePath)))
   }
@@ -977,6 +982,27 @@ export class DownloadManager {
     else this.list.update(id, { file: now })
   }
 
+  /**
+   * A download just put its file at `path`: older finished downloads whose file was there show
+   * "File Missing" from now on, as theirs is gone (D56).
+   */
+  private replaced(id: string, path: string): void {
+    const at = (r: DownloadRecord) =>
+      r.id !== id && r.state === 'completed' && !r.danger && !r.replaced && samePath(r.savePath, path)
+    const profiles = new Set<ProfileId>()
+    for (const r of this.list.list()) {
+      if (!at(r)) continue
+      this.list.update(r.id, { replaced: true })
+      profiles.add(r.profileId)
+    }
+    for (const p of this.privates.values()) {
+      if (!at(p.record)) continue
+      p.record = { ...p.record, replaced: true }
+      profiles.add(p.record.profileId)
+    }
+    for (const profileId of profiles) this.opts.changed(profileId)
+  }
+
   /** Off the list and the sidebar. */
   private forget(id: string, profileId: ProfileId): void {
     const timer = this.lingers.get(id)
@@ -1017,15 +1043,32 @@ function fileOf(record: DownloadRecord): string {
   return record.danger ? partialPath(record) : record.savePath
 }
 
-/** What is at a finished download's path now: its own file, another one, or nothing (DL-04, DL-08). */
-function fileAt(record: DownloadRecord): 'its' | 'other' | 'none' {
+/**
+ * What is at a finished download's path now (DL-08, D56): the file as it was downloaded, a file
+ * changed since (edited, or another put there or replaced by a later download), or no file.
+ */
+function fileAt(record: DownloadRecord): 'its' | 'changed' | 'none' {
   let stats: Stats
   try {
     stats = statSync(fileOf(record))
   } catch {
     return 'none'
   }
-  return isItsFile(record, stats) ? 'its' : 'other'
+  if (!stats.isFile()) return 'none'
+  return !record.replaced && isItsFile(record, stats) ? 'its' : 'changed'
+}
+
+/**
+ * Whether a finished download has a file to open, show, copy or drag (DL-04, D56): any file at its
+ * path, unless a later download replaced it. Else it shows "File Missing".
+ */
+function hasFile(record: DownloadRecord): boolean {
+  return !record.replaced && fileAt(record) !== 'none'
+}
+
+/** Whether two paths name one file: by name, ignoring case where disks usually do (macOS, Windows). */
+function samePath(a: string, b: string): boolean {
+  return process.platform === 'linux' ? a === b : a.toLowerCase() === b.toLowerCase()
 }
 
 /** A file's identity as it goes into place. */
