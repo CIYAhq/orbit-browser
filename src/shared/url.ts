@@ -1,4 +1,5 @@
-import type { SearchEngineId } from './state'
+import { DEFAULT_PROFILE_ID } from './defaults'
+import type { OrbitState, ProfileId, SearchEngineId, SpaceId, WindowId } from './state'
 
 export interface SearchEngine {
   id: SearchEngineId
@@ -45,10 +46,91 @@ export const SEARCH_ENGINES: Record<SearchEngineId, SearchEngine> = {
     name: 'Kagi',
     search: 'https://kagi.com/search?q=%s',
   },
+  startpage: {
+    id: 'startpage',
+    name: 'Startpage',
+    search: 'https://www.startpage.com/sp/search?query=%s',
+  },
+  perplexity: {
+    id: 'perplexity',
+    name: 'Perplexity',
+    search: 'https://www.perplexity.ai/search?q=%s',
+  },
 }
 
-export function searchUrl(engine: SearchEngineId, query: string): string {
-  return fillSearchTemplate(SEARCH_ENGINES[engine].search, query)
+// ---- Default search engines (ST-06) ----
+//
+// Each profile has one: a built-in engine or one of the site searches (custom engines). A profile
+// without its own choice uses the Default profile's, then `settings.searchEngine`. Everywhere a typed
+// query becomes a search resolves the engine here, for the profile of the Space it was typed in.
+
+/** An engine a query can go to. */
+export interface EngineChoice {
+  /** A built-in engine id ("google"), or "site:<id>" for a site search. */
+  id: string
+  name: string
+  /** Results URL; %s is the query. */
+  search: string
+  /** Suggestion endpoint (built-in engines only, CB-15). */
+  suggest?: string
+}
+
+type EngineState = Pick<OrbitState, 'settings' | 'profiles'>
+
+const SITE_ENGINE = 'site:'
+
+/** The engine id that makes a site search a profile's default engine. */
+export function siteEngineId(siteSearchId: string): string {
+  return `${SITE_ENGINE}${siteSearchId}`
+}
+
+export function isBuiltInEngine(id: unknown): id is SearchEngineId {
+  return typeof id === 'string' && Object.hasOwn(SEARCH_ENGINES, id)
+}
+
+/** The engine an id names, if it still exists. */
+export function engineById(state: Pick<OrbitState, 'settings'>, id: string | undefined): EngineChoice | undefined {
+  if (!id) return undefined
+  if (id.startsWith(SITE_ENGINE)) {
+    const siteId = id.slice(SITE_ENGINE.length)
+    const site = (state.settings.siteSearch ?? []).find((s) => s.id === siteId)
+    return site ? { id, name: site.name, search: site.url } : undefined
+  }
+  return isBuiltInEngine(id) ? SEARCH_ENGINES[id] : undefined
+}
+
+/** A profile's default search engine (ST-06). */
+export function engineFor(state: EngineState, profileId: ProfileId | undefined): EngineChoice {
+  return (
+    engineById(state, profileId ? state.profiles[profileId]?.searchEngine : undefined) ??
+    engineById(state, state.profiles[DEFAULT_PROFILE_ID]?.searchEngine) ??
+    SEARCH_ENGINES[state.settings.searchEngine] ??
+    SEARCH_ENGINES.google
+  )
+}
+
+/** The engine for queries typed in a Space: its profile's. */
+export function engineForSpace(
+  state: EngineState & Pick<OrbitState, 'spaces'>,
+  spaceId: SpaceId | undefined,
+): EngineChoice {
+  return engineFor(state, spaceId ? state.spaces[spaceId]?.profileId : undefined)
+}
+
+/** The engine for queries typed in a window: the profile of the Space it shows. */
+export function engineForWindow(
+  state: EngineState & Pick<OrbitState, 'spaces' | 'windows'>,
+  windowId: WindowId | undefined,
+): EngineChoice {
+  return engineForSpace(state, windowId ? state.windows[windowId]?.spaceId : undefined)
+}
+
+/** A search engine for a typed query: a built-in engine's id, or any engine's results URL (%s = query). */
+export type SearchWith = SearchEngineId | { search: string }
+
+export function searchUrl(engine: SearchWith, query: string): string {
+  const template = typeof engine === 'string' ? (SEARCH_ENGINES[engine] ?? SEARCH_ENGINES.google).search : engine.search
+  return fillSearchTemplate(template, query)
 }
 
 /**
@@ -56,7 +138,7 @@ export function searchUrl(engine: SearchEngineId, query: string): string {
  * the engine has no reliable way to do it: only DuckDuckGo's "\" prefix qualifies
  * (Google's lucky parameter often stops at a redirect notice).
  */
-export function topResultUrl(engine: SearchEngineId, query: string): string | undefined {
+export function topResultUrl(engine: string, query: string): string | undefined {
   const q = encodeURIComponent(query).replace(/%20/g, '+')
   if (engine === 'duckduckgo') return `https://duckduckgo.com/?q=%5C${q}`
   return undefined
@@ -95,7 +177,7 @@ export type ParsedInput = { kind: 'url'; url: string } | { kind: 'search'; query
  * Turns what the user typed into the command bar into a URL to load:
  * full URLs pass through, bare hosts get a scheme, everything else is a search.
  */
-export function parseInput(raw: string, engine: SearchEngineId = 'google'): ParsedInput {
+export function parseInput(raw: string, engine: SearchWith = 'google'): ParsedInput {
   const text = raw.trim()
   if (!text) return { kind: 'search', query: '', url: searchUrl(engine, '') }
   const hasSpace = /\s/.test(text)

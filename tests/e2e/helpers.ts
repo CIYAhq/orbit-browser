@@ -88,7 +88,7 @@ async function waitOffline(app: ElectronApplication): Promise<void> {
  * code part-way, even inside a store update. A change made there is lost when that update finishes:
  * a background tab a test had just created vanished. Each evaluate starts in a task of its own instead.
  */
-function evaluateBetweenTasks(app: ElectronApplication): void {
+export function evaluateBetweenTasks(app: ElectronApplication): void {
   const evaluate = app.evaluate.bind(app)
   app.evaluate = ((fn: unknown, arg?: unknown) => {
     if (typeof fn !== 'function') return evaluate(fn as never, arg as never)
@@ -132,7 +132,7 @@ const quitAlone = new Set<ElectronApplication>()
  *
  * An app that quits on its own is checked by the next `launchOrbit()`, or by its own `app.close()`.
  */
-function checkQuit(app: ElectronApplication): () => string {
+export function checkQuit(app: ElectronApplication): () => string {
   const proc = app.process()
   let recent = ''
   let thrown = ''

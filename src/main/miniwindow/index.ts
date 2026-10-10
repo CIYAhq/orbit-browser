@@ -16,7 +16,7 @@ import type { Rect } from '../../shared/rpc'
 import type { OrbitState, ProfileId, SpaceId, TabId, WindowId } from '../../shared/state'
 import { NEUTRAL_THEME, paletteFor } from '../../shared/theme'
 import { insertItem, removeItem, sectionOf } from '../../shared/tree'
-import { parseInput, siteOf } from '../../shared/url'
+import { engineForWindow, parseInput, siteOf } from '../../shared/url'
 import type { MainContext } from '../context'
 import { archiveFloating, floatingTab, keepFloatingPagesOutOfTabClose } from '../peek/floating'
 import { runPageAction } from '../peek/page-actions'
@@ -503,7 +503,7 @@ export function registerMiniWindow(ctx: MainContext): void {
   const navigate = (mini: Mini, input: string) => {
     const text = input.trim()
     if (!text) return
-    const url = parseInput(text, store.state.settings.searchEngine).url
+    const url = parseInput(text, engineForWindow(store.state, mini.id)).url
     if (mini.tabId && store.state.tabs[mini.tabId]) {
       tabs.navigate(mini.tabId, url)
       tabs.contents(mini.tabId)?.focus()
