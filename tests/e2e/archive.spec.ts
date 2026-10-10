@@ -709,6 +709,36 @@ test('[AR-06] from a preview, Open as Tab opens the page and keeps the entry; Re
   expect(await ids('expanded')).toEqual([expanded])
 })
 
+test('[SV-19][SV-24] a Today split closed as one unit restores from the Archive as one unit: Restore on either pane brings the split back, same pages and sizes', async () => {
+  const { app } = orbit
+  const sp = await space(app)
+  const left = await newTab(app, fx.url('/page/Left'))
+  await waitTab(app, left, '/page/Left')
+  const right = await newTab(app, fx.url('/page/Right'))
+  await waitTab(app, right, '/page/Right')
+  const splitId = (await run(app, 'split.create', { tabIds: [left, right] })) as string
+  await run(app, 'split.resize', { splitId, path: [], sizes: [0.4, 0.6] })
+  await expect.poll(async () => (await state(app)).splits[splitId]?.layout).toMatchObject({ sizes: [0.4, 0.6] })
+  const layout = (await state(app)).splits[splitId]?.layout
+  // × on the split row (Close Split): it goes to the Archive as one unit, one row per pane.
+  await run(app, 'split.close', { splitId })
+  await expect.poll(async () => (await state(app)).splits[splitId]).toBeUndefined()
+  const lib = await openLibrary(orbit)
+  const rows = lib.getByTestId('archive-row')
+  await expect(rows).toHaveCount(2)
+  await expect(lib.getByTestId('archive-row-split')).toHaveCount(2)
+  const rightRow = rows.filter({ hasText: 'Right' })
+  await rightRow.hover()
+  await rightRow.getByTestId('archive-restore').click()
+  // Back at the top of Today as the same split, both pages in it; both rows left the Archive.
+  await expect.poll(async () => (await state(app)).spaces[sp.id]?.today[0]).toBe(splitId)
+  const s = await state(app)
+  expect(s.splits[splitId]?.layout).toEqual(layout)
+  expect(s.tabs[left]?.url).toBe(fx.url('/page/Left'))
+  expect(s.tabs[right]?.url).toBe(fx.url('/page/Right'))
+  await expect(rows).toHaveCount(0)
+})
+
 test('[AR-11] Restore Data lists sidebar backups; the one from before a folder was deleted brings the folder back; Undo, ⌘Z and ⌘⇧Z in the Library take it back and redo it', async () => {
   const { app } = orbit
   const sp = await space(app)

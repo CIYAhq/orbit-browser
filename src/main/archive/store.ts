@@ -26,7 +26,8 @@ import { appendFileSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'no
 import { readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { ArchivePage, ArchiveQuery, ArchiveRow } from '../../shared/commands/archive'
-import type { ArchivedTab, ProfileId } from '../../shared/state'
+import { layoutLeaves, normalizeLayout } from '../../shared/split'
+import type { ArchivedSplit, ArchivedTab, ProfileId, SplitLayout } from '../../shared/state'
 import { queryTerms, urlKeyOf } from '../history/store'
 
 /** One back/forward entry (the shape Chromium's navigation history restores). */
@@ -128,7 +129,36 @@ export function cleanEntry(input: unknown): ArchivedTab | undefined {
   if (typeof e.spaceName === 'string') out.spaceName = e.spaceName
   if (e.section === 'today' || e.section === 'pinned') out.section = e.section
   if (e.from === 'mini' || e.from === 'peek') out.from = e.from
+  const split = cleanSplit(e.split)
+  if (split) out.split = split
   return out
+}
+
+/** A split view an entry was a pane of (SV-19), checked; undefined when it is not one. */
+function cleanSplit(input: unknown): ArchivedSplit | undefined {
+  const s = input as Partial<ArchivedSplit> | undefined
+  if (!s || typeof s !== 'object' || typeof s.id !== 'string' || !s.id) return undefined
+  const layout = cleanLayout(s.layout, 0)
+  if (!layout || layout.type === 'leaf') return undefined
+  const out: ArchivedSplit = { id: s.id, layout }
+  if (typeof s.name === 'string' && s.name) out.name = s.name.slice(0, MAX_TITLE)
+  if (typeof s.focus === 'string' && layoutLeaves(layout).includes(s.focus)) out.focus = s.focus
+  return out
+}
+
+function cleanLayout(input: unknown, depth: number): SplitLayout | undefined {
+  const l = input as Record<string, unknown> | undefined
+  if (!l || typeof l !== 'object' || depth > 6) return undefined
+  if (l.type === 'leaf') return typeof l.tabId === 'string' && l.tabId ? { type: 'leaf', tabId: l.tabId } : undefined
+  if ((l.type !== 'row' && l.type !== 'column') || !Array.isArray(l.children)) return undefined
+  const children: SplitLayout[] = []
+  for (const child of l.children) {
+    const c = cleanLayout(child, depth + 1)
+    if (!c) return undefined
+    children.push(c)
+  }
+  const sizes = Array.isArray(l.sizes) ? l.sizes.map((n) => (typeof n === 'number' ? n : 0)) : []
+  return normalizeLayout({ type: l.type, children, sizes }) ?? undefined
 }
 
 function toRow(e: StoredEntry, favicon?: (url: string) => string | undefined): ArchiveRow {
@@ -144,6 +174,7 @@ function toRow(e: StoredEntry, favicon?: (url: string) => string | undefined): A
   if (e.section) row.section = e.section
   if (e.from) row.from = e.from
   if (e.history) row.hasHistory = true
+  if (e.split) row.split = true
   const icon = favicon?.(e.url)
   if (icon) row.favicon = icon
   return row

@@ -8,6 +8,7 @@ import { isFolderId, isTabId, newId } from '../../shared/ids'
 import { isMediaBusy } from '../../shared/media'
 import { isPendingPane, layoutLeaves, paneAfterClose, SPLIT_FULL_MESSAGE } from '../../shared/split'
 import type {
+  ArchivedSplit,
   ArchivedTab,
   ContainerRef,
   Folder,
@@ -202,9 +203,19 @@ export class TabOps {
     tab: Tab,
     reason: ArchivedTab['reason'],
     section: 'today' | 'pinned',
+    unit?: SplitUnit,
   ): string | undefined {
     if (!tab.url || tab.url === 'about:blank') return undefined
     const id = newId('a')
+    // A whole split going at once comes back from the Archive as one unit (SV-19, SV-24).
+    const split: ArchivedSplit | undefined = unit
+      ? {
+          id: unit.id,
+          layout: unit.layout,
+          ...(unit.name ? { name: unit.name } : {}),
+          ...(unit.focus ? { focus: unit.focus } : {}),
+        }
+      : undefined
     // Appended (newest last): an unshift would rewrite every entry's patch path.
     d.archive.push({
       id,
@@ -219,6 +230,7 @@ export class TabOps {
       // The tab's id (a restore reuses it) and its Space's name, kept if the Space goes (AR-01).
       tabId: tab.id,
       spaceName: d.spaces[tab.spaceId]?.name,
+      ...(split ? { split } : {}),
     })
     // Trim the oldest entries in chunks so the full-list rewrite happens rarely.
     if (d.archive.length > MAX_ARCHIVE + ARCHIVE_TRIM_CHUNK) d.archive.splice(0, d.archive.length - MAX_ARCHIVE)
@@ -281,7 +293,7 @@ export class TabOps {
         const tab = d.tabs[rec.tab.id]
         if (!tab) continue
         const section = sectionOf(d, tab.id) === 'today' ? 'today' : 'pinned'
-        rec.archiveId = this.archiveEntry(d, tab, reason, section)
+        rec.archiveId = this.archiveEntry(d, tab, reason, section, rec.unit)
       }
       for (const rec of records) {
         detachFromSplit(d, rec.tab.id)
@@ -552,6 +564,8 @@ export class TabOps {
       .filter((s) => !!s)
       .map((s) => structuredClone(s))
     const all = new Set(tabIds)
+    // Its split views go whole: each comes back from the Archive as one unit (SV-19, SV-24).
+    const splitInfo = splitCloseInfo(state, all)
     this.ctx.store.update((d) => {
       reselectAway(
         d,
@@ -561,7 +575,7 @@ export class TabOps {
       )
       for (const rec of [...records].reverse()) {
         const tab = d.tabs[rec.tab.id]
-        if (tab) rec.archiveId = this.archiveEntry(d, tab, 'closed', 'pinned')
+        if (tab) rec.archiveId = this.archiveEntry(d, tab, 'closed', 'pinned', splitInfo.get(rec.tab.id)?.unit)
       }
       removeItem(d, folderId)
       for (const f of folders) delete d.folders[f.id]

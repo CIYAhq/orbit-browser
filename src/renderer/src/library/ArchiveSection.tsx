@@ -1,4 +1,4 @@
-import { ArchiveRestore, RotateCcw, Search, X } from 'lucide-react'
+import { ArchiveRestore, Columns2, RotateCcw, Search, X } from 'lucide-react'
 import {
   type CSSProperties,
   type KeyboardEvent,
@@ -145,6 +145,15 @@ function LoadedRow(props: RowProps & { row: ArchiveRow; style: CSSProperties }) 
           {row.title || row.url}
         </span>
         <span className="archive-row__host">{host}</span>
+        {row.split && (
+          <span
+            className="archive-row__split"
+            title="A pane of a split view: it comes back with the split’s other panes"
+            data-testid="archive-row-split"
+          >
+            <Columns2 size={12} strokeWidth={2} />
+          </span>
+        )}
       </span>
       <span
         className="archive-row__space"

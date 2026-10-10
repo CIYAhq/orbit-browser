@@ -26,6 +26,8 @@ export interface ArchiveRow {
   from?: ArchivedTab['from']
   /** The tab's back/forward history is kept: a restore brings it back (AR-01). */
   hasHistory?: boolean
+  /** A pane of a split view archived as one unit: a restore brings the split back (SV-19, SV-24). */
+  split?: boolean
 }
 
 export interface ArchiveQuery {

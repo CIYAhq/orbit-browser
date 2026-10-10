@@ -509,6 +509,13 @@ html[data-view="library"] body {
   font-size: 12px;
 }
 
+.archive-row__split {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  color: var(--text-muted);
+}
+
 .archive-row__space {
   display: inline-flex;
   align-items: center;

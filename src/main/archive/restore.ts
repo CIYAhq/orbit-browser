@@ -1,9 +1,11 @@
 import type { ArchiveRestoreResult } from '../../shared/commands/archive'
 import { newId } from '../../shared/ids'
 import { routeFor } from '../../shared/link-routing'
-import type { ArchivedTab, OrbitState, SpaceId, TabId, WindowId } from '../../shared/state'
-import { insertItem } from '../../shared/tree'
+import { layoutLeaves, replacePane } from '../../shared/split'
+import type { ArchivedTab, OrbitState, SpaceId, SplitId, TabId, WindowId } from '../../shared/state'
+import { insertItem, splitOfTab } from '../../shared/tree'
 import type { MainContext } from '../context'
+import { restoreUnitInDraft, type SplitUnit } from '../split/model'
 import { activateInDraft, makeTab, todayInsertIndex } from '../tabs/model'
 import type { ArchiveHistory, ArchiveStore } from './store'
 
@@ -45,10 +47,52 @@ interface Plan {
   history?: ArchiveHistory
 }
 
+/** An entry by id: from the store, else from the recent window in state (before the log was read). */
+function entryOf(state: OrbitState, archive: ArchiveStore, id: string): ArchivedTab | undefined {
+  return archive.get(id) ?? state.archive.find((a) => a.id === id)
+}
+
+/**
+ * The ids asked for, each followed by the other panes of the split it was archived with (one
+ * entry per pane, the newest): a split comes back from the Archive as one unit (SV-19, SV-24).
+ */
+function withSplitPanes(state: OrbitState, archive: ArchiveStore, ids: readonly string[]): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  const add = (id: string) => {
+    if (seen.has(id)) return
+    seen.add(id)
+    out.push(id)
+  }
+  for (const id of ids) {
+    if (typeof id !== 'string') continue
+    add(id)
+    const split = entryOf(state, archive, id)?.split
+    if (!split) continue
+    for (const tabId of layoutLeaves(split.layout)) {
+      const ids = new Set([
+        ...archive.idsOfTab(tabId),
+        ...state.archive.filter((a) => a.tabId === tabId).map((a) => a.id),
+      ])
+      let pane: ArchivedTab | undefined
+      for (const candidate of ids) {
+        const e = entryOf(state, archive, candidate)
+        if (e?.split?.id === split.id && (!pane || e.archivedAt > pane.archivedAt)) pane = e
+      }
+      if (pane) add(pane.id)
+    }
+  }
+  return out
+}
+
 /**
  * Puts archived tabs back at the top of Today (AR-05), in the order given, and takes their entries
  * out of the Archive in the same step. Entries that are gone (restored already, deleted) are
  * skipped, so a second click restores nothing.
+ *
+ * A pane of a split archived as one unit brings the split's other panes along, and they come back
+ * as that split (same arrangement, sizes, name and focused pane) in the first one's Space: one
+ * unit, at the top of Today (SV-19, SV-24). With one pane left in the Archive it is a tab again.
  *
  * A tab takes the profile of the Space it lands in (PR-05). Its back/forward history comes back
  * only when that is the profile it was archived from; history never crosses profiles.
@@ -62,15 +106,16 @@ export function restoreEntries(
   const state = ctx.store.state
   const now = opts.now ?? Date.now()
   const plans: Plan[] = []
-  const seen = new Set<string>()
   const taken = new Set<TabId>()
-  for (const id of ids) {
-    if (typeof id !== 'string' || seen.has(id)) continue
-    seen.add(id)
+  /** The Space each split's panes go to: the first pane's. */
+  const splitSpaces = new Map<SplitId, SpaceId>()
+  for (const id of withSplitPanes(state, archive, ids)) {
     const stored = archive.get(id)
     const entry: ArchivedTab | undefined = stored ?? state.archive.find((a) => a.id === id)
     if (!entry) continue
-    const spaceId = restoreSpace(state, entry, opts.windowId, opts.here)
+    const spaceId =
+      (entry.split && splitSpaces.get(entry.split.id)) || restoreSpace(state, entry, opts.windowId, opts.here)
+    if (entry.split && spaceId && !splitSpaces.has(entry.split.id)) splitSpaces.set(entry.split.id, spaceId)
     const space = spaceId ? state.spaces[spaceId] : undefined
     if (!spaceId || !space) continue
     // The tab keeps its id when it is free (links to it, like its entry's, still point at it).
@@ -95,7 +140,6 @@ export function restoreEntries(
   }
   const restored = new Set(plans.map((p) => p.entry.id))
   ctx.store.update((d) => {
-    const placed = new Map<SpaceId, number>()
     for (const p of plans) {
       const space = d.spaces[p.spaceId]
       if (!space) continue
@@ -103,16 +147,51 @@ export function restoreEntries(
         { id: p.tabId, spaceId: p.spaceId, profileId: space.profileId, url: p.entry.url, title: p.entry.title },
         now,
       )
+    }
+    const placed = new Map<SpaceId, number>()
+    const done = new Set<TabId>()
+    for (const p of plans) {
+      const space = d.spaces[p.spaceId]
+      if (!space || !d.tabs[p.tabId] || done.has(p.tabId)) continue
       // Each next one goes below the one before, so a batch keeps its order at the top.
       const k = placed.get(p.spaceId) ?? 0
       placed.set(p.spaceId, k + 1)
-      insertItem(d, { kind: 'today', spaceId: p.spaceId }, todayInsertIndex(space, 'restore') + k, p.tabId)
+      const at = {
+        container: { kind: 'today' as const, spaceId: p.spaceId },
+        index: todayInsertIndex(space, 'restore') + k,
+      }
+      const split = p.entry.split
+      const panes = split ? plans.filter((q) => q.entry.split?.id === split.id && q.spaceId === p.spaceId) : []
+      if (split && panes.length >= 2) {
+        // The saved layout names the panes by their tab ids then; one back under a new id takes its place.
+        let layout = split.layout
+        for (const q of panes)
+          if (q.entry.tabId && q.entry.tabId !== q.tabId) layout = replacePane(layout, q.entry.tabId, q.tabId)
+        const focus = panes.find((q) => q.entry.tabId === split.focus)?.tabId
+        const unit: SplitUnit = {
+          id: split.id,
+          layout,
+          ...(split.name ? { name: split.name } : {}),
+          ...(focus ? { focus } : {}),
+          location: at,
+          tabIds: panes.map((q) => q.tabId),
+        }
+        if (restoreUnitInDraft(d, unit, now)) {
+          for (const q of panes) done.add(q.tabId)
+          continue
+        }
+      }
+      insertItem(d, at.container, at.index, p.tabId)
+      done.add(p.tabId)
     }
     if (d.archive.some((a) => restored.has(a.id))) d.archive = d.archive.filter((a) => !restored.has(a.id))
     const first = plans[0]
     const win = opts.windowId ? d.windows[opts.windowId] : undefined
     if (opts.open && opts.windowId && win && first && d.tabs[first.tabId]) {
-      if (!opts.stay || win.spaceId === first.spaceId) activateInDraft(d, opts.windowId, first.tabId, now)
+      // A split shows with the pane it had focused (SV-14).
+      const splitId = splitOfTab(d, first.tabId)
+      const show = (splitId && d.splits[splitId]?.focus) || first.tabId
+      if (!opts.stay || win.spaceId === first.spaceId) activateInDraft(d, opts.windowId, show, now)
     }
   })
   archive.delete(restored)

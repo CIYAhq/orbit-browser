@@ -330,6 +330,18 @@ export interface ArchivedTab {
   section?: 'today' | 'pinned'
   /** Where the page was when it closed, when not in the sidebar (the Archive's "Mini Window" filter, AR-01). */
   from?: 'mini' | 'peek'
+  /** The split view it was a pane of, when the whole split went at once: it comes back as one unit (SV-19, SV-24). */
+  split?: ArchivedSplit
+}
+
+/** A split view archived as one unit, as each of its panes' Archive entries keeps it (SV-19, SV-24). */
+export interface ArchivedSplit {
+  id: SplitId
+  /** Its arrangement and sizes; the leaves are its panes' tab ids (`ArchivedTab.tabId`). */
+  layout: SplitLayout
+  name?: string
+  /** The pane focused last. */
+  focus?: TabId
 }
 
 export interface Download {

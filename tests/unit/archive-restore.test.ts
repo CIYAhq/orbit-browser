@@ -3,6 +3,7 @@ import { restoreEntries, restoreSpace } from '../../src/main/archive/restore'
 import { ArchiveSync } from '../../src/main/archive/service'
 import { ArchiveStore } from '../../src/main/archive/store'
 import type { MainContext } from '../../src/main/context'
+import { createSplitInDraft } from '../../src/main/split/model'
 import { Store } from '../../src/main/store'
 import { makeTab } from '../../src/main/tabs/model'
 import { TabOps } from '../../src/main/tabs/ops'
@@ -13,7 +14,8 @@ import {
   createWindowState,
   DEFAULT_PROFILE_ID,
 } from '../../src/shared/defaults'
-import type { ArchivedTab, SpaceId, TabId } from '../../src/shared/state'
+import { layoutLeaves, leaf } from '../../src/shared/split'
+import type { ArchivedTab, SpaceId, SplitId, TabId } from '../../src/shared/state'
 
 const syncs: ArchiveSync[] = []
 afterEach(() => {
@@ -198,5 +200,80 @@ describe('Restore from the Archive (AR-05)', () => {
     expect(spaceIds).toEqual([a])
     expect(tabIds[0]).not.toBe(entry.tabId)
     expect(today(a)[0]).toBe(tabIds[0])
+  })
+})
+
+describe('Splits in the Archive (SV-19, SV-24)', () => {
+  /** Today tabs in Space B, the first two made a split (30/70, named, the right pane focused). */
+  function splitWorld() {
+    const w = world()
+    const open = (url: string): TabId => {
+      const tab = makeTab({ spaceId: w.b, profileId: DEFAULT_PROFILE_ID, url, title: url })
+      w.store.update((d) => {
+        d.tabs[tab.id] = tab
+        d.spaces[w.b]?.today.push(tab.id)
+      })
+      return tab.id
+    }
+    const left = open('https://left.test/')
+    const right = open('https://right.test/')
+    const other = open('https://other.test/')
+    let splitId = '' as SplitId
+    w.store.update((d) => {
+      const layout = { type: 'row' as const, children: [leaf(left), leaf(right)], sizes: [0.3, 0.7] }
+      splitId = createSplitInDraft(d, [left, right], { at: left, layout }) as SplitId
+      const split = d.splits[splitId]
+      if (split) {
+        split.name = 'Pair'
+        split.focus = right
+      }
+    })
+    const entriesOf = () => w.store.state.archive.filter((e) => e.tabId === left || e.tabId === right)
+    return { ...w, left, right, other, splitId, entriesOf }
+  }
+
+  for (const reason of ['closed', 'auto'] as const) {
+    it(`[SV-19][SV-24] a Today split ${reason === 'auto' ? 'archived when idle' : 'closed with ×'} restores from the Archive as one unit: one row brings back both panes as the split, at the top of Today`, () => {
+      const w = splitWorld()
+      w.ops.closeTabs([w.left, w.right], reason, { undoLabel: false })
+      expect(w.store.state.splits[w.splitId]).toBeUndefined()
+      const entries = w.entriesOf()
+      expect(entries).toHaveLength(2)
+      for (const e of entries) expect(e.split).toMatchObject({ id: w.splitId, name: 'Pair', focus: w.right })
+      // The Archive lists one row per pane, each marked as part of a split.
+      expect(w.archive.query({ profileId: DEFAULT_PROFILE_ID }).rows.filter((r) => r.split)).toHaveLength(2)
+
+      const right = entries.find((e) => e.tabId === w.right) as ArchivedTab
+      const result = restoreEntries(w.ctx, w.archive, [right.id], { windowId: w.w1 })
+      expect(result.ids.toSorted()).toEqual(entries.map((e) => e.id).toSorted())
+      const s = w.store.state
+      expect(s.spaces[w.b]?.today).toEqual([w.splitId, w.other])
+      const split = s.splits[w.splitId]
+      expect(split).toMatchObject({ name: 'Pair', focus: w.right, layout: { type: 'row', sizes: [0.3, 0.7] } })
+      expect(split && layoutLeaves(split.layout)).toEqual([w.left, w.right])
+      expect(s.tabs[w.left]).toMatchObject({ url: 'https://left.test/', spaceId: w.b })
+      // Both rows left the Archive.
+      expect(w.archive.idsOfTab(w.left)).toEqual([])
+      expect(w.archive.idsOfTab(w.right)).toEqual([])
+      expect(w.entriesOf()).toEqual([])
+    })
+  }
+
+  it('[SV-19] a pane closed on its own is an ordinary row; a split with one pane left in the Archive comes back as a tab', () => {
+    const w = splitWorld()
+    w.ops.closeTabs([w.left], 'closed', { undoLabel: false })
+    expect(w.entriesOf()[0]?.split).toBeUndefined()
+    w.ops.closeTabs([w.right], 'closed', { undoLabel: false })
+    const w2 = splitWorld()
+    w2.ops.closeTabs([w2.left, w2.right], 'closed', { undoLabel: false })
+    const [first, second] = w2.entriesOf() as [ArchivedTab, ArchivedTab]
+    w2.archive.delete([first.id])
+    w2.store.update((d) => {
+      d.archive = d.archive.filter((e) => e.id !== first.id)
+    })
+    const result = restoreEntries(w2.ctx, w2.archive, [second.id], { windowId: w2.w1 })
+    expect(result.tabIds).toEqual([second.tabId])
+    expect(w2.store.state.spaces[w2.b]?.today).toEqual([second.tabId, w2.other])
+    expect(Object.keys(w2.store.state.splits)).toEqual([])
   })
 })
