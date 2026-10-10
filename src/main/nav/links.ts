@@ -1,5 +1,5 @@
 import { type BrowserWindow, Menu, type MenuItemConstructorOptions, type Referrer, type WebContents } from 'electron'
-import { pageMayOpen } from '../../shared/link-routing'
+import { framesMayOpen, pageMayOpen } from '../../shared/link-routing'
 import { type PageReferrer, popupTitle, referrerPolicyName, shownTabId } from '../../shared/nav'
 import type { TabId, WindowId } from '../../shared/state'
 import { sectionOf } from '../../shared/tree'
@@ -238,6 +238,9 @@ export function registerLinks(ctx: MainContext, deps: LinksDeps): LinksTestHooks
       const alt = altClicks.get(tabId)
       if (alt && Date.now() <= alt.until && withoutHash(alt.url) === withoutHash(url)) {
         altClicks.delete(tabId)
+        // A frame's link opens beside the page only where a web page may open it: a local file's
+        // download goes ahead (D49, round 2 fix check F1, F2).
+        if (alt.split && !pageMayOpen(undefined, url)) return
         event.preventDefault()
         if (alt.split) openInSplit(tabId, url)
         return
@@ -286,6 +289,10 @@ export function registerLinks(ctx: MainContext, deps: LinksDeps): LinksTestHooks
   const previousBlocked = tabs.onPopupBlocked
   tabs.onPopupBlocked = (tabId, url, referrer) => {
     previousBlocked?.(tabId, url, referrer)
+    // Kept to open later only where the page may open it: a local file for no web page (D49, round 2
+    // fix check F1). Open, below, loads only what this list holds.
+    const contents = tabs.contents(tabId)
+    if (!(contents ? framesMayOpen(contents, url) : pageMayOpen(undefined, url))) return
     const list = (blocked.get(tabId) ?? []).filter((b) => b.url !== url)
     list.push({ url, referrer })
     setBlocked(tabId, list.slice(-20))

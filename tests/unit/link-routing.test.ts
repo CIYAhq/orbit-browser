@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   decideLink,
+  framesMayOpen,
   isLocalFileUrl,
   isMeetingLink,
   type LinkSettings,
@@ -161,6 +162,24 @@ describe('local files a page may have Orbit open (D49)', () => {
     for (const from of [undefined, '', 'about:blank', 'data:text/html,<a>x</a>', `view-source:${file}`]) {
       expect(pageMayOpen(from, file)).toBe(false)
     }
+  })
+  it('a page that asks from a frame Orbit can’t name: a local file only when every frame is local (F1)', () => {
+    const framed = (...origins: string[]) => ({ mainFrame: { framesInSubtree: origins.map((origin) => ({ origin })) } })
+    expect(framesMayOpen(framed('file://'), file)).toBe(true)
+    // An about:blank or srcdoc frame of a local page has its origin.
+    expect(framesMayOpen(framed('file://', 'file://'), file)).toBe(true)
+    expect(framesMayOpen(framed('file://', 'http://localhost:3310'), file)).toBe(false)
+    expect(framesMayOpen(framed('file://', 'null'), file)).toBe(false)
+    expect(framesMayOpen(framed('https://example.com'), file)).toBe(false)
+    expect(framesMayOpen(framed('https://example.com'), `view-source:${file}`)).toBe(false)
+    expect(framesMayOpen(framed('https://example.com', 'null'), 'https://example.org/b')).toBe(true)
+    const gone = {
+      get mainFrame(): never {
+        throw new Error('Render frame was disposed before WebFrameMain could be accessed')
+      },
+    }
+    expect(framesMayOpen(gone, file)).toBe(false)
+    expect(framesMayOpen(gone, 'https://example.org/b')).toBe(true)
   })
   it('which addresses are local files', () => {
     expect(isLocalFileUrl(file)).toBe(true)

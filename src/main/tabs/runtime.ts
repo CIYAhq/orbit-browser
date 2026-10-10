@@ -9,6 +9,7 @@ import {
   type WebContentsViewConstructorOptions,
   type WindowOpenHandlerResponse,
 } from 'electron'
+import { framesMayOpen } from '../../shared/link-routing'
 import { reopenReferrerPolicy } from '../../shared/nav'
 import { isPrivateProfileId } from '../../shared/private'
 import type { Tab, TabId } from '../../shared/state'
@@ -313,6 +314,10 @@ export class TabRuntime {
     })
     contents.on('context-menu', (_e, params) => showPageContextMenu(this.ctx, tabId, contents, params))
     contents.setWindowOpenHandler((details) => {
+      // A local file opens for no web page, nor for a page with a frame from elsewhere, which may be
+      // the one asking: no tab, window, Peek, Mini Window or pop-up, nor a blocked pop-up to open
+      // later, whatever the engine let through (D49, round 2 fix check F1).
+      if (!framesMayOpen(contents, details.url)) return { action: 'deny' }
       // A link Orbit asked this page to open (openFromPage): the click was counted already.
       const asked = this.takePageOpen(contents.id, details.url)
       if (asked) return asked

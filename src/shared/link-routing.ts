@@ -51,13 +51,36 @@ export function isLocalFileUrl(url: string): boolean {
 }
 
 /**
- * Whether Orbit may itself load or save `url` for the page at `from`, as it does for the page menu,
- * ⌥-click and a dropped link: a local file only for a page that is a local file too, as the engine
- * allows a plain click (D49). `from` is empty when the page isn't known. Other addresses are left
- * to each route's own rules.
+ * Whether Orbit may itself load or save `url` for the page at `from`: a local file only for a page
+ * that is a local file too, as the engine allows a plain click (D49). `from` is empty when the page
+ * isn't known. Other addresses are left to each route's own rules. The one check on every route where
+ * Orbit loads what a page chose, whatever the engine allows: the page menu, ⌥-click and its frame's
+ * download, a dropped link, and through `framesMayOpen` the windows, tabs and pop-ups a page asks
+ * for, its blocked pop-ups and Save Page As… (round 2 fix check F1).
  */
 export function pageMayOpen(from: string | undefined, url: string): boolean {
   return !isLocalFileUrl(url) || /^file:/i.test(from?.trim() ?? '')
+}
+
+/** A page as the main process sees it: every frame in it, the top one too, each with its origin. */
+export interface PageFrames {
+  readonly mainFrame: { readonly framesInSubtree: readonly { readonly origin: string }[] }
+}
+
+/**
+ * `pageMayOpen` for a page that asked for `url` from a frame Orbit can't name: a new window, tab or
+ * pop-up it requested, a pop-up blocked on it, or a save of it (D49; round 2 fix check M1, F1). A
+ * local file only when every frame may open it, by each frame's origin: a frame from elsewhere counts
+ * as a web page (F2), and an about:blank frame a local page made counts as local. A page that went
+ * away opens no local file.
+ */
+export function framesMayOpen(page: PageFrames, url: string): boolean {
+  if (pageMayOpen(undefined, url)) return true
+  try {
+    return page.mainFrame.framesInSubtree.every((frame) => pageMayOpen(frame.origin, url))
+  } catch {
+    return false
+  }
 }
 
 /** Same registrable domain (eTLD+1): `mail.example.com` and `docs.example.com` are one site (PK-02). */

@@ -8,6 +8,7 @@ import {
   type WebContentsViewConstructorOptions,
 } from 'electron'
 import { isFolderId, isTabId, newId } from '../../shared/ids'
+import { framesMayOpen } from '../../shared/link-routing'
 import { isPrivateTab, privateTabMenu } from '../../shared/private'
 import type { ContainerRef, Folder, FolderId, ItemId, TabId, WindowId } from '../../shared/state'
 import {
@@ -509,6 +510,8 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
       }
     })
     wc.setWindowOpenHandler((details) => {
+      // As for a tab's page: a local file opens for no web page (D49, round 2 fix check F1).
+      if (!framesMayOpen(wc, details.url)) return { action: 'deny' }
       const windowId = windows.windowOfTab(openerTabId) ?? windows.focusedWindowId()
       if (gesture.used || Date.now() - gesture.at > 1000) {
         toast(windowId, 'Pop-up blocked')

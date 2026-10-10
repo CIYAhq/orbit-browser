@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { app, type ContextMenuParams, dialog, type MenuItemConstructorOptions, type WebContents } from 'electron'
-import { pageMayOpen } from '../../shared/link-routing'
+import { framesMayOpen } from '../../shared/link-routing'
 import { type PageReferrer, referrerPolicyName } from '../../shared/nav'
 import { isPrivateTab } from '../../shared/private'
 import type { TabId, WindowId } from '../../shared/state'
@@ -144,22 +144,16 @@ function fileName(title: string): string {
   return clean || 'Page'
 }
 
-/** Any local file's address: what a complete save would read for a frame, asked of `pageMayOpen`. */
+/** Any local file's address: what a complete save would read for a frame, asked of `framesMayOpen`. */
 const LOCAL_FILE = 'file:///'
 
 /**
  * Whether Save Page As… may save the page complete, the resources its frames name copied beside it.
  * Chromium reads each `file:` resource named from disk for that, though no web page could load one,
- * so only a page whose frames are all local files saves complete (D49, round 2 fix check M1). By each
- * frame's origin, so an about:blank frame a local page made counts as local.
+ * so only a page whose frames are all local files saves complete (D49, round 2 fix check M1).
  */
 export function savesComplete(contents: WebContents): boolean {
-  try {
-    return contents.mainFrame.framesInSubtree.every((frame) => pageMayOpen(frame.origin, LOCAL_FILE))
-  } catch {
-    // The page went away.
-    return false
-  }
+  return framesMayOpen(contents, LOCAL_FILE)
 }
 
 /**

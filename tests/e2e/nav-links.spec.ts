@@ -15,6 +15,7 @@ import {
   cmd,
   foreignWindowTitles,
   hoverInPage,
+  type Modifier,
   type NavFixtures,
   openTab,
   pageMenu,
@@ -853,6 +854,115 @@ test('[NV-08] ⌥-click on a local file’s link in a frame never opens it besid
     { url: local.text, cancelled: false },
     { url: page('FramedWeb'), cancelled: true },
   ])
+})
+
+/**
+ * Asks the window-open handler Orbit gave the page at `pageUrl` for `url`, as the engine would for a
+ * link or a window.open() it let through, with a click in the page just before (holding `modifiers`)
+ * unless `click` is false: the handler's answer.
+ */
+function askToOpen(
+  app: ElectronApplication,
+  pageUrl: string,
+  url: string,
+  disposition: 'background-tab' | 'foreground-tab' | 'new-window',
+  { features = '', click = true, modifiers = [] }: { features?: string; click?: boolean; modifiers?: Modifier[] } = {},
+): Promise<string> {
+  return app.evaluate(
+    async ({ webContents }, [p, u, d, f, c, m]) => {
+      const contents = webContents.getAllWebContents().find((w) => w.getURL() === p)
+      if (!contents) throw new Error(`no page ${p}`)
+      if (c) {
+        // A click in the page's margin: the gesture a new tab or a pop-up needs (NV-09).
+        const at = { x: 8, y: 8, button: 'left' as const, clickCount: 1, modifiers: [...m] }
+        contents.sendInputEvent({ type: 'mouseDown', ...at })
+        contents.sendInputEvent({ type: 'mouseUp', ...at })
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      type Handler = (details: Electron.HandlerDetails) => Electron.WindowOpenHandlerResponse
+      // Where Electron keeps the handler a page's opens go to.
+      const handler = (contents as unknown as { _windowOpenHandler?: Handler })._windowOpenHandler
+      if (typeof handler !== 'function') throw new Error(`no window-open handler for ${p}`)
+      const details = { url: u, frameName: '', features: f, disposition: d, referrer: { url: '', policy: 'default' } }
+      return handler(details as Electron.HandlerDetails).action
+    },
+    [pageUrl, url, disposition, features, click, modifiers] as const,
+  )
+}
+
+test('[NV-08][NV-09][MW-07] a web page that asks for a local file in a new tab, window or pop-up gets none, even where the engine lets it ask; a local page still does (D49, round 2 fix check F1)', async () => {
+  const { app } = orbit
+  const local = localFiles()
+  const folder = new URL(local.folder.endsWith('/') ? local.folder : `${local.folder}/`)
+  const loads = await watchLoads(app, local.folder)
+  const web = page('Opener')
+  const webId = await openTab(app, web)
+  const windows = (await windowList(app)).length
+  const fileTabs = async () =>
+    Object.values((await state(app)).tabs)
+      .filter((t) => t.url.includes('orbit-local'))
+      .map((t) => t.url)
+
+  // From the web page: a pop-up without a click (to block), ⌘-click (a background tab), ⌘⌥-click (a
+  // Mini Window), ⇧⌘-click (a selected tab), ⇧-click (a window), and a pop-up with a click.
+  const popup = 'width=300,height=200'
+  const answers = [
+    await askToOpen(app, web, local.text, 'new-window', { features: popup, click: false }),
+    await askToOpen(app, web, local.text, 'background-tab'),
+    await askToOpen(app, web, local.text, 'background-tab', { modifiers: [mod, 'alt'] }),
+    await askToOpen(app, web, local.text, 'foreground-tab'),
+    await askToOpen(app, web, local.text, 'new-window'),
+    await askToOpen(app, web, local.text, 'new-window', { features: popup }),
+  ]
+  expect(answers).toEqual(['deny', 'deny', 'deny', 'deny', 'deny', 'deny'])
+  // A pop-up the page opened asks too: its own opens become tabs.
+  await clickInPage(app, web, '#popup')
+  await expect.poll(() => loadedTitle(app, page('Popup-Opener'))).toBe('Popup-Opener')
+  expect(await askToOpen(app, page('Popup-Opener'), local.text, 'foreground-tab')).toBe('deny')
+
+  // A local page with a frame from the web: the frame may be the one asking.
+  const framed = new URL('framed.html', folder).href
+  writeFileSync(new URL(framed), `<!doctype html><title>Framed</title><iframe src="${page('FramedWeb')}"></iframe>`)
+  const framedId = await openTab(app, framed)
+  await expect.poll(() => inFrame(app, framedId, '/page/FramedWeb', 'document.readyState')).toBe('complete')
+  expect(await askToOpen(app, framed, local.text, 'background-tab')).toBe('deny')
+
+  // Nothing opened, loaded or waits to be opened.
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  expect(await fileTabs()).toEqual([])
+  expect(await windowList(app)).toHaveLength(windows)
+  expect(await foreignWindowTitles(app)).toEqual([`localhost:${fx.port}`])
+  expect((await state(app)).tabs[webId]?.blockedPopups).toBeUndefined()
+  expect((await loads()).filter((u) => u.includes('orbit-local'))).toEqual([])
+
+  // A local page of its own asks, and its ⌘-clicked local file opens in a background tab.
+  const first = new URL('first.html', folder).href
+  writeFileSync(new URL(first), '<!doctype html><title>First</title><p>First local page</p>')
+  await openTab(app, first)
+  expect(await askToOpen(app, first, local.text, 'background-tab')).toBe('deny')
+  await expect.poll(fileTabs).toEqual([local.text])
+})
+
+test('[NV-09] a pop-up blocked on a web page is offered to open later unless it is a local file (D49, round 2 fix check F1)', async () => {
+  const { app } = orbit
+  const local = localFiles()
+  const web = page('Web')
+  const id = await openTab(app, web)
+  // As the tabs runtime reports the pop-ups it blocked: a local file, then a web page.
+  await app.evaluate(
+    (_e, [tabId, urls, from]) => {
+      type Tabs = { onPopupBlocked?: (tabId: string, url: string, referrer: Electron.Referrer) => void }
+      const { tabs } = (globalThis as unknown as { __orbit: { ctx: { tabs: Tabs } } }).__orbit.ctx
+      for (const url of urls) tabs.onPopupBlocked?.(tabId, url, { url: from, policy: 'default' })
+    },
+    [id, [local.text, page('Surprise')], web] as const,
+  )
+  await expect.poll(async () => (await state(app)).tabs[id]?.blockedPopups).toBe(1)
+  const host = `localhost:${fx.port}`
+  await cmd(app, 'nav.blockedPopupsMenu', { x: 0, y: 0 })
+  await expect
+    .poll(() => blockedMenu(app))
+    .toEqual([`[Pop-ups blocked on ${host}]`, `Open ${page('Surprise')}`, `Always Allow Pop-ups from ${host}`])
 })
 
 test('[TB-02] a local file’s address dropped on the sidebar opens nothing, as a link or as text; a web link dropped after it opens (D49)', async () => {
