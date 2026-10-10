@@ -442,3 +442,84 @@ test('[AR-09] Recently Closed lists the last closed tabs newest first, in the Li
   expect((await state(app)).tabs[b]).toBeUndefined()
   if (process.platform === 'darwin') await expect.poll(appMenu).toEqual(['ListB'])
 })
+
+/** The Archive's entry in the Library's section list. */
+const archiveEntry = (lib: Page) => lib.locator('[data-testid="library-nav-item"][data-section-id="archive"]')
+const visitCount = async (o: Orbit) => ((await run(o.app, 'history.visits', { limit: 500 })) as unknown[]).length
+
+test('[AR-07] Clear Archive always asks first, from the Archive’s menu or the command bar; Cancel keeps it, Clear empties it and keeps history', async () => {
+  const { app } = orbit
+  const t = await newTab(app, fx.url('/page/Visited'))
+  await waitTab(app, t, '/page/Visited')
+  await expect.poll(() => visitCount(orbit)).toBeGreaterThan(0)
+  const visits = await visitCount(orbit)
+  await seed(orbit, { count: 12, days: 3 })
+  const lib = await openLibrary(orbit)
+  await expect.poll(() => countOf(lib)).toBe(12)
+  await archiveEntry(lib).click({ button: 'right' })
+  await expect
+    .poll(() => run(app, 'archive.testMenu', {}))
+    .toEqual([
+      'Clear Archive…',
+      'Keep Archived Tabs For',
+      'Keep Archived Tabs For > 30 Days',
+      'Keep Archived Tabs For > 90 Days',
+      'Keep Archived Tabs For > 1 Year',
+      'Keep Archived Tabs For > Forever',
+    ])
+  await run(app, 'archive.testMenu', { click: 'Clear Archive…' })
+  const dialog = lib.getByTestId('archive-clear')
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toContainText('All 12 archived tabs will be deleted. This can’t be undone.')
+  await expect(dialog).toContainText('Your browsing history is kept.')
+  // Cancel has the keys: Enter cancels, and so does Esc, which leaves the Library open.
+  await expect(lib.getByTestId('archive-clear-cancel')).toBeFocused()
+  await lib.keyboard.press('Enter')
+  await expect(dialog).toHaveCount(0)
+  await run(app, 'archive.testMenu', { click: 'Clear Archive…' })
+  await expect(dialog).toBeVisible()
+  await lib.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  expect((await info(orbit)).open).toBe(true)
+  await expect(lib.getByTestId('archive-search')).toBeFocused()
+  expect((await query(orbit)).total).toBe(12)
+  // The command bar's "Clear Archive…" asks the same; this time the Archive is cleared.
+  await openViaCommandBar(orbit, 'Clear Archive')
+  await expect(dialog).toBeVisible()
+  await lib.getByTestId('archive-clear-ok').click()
+  await expect(lib.getByTestId('library-toast').filter({ hasText: 'Cleared 12 archived tabs' })).toBeVisible()
+  await expect(lib.getByTestId('archive-empty')).toContainText('Nothing in the Archive')
+  await expect(lib.getByTestId('archive-kept-for')).toHaveText('They are kept for 30 days.')
+  expect((await query(orbit)).total).toBe(0)
+  expect((await state(app)).archive).toEqual([])
+  // Browsing history is not the Archive (AR-10): it is all still there.
+  expect(await visitCount(orbit)).toBe(visits)
+  // An empty Archive has nothing to clear: no question, just a note.
+  await openViaCommandBar(orbit, 'Clear Archive')
+  await expect(lib.getByTestId('library-toast').filter({ hasText: 'The Archive is already empty' })).toBeVisible()
+  await expect(dialog).toHaveCount(0)
+})
+
+test('[AR-08] the Archive keeps 30 days by default: older entries go at launch, and at once when a shorter time is chosen', async () => {
+  const { app, userData } = orbit
+  expect((await state(app)).settings.archiveKeepDays).toBe(30)
+  // Twelve entries ten days apart: 110 days old down to a minute old.
+  await seed(orbit, { count: 12, days: 120 })
+  expect((await query(orbit)).total).toBe(12)
+  // Next launch, entries older than 30 days are gone.
+  await app.close()
+  orbit = await launchOrbit({ userData })
+  await expect.poll(async () => (await query(orbit)).total).toBe(3)
+  // Longer, then shorter, from the Archive's menu in the Library.
+  await run(orbit.app, 'archive.setKeepDays', { days: 0 })
+  await seed(orbit, { count: 12, days: 120, prefix: 'Again' })
+  const lib = await openLibrary(orbit)
+  await expect.poll(() => countOf(lib)).toBe(15)
+  await archiveEntry(lib).click({ button: 'right' })
+  await run(orbit.app, 'archive.testMenu', { click: 'Keep Archived Tabs For > 90 Days' })
+  await expect.poll(() => countOf(lib)).toBe(12)
+  await archiveEntry(lib).click({ button: 'right' })
+  await run(orbit.app, 'archive.testMenu', { click: 'Keep Archived Tabs For > 30 Days' })
+  await expect.poll(() => countOf(lib)).toBe(6)
+  expect((await state(orbit.app)).settings.archiveKeepDays).toBe(30)
+})

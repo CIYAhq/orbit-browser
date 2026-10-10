@@ -10,8 +10,10 @@ import { installMenu } from '../menu'
 import type { CallContext } from '../registry'
 import { findMenuItem, menuLabels } from '../tabs/menus'
 import { LibraryHost } from './library'
+import { archiveSectionItems, setKeepDays } from './menus'
 import { recentlyClosedItems, refreshRecentlyClosed, watchRecentlyClosed } from './recently-closed'
 import { restoreEntries } from './restore'
+import { keepDaysOf, scheduleRetention } from './retention'
 import { ArchiveSync } from './service'
 import { ArchiveStore } from './store'
 
@@ -42,8 +44,13 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
   const store = new ArchiveStore(join(ctx.paths.userData, 'archive', 'archive.jsonl'))
   const sync = new ArchiveSync(ctx, store)
   sync.start()
+  // Entries past their time go once the log is read, then hourly (AR-08).
+  const stopRetention = scheduleRetention(ctx, sync, store)
   setTimeout(() => void store.load(), LOAD_DELAY_MS)
-  app.on('before-quit', () => store.close())
+  app.on('before-quit', () => {
+    stopRetention()
+    store.close()
+  })
 
   let changedTimer: ReturnType<typeof setTimeout> | undefined
   store.onChange = () => {
@@ -112,6 +119,8 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
   })
   ctx.actions.register('app.library', (c) => openLibrary(c))
   ctx.actions.register('app.archive', (c) => openLibrary(c, { section: 'archive' }))
+  // The menu and the command bar ask in the Library before anything goes (AR-07).
+  ctx.actions.register('archive.clear', (c) => openLibrary(c, { section: 'archive', confirmClear: true }))
 
   // ---- Archive entries ----
 
@@ -123,6 +132,20 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
   commands.register('archive.delete', async ({ ids }) => {
     await store.load()
     return sync.remove(Array.isArray(ids) ? ids : []).length
+  })
+  // After the Library asked (AR-07). Browsing history is a separate store and stays.
+  commands.register('archive.clear', async ({ profileId }, c) => {
+    await store.load()
+    return sync.clearProfile(profileOf(profileId, c)).length
+  })
+  commands.register('archive.setKeepDays', ({ days }) => setKeepDays(ctx, days))
+  // The app menu shows how long entries are kept (macOS has the only app menu).
+  let keepDays = keepDaysOf(state.state)
+  state.subscribe((next) => {
+    const days = keepDaysOf(next)
+    if (days === keepDays) return
+    keepDays = days
+    if (process.platform === 'darwin') installMenu(ctx)
   })
 
   /**
@@ -176,7 +199,17 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
     await store.load()
     const windowId = windowOf(c)
     const entries = (Array.isArray(ids) ? ids : []).map((id) => store.get(id)).filter((e) => !!e)
-    if (entries.length === 0) return
+    if (entries.length === 0) {
+      // Rows that are gone show nothing; no rows at all is the Archive's entry in the section list.
+      if (Array.isArray(ids) && ids.length > 0) return
+      const canClear = !store.newestFirst(profileOf(undefined, c)).next().done
+      lastMenu = archiveSectionItems(ctx, () => windowId, { canClear })
+      if (ctx.e2e) return
+      const win = windowId ? windows.get(windowId) : undefined
+      if (win?.isDestroyed()) return
+      Menu.buildFromTemplate(lastMenu).popup(win ? { window: win } : undefined)
+      return
+    }
     const many = entries.length > 1
     const first = entries[0] as (typeof entries)[number]
     const items: MenuItemConstructorOptions[] = [

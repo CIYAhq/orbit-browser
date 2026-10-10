@@ -244,6 +244,13 @@ export const ACTIONS: ActionDef[] = [
     mac: ['Cmd+Shift+L'],
     keywords: ['library', 'archive', 'downloads', 'media'],
   },
+  // Asks first; browsing history is kept (AR-07).
+  {
+    id: 'archive.clear',
+    title: 'Clear Archive…',
+    category: 'App',
+    keywords: ['clear archive', 'delete archived tabs', 'empty archive'],
+  },
 
   // Spaces
   { id: 'space.new', title: 'New Space', category: 'Spaces', keywords: ['create space'] },

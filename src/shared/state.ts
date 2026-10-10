@@ -234,6 +234,8 @@ export interface Settings {
   lastTabOnCmd9: boolean
   /** The Library section used last: the Library reopens there (AR-02, DL-09). */
   librarySection: string
+  /** Archive entries older than this many days are deleted (AR-08). 0 = kept forever. */
+  archiveKeepDays: number
 }
 
 /** "URL contains …" or "URL is exactly …" → a Space (ST-09 link routing). */

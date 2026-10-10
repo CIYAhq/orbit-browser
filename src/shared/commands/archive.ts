@@ -112,9 +112,17 @@ export interface ArchiveCommands {
   'archive.restore': { args: ArchiveRestoreArgs; result: ArchiveRestoreResult }
   /** Removes entries without restoring them (AR-07, row menu). Returns how many went. */
   'archive.delete': { args: { ids: string[] }; result: number }
-  /** Removes every entry of a profile (default: the calling window's) (AR-07). Returns how many went. */
+  /**
+   * Removes every entry of a profile (default: the calling window's) (AR-07); browsing history
+   * stays. The Library asks first (`confirmClear`). Returns how many went.
+   */
   'archive.clear': { args: { profileId?: ProfileId }; result: number }
-  /** Shows the row's context menu (Restore, Open in New Tab, Copy URL, Delete) at a point of the Library. */
+  /** How many days Archive entries are kept (AR-08): 30, 90, 365, or 0 for forever. */
+  'archive.setKeepDays': { args: { days: number }; result: void }
+  /**
+   * Shows the row's context menu (Restore, Open in New Tab, Copy URL, Delete) at a point of the
+   * Library. With no ids, the Archive section's own menu (Clear Archive…, Keep Archived Tabs For).
+   */
   'archive.contextMenu': { args: { ids: string[]; x: number; y: number }; result: void }
   /**
    * Test-only (ORBIT_E2E=1): the labels of the last Archive menu; `click` runs an item ("Delete").

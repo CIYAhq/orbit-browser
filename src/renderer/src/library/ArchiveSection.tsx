@@ -20,6 +20,7 @@ import { invoke } from '../api'
 import { getOrbitState, useOrbit, useOrbitShallow, useWindow } from '../store'
 import { Favicon } from '../ui/Favicon'
 import { ArchiveListModel, filtersKey } from './archive-model'
+import { ConfirmDialog } from './ConfirmDialog'
 import { dayLabel, HEAD_H, type ListItem, listGeometry, ROW_H, rowRange, rowTop, visibleItems } from './geometry'
 import { libraryToast } from './LibraryToasts'
 import type { LibrarySectionProps } from './sections'
@@ -46,6 +47,16 @@ const REASON: Record<ArchiveRow['reason'], string> = {
 
 /** Restored rows fade out and the rows below rise for this long (FL-09). */
 const LEAVE_MS = 200
+
+/** The open of the Library whose "Clear Archive…" was asked already (showing the section again asks no more). */
+let askedClearNonce = -1
+
+/** "Kept for 30 days", "kept forever" (AR-08). */
+export function keptFor(days: number): string {
+  if (!(days > 0)) return 'kept forever'
+  if (days % 365 === 0) return days === 365 ? 'kept for a year' : `kept for ${days / 365} years`
+  return `kept for ${days} days`
+}
 
 /** Empties a selection (keeping the same set when it is empty already, so nothing renders again). */
 const clearSet = (set: ReadonlySet<string>): ReadonlySet<string> => (set.size ? new Set() : set)
@@ -200,6 +211,7 @@ export function ArchiveSection({ show }: LibrarySectionProps) {
   const spaces = useOrbitShallow((s) => s.spaceOrder.filter((id) => s.spaces[id]?.profileId === profileId))
   const spaceNames = useOrbitShallow((s) => spaces.map((id) => s.spaces[id]?.name ?? ''))
   const spaceBadges = useSpaceBadges()
+  const keepDays = useOrbit((s) => s.settings.archiveKeepDays)
   const [text, setText] = useState('')
   const [source, setSource] = useState<ArchiveSource>('all')
   const [spaceFilter, setSpaceFilter] = useState<SpaceId | ''>('')
@@ -280,6 +292,21 @@ export function ArchiveSection({ show }: LibrarySectionProps) {
     scrollerRef.current?.scrollTo({ top: 0 })
   }, [key])
 
+  // ---- Clear Archive (AR-07): always asked here first, from the menu, the command bar or the list ----
+  const [clearAsk, setClearAsk] = useState<{ count: number } | null>(null)
+  // The profile shown here is the one asked about and cleared (main picks the window's otherwise).
+  const shownProfile = profileId ? { profileId } : {}
+  const askClear = async () => {
+    const page = await invoke('archive.query', { ...shownProfile, limit: 1 })
+    if (page.total === 0) libraryToast('The Archive is already empty')
+    else setClearAsk({ count: page.total })
+  }
+  const clearArchive = async () => {
+    setClearAsk(null)
+    const n = await invoke('archive.clear', shownProfile)
+    libraryToast(n === 1 ? 'Cleared 1 archived tab' : `Cleared ${n.toLocaleString()} archived tabs`)
+  }
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs for each open of the Library
   useEffect(() => {
     // A fresh open starts from the whole list, at its top match; the filters stay as they were.
@@ -291,6 +318,10 @@ export function ArchiveSection({ show }: LibrarySectionProps) {
     }
     inputRef.current?.focus()
     inputRef.current?.select()
+    if (show.confirmClear && show.nonce !== askedClearNonce) {
+      askedClearNonce = show.nonce
+      void askClear()
+    }
   }, [show.nonce])
 
   const scrollToOffset = useCallback(
@@ -625,11 +656,28 @@ export function ArchiveSection({ show }: LibrarySectionProps) {
               <>
                 <p className="archive__empty-title">Nothing in the Archive</p>
                 <p>Tabs you close, clear or that are archived after a while show up here.</p>
+                <p data-testid="archive-kept-for">They are {keptFor(keepDays)}.</p>
               </>
             )}
           </div>
         )}
       </div>
+      {clearAsk && (
+        <ConfirmDialog
+          title="Clear the Archive?"
+          confirmLabel="Clear Archive"
+          destructive
+          testId="archive-clear"
+          onConfirm={() => void clearArchive()}
+          onCancel={() => setClearAsk(null)}
+        >
+          <p>
+            {clearAsk.count === 1 ? 'The archived tab' : `All ${clearAsk.count.toLocaleString()} archived tabs`}
+            {profileName ? ` in ${profileName}` : ''} will be deleted. This can’t be undone.
+          </p>
+          <p>Your browsing history is kept.</p>
+        </ConfirmDialog>
+      )}
     </section>
   )
 }
