@@ -1,13 +1,47 @@
 import { join, normalize, sep } from 'node:path'
 import { INTERNAL_SCHEME } from '../../shared/commands/devtools'
+import type { CommandName } from '../../shared/rpc'
 
-/** Internal pages' addresses and files (DT-13); see internal-pages.ts. */
+/** Internal pages' addresses, files and rights (DT-13); see internal-pages.ts. */
 
 const PREFIX = `${INTERNAL_SCHEME}:`
 
 /** True for the address of an internal page, in any case. */
 export function isInternalUrl(url: string | undefined): boolean {
   return !!url && url.slice(0, PREFIX.length).toLowerCase() === PREFIX
+}
+
+/**
+ * The commands each internal page may run (D53), by its name (`orbit://<name>/`). Main refuses any
+ * other command, and every event, so a script that got into a page (one that shows text from the
+ * web) can do no more than the page itself. A page that runs no command needs no entry; a new page
+ * that runs some lists them here.
+ */
+export const INTERNAL_PAGE_COMMANDS: Readonly<Record<string, readonly CommandName[]>> = {
+  version: ['settings.buildInfo', 'settings.copyBuildInfo'],
+}
+
+/**
+ * What an internal page's document allows (D53): no web page may frame it, and it runs only its own
+ * scripts (no inline script, no other origin's, no plugins, no `<base>` to move them).
+ */
+export const INTERNAL_DOCUMENT_CSP = "frame-ancestors 'none'; script-src 'self'; object-src 'none'; base-uri 'none'"
+
+/** The name of the internal page at an address, lowercase: `version` for `orbit://version/…`. */
+export function internalPageName(url: string | undefined): string | undefined {
+  if (!url || !isInternalUrl(url)) return undefined
+  try {
+    return new URL(url).hostname.toLowerCase() || undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Whether the internal page at an address may run a command (D53). */
+export function internalPageMayRun(url: string | undefined, command: string): boolean {
+  const name = internalPageName(url)
+  if (!name || !Object.hasOwn(INTERNAL_PAGE_COMMANDS, name)) return false
+  return (INTERNAL_PAGE_COMMANDS[name] as readonly string[]).includes(command)
 }
 
 /**

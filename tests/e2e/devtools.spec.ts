@@ -3,6 +3,7 @@ import { createServer, type Server } from 'node:http'
 import { resolve } from 'node:path'
 import { expect, test } from '@playwright/test'
 import type { MainContext } from '../../src/main/context'
+import { INTERNAL_DOCUMENT_CSP } from '../../src/main/devtools/internal-urls'
 import type { DevtoolsState, DockSide } from '../../src/shared/commands/devtools'
 import type { OrbitState } from '../../src/shared/state'
 import {
@@ -739,4 +740,58 @@ test('[DT-13] a web page reaches no internal page: no link, frame, new tab, redi
     .toBe(false)
   expect(await tabUrl(other)).not.toContain('orbit:')
   expect((await openTabs()).filter((t) => t.url.startsWith('orbit:'))).toEqual([])
+})
+
+test('[DT-13] an internal page runs only its own commands, sends no events, and runs no script but its own (D53)', async () => {
+  await openViaCommandBar(orbit, 'orbit://version/')
+  const page = await tabPage(orbit.app, 'orbit://version/')
+  await expect(page.getByTestId('version-facts')).toHaveAttribute('data-answered', 'true')
+  // What a script that got into the page could ask: its own commands run, any other is refused.
+  type Bridge = {
+    invoke: (name: string, args: unknown) => Promise<unknown>
+    send: (name: string, payload: unknown) => void
+  }
+  const ask = (name: string, args: unknown) =>
+    page.evaluate(
+      ([n, a]) =>
+        (window as unknown as { orbit: Bridge }).orbit.invoke(n as string, a).then(
+          () => 'ran',
+          (e: Error) => (e.message.includes('Forbidden') ? 'refused' : e.message),
+        ),
+      [name, args] as const,
+    )
+  const tabs = (await openTabs()).length
+  expect(await ask('settings.buildInfo', {})).toBe('ran')
+  expect(await ask('settings.copyBuildInfo', {})).toBe('ran')
+  expect(await ask('tabs.create', { url: site.url('/page/Sneaky') })).toBe('refused')
+  expect(await ask('spaces.setAppearance', { appearance: 'dark' })).toBe('refused')
+  expect(await ask('downloads.list', {})).toBe('refused')
+  expect((await openTabs()).length).toBe(tabs)
+  expect((await state(orbit.app)).settings.appearance).not.toBe('dark')
+  // Events are for Orbit's own UI: one from the page never reaches main (a command after it has).
+  await orbit.app.evaluate(() => {
+    const g = globalThis as unknown as OrbitGlobal & { __events: string[] }
+    g.__events = []
+    g.__orbit.ctx.events.on('perf.mark', (p) => g.__events.push(p.name))
+  })
+  await page.evaluate(() =>
+    (window as unknown as { orbit: Bridge }).orbit.send('perf.mark', { name: 'internal', t: 1 }),
+  )
+  expect(await ask('settings.buildInfo', {})).toBe('ran')
+  expect(await orbit.app.evaluate(() => (globalThis as unknown as { __events: string[] }).__events)).toEqual([])
+  // A script put into the page never runs: the policy Orbit serves the page with stops it.
+  await page.evaluate(() => {
+    const w = window as unknown as { __policies: string[] }
+    w.__policies = []
+    document.addEventListener('securitypolicyviolation', (e) => w.__policies.push(e.originalPolicy))
+    document.body.append(Object.assign(document.createElement('script'), { textContent: 'window.__ran = true' }))
+  })
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __policies: string[] }).__policies))
+    .toContain(INTERNAL_DOCUMENT_CSP)
+  expect(await page.evaluate(() => (window as unknown as { __ran?: boolean }).__ran)).toBeUndefined()
+  // The list page runs none.
+  await run(orbit.app, 'tabs.navigate', { tabId: (await activeTabId(orbit.app)) as string, url: 'orbit://pages/' })
+  await expect(page.getByTestId('internal-page')).toHaveAttribute('data-page', 'pages')
+  expect(await ask('settings.buildInfo', {})).toBe('refused')
 })

@@ -11,7 +11,9 @@ import type { ComponentType } from 'react'
  * - `description`: one line on the list.
  * - `component`: the page. It fills the tab, scrolls itself, and renders like any Orbit UI: the
  *   store (`useOrbit`), commands (`invoke`), and `useWindow()`, the window the tab was in when the
- *   page loaded. A big page loads its code on demand (`React.lazy`).
+ *   page loaded. A big page loads its code on demand (`React.lazy`). It runs only the commands
+ *   `INTERNAL_PAGE_COMMANDS` (src/main/devtools/internal-urls.ts) lists for it, and sends no events
+ *   (D53): list a new page's commands there.
  * - `hidden` (optional): left off the list.
  *
  * Pages register by file name, so adding one edits no file here: any module under

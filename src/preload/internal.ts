@@ -28,8 +28,9 @@ function expose(windowId: string): void {
     windowId,
     view: 'internal',
     platform: process.platform,
+    // Main runs only the commands listed for the page, and takes no events from it (D53).
     invoke: (name, args) => ipcRenderer.invoke('orbit:internal:invoke', name, args),
-    send: (name, payload) => ipcRenderer.send('orbit:internal:send', name, payload),
+    send: () => {},
     getState: () => {
       const pending = prefetched ?? ipcRenderer.invoke('orbit:internal:getState')
       prefetched = undefined

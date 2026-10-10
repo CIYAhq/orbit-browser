@@ -13,10 +13,10 @@ import {
   webContents,
 } from 'electron'
 import { INTERNAL_SCHEME } from '../../shared/commands/devtools'
-import type { CommandName, EventName, OrbitEvents } from '../../shared/rpc'
+import type { CommandName } from '../../shared/rpc'
 import type { MainContext } from '../context'
 import { rendererEntry } from '../windows'
-import { AwaitedPages, internalFile, isInternalUrl } from './internal-urls'
+import { AwaitedPages, INTERNAL_DOCUMENT_CSP, internalFile, internalPageMayRun, isInternalUrl } from './internal-urls'
 
 /**
  * Orbit's internal pages (DT-13): `orbit://<page>/` addresses that open as normal tabs and show
@@ -34,6 +34,9 @@ import { AwaitedPages, internalFile, isInternalUrl } from './internal-urls'
  *   frame the same `window.orbit` bridge Orbit's UI has, on channels of its own. Main answers only
  *   a tab's main frame showing an `orbit:` page, and sends state changes and broadcasts only there.
  *   A web page gets no bridge.
+ * - Each page runs only the commands listed for it (`INTERNAL_PAGE_COMMANDS` in internal-urls.ts)
+ *   and sends no events (D53); its document runs only its own scripts (`script-src 'self'`). A
+ *   script that got into a page, say through text from the web it shows, can do no more than it.
  * - Web content can't reach them: a page can't navigate a frame to an `orbit:` address, redirect
  *   to one or open one in a new tab, and the pages refuse to be framed. It can't load or fetch them
  *   either: the handler serves a page only to a navigation that Orbit or an internal page started
@@ -44,8 +47,9 @@ import { AwaitedPages, internalFile, isInternalUrl } from './internal-urls'
  * Adding a page: a module named `<name>.internal-page.tsx` anywhere under `src/renderer/src`
  * (beside the feature's other UI) that exports `page: InternalPage` (see
  * `src/renderer/src/internal/registry.ts`). It is then `orbit://<name>/`, listed on
- * `orbit://pages/`, and renders like any Orbit UI: the store (`useOrbit`), commands (`invoke`), and
- * `useWindow()`, the window its tab was in when it loaded. Its data comes through the bridge, not
+ * `orbit://pages/`, and renders like any Orbit UI: the store (`useOrbit`), commands (`invoke`, the
+ * ones `INTERNAL_PAGE_COMMANDS` lists for it), and `useWindow()`, the window its tab was in when
+ * it loaded. Its data comes through the bridge, not
  * `fetch()`; its images are inlined by the build or drawn as icons (a plain `<img>` request carries
  * no origin, so it isn't served).
  */
@@ -76,8 +80,8 @@ const TYPES: Record<string, string> = {
 /** The page itself, not one of its scripts or styles. */
 const DOCUMENT_HEADERS = {
   'content-type': 'text/html; charset=utf-8',
-  // No web page may frame an internal page.
-  'content-security-policy': "frame-ancestors 'none'",
+  // No web page may frame an internal page, and it runs only its own scripts (D53).
+  'content-security-policy': INTERNAL_DOCUMENT_CSP,
   // Each showing asks again (see AwaitedPages).
   'cache-control': 'no-store',
 }
@@ -126,7 +130,7 @@ function internalFrame(frame: WebFrameMain | null | undefined): frame is WebFram
 
 /** Serves internal pages in every profile session, bridges them to main, and keeps web content out. */
 export function registerInternalPages(ctx: MainContext): void {
-  const { commands, events, hooks, sessions, store, tabs, windows } = ctx
+  const { commands, hooks, sessions, store, tabs, windows } = ctx
 
   const awaited = new AwaitedPages()
   const serve = server(awaited)
@@ -166,13 +170,10 @@ export function registerInternalPages(ctx: MainContext): void {
     }
     return store.snapshot()
   })
+  // Only the commands listed for the page (D53). It sends no events: those are for Orbit's own UI.
   ipcMain.handle('orbit:internal:invoke', (event, name: CommandName, args: unknown) => {
-    if (!allowed(event)) throw new Error('Forbidden')
+    if (!allowed(event) || !internalPageMayRun(event.senderFrame?.url, name)) throw new Error('Forbidden')
     return commands.run(name, args as never, { windowId: windows.windowIdFor(event.sender), sender: event.sender })
-  })
-  ipcMain.on('orbit:internal:send', (event, name: EventName, payload: OrbitEvents[EventName]) => {
-    if (!allowed(event)) return
-    events.emit(name, payload, { windowId: windows.windowIdFor(event.sender) })
   })
   windows.onBroadcast((channel, args) => {
     if (live.size > 0) forward(channel, args)

@@ -1,6 +1,13 @@
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { AwaitedPages, internalFile, isInternalUrl } from '../../src/main/devtools/internal-urls'
+import {
+  AwaitedPages,
+  INTERNAL_DOCUMENT_CSP,
+  internalFile,
+  internalPageMayRun,
+  internalPageName,
+  isInternalUrl,
+} from '../../src/main/devtools/internal-urls'
 import { parseInput } from '../../src/shared/url'
 
 describe('[DT-13] internal pages: their addresses and files', () => {
@@ -13,6 +20,26 @@ describe('[DT-13] internal pages: their addresses and files', () => {
     expect(isInternalUrl('view-source:orbit://pages/')).toBe(false)
     expect(isInternalUrl('')).toBe(false)
     expect(isInternalUrl(undefined)).toBe(false)
+  })
+
+  it('each page runs only the commands listed for it, by its name in any case; nothing else runs any (D53)', () => {
+    expect(internalPageName('orbit://version/?a#b')).toBe('version')
+    expect(internalPageName('ORBIT://Version/')).toBe('version')
+    expect(internalPageName('https://version/')).toBeUndefined()
+    expect(internalPageMayRun('orbit://version/', 'settings.buildInfo')).toBe(true)
+    expect(internalPageMayRun('ORBIT://VERSION/x?y#z', 'settings.copyBuildInfo')).toBe(true)
+    for (const command of ['tabs.create', 'tabs.navigate', 'downloads.open', 'settings.set', 'action.run']) {
+      expect(internalPageMayRun('orbit://version/', command), command).toBe(false)
+    }
+    expect(internalPageMayRun('orbit://pages/', 'settings.buildInfo')).toBe(false)
+    expect(internalPageMayRun('orbit://nope/', 'settings.buildInfo')).toBe(false)
+    expect(internalPageMayRun('orbit://constructor/', 'constructor')).toBe(false)
+    expect(internalPageMayRun('orbit://__proto__/', 'settings.buildInfo')).toBe(false)
+    expect(internalPageMayRun('https://version/', 'settings.buildInfo')).toBe(false)
+    expect(internalPageMayRun(undefined, 'settings.buildInfo')).toBe(false)
+    // Its document runs only its own scripts, and no web page frames it.
+    expect(INTERNAL_DOCUMENT_CSP).toContain("script-src 'self'")
+    expect(INTERNAL_DOCUMENT_CSP).toContain("frame-ancestors 'none'")
   })
 
   it('typed in the command bar, an internal address is an address, not a search', () => {
