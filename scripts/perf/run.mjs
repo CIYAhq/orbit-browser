@@ -6,6 +6,7 @@
  * scenarios in Chromium on the same machine.
  *
  * Linux: xvfb-run -a -s "-screen 0 1440x900x24" node scripts/perf/run.mjs [--runs 5] [--out perf-results/latest.json]
+ *   [--port 3350] (the fixture server's first port; it takes the next free one up to 3399)
  */
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -22,6 +23,7 @@ const opt = (name, fallback) => {
 const RUNS = Number(opt('runs', '5'))
 const OUT = resolve(opt('out', 'perf-results/latest.json'))
 const SKIP_CHROME = args.includes('--no-chrome')
+const FIRST_PORT = Number(opt('port', '3350'))
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const median = (xs) => {
   const s = [...xs].sort((a, b) => a - b)
@@ -45,7 +47,7 @@ async function startFixtures() {
     res.writeHead(200, { 'content-type': 'text/html' })
     res.end(PAGE(n))
   })
-  let port = 3350
+  let port = FIRST_PORT
   await new Promise((ok, fail) => {
     server.on('error', (err) =>
       err.code === 'EADDRINUSE' && port < 3399 ? server.listen(++port, '127.0.0.1') : fail(err),
@@ -178,9 +180,11 @@ async function orbitInteractive(fx) {
   }
   await sleep(1500)
   const rss10 = treeRssMb(pid)
-  // Put every background tab to sleep and measure what is freed.
+  // Put every background tab to sleep and measure what is freed. Between tasks, as __orbit.run does:
+  // the inspector could otherwise run this part-way through other main-process code.
   await app.evaluate(
-    (_e, ids) => {
+    async (_e, ids) => {
+      await new Promise((r) => setImmediate(r))
       for (const id of ids) globalThis.__orbit.ctx.tabs.sleep(id)
     },
     tabs.slice(0, -1),
@@ -223,8 +227,10 @@ async function orbitInteractive(fx) {
     const t0 = Date.now()
     const inMain = await app.evaluate(async (_e, id) => {
       const o = globalThis.__orbit
+      // Start between tasks, as __orbit.run does, but time the command alone, not that hop.
+      await new Promise((r) => setImmediate(r))
       const s = performance.now()
-      await o.run('tabs.activate', { tabId: id }, o.windowIds()[0])
+      await o.ctx.commands.run('tabs.activate', { tabId: id }, { windowId: o.windowIds()[0] })
       const visible = o.ctx.tabs.get(id)?.getVisible() ?? false
       return { ms: performance.now() - s, visible }
     }, target)
