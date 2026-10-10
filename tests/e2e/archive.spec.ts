@@ -175,14 +175,15 @@ test('[AR-02] ⌘T "View Archive" opens the same view; the Library reopens to th
   expect((await state(orbit.app)).settings.librarySection).toBe('archive')
 })
 
-test('[DL-09][FL-24] once Orbit is idle after launch the Library view is made off-screen, so even the first open is quick', async () => {
+test('[DL-09][FL-24] once Orbit is idle after launch the Library view is made off-screen, so even the first open is quick at 10,000 entries', async () => {
   const { app } = orbit
+  await seed(orbit, { count: 10_000, days: 60 })
   // Nothing loading and nothing over the window: the view is made a few seconds after launch, hidden,
   // with the section it opens to built.
   await expect.poll(async () => (await info(orbit)).ready, { timeout: 20_000 }).toBe(true)
   const lib = await libraryPage(app)
   await expect(lib.getByTestId('library')).toHaveAttribute('data-open', 'false')
-  await expect(lib.getByTestId('archive-search')).toBeAttached()
+  await expect.poll(() => countOf(lib)).toBe(10_000)
   expect(await info(orbit)).toMatchObject({ open: false, visible: false })
   // The first open, from its shortcut's action (no pointer over the Library button to warm it up).
   const marks = async () =>
