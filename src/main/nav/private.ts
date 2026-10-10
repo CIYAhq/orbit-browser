@@ -4,6 +4,7 @@ import { createSpace, createWindowState, THEME_PRESETS } from '../../shared/defa
 import { isFolderId } from '../../shared/ids'
 import {
   isPrivateProfileId,
+  isPrivateSpace,
   isPrivateWindow,
   PRIVATE_PARTITION_PREFIX,
   PRIVATE_PROFILE_PREFIX,
@@ -114,6 +115,8 @@ export function registerPrivate(ctx: MainContext, ops: TabOps, prefs: SitePrefs)
     for (const spaceId of spaceIds) {
       const state = store.state
       if (!state.spaces[spaceId]) continue
+      // Only a private Space: a normal one keeps its tabs, whatever window showed it (fix check B, F3).
+      if (!isPrivateSpace(state, spaceId)) continue
       if (Object.values(state.windows).some((w) => w.spaceId === spaceId)) continue
       const tabIds = itemsOf(state, spaceId).flatMap((id) => tabsInItem(state, id))
       if (tabIds.length > 0) ops.closeTabs(tabIds, 'auto', { remove: true, undoLabel: false })
