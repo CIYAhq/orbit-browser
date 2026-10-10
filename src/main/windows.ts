@@ -1441,11 +1441,22 @@ export class WindowManager {
     rec.tools = view
     rec.toolsShown = false
     rec.toolsReady = false
+    const contents = view.webContents
     // Into the window once its page has loaded (round 2 fix check, M3), when the nav module shows it.
-    view.webContents.once('did-finish-load', () => {
+    contents.on('did-finish-load', () => {
       if (rec.tools !== view || rec.win.isDestroyed()) return
       rec.toolsReady = true
       for (const listener of this.toolsReadyListeners) listener(rec.id)
+    })
+    // A crash takes their page away until it has loaded again (round 3 fix check, F6): they leave the
+    // window until then, and the keyboard goes back to the page if they had it.
+    contents.on('render-process-gone', () => {
+      if (rec.tools !== view || rec.win.isDestroyed()) return
+      rec.toolsReady = false
+      if (!rec.win.contentView.children.includes(view)) return
+      const focused = webContents.getFocusedWebContents()
+      this.removeChild(rec, view)
+      if ((!focused || focused === contents) && !rec.overlayShown && rec.win.isFocused()) this.focusActiveTab(rec.id)
     })
     return view
   }

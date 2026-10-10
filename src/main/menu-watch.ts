@@ -10,6 +10,12 @@ let watching = false
  * opens it: the floating sidebar's card stays out while a menu opened from it is up, even where
  * the menu reaches out of the window (round 2 fix check, M4). A menu that names no window counts
  * for the focused one, where Electron opens it.
+ *
+ * A menu comes off the count when it closes or when Chromium refuses it, whichever it hears first,
+ * and only once. On Linux Chromium runs one native menu at a time in the whole app: a `popup()` while
+ * a menu is up, in any window, closes that one and shows nothing. The refused menu hears no
+ * `menu-will-show` and no `menu-will-close`, only its `popup()` callback, which runs at once (round 3
+ * fix check, M1).
  */
 export function watchMenus(): void {
   if (watching) return
@@ -26,6 +32,7 @@ export function watchMenus(): void {
     const close = () => {
       if (closed) return
       closed = true
+      this.removeListener('menu-will-close', close)
       const left = (upIn.get(id) ?? 1) - 1
       if (left > 0) {
         upIn.set(id, left)
@@ -34,12 +41,18 @@ export function watchMenus(): void {
       upIn.delete(id)
       if (!win.isDestroyed()) for (const listener of closedListeners) listener(win)
     }
+    const callback = options?.callback
     upIn.set(id, (upIn.get(id) ?? 0) + 1)
     this.once('menu-will-close', close)
     try {
-      popup.call(this, options)
+      popup.call(this, {
+        ...options,
+        callback: () => {
+          close()
+          callback?.()
+        },
+      })
     } catch (error) {
-      this.removeListener('menu-will-close', close)
       close()
       throw error
     }

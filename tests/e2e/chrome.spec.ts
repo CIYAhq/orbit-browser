@@ -8,6 +8,7 @@ import {
   activeTab,
   chooseHistory,
   cmd,
+  cmdIn,
   floatingInfo,
   floatingPage,
   HOST_ARGS,
@@ -950,6 +951,118 @@ test('[SB-12][FL-03] a pointer that leaves the window from inside the card, wher
   await app.evaluate(() => (globalThis as unknown as { __menu: Electron.Menu }).__menu.closePopup())
   await expect.poll(async () => (await sidebarState()).peeking, { timeout: 1000 * FRAME_SLACK }).toBe(false)
   expect(Date.now() - closed).toBeLessThan(1000 * FRAME_SLACK)
+})
+
+type MenuHooks = {
+  __orbit: { windowIds: () => string[]; ctx: { windows: { get: (w: string) => Electron.BrowserWindow } } }
+  __menus?: Electron.Menu[]
+  __heard?: string[]
+}
+
+/**
+ * Asks for a native menu in each window given, in order and at once, as right-clicks close together
+ * do. Returns what every menu asked for so far heard: `shown`, `closed`, and its popup() callback (`done`).
+ */
+function popMenus(...menus: [label: string, windowId: string][]): Promise<string[]> {
+  return orbit.app.evaluate(({ Menu }, list) => {
+    const g = globalThis as unknown as MenuHooks
+    const heard = g.__heard ?? []
+    const shown = g.__menus ?? []
+    g.__heard = heard
+    g.__menus = shown
+    for (const [label, windowId] of list) {
+      const menu = Menu.buildFromTemplate([{ label }])
+      shown.push(menu)
+      menu.on('menu-will-show', () => heard.push(`${label} shown`))
+      menu.on('menu-will-close', () => heard.push(`${label} closed`))
+      const window = g.__orbit.ctx.windows.get(windowId)
+      menu.popup({ window, x: 120, y: 60, callback: () => heard.push(`${label} done`) })
+    }
+    return [...heard]
+  }, menus)
+}
+
+/** Closes what `popMenus` showed that is still up (where the engine shows more than one menu at a time). */
+function closeMenusUp(): Promise<void> {
+  return orbit.app.evaluate(() => {
+    const g = globalThis as unknown as MenuHooks
+    const heard = g.__heard ?? []
+    for (const menu of g.__menus ?? []) {
+      const label = menu.items[0]?.label
+      if (heard.includes(`${label} shown`) && !heard.includes(`${label} closed`)) menu.closePopup()
+    }
+  })
+}
+
+test('[SB-12][FL-03] a menu Chromium refuses holds no card: asked for while a menu is up, in this window or another, it shows nothing, and the card goes as the pointer leaves the window (round 3 fix check, M1)', async () => {
+  const { app } = orbit
+  await openTab(app, page('Refused'))
+  await hideSidebar()
+  const floating = await revealFloating()
+  await floating.mouse.move(100, 400)
+  await floating.mouse.move(110, 410)
+  await expect.poll(async () => (await floatingInfo(app)).hold?.over).toBe(true)
+  // The card's last word as the pointer goes where nothing hears it (as in the test before).
+  await floating.evaluate(() =>
+    document.body.dispatchEvent(new MouseEvent('mouseout', { clientX: 2, clientY: 45, bubbles: true })),
+  )
+  const [first] = await app.evaluate(() => (globalThis as unknown as MenuHooks).__orbit.windowIds())
+  if (!first) throw new Error('no window')
+  // Two menus at once, as two right-clicks close together ask: Chromium runs one native menu at a
+  // time in the app, so asking for the second closes the first, and the second shows nothing.
+  const heard = await popMenus(['First', first], ['Second', first])
+  if (process.platform === 'linux') expect(heard).toEqual(['First shown', 'First closed', 'First done', 'Second done'])
+  await closeMenusUp()
+  // The events a closing menu sends the window (the pointer back over it) come in first.
+  await new Promise((r) => setTimeout(r, 300))
+  // Nothing is up: on out of the window, the card goes within a second.
+  let left = Date.now()
+  await pointerAt(app, -40, 300)
+  await expect.poll(async () => (await sidebarState()).peeking, { timeout: 1000 * FRAME_SLACK }).toBe(false)
+  expect(Date.now() - left).toBeLessThan(1000 * FRAME_SLACK)
+
+  // A menu asked for in a second window while the first window has one up: the same.
+  const before = [first]
+  await action(app, 'window.new')
+  let second = ''
+  await expect
+    .poll(async () => {
+      const ids = await app.evaluate(() => (globalThis as unknown as MenuHooks).__orbit.windowIds())
+      second = ids.find((id) => !before.includes(id)) ?? ''
+      return second
+    })
+    .not.toBe('')
+  const peekingIn = async (windowId: string) => (await state(app)).windows[windowId]?.sidebar.peeking
+  const overlayIn = async (windowId: string) => (await state(app)).windows[windowId]?.overlay.kind
+  // Its command bar closed once it opens, and its sidebar hidden, its card is out for a pointer it
+  // can't place, in the window.
+  await expect.poll(() => overlayIn(second)).not.toBe('none')
+  await cmdIn(app, second, 'overlay.close')
+  await expect.poll(() => overlayIn(second)).toBe('none')
+  await cmdIn(app, second, 'window.setSidebar', { visible: false })
+  await pointerAt(app, 300, 300, second)
+  await cmdIn(app, second, 'window.setSidebar', { peeking: true })
+  await cmdIn(app, second, 'sidebar.peekState', { over: null })
+  await new Promise((r) => setTimeout(r, 600))
+  expect((await floatingInfo(app, second)).hold).toEqual({ over: true, editing: false, overlay: false, hiding: false })
+  expect(await peekingIn(second)).toBe(true)
+  await popMenus(['Up in the first', first])
+  await new Promise((r) => setTimeout(r, 300))
+  const both = await popMenus(['Asked in the second', second])
+  if (process.platform === 'linux') {
+    expect(both.slice(heard.length)).toEqual([
+      'Up in the first shown',
+      'Up in the first closed',
+      'Up in the first done',
+      'Asked in the second done',
+    ])
+  }
+  await closeMenusUp()
+  await new Promise((r) => setTimeout(r, 300))
+  left = Date.now()
+  await pointerAt(app, -2000, -2000, second)
+  await expect.poll(() => peekingIn(second), { timeout: 1000 * FRAME_SLACK }).toBe(false)
+  expect(Date.now() - left).toBeLessThan(1000 * FRAME_SLACK)
 })
 
 test('[SB-14] dragging the edge sets the width 1:1 within limits; double-click resets; far left hides', async () => {

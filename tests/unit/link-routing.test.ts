@@ -6,6 +6,7 @@ import {
   isMeetingLink,
   type LinkSettings,
   type LinkSource,
+  localFileBlockedMessage,
   pageMayOpen,
   routeFor,
   sameSite,
@@ -180,6 +181,17 @@ describe('local files a page may have Orbit open (D49)', () => {
     }
     expect(framesMayOpen(gone, file)).toBe(false)
     expect(framesMayOpen(gone, 'https://example.org/b')).toBe(true)
+  })
+  it('a local file refused for a page is named in its toast (round 3 fix check F1)', () => {
+    expect(localFileBlockedMessage('file:///tmp/orbit/notes.txt')).toBe('Local file blocked: notes.txt')
+    expect(localFileBlockedMessage('file:///tmp/my%20docs/caf%C3%A9%20menu.pdf')).toBe(
+      'Local file blocked: café menu.pdf',
+    )
+    expect(localFileBlockedMessage('view-source:file:///tmp/orbit/index.html')).toBe('Local file blocked: index.html')
+    expect(localFileBlockedMessage('file:///C:/Users/me/plan.txt')).toBe('Local file blocked: plan.txt')
+    expect(localFileBlockedMessage('file:///home/me/')).toBe('Local file blocked: me')
+    expect(localFileBlockedMessage('file:///tmp/100%.txt')).toBe('Local file blocked: 100%.txt')
+    expect(localFileBlockedMessage('file:///')).toBe('Local file blocked: file:///')
   })
   it('which addresses are local files', () => {
     expect(isLocalFileUrl(file)).toBe(true)

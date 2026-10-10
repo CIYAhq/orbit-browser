@@ -8,7 +8,7 @@ import {
   type WebContentsViewConstructorOptions,
 } from 'electron'
 import { isFolderId, isTabId, newId } from '../../shared/ids'
-import { framesMayOpen } from '../../shared/link-routing'
+import { framesMayOpen, localFileBlockedMessage } from '../../shared/link-routing'
 import { isPrivateTab, privateTabMenu } from '../../shared/private'
 import type { ContainerRef, Folder, FolderId, ItemId, TabId, WindowId } from '../../shared/state'
 import {
@@ -515,8 +515,12 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
       }
     })
     wc.setWindowOpenHandler((details) => {
-      // As for a tab's page: a local file opens for no web page (D49, round 2 fix check F1).
-      if (!framesMayOpen(wc, details.url)) return { action: 'deny' }
+      // As for a tab's page: a local file opens for no web page, and a toast names it (D49, round 2
+      // fix check F1, round 3 fix check F1).
+      if (!framesMayOpen(wc, details.url)) {
+        localFileRefused(openerTabId, details.url)
+        return { action: 'deny' }
+      }
       const windowId = windows.windowOfTab(openerTabId) ?? windows.focusedWindowId()
       if (gesture.used || Date.now() - gesture.at > 1000) {
         toast(windowId, 'Pop-up blocked')
@@ -540,6 +544,20 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
       }
     })
   }
+
+  /**
+   * A local file refused for a page (D49) is named in a toast, so a click that opens nothing says
+   * why: once per tab and file every few seconds, however often a page asks (round 3 fix check F1).
+   */
+  const refusedAt = new Map<TabId, { url: string; at: number }>()
+  const localFileRefused = (tabId: TabId, url: string) => {
+    const now = Date.now()
+    const last = refusedAt.get(tabId)
+    if (last?.url === url && now - last.at < 3000) return
+    refusedAt.set(tabId, { url, at: now })
+    toast(windows.windowOfTab(tabId) ?? windows.focusedWindowId(), localFileBlockedMessage(url))
+  }
+  tabs.onLocalFileRefused = localFileRefused
 
   // One "Pop-up blocked" per tab every few seconds, however often a page tries.
   const blockedAt = new Map<TabId, number>()

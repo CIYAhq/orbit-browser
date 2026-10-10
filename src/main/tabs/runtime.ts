@@ -162,6 +162,8 @@ export class TabRuntime {
   recentSwitch?: { active: (windowId: WindowId) => boolean; closeHighlighted: (windowId: WindowId) => void }
   /** A page tried to open a tab or pop-up without a user gesture. */
   onPopupBlocked?: (tabId: TabId, url: string, referrer: Referrer) => void
+  /** A page asked for a local file in a new tab, window or pop-up, and Orbit refused it (D49). */
+  onLocalFileRefused?: (tabId: TabId, url: string) => void
   /** True when the tab's site may open pop-ups without a click (allowed in site controls, NV-09). */
   allowsPopups?: (tabId: TabId) => boolean
   /** Last user gesture per tab, for the pop-up rule (NV-09). */
@@ -319,10 +321,14 @@ export class TabRuntime {
     })
     contents.on('context-menu', (_e, params) => showPageContextMenu(this.ctx, tabId, contents, params))
     contents.setWindowOpenHandler((details) => {
-      // A local file opens for no web page, nor for a page with a frame from elsewhere, which may be
-      // the one asking: no tab, window, Peek, Mini Window or pop-up, nor a blocked pop-up to open
-      // later, whatever the engine let through (D49, round 2 fix check F1).
-      if (!framesMayOpen(contents, details.url)) return { action: 'deny' }
+      // A local file opens for no web page, nor for a local page with any frame whose origin isn't a
+      // local file's (a web page's, or an opaque one), which may be the one asking: no tab, window,
+      // Peek, Mini Window or pop-up, nor a blocked pop-up to open later, whatever the engine let
+      // through (D49, round 2 fix check F1). A toast names the file (round 3 fix check F1).
+      if (!framesMayOpen(contents, details.url)) {
+        this.onLocalFileRefused?.(tabId, details.url)
+        return { action: 'deny' }
+      }
       // A link Orbit asked this page to open (openFromPage): the click was counted already.
       const asked = this.takePageOpen(contents.id, details.url)
       if (asked) return asked

@@ -38,6 +38,8 @@ export interface NavFixtures {
   cacheControl: (path: string) => string | undefined
   /** What the latest request for a path said about where it came from, or undefined before one. */
   sentFrom: (path: string) => SentFrom | undefined
+  /** What each request for a path said about where it came from, oldest first. */
+  sentFromEach: (path: string) => SentFrom[]
   close: () => Promise<void>
 }
 
@@ -168,7 +170,7 @@ function tone(seconds: number): Buffer {
 export async function startNavFixtures(): Promise<NavFixtures> {
   const hits = new Map<string, number>()
   const cacheControl = new Map<string, string | undefined>()
-  const sentFrom = new Map<string, SentFrom>()
+  const sentFrom = new Map<string, SentFrom[]>()
   const pending = new Set<ServerResponse>()
   /** The held-back pages per path, to send early (`release`). */
   const held = new Map<string, Set<() => void>>()
@@ -183,7 +185,7 @@ export async function startNavFixtures(): Promise<NavFixtures> {
     const site = req.headers['sec-fetch-site']
     if (typeof site === 'string') from.site = site
     if (req.headers.cookie) from.cookie = req.headers.cookie
-    sentFrom.set(u.pathname, from)
+    sentFrom.set(u.pathname, [...(sentFrom.get(u.pathname) ?? []), from])
     const [, kind = '', raw = 'index'] = u.pathname.split('/')
     const title = decodeURIComponent(raw)
     const send = () => {
@@ -271,7 +273,8 @@ export async function startNavFixtures(): Promise<NavFixtures> {
       for (const done of [...(held.get(path) ?? [])]) done()
     },
     cacheControl: (path) => cacheControl.get(path),
-    sentFrom: (path) => sentFrom.get(path),
+    sentFrom: (path) => sentFrom.get(path)?.at(-1),
+    sentFromEach: (path) => [...(sentFrom.get(path) ?? [])],
     close: () =>
       new Promise((r) => {
         for (const socket of sockets) socket.destroy()
@@ -597,16 +600,20 @@ export async function floatingPage(app: ElectronApplication): Promise<Page> {
 }
 
 /**
- * The pointer Orbit reads for the sidebar's edge at `x`, `y` of the first window's content, inside
- * it or not, as a real pointer no view in the window hears (fix check A, M1).
+ * The pointer Orbit reads for the sidebar's edge at `x`, `y` of a window's content (default: the
+ * first), inside it or not, as a real pointer no view in the window hears (fix check A, M1).
  */
-export async function pointerAt(app: ElectronApplication, x: number, y: number): Promise<void> {
-  await app.evaluate((_e, [px, py]) => (globalThis as unknown as Hooks).__orbitNav.pointerAt(px, py), [x, y] as const)
+export async function pointerAt(app: ElectronApplication, x: number, y: number, windowId?: string): Promise<void> {
+  await app.evaluate((_e, [px, py, w]) => (globalThis as unknown as Hooks).__orbitNav.pointerAt(px, py, w), [
+    x,
+    y,
+    windowId,
+  ] as const)
 }
 
-/** The first window's floating sidebar. */
-export function floatingInfo(app: ElectronApplication): Promise<FloatingInfo> {
-  return app.evaluate(() => (globalThis as unknown as Hooks).__orbitNav.floating())
+/** A window's floating sidebar (default: the first). */
+export function floatingInfo(app: ElectronApplication, windowId?: string): Promise<FloatingInfo> {
+  return app.evaluate((_e, w) => (globalThis as unknown as Hooks).__orbitNav.floating(w), windowId)
 }
 
 /** The corner radius a shown page's card was given (SB-19). */

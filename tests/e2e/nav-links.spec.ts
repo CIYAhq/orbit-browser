@@ -266,11 +266,17 @@ test('[NV-08][NV-09][NV-12] links Orbit opens for a page (its menu, ⌥-click, a
   await fromMenu('Open Link in New Window')
   await expect.poll(() => fx.hits('/page/Opened-2')).toBe(1)
   expect(fx.sentFrom('/page/Opened-2')?.referer).toBe(referer)
-  // ⌥-click: split view.
-  await away(3)
+  // ⌥-click: split view. The link is requested twice, for the split's page and for the engine's own
+  // ⌥-click download (Orbit cancels it once it has begun), so the requests aren't counted: once the
+  // split shows the page, each request so far had the page as Referer.
+  const url3 = await away(3)
   await clickInPage(app, src, '#away', ['alt'])
-  await expect.poll(() => fx.hits('/page/Opened-3')).toBe(1)
-  expect(fx.sentFrom('/page/Opened-3')?.referer).toBe(referer)
+  await expect.poll(() => splitTabs(app, srcTab)).toHaveLength(2)
+  const [, split] = await splitTabs(app, srcTab)
+  await waitLoaded(app, split as string, url3)
+  const sent = fx.sentFromEach('/page/Opened-3')
+  expect(sent.length).toBeGreaterThan(0)
+  for (const request of sent) expect(request.referer).toBe(referer)
   // A pop-up blocked as the page loaded, opened from the address display.
   const blocked = fx.urlOn('127.0.0.1', '/page/Opened-4')
   await openTab(app, fx.url(`/page/Eager?open=${encodeURIComponent(blocked)}`))
@@ -891,7 +897,7 @@ function askToOpen(
 }
 
 test('[NV-08][NV-09][MW-07] a web page that asks for a local file in a new tab, window or pop-up gets none, even where the engine lets it ask; a local page still does (D49, round 2 fix check F1)', async () => {
-  const { app } = orbit
+  const { app, shell } = orbit
   const local = localFiles()
   const folder = new URL(local.folder.endsWith('/') ? local.folder : `${local.folder}/`)
   const loads = await watchLoads(app, local.folder)
@@ -915,10 +921,14 @@ test('[NV-08][NV-09][MW-07] a web page that asks for a local file in a new tab, 
     await askToOpen(app, web, local.text, 'new-window', { features: popup }),
   ]
   expect(answers).toEqual(['deny', 'deny', 'deny', 'deny', 'deny', 'deny'])
-  // A pop-up the page opened asks too: its own opens become tabs.
+  // A toast names the file, once however often the page asks (round 3 fix check F1).
+  const refused = (file: string) => shell.getByTestId('toast').filter({ hasText: `Local file blocked: ${file}` })
+  await expect(refused('orbit-local.txt')).toHaveCount(1)
+  // A pop-up the page opened asks too: its own opens become tabs. Its toast is in the opener's window.
   await clickInPage(app, web, '#popup')
   await expect.poll(() => loadedTitle(app, page('Popup-Opener'))).toBe('Popup-Opener')
-  expect(await askToOpen(app, page('Popup-Opener'), local.text, 'foreground-tab')).toBe('deny')
+  expect(await askToOpen(app, page('Popup-Opener'), local.image, 'foreground-tab')).toBe('deny')
+  await expect(refused('orbit-local.png')).toBeVisible()
 
   // A local page with a frame from the web: the frame may be the one asking.
   const framed = new URL('framed.html', folder).href
@@ -941,6 +951,68 @@ test('[NV-08][NV-09][MW-07] a web page that asks for a local file in a new tab, 
   await openTab(app, first)
   expect(await askToOpen(app, first, local.text, 'background-tab')).toBe('deny')
   await expect.poll(fileTabs).toEqual([local.text])
+})
+
+test('[NV-08][NV-09] a local page with a frame of another origin, a web page’s or an opaque one, opens no local file in a new tab, and a toast names it; a plain click still opens it (D49, round 3 fix check F1)', async () => {
+  const { app, shell } = orbit
+  const local = localFiles()
+  const folder = new URL(local.folder.endsWith('/') ? local.folder : `${local.folder}/`)
+  const fileTabs = async () =>
+    Object.values((await state(app)).tabs)
+      .filter((t) => t.url.includes('orbit-local'))
+      .map((t) => t.url)
+      .sort()
+  const frameOrigins = (id: string) =>
+    app.evaluate(
+      (_e, tabId) =>
+        (globalThis as unknown as TabsHook).__orbit.ctx.tabs
+          .contents(tabId)
+          ?.mainFrame.framesInSubtree.map((f) => f.origin) ?? [],
+      id,
+    )
+  /** A local page with a frame, a target=_blank link to the text file and a plain one to the image. */
+  const localPage = (name: string, frame: string) => {
+    const url = new URL(`${name}.html`, folder).href
+    const links = `<a id="blank" target="_blank" href="${local.text}">Text</a> <a id="plain" href="${local.image}">Image</a>`
+    writeFileSync(new URL(url), `<!doctype html><title>${name}</title><p>${links}</p>${frame}`)
+    return url
+  }
+  const toasts = shell.getByTestId('toast')
+  const refused = (file: string) => toasts.filter({ hasText: `Local file blocked: ${file}` })
+  const frames = [
+    { name: 'web-frame', frame: `<iframe src="${page('FramedWeb')}"></iframe>`, origin: `http://localhost:${fx.port}` },
+    { name: 'sandboxed-frame', frame: '<iframe sandbox srcdoc="<p>Sandboxed</p>"></iframe>', origin: 'null' },
+    { name: 'data-frame', frame: '<iframe src="data:text/html,<p>Data</p>"></iframe>', origin: 'null' },
+  ]
+  let last = { url: '', id: '' }
+  for (const { name, frame, origin } of frames) {
+    const url = localPage(name, frame)
+    const id = await openTab(app, url)
+    last = { url, id }
+    await expect.poll(() => frameOrigins(id)).toEqual(['file://', origin])
+    // The toasts before have gone.
+    await expect(toasts).toHaveCount(0, { timeout: 5000 })
+    // A target=_blank link: the page asks for a new tab.
+    await clickInPage(app, url, '#blank')
+    await expect(refused('orbit-local.txt')).toBeVisible()
+    // ⌘-click (Ctrl-click): a background tab.
+    await clickInPage(app, url, '#plain', [mod])
+    await expect(refused('orbit-local.png')).toBeVisible()
+    expect(await fileTabs()).toEqual([])
+  }
+  // A plain click without a target loads it in the page's own tab, as the engine allows.
+  await clickInPage(app, last.url, '#plain')
+  await expect.poll(() => urlOf(app, last.id)).toBe(local.image)
+
+  // A local page with a frame of its own origin (srcdoc) opens both, and no toast.
+  await expect(toasts).toHaveCount(0, { timeout: 5000 })
+  const own = localPage('own-frame', '<iframe srcdoc="<p>Own</p>"></iframe>')
+  const ownId = await openTab(app, own)
+  await expect.poll(() => frameOrigins(ownId)).toEqual(['file://', 'file://'])
+  await clickInPage(app, own, '#blank')
+  await clickInPage(app, own, '#plain', [mod])
+  await expect.poll(fileTabs).toEqual([local.image, local.image, local.text].sort())
+  expect(await toasts.count()).toBe(0)
 })
 
 test('[NV-09] a pop-up blocked on a web page is offered to open later unless it is a local file (D49, round 2 fix check F1)', async () => {
