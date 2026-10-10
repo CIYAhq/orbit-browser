@@ -2,6 +2,7 @@ import { type MenuItemConstructorOptions, nativeImage } from 'electron'
 import type { CommandResult } from '../../shared/rpc'
 import type { WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
+import { isPrivateOrGone } from './service'
 
 /** How many closed tabs the Recently Closed list shows (AR-09: "the last ~10 items"). */
 export const RECENTLY_CLOSED_SHOWN = 10
@@ -53,11 +54,15 @@ export function recentlyClosedItems(
   })
 }
 
-/** Reads the list now (a menu is about to show). True when it changed. */
+/**
+ * Reads the list now (a menu is about to show). True when it changed. The list shows in normal
+ * windows (the Library never opens in a private one; the File menu is the app's), so tabs of a
+ * private or deleted profile never appear in it.
+ */
 export async function refreshRecentlyClosed(ctx: MainContext): Promise<boolean> {
-  const list = ctx.commands.has('tabs.recentlyClosed')
-    ? (await ctx.commands.run('tabs.recentlyClosed', {})).slice(0, RECENTLY_CLOSED_SHOWN)
-    : []
+  const all = ctx.commands.has('tabs.recentlyClosed') ? await ctx.commands.run('tabs.recentlyClosed', {}) : []
+  const state = ctx.store.state
+  const list = all.filter((c) => !isPrivateOrGone(state, c.profileId)).slice(0, RECENTLY_CLOSED_SHOWN)
   const key = (l: Closed[]) => JSON.stringify(l.map((c) => [c.tabId, c.title, c.url, !!c.favicon]))
   if (key(list) === key(shown)) return false
   shown = list
