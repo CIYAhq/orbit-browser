@@ -9,9 +9,11 @@ import {
   blockedMenu,
   chooseBlocked,
   choosePageMenu,
+  clickEvents,
   clickInPage,
   cmd,
   foreignWindowTitles,
+  hoverInPage,
   type NavFixtures,
   openTab,
   pageMenu,
@@ -325,6 +327,33 @@ test('[NV-08][SV-08] ⌥-click (Alt-click) opens the link in split view beside t
   // The engine's own download of the link comes a moment later, and is cancelled.
   await expect.poll(downloads, { timeout: 10_000 }).toEqual([{ url: page('Alted-next'), cancelled: true }])
   expect(await urlOf(app, id)).toBe(page('Alted'))
+})
+
+test('[NV-08][SV-08] ⌥-click opens the link under the click, though the pointer leaves the page before a busy page answers which (fix check B, F1)', async () => {
+  const { app } = orbit
+  const url = page('Busy')
+  const id = await openTab(app, url)
+  const downloads = await watchDownloads(app, url)
+  const next = await hoverInPage(app, url, '#next')
+  await hoverInPage(app, url, '#child')
+  // The page is busy for a moment. Meanwhile ⌥-click comes on the link above the pointer, and the
+  // pointer leaves the page, as when a window opens over the real one.
+  const events = [...clickEvents(next.x, next.y, ['alt']), { type: 'mouseLeave', x: next.x, y: next.y }]
+  await app.evaluate(
+    ({ webContents }, [u, list]) => {
+      const contents = webContents.getAllWebContents().find((w) => w.getURL() === u)
+      if (!contents) throw new Error(`no page ${u}`)
+      void contents.executeJavaScript(
+        '(() => { const end = performance.now() + 400; while (performance.now() < end); })()',
+      )
+      for (const event of list) contents.sendInputEvent(event as unknown as Electron.MouseInputEvent)
+    },
+    [url, events] as const,
+  )
+  await expect.poll(() => splitTabs(app, id)).toHaveLength(2)
+  const [, right] = await splitTabs(app, id)
+  expect(await urlOf(app, right)).toBe(page('Busy-next'))
+  await expect.poll(downloads, { timeout: 10_000 }).toEqual([{ url: page('Busy-next'), cancelled: true }])
 })
 
 test('[NV-09] a target=_blank link opens a new tab at the top of Today and selects it', async () => {

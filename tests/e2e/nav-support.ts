@@ -333,7 +333,7 @@ export function chooseBlocked(app: ElectronApplication, label: string): Promise<
   return app.evaluate((_e, l) => (globalThis as unknown as Hooks).__orbitNav.chooseBlocked(l), label)
 }
 
-type Modifier = 'shift' | 'control' | 'alt' | 'meta'
+export type Modifier = 'shift' | 'control' | 'alt' | 'meta'
 type InputEventInit = { type: string } & Record<string, unknown>
 
 /** Runs a script in the page with this address (or a part of it); null while there's none or it loads. */
@@ -350,7 +350,7 @@ function inPage<T>(app: ElectronApplication, page: string, code: string): Promis
 }
 
 /** Sends input events to the page with this address (or a part of it) as the hardware would. */
-async function sendToPage(app: ElectronApplication, page: string, events: InputEventInit[]): Promise<void> {
+export async function sendToPage(app: ElectronApplication, page: string, events: InputEventInit[]): Promise<void> {
   await app.evaluate(
     ({ webContents }, [part, list]) => {
       const matches = (url: string) => (part.startsWith('http') ? url === part : url.includes(part))
@@ -360,6 +360,39 @@ async function sendToPage(app: ElectronApplication, page: string, events: InputE
     },
     [page, events] as const,
   )
+}
+
+/**
+ * Moves the pointer onto the middle of an element of a page until the page has it hovered, and
+ * returns that point. The move goes again while waiting: the real pointer's own crossing (a window
+ * opening over it, say) can take the page's hover back after it (fix check B, F1).
+ * `page` is the page's full address (matched exactly), or a part of it.
+ */
+export async function hoverInPage(
+  app: ElectronApplication,
+  page: string,
+  selector: string,
+): Promise<{ x: number; y: number }> {
+  const sel = JSON.stringify(selector)
+  const deadline = Date.now() + 10_000
+  let at: { x: number; y: number } | null = null
+  while (!at && Date.now() < deadline) {
+    at = await inPage<{ x: number; y: number }>(
+      app,
+      page,
+      `(() => { const r = document.querySelector(${sel})?.getBoundingClientRect(); return r ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } : null })()`,
+    )
+    if (!at) await new Promise((r) => setTimeout(r, 100))
+  }
+  if (!at) throw new Error(`no ${selector} in ${page}`)
+  const { x, y } = at
+  await expect
+    .poll(async () => {
+      await sendToPage(app, page, [{ type: 'mouseMove', x, y }])
+      return inPage<boolean>(app, page, `!!document.querySelector(${sel})?.matches(':hover')`)
+    })
+    .toBe(true)
+  return { x, y }
 }
 
 /**
@@ -375,21 +408,17 @@ export async function clickInPage(
   modifiers: Modifier[] = [],
   button: 'left' | 'middle' | 'right' = 'left',
 ): Promise<void> {
-  const sel = JSON.stringify(selector)
-  const deadline = Date.now() + 10_000
-  let at: { x: number; y: number } | null = null
-  while (!at && Date.now() < deadline) {
-    at = await inPage<{ x: number; y: number }>(
-      app,
-      page,
-      `(() => { const r = document.querySelector(${sel})?.getBoundingClientRect(); return r ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } : null })()`,
-    )
-    if (!at) await new Promise((r) => setTimeout(r, 100))
-  }
-  if (!at) throw new Error(`no ${selector} in ${page}`)
-  const { x, y } = at
-  await sendToPage(app, page, [{ type: 'mouseMove', x, y }])
-  await expect.poll(() => inPage<boolean>(app, page, `!!document.querySelector(${sel})?.matches(':hover')`)).toBe(true)
+  const { x, y } = await hoverInPage(app, page, selector)
+  await sendToPage(app, page, clickEvents(x, y, modifiers, button))
+}
+
+/** The keys going down, a press and release at (x, y), and the keys coming up. */
+export function clickEvents(
+  x: number,
+  y: number,
+  modifiers: Modifier[] = [],
+  button: 'left' | 'middle' | 'right' = 'left',
+): InputEventInit[] {
   const keys: Record<Modifier, string> = { shift: 'Shift', control: 'Control', alt: 'Alt', meta: 'Meta' }
   const events: InputEventInit[] = []
   const held: Modifier[] = []
@@ -403,7 +432,7 @@ export async function clickInPage(
     held.pop()
     events.push({ type: 'keyUp', keyCode: keys[m], modifiers: [...held] })
   }
-  await sendToPage(app, page, events)
+  return events
 }
 
 /** Orbit's windows: id, kind and bounds, in the order they opened. */

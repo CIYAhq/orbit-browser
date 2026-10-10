@@ -16,21 +16,23 @@ const ALT_CLICK_DOWNLOAD_MS = 15_000
 const BLOCKED_SHOWN = 5
 
 /**
- * The link under the pointer in the page's main frame (through open shadow roots), as
- * `{ href, policy }`; `{ frame: true }` when the pointer is over a frame or something Orbit can't
+ * The link at a point of the page's main frame, in CSS pixels (through open shadow roots), as
+ * `{ href, policy }`; `{ frame: true }` when the point is over a frame or something Orbit can't
  * look into (the link may be inside); null over anything else. `policy` is the referrer policy the
  * link sets for itself (`rel=noreferrer`, `referrerpolicy`) or else the page's
  * `<meta name="referrer">`; a policy the page sets in its response headers is out of reach.
+ *
+ * The click's own point, not the page's `:hover`: the page's hover follows the pointer it was last
+ * told about, which can change between the press and this lookup (fix check B, F1).
  */
-const HOVERED_LINK = `(() => {
+const linkAt = (x: number, y: number) => `(() => {
   let root = document, el = null
   for (let i = 0; i < 16; i++) {
-    const list = root.querySelectorAll(':hover')
-    const last = list[list.length - 1]
-    if (!last) break
-    el = last
-    if (!last.shadowRoot) break
-    root = last.shadowRoot
+    const hit = root.elementFromPoint(${x}, ${y})
+    if (!hit || hit === el) break
+    el = hit
+    if (!hit.shadowRoot) break
+    root = hit.shadowRoot
   }
   if (!el) return null
   for (let n = el; n; n = n.parentElement || (n.getRootNode && n.getRootNode().host) || null) {
@@ -47,7 +49,7 @@ const HOVERED_LINK = `(() => {
   return tag === 'iframe' || tag === 'frame' || tag === 'object' || tag === 'embed' || el.shadowRoot ? { frame: true } : null
 })()`
 
-interface Hovered {
+interface PageLink {
   href?: string
   policy?: string
   frame?: boolean
@@ -147,15 +149,18 @@ export function registerLinks(ctx: MainContext, deps: LinksDeps): LinksTestHooks
       .catch(() => {})
   }
 
-  const onAltClick = async (tabId: TabId, contents: WebContents) => {
+  /** An ⌥-click at `at` (the press, in the page's view): the link there, in a pane beside the page. */
+  const onAltClick = async (tabId: TabId, contents: WebContents, at: { x: number; y: number }) => {
     const windowId = windows.windowOfTab(tabId)
     // Only a page that is one of a browser window's panes (not Peek, a Mini Window or a pop-up).
     if (!windowId || store.state.windows[windowId]?.kind === 'mini') return
     if (!shownTabs(store.state, windowId).has(tabId)) return
     const fallback = hovered.get(tabId)
-    let found: Hovered | null
+    const zoom = contents.getZoomFactor() || 1
+    let found: PageLink | null
     try {
-      found = (await contents.executeJavaScriptInIsolatedWorld(NAV_WORLD, [{ code: HOVERED_LINK }])) as Hovered | null
+      const code = linkAt(at.x / zoom, at.y / zoom)
+      found = (await contents.executeJavaScriptInIsolatedWorld(NAV_WORLD, [{ code }])) as PageLink | null
     } catch {
       found = { frame: true }
     }
@@ -181,7 +186,7 @@ export function registerLinks(ctx: MainContext, deps: LinksDeps): LinksTestHooks
     })
     contents.on('before-mouse-event', (_e, mouse) => {
       if (mouse.type !== 'mouseDown' || mouse.button !== 'left' || !altOnly(mouse)) return
-      void onAltClick(tabId, contents)
+      void onAltClick(tabId, contents, { x: mouse.x, y: mouse.y })
     })
     contents.on('did-create-window', (popup, details) => keepHostTitle(popup, details.url))
     contents.once('destroyed', () => {
