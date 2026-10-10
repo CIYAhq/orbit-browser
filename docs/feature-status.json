@@ -1,4 +1,13 @@
 {
+  "ST-01": {"built": "yes", "note": "own window (⌘, / Ctrl+,): opens or focuses one; remembers section and size; takes the opener Space's colours; sections come from a registry (src/renderer/src/settings/registry.ts); search filters rows"},
+  "ST-02": {"built": "yes", "note": "sections and common settings are command-bar actions (settings.*) that open Settings at the row; the keys lane adds Shortcuts"},
+  "ST-03": {"built": "partial", "note": "default browser row and menu action (only an installed build can register; e2e uses a stub), Mini Window archive timing, Import button when the import lane registers import.open; update rows wait for UP"},
+  "ST-04": {"built": "yes", "note": "list with Default first, rename any profile, New Profile…, delete with confirmation (off while a Space uses it, and says why)"},
+  "ST-05": {"built": "yes", "note": "12 hours (default), 24 hours, 7 days, 30 days per profile; no Never; other profiles follow Default until set"},
+  "ST-06": {"built": "yes", "note": "per-profile default engine (8 built-ins), custom engines with keyword and %s URL, Make default from the row menu; no extension override in Electron, so that row does not exist"},
+  "ST-20": {"built": "partial", "note": "per-profile rows carry the profile's name; download location, passwords and site permissions don't exist yet"},
+  "AP-01": {"built": "yes", "note": "Light / Dark / Match system in Settings and the Space theme picker; about 200 ms cross-fade, no flash"},
+  "OB-02": {"built": "yes", "note": "audit and e2e: no account UI anywhere; a first run sends nothing off the computer except Chromium's spell-check dictionary download (see test)"},
   "SB-01": {"built": "partial", "note": "scaffold; audit vs spec"},
   "SB-02": {"built": "partial", "note": "scaffold; audit vs spec"},
   "SB-03": {"built": "partial", "note": "scaffold"},

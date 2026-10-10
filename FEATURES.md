@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 140 built (45 partial) · 189 tested · 0 feel right.
+**Totals:** 485 spec’d · 147 built (47 partial) · 202 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 97 | 118 |
-| P1 | 221 | 39 | 66 |
+| P0 | 174 | 101 | 121 |
+| P1 | 221 | 42 | 76 |
 | P2 | 83 | 4 | 5 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -358,7 +358,7 @@ Spec: `spec/shortcuts.md`
 | KS-09 | Split view | P0 | – | – | – |  |
 | KS-10 | Peek and Mini Window | P1 | – | – | – |  |
 | KS-11 | Media | P1 | – | – | – |  |
-| KS-12 | Library, history, downloads, settings, extensions, help | P1 | – | – | – |  |
+| KS-12 | Library, history, downloads, settings, extensions, help | P1 | – | ✅ e2e | – |  |
 | KS-13 | Developer tools | P1 | – | – | – |  |
 | KS-14 | Canvases, notes, capture and Tweaks | P2 | – | – | – |  |
 | KS-15 | Standard app and window keys | P1 | – | – | – |  |
@@ -413,8 +413,8 @@ Spec: `spec/appearance.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| AP-01 | Light, Dark or Match system | P0 | – | ✅ e2e | – |  |
-| AP-02 | Theme colours carry through the whole interface | P1 | – | – | – |  |
+| AP-01 | Light, Dark or Match system | P0 | ✅ | ✅ e2e | – | Light / Dark / Match system in Settings and the Space theme picker; about 200 ms cross-fade, no flash |
+| AP-02 | Theme colours carry through the whole interface | P1 | – | ✅ e2e | – |  |
 | AP-03 | Restore the default (neutral) theme | P1 | – | ✅ unit | – |  |
 | AP-04 | Dark mode quality | P1 | – | ✅ unit | – |  |
 | AP-05 | Private-window appearance | P1 | – | – | – |  |
@@ -536,17 +536,17 @@ Spec: `spec/settings.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| ST-01 | Settings window | P0 | – | – | – |  |
-| ST-02 | Settings reachable and searchable from the command bar | P1 | – | – | – |  |
-| ST-03 | General section | P1 | – | – | – |  |
-| ST-04 | Profiles section (list, rename, delete) | P1 | – | – | – |  |
-| ST-05 | Per-profile: auto-archive timing | P1 | – | – | – |  |
-| ST-06 | Per-profile: default search engine and custom engines | P0 | – | – | – |  |
+| ST-01 | Settings window | P0 | ✅ | ✅ e2e+unit | – | own window (⌘, / Ctrl+,): opens or focuses one; remembers section and size; takes the opener Space's colours; sections come from a registry (src/renderer/src/settings/registry.ts); search filters rows |
+| ST-02 | Settings reachable and searchable from the command bar | P1 | ✅ | ✅ e2e | – | sections and common settings are command-bar actions (settings.*) that open Settings at the row; the keys lane adds Shortcuts |
+| ST-03 | General section | P1 | 🟡 partial | ✅ e2e | – | default browser row and menu action (only an installed build can register; e2e uses a stub), Mini Window archive timing, Import button when the import lane registers import.open; update rows wait for UP |
+| ST-04 | Profiles section (list, rename, delete) | P1 | ✅ | ✅ e2e | – | list with Default first, rename any profile, New Profile…, delete with confirmation (off while a Space uses it, and says why) |
+| ST-05 | Per-profile: auto-archive timing | P1 | ✅ | ✅ e2e+unit | – | 12 hours (default), 24 hours, 7 days, 30 days per profile; no Never; other profiles follow Default until set |
+| ST-06 | Per-profile: default search engine and custom engines | P0 | ✅ | ✅ e2e+unit | – | per-profile default engine (8 built-ins), custom engines with keyword and %s URL, Make default from the row menu; no extension override in Electron, so that row does not exist |
 | ST-07 | Per-profile: download location, new-document app, data shortcuts | P1 | – | – | – |  |
 | ST-08 | Shortcuts section (remapping) | P1 | – | – | – |  |
 | ST-09 | Links section | P1 | – | ✅ unit | – |  |
 | ST-10 | Advanced section | P1 | – | – | – |  |
-| ST-11 | Appearance section | P1 | – | – | – |  |
+| ST-11 | Appearance section | P1 | – | ✅ e2e | – |  |
 | ST-12 | Privacy & security, and clearing browsing data | P1 | – | – | – |  |
 | ST-13 | Site settings (permissions) page | P1 | – | – | – |  |
 | ST-14 | Languages, spell check and translation | P2 | – | – | – |  |
@@ -555,7 +555,7 @@ Spec: `spec/settings.md`
 | ST-17 | About Orbit | P1 | – | – | – |  |
 | ST-18 | Account, sign-in and sync sections | ? | – | – | – |  |
 | ST-19 | AI features section | ? | – | – | – |  |
-| ST-20 | Which settings are global and which are per profile | P1 | – | – | – |  |
+| ST-20 | Which settings are global and which are per profile | P1 | 🟡 partial | ✅ e2e+unit | – | per-profile rows carry the profile's name; download location, passwords and site permissions don't exist yet |
 | ST-21 | Enterprise / managed policies | P2 | – | – | – |  |
 
 ## Import of data from other browsers
@@ -564,7 +564,7 @@ Spec: `spec/import.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| IM-01 | Import entry points | P1 | – | – | – |  |
+| IM-01 | Import entry points | P1 | – | ✅ e2e | – |  |
 | IM-02 | Choose the source browser and profile(s) | P1 | – | – | – |  |
 | IM-03 | Choose which data types to import | P1 | – | – | – |  |
 | IM-04 | Choose which bookmarks to import | P1 | – | – | – |  |
@@ -588,8 +588,8 @@ Spec: `spec/onboarding.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| OB-01 | Welcome screen | P1 | – | – | – |  |
-| OB-02 | No account, no sign-in, ever | P0 | – | – | – |  |
+| OB-01 | Welcome screen | P1 | – | ✅ e2e | – |  |
+| OB-02 | No account, no sign-in, ever | P0 | ✅ | ✅ e2e+unit | – | audit and e2e: no account UI anywhere; a first run sends nothing off the computer except Chromium's spell-check dictionary download (see test) |
 | OB-03 | Import step | P1 | – | – | – |  |
 | OB-04 | Pick a theme colour | P1 | – | – | – |  |
 | OB-05 | Pick favourite web apps (seed Favorites) | P1 | – | – | – |  |
