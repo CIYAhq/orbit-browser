@@ -142,6 +142,38 @@ test('[OB-14][OB-03] Skip setup after an import was chosen imports nothing (D44)
   expect(Object.values(s.tabs).filter((t) => t.url.startsWith('https://example.com/'))).toEqual([])
 })
 
+test('[OB-03][IM-02][IM-06] onboarding offers the browsers on this computer: several profiles, types and bookmarks, into the first Space', async () => {
+  const places = JSON.stringify([{ browser: 'chrome', dir: fixturePath('chrome') }])
+  orbit = await launchFirstRun({ env: { ORBIT_ONBOARDING: '1', ORBIT_IMPORT_PLACES: places } })
+  const { app } = orbit
+  const page = await onboardingAt(app, 'welcome')
+  await page.getByTestId('onboarding-next').click()
+  await page.getByTestId('import-source-chrome').click()
+  await page.getByTestId('import-next').click()
+  // Both profiles, by name.
+  await expect(page.getByTestId('import-profiles')).toContainText('Personal')
+  await page.getByTestId('import-profiles').getByRole('checkbox').nth(1).check()
+  await page.getByTestId('import-next').click()
+  await expect(page.getByTestId('import-type-bookmarks')).toContainText('9 bookmarks')
+  await page.getByTestId('import-next').click()
+  await expect(page.getByTestId('import-count')).toHaveText('9 of 9 bookmarks selected')
+  await page.getByTestId('import-next').click()
+  await expect(page.getByTestId('import-step-target')).toBeVisible()
+  await page.getByTestId('import-next').click()
+  await expect(page.getByTestId('onboarding-step-theme')).toBeVisible()
+  await page.getByTestId('onboarding-next').click()
+  await page.getByTestId('onboarding-next').click()
+  await page.getByTestId('onboarding-browser-later').click()
+  await expect(page.getByTestId('onboarding-summary-import')).toHaveText('9 bookmarks from Chrome')
+  await closing(page, () => page.getByTestId('onboarding-start').click())
+
+  await expect.poll(async () => importedFolders(await state(app)).map((f) => f.name)).toEqual(['Imported from Chrome'])
+  const s = await state(app)
+  const folderId = s.spaces[s.spaceOrder[0] as string]?.pinned.at(-1) as string
+  expect(s.folders[folderId]?.children.map((id) => s.folders[id]?.name)).toEqual(['Work', 'Personal'])
+  expect(tabsUnder(s, folderId)).toHaveLength(9)
+})
+
 test('[OB-09] Do this later: the Done screen says nothing was imported and where to find it', async () => {
   orbit = await launchOnboarding()
   const { app } = orbit

@@ -71,8 +71,15 @@ export class ImportJobs {
     return this.get(jobId)?.status ?? null
   }
 
-  /** Starts an import made of `tasks`; returns its id. */
-  start(plan: ImportPlan, source: string, folderName: string, tasks: Task[], c: CallContext): string {
+  /** Starts an import made of `tasks`; returns its id. `profileNames`: the source profiles chosen, by key. */
+  start(
+    plan: ImportPlan,
+    source: string,
+    folderName: string,
+    tasks: Task[],
+    c: CallContext,
+    profileNames = new Map<string, string>(),
+  ): string {
     const id = newId('x').replace(/^x-/, 'import-')
     const job: Job = {
       status: { id, phase: 'reading', source, items: tasks.map((t) => t.item), skipped: [], folders: [] },
@@ -82,7 +89,7 @@ export class ImportJobs {
       bookmarks: new Map(),
       destinations: new Map(),
       folderName,
-      profileNames: new Map(),
+      profileNames,
       extra: new Map(),
     }
     this.jobs.set(id, job)
@@ -183,16 +190,23 @@ export class ImportJobs {
   private async resolveDestinations(job: Job): Promise<void> {
     const target: ImportTarget = job.plan.target
     const state = this.ctx.store.state
-    const keys = new Set<string>([...job.bookmarks.keys(), ...job.destinations.keys()])
+    const keys = new Set<string>([...job.profileNames.keys(), ...job.bookmarks.keys(), ...job.destinations.keys()])
     if (keys.size === 0) keys.add('')
-    const run = this.ctx.commands.run as unknown as (n: string, a: unknown, c: CallContext) => Promise<unknown>
+    const run = this.ctx.commands.run.bind(this.ctx.commands) as unknown as (
+      n: string,
+      a: unknown,
+      c: CallContext,
+    ) => Promise<unknown>
     const c: CallContext = { windowId: job.opener }
     if (target.kind === 'matching') {
+      // In the source's order, after the last Space.
+      let afterSpaceId = state.spaceOrder.at(-1)
       for (const key of keys) {
         const name = job.profileNames.get(key) || 'Imported'
         const profileId = (await run('profiles.create', { name }, c)) as ProfileId
-        const spaceId = (await run('spaces.create', { name, profileId, activate: false }, c)) as SpaceId
+        const spaceId = (await run('spaces.create', { name, profileId, activate: false, afterSpaceId }, c)) as SpaceId
         job.destinations.set(key, { spaceId, profileId })
+        afterSpaceId = spaceId
       }
       return
     }

@@ -75,7 +75,11 @@ export function registerSettings(ctx: MainContext): void {
     if (!commands.has('import.open')) return false
     const windowId = settings.browserWindow() ?? windows.open()
     windows.get(windowId)?.focus()
-    const run = commands.run as unknown as (name: string, args: unknown, c: CallContext) => Promise<unknown>
+    const run = commands.run.bind(commands) as unknown as (
+      name: string,
+      args: unknown,
+      c: CallContext,
+    ) => Promise<unknown>
     await run('import.open', {}, { windowId })
     return true
   })

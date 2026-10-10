@@ -2,11 +2,20 @@ import { readFile, stat } from 'node:fs/promises'
 import { basename } from 'node:path'
 import { BrowserWindow, dialog } from 'electron'
 import { ACTIONS_BY_ID } from '../../shared/actions'
-import type { ImportPlan, ImportProgressItem, ImportSource, ParsedFile } from '../../shared/commands/import'
+import type {
+  ImportDataType,
+  ImportPlan,
+  ImportProgressItem,
+  ImportSource,
+  Inspection,
+  ParsedFile,
+} from '../../shared/commands/import'
 import type { WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import type { HistoryService } from '../history'
 import type { CallContext } from '../registry'
+import { type FoundSource, findSources, inspectProfile, publicSource } from './browsers'
+import { withScratch } from './copy'
 import { cleanTree, FILE_FOLDER_NAME, LINKS_FOLDER_NAME, linkNodes, MAX_FILE_BYTES, parseFile } from './files'
 import { ImportJobs, type Task } from './jobs'
 import { countBookmarks, NO_BOOKMARKS } from './netscape'
@@ -35,9 +44,29 @@ export function registerImport(ctx: MainContext, _history: HistoryService): void
     else win.open(c.windowId ?? windows.focusedWindowId(), start)
   })
   commands.register('import.session', () => win.takeSession())
-  commands.register('import.sources', async (): Promise<ImportSource[]> => {
-    importPlaces(ctx.e2e)
-    return []
+
+  // The browsers found by the last look (IM-02). Their folders stay here; the window gets ids and names.
+  let found = new Map<string, FoundSource>()
+  const discover = async () => {
+    const list = await findSources(importPlaces(ctx.e2e))
+    found = new Map(list.map((s) => [s.id, s]))
+    return list
+  }
+  const sourceOf = async (id: unknown): Promise<FoundSource> => {
+    const source = found.get(String(id)) ?? (await discover()).find((s) => s.id === id)
+    if (!source || source.blocked) throw new Error('That browser can’t be read')
+    return source
+  }
+  commands.register('import.sources', async (): Promise<ImportSource[]> => (await discover()).map(publicSource))
+  commands.register('import.inspect', async ({ sourceId, profileIds }): Promise<Inspection> => {
+    const source = await sourceOf(sourceId)
+    const ids = new Set(Array.isArray(profileIds) ? profileIds : [])
+    const profiles = await withScratch(async (scratch) => {
+      const out = []
+      for (const p of source.profiles) if (ids.has(p.id)) out.push(await inspectProfile(source, p, scratch))
+      return out
+    })
+    return { sourceId: source.id, browser: source.browser, name: source.name, profiles }
   })
   commands.register('import.parseFile', ({ name, text }): ParsedFile => {
     const file = typeof name === 'string' ? basename(name) : 'file'
@@ -67,7 +96,7 @@ export function registerImport(ctx: MainContext, _history: HistoryService): void
     }
   })
 
-  commands.register('import.start', ({ plan }, c) => {
+  commands.register('import.start', async ({ plan }, c) => {
     const p = plan as ImportPlan
     const item = (type: ImportProgressItem['type'], total?: number): ImportProgressItem => ({
       type,
@@ -113,6 +142,36 @@ export function registerImport(ctx: MainContext, _history: HistoryService): void
       ]
       return jobs.start(p, source, folderName, tasks, { windowId: browserOf(c) })
     }
+    if (p?.kind === 'browser') {
+      // IM-02 to IM-06: the chosen profiles' types, into "Imported from <Browser>" (IM-05).
+      const source = await sourceOf(p.sourceId)
+      const chosen = (Array.isArray(p.profiles) ? p.profiles : []).flatMap((x) => {
+        const profile = source.profiles.find((sp) => sp.id === x?.profileId)
+        const types = new Set<ImportDataType>(Array.isArray(x?.types) ? x.types : [])
+        return profile ? [{ profile, types, bookmarks: x.bookmarks }] : []
+      })
+      const tasks: Task[] = []
+      const withMarks = chosen.filter((x) => x.types.has('bookmarks'))
+      if (withMarks.length > 0) {
+        const bookmarks = item('bookmarks')
+        tasks.push({
+          item: bookmarks,
+          read: async (job) => {
+            await new Promise((resolve) => setImmediate(resolve))
+            bookmarks.total = 0
+            for (const x of withMarks) {
+              const nodes = cleanTree(x.bookmarks)
+              bookmarks.total += countBookmarks(nodes)
+              job.bookmarks.set(x.profile.id, [{ title: '', nodes }])
+            }
+          },
+          add: async (job) => jobs.addBookmarks(job, bookmarks),
+        })
+      }
+      if (tasks.length === 0) throw new Error('Nothing to import')
+      const names = new Map(chosen.map((x) => [x.profile.id, x.profile.name]))
+      return jobs.start(p, source.name, `Imported from ${source.name}`, tasks, { windowId: browserOf(c) }, names)
+    }
     throw new Error('Unknown import')
   })
   commands.register('import.status', ({ jobId }) => jobs.status(jobId))
@@ -129,7 +188,7 @@ export function registerImport(ctx: MainContext, _history: HistoryService): void
     const windowId = (job?.opener && store.state.windows[job.opener] ? job.opener : undefined) ?? browserOf(c)
     if (c.windowId === IMPORT_WINDOW_ID) win.close()
     if (!folder || !windowId || !store.state.folders[folder.folderId]) return
-    const run = commands.run as unknown as (n: string, a: unknown, cc: CallContext) => Promise<unknown>
+    const run = commands.run.bind(commands) as unknown as (n: string, a: unknown, cc: CallContext) => Promise<unknown>
     if (store.state.windows[windowId]?.spaceId !== folder.spaceId) {
       await run('spaces.switch', { spaceId: folder.spaceId }, { windowId })
     }

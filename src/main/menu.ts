@@ -40,6 +40,8 @@ export function installMenu(ctx: MainContext): void {
         { type: 'separator' },
         item('app.settings', 'Settings…'),
         item('settings.defaultBrowser', 'Set as Default Browser…'),
+        // The import flow (import lane, IM-01).
+        item('app.import', 'Import from Another Browser…'),
         { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
