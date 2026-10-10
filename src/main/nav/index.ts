@@ -269,6 +269,11 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
   const prefs = new SitePrefs(join(ctx.paths.userData, 'orbit-site-prefs.json'))
   prefs.load()
   app.on('before-quit', () => prefs.flush())
+  // A deleted profile's site choices go with its data (review B-F7).
+  store.subscribe((next, prev) => {
+    if (next.profiles === prev.profiles) return
+    for (const id of Object.keys(prev.profiles)) if (!next.profiles[id]) prefs.forgetProfile(id)
+  })
   commands.register('nav.copyHint', (_args, c) => {
     if (prefs.hintShown('copy-url')) return
     const action = ACTIONS_BY_ID['tab.copyUrl']

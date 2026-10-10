@@ -1,5 +1,5 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { mkdir, rename, writeFile } from 'node:fs/promises'
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { sameZoom, ZOOM_STEPS } from '../../shared/nav'
 import { isPrivateProfileId } from '../../shared/private'
@@ -46,7 +46,10 @@ export class SitePrefs {
   /** Choices made in private windows: never written, gone with the private session. */
   private ephemeral: SiteChoices = emptyChoices()
   private timer: NodeJS.Timeout | undefined
-  private dirty = false
+  /** Counts changes; `saved` is the count the file on disk has caught up with. */
+  private changes = 0
+  private saved = 0
+  private writing: Promise<void> = Promise.resolve()
 
   constructor(private file: string) {}
 
@@ -217,6 +220,15 @@ export class SitePrefs {
     this.ephemeral = emptyChoices()
   }
 
+  /** Forgets a deleted profile's choices: zoom, pop-up hosts, permissions and devices (review B-F7). */
+  forgetProfile(profileId: string): void {
+    const choices = this.choices(profileId)
+    const kept = [choices.zoom, choices.popups, choices.permissions, choices.devices].filter((map) => profileId in map)
+    if (kept.length === 0) return
+    for (const map of kept) delete map[profileId]
+    this.changed(profileId)
+  }
+
   private choices(profileId: string): SiteChoices {
     return isPrivateProfileId(profileId) ? this.ephemeral : this.data
   }
@@ -225,34 +237,53 @@ export class SitePrefs {
     if (!isPrivateProfileId(profileId)) this.schedule()
   }
 
-  /** Writes pending changes now (quit). */
+  /**
+   * Writes what the file hasn't caught up with now (quit), including changes a write still on its
+   * way holds: the app may be gone before that write lands (review A-F9).
+   */
   flush(): void {
-    if (!this.dirty) return
     clearTimeout(this.timer)
     this.timer = undefined
-    this.dirty = false
+    if (this.saved >= this.changes) return
+    const upTo = this.changes
     try {
       mkdirSync(dirname(this.file), { recursive: true })
       const tmp = `${this.file}.tmp`
       writeFileSync(tmp, JSON.stringify(this.data))
       renameSync(tmp, this.file)
+      this.saved = upTo
     } catch (err) {
       console.error('[site-prefs] could not save', err)
     }
   }
 
+  /** Resolves once the background writes started so far have landed, or given way to a newer one (tests). */
+  written(): Promise<void> {
+    return this.writing
+  }
+
   private schedule(): void {
-    this.dirty = true
+    this.changes++
     if (this.timer) return
     this.timer = setTimeout(() => {
       this.timer = undefined
-      if (!this.dirty) return
-      this.dirty = false
-      const tmp = `${this.file}.tmp`
-      void mkdir(dirname(this.file), { recursive: true })
-        .then(() => writeFile(tmp, JSON.stringify(this.data)))
-        .then(() => rename(tmp, this.file))
+      const upTo = this.changes
+      if (this.saved >= upTo) return
+      const data = JSON.stringify(this.data)
+      // A file of its own: a write on quit, or a later one, may run while this one is on its way.
+      const tmp = `${this.file}.${upTo}.tmp`
+      const write = mkdir(dirname(this.file), { recursive: true })
+        .then(() => writeFile(tmp, data))
+        .then(() => {
+          // In the same tick as the check: something newer on disk (a write on quit) is never undone.
+          if (this.saved >= upTo) rmSync(tmp, { force: true })
+          else {
+            renameSync(tmp, this.file)
+            this.saved = upTo
+          }
+        })
         .catch((err) => console.error('[site-prefs] could not save', err))
+      this.writing = Promise.all([this.writing, write]).then(() => undefined)
     }, 500)
     this.timer.unref?.()
   }

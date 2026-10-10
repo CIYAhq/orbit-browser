@@ -1,7 +1,7 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { dirname, join } from 'node:path'
+import { describe, expect, it, vi } from 'vitest'
 import { SitePrefs } from '../../src/main/nav/site-prefs'
 import { makeTab } from '../../src/main/tabs/model'
 import { createInitialState, createWindowState, DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
@@ -170,6 +170,56 @@ describe('site choices on disk (NV-15, NV-16)', () => {
     expect(prefs.devicesFor(DEFAULT_PROFILE_ID, 'https://a.test')).toEqual([board])
     prefs.revokeDevice(DEFAULT_PROFILE_ID, 'https://a.test', board.key)
     expect(prefs.devicesFor(DEFAULT_PROFILE_ID, 'https://a.test')).toEqual([])
+  })
+
+  it('writes on quit what a background write still on its way holds, and that write never undoes it (review A-F9)', async () => {
+    const file = fileIn()
+    const zoomOnDisk = () => (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).zoom : undefined)
+    vi.useFakeTimers()
+    let prefs: SitePrefs
+    try {
+      prefs = new SitePrefs(file)
+      prefs.setZoom(DEFAULT_PROFILE_ID, 'a.test', 1.1)
+      // Half a second on, the background write starts; the app quits before it lands.
+      vi.advanceTimersByTime(500)
+      prefs.flush()
+      expect(zoomOnDisk()).toEqual({ [DEFAULT_PROFILE_ID]: { 'a.test': 1.1 } })
+      // A change while the next write is on its way, then quit: the older write lands after the quit's.
+      prefs.setZoom(DEFAULT_PROFILE_ID, 'a.test', 1.25)
+      vi.advanceTimersByTime(500)
+      prefs.setZoom(DEFAULT_PROFILE_ID, 'a.test', 1.5)
+      prefs.flush()
+    } finally {
+      vi.useRealTimers()
+    }
+    await prefs.written()
+    expect(zoomOnDisk()).toEqual({ [DEFAULT_PROFILE_ID]: { 'a.test': 1.5 } })
+    expect(readdirSync(dirname(file))).toEqual(['site-prefs.json'])
+  })
+
+  it('forgets a deleted profile’s choices and keeps the others’ (review B-F7)', () => {
+    const file = fileIn()
+    const prefs = new SitePrefs(file)
+    const board = { type: 'usb' as const, key: 'usb:1:2:A', name: 'Board' }
+    for (const profile of ['work', DEFAULT_PROFILE_ID]) {
+      prefs.setZoom(profile, 'a.test', 1.25)
+      prefs.setPopupsAllowed(profile, 'a.test', true)
+      prefs.setPermission(profile, 'https://a.test', 'camera', 'allow')
+      prefs.grantDevice(profile, 'https://a.test', board)
+    }
+    prefs.forgetProfile('work')
+    expect(prefs.zoomFor('work', 'a.test')).toBeUndefined()
+    expect(prefs.popupsAllowed('work', 'a.test')).toBe(false)
+    expect(prefs.permissionsFor('work', 'https://a.test')).toEqual({})
+    expect(prefs.devicesFor('work', 'https://a.test')).toEqual([])
+    expect(prefs.zoomFor(DEFAULT_PROFILE_ID, 'a.test')).toBe(1.25)
+    expect(prefs.popupsAllowed(DEFAULT_PROFILE_ID, 'a.test')).toBe(true)
+    expect(prefs.permissionsFor(DEFAULT_PROFILE_ID, 'https://a.test')).toEqual({ camera: 'allow' })
+    expect(prefs.devicesFor(DEFAULT_PROFILE_ID, 'https://a.test')).toEqual([board])
+    prefs.flush()
+    const saved = JSON.parse(readFileSync(file, 'utf8'))
+    for (const key of ['zoom', 'popups', 'permissions', 'devices'])
+      expect(Object.keys(saved[key])).toEqual([DEFAULT_PROFILE_ID])
   })
 
   it('drops what it doesn’t understand when loading', () => {

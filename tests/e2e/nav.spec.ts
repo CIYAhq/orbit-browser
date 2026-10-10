@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
@@ -475,6 +475,34 @@ test('[NV-06] zoom is remembered per site and profile across a restart', async (
   await expect.poll(async () => (await windowState(app)).spaceId).toBe(work)
   await openTab(app, page('KeepWorkAgain'))
   expect(await zoomOf(app, '/page/KeepWorkAgain')).toBeCloseTo(1)
+})
+
+test('[NV-06] deleting a profile forgets its sites’ zoom; the other profiles keep theirs (review B-F7)', async () => {
+  const userData = mkdtempSync(join(tmpdir(), 'orbit-e2e-forget-'))
+  await orbit.app.close()
+  orbit = await launchOrbit({ userData })
+  const { app } = orbit
+  const personal = (await windowState(app)).spaceId
+  const kept = (await state(app)).spaces[personal]?.profileId
+  await openTab(app, page('Stay'))
+  await pressInPage(app, '/page/Stay', '=', [mod])
+  await expect.poll(() => zoomOf(app, '/page/Stay')).toBeCloseTo(1.1)
+  const profileId = await cmd<string>(app, 'profiles.create', { name: 'Work' })
+  const work = await cmd<string>(app, 'spaces.create', { name: 'Work', profileId })
+  await expect.poll(async () => (await windowState(app)).spaceId).toBe(work)
+  await openTab(app, page('Gone'))
+  await pressInPage(app, '/page/Gone', '=', [mod])
+  await expect.poll(() => zoomOf(app, '/page/Gone')).toBeCloseTo(1.1)
+  // Its Space goes, then the profile.
+  await cmd(app, 'spaces.switch', { spaceId: personal })
+  expect(await cmd(app, 'spaces.delete', { spaceId: work })).toBe(true)
+  expect(await cmd(app, 'profiles.delete', { profileId })).toBe(true)
+  await app.close()
+  const saved = JSON.parse(readFileSync(join(userData, 'orbit-site-prefs.json'), 'utf8')) as {
+    zoom: Record<string, Record<string, number>>
+  }
+  expect(Object.keys(saved.zoom)).toEqual([kept])
+  orbit = await launchOrbit({ userData })
 })
 
 test('[NV-06] ⌘0 also undoes a pinch zoom', async () => {
