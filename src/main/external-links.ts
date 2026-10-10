@@ -23,8 +23,24 @@ export function routeExternalUrl(ctx: MainContext, url: string): void {
 /** Files Orbit opens as pages (what the packaged app registers for, plus close relatives). */
 const OPENABLE_FILE = /\.(html?|xhtml|shtml|svg|pdf)$/i
 
-/** URLs to open from a command line: web and file URLs, and paths of existing openable files. */
+/** The command line switch that opens a private window (Windows taskbar task, NV-11), with the launch's links in it. */
+export const PRIVATE_WINDOW_SWITCH = '--private-window'
+
+/** True when a command line asks for a private window (Chromium may reorder arguments). */
+export function privateSwitchIn(argv: readonly string[]): boolean {
+  return argv.some((a) => a.toLowerCase() === PRIVATE_WINDOW_SWITCH)
+}
+
+/**
+ * URLs to open from a command line as links from another app (NV-18): none when it asks for a
+ * private window, which opens them itself (nav/private.ts; review B-F6).
+ */
 export function linksFromArgv(argv: readonly string[], cwd: string): string[] {
+  return privateSwitchIn(argv) ? [] : urlsInArgv(argv, cwd)
+}
+
+/** The URLs on a command line: web and file URLs, and paths of existing openable files. */
+export function urlsInArgv(argv: readonly string[], cwd: string): string[] {
   const links: string[] = []
   for (const arg of argv.slice(1)) {
     if (!arg || arg.startsWith('-')) continue
@@ -70,8 +86,9 @@ export function captureExternalLinks(): void {
   app.on('second-instance', (_event, argv, workingDirectory) => {
     const links = linksFromArgv(argv, workingDirectory)
     for (const url of links) open(url)
-    // A jump-list launch acts on Mini Windows only (the Mini Window module handles it, MW-14).
-    if (links.length > 0 || !target || miniSwitchIn(argv)) return
+    // A jump-list launch acts on Mini Windows only (the Mini Window module handles it, MW-14), and
+    // one for a private window opens that window (nav/private.ts, NV-11).
+    if (links.length > 0 || !target || miniSwitchIn(argv) || privateSwitchIn(argv)) return
     // Launched again without a link: bring Orbit forward (a window opens if none is).
     const windowId = target.windows.focusedWindowId() ?? target.windows.ids()[0] ?? target.windows.open()
     const win = target.windows.get(windowId)

@@ -368,3 +368,41 @@ test('[NV-11][NV-18][MW-07] a private window keeps its links: no Peek or Mini Wi
   expect((s3.spaces[priv.spaceId]?.today ?? []).map((t) => s3.tabs[t]?.url)).not.toContain(page('FromChat'))
   expect(Object.values(s3.tabs).filter((t) => t.url === page('FromChat') && isPrivateTab(s3, t.id))).toEqual([])
 })
+
+test('[NV-11][NV-18] a launch with --private-window opens its links in a private window: no Mini Window, nothing in the history (review B-F6)', async () => {
+  const { app } = orbit
+  const token = `Launched${Date.now().toString(36)}`
+  const first = page(`${token}One`)
+  const second = page(`${token}Two`)
+  const main = (await windowList(app))[0]
+  if (!main) throw new Error('no window')
+  // A second launch, as the Windows taskbar task or another app runs it, with two links.
+  await app.evaluate(
+    ({ app: a }, urls) => a.emit('second-instance', {}, ['orbit', '--private-window', ...urls], '/'),
+    [first, second],
+  )
+  await expect
+    .poll(async () => Object.values((await state(app)).windows).map((w) => w.kind))
+    .toEqual(['main', 'private'])
+  const priv = (await windowList(app)).find((w) => w.kind === 'private') as WindowInfo
+  // Both links in its tabs, the first in front.
+  await expect
+    .poll(async () => {
+      const s = await state(app)
+      return (s.spaces[priv.spaceId]?.today ?? []).map((id) => s.tabs[id]?.url).sort()
+    })
+    .toEqual([first, second].sort())
+  const s = await state(app)
+  const front = s.windows[priv.id]?.activeTab[priv.spaceId] ?? ''
+  expect(s.tabs[front]?.url).toBe(first)
+  expect(s.tabs[front]?.profileId).toMatch(/^private-/)
+  await waitLoaded(app, front, first)
+  // The history gets a normal page opened after them, and not them.
+  await openTabIn(app, main.id, page(`${token}Kept`))
+  const history = () =>
+    cmd<{ url: string }[]>(app, 'history.search', { profileId: 'p-default', text: token }).then((found) =>
+      found.map((e) => e.url),
+    )
+  await expect.poll(history).toEqual([page(`${token}Kept`)])
+  expect(Object.values((await state(app)).windows).map((w) => w.kind)).toEqual(['main', 'private'])
+})

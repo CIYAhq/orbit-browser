@@ -11,15 +11,13 @@ import {
 import type { ItemId, OrbitState, Profile, ProfileId, SpaceId, SpaceTheme, WindowId } from '../../shared/state'
 import { tabsInItem } from '../../shared/tree'
 import type { MainContext } from '../context'
+import { PRIVATE_WINDOW_SWITCH, privateSwitchIn, urlsInArgv } from '../external-links'
 import type { TabOps, TabPage } from '../tabs/ops'
 import type { SitePrefs } from './site-prefs'
 
 /** Actions for what a private window doesn't have (SB-25). */
 const NOT_IN_PRIVATE =
   /^(space\.|tab\.togglePin$|tab\.favorite$|tab\.resetToPinned$|pinned\.toggleCollapsed$|folder\.new$|app\.archive$)/
-
-/** The command line switch that opens a private window (Windows taskbar task, NV-11). */
-export const PRIVATE_WINDOW_SWITCH = '--private-window'
 
 export interface PrivateWindows {
   /**
@@ -209,10 +207,20 @@ export function registerPrivate(ctx: MainContext, ops: TabOps, prefs: SitePrefs)
       },
     ])
   }
-  app.on('second-instance', (_event, argv) => {
-    if (argv.includes(PRIVATE_WINDOW_SWITCH)) open()
-  })
-  if (process.argv.includes(PRIVATE_WINDOW_SWITCH)) setImmediate(() => open())
+  /**
+   * A launch with the private window switch: a private window, with the command line's links in its
+   * tabs (the first in front), never in a Mini Window or the history (review B-F6).
+   */
+  const openFromArgv = (argv: readonly string[], cwd: string) => {
+    if (!privateSwitchIn(argv)) return
+    const [first, ...rest] = urlsInArgv(argv, cwd)
+    const windowId = open(first ? { url: first } : {})
+    const spaceId = windowId ? store.state.windows[windowId]?.spaceId : undefined
+    if (!windowId || !spaceId) return
+    for (const url of rest) ops.createTab({ url, spaceId, windowId, activate: false })
+  }
+  app.on('second-instance', (_event, argv, workingDirectory) => openFromArgv(argv, workingDirectory))
+  if (privateSwitchIn(process.argv)) setImmediate(() => openFromArgv(process.argv, process.cwd()))
 
   return { open, profileId: () => current }
 }
