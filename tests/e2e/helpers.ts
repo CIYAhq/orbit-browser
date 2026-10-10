@@ -201,14 +201,19 @@ export function checkQuit(app: ElectronApplication): () => string {
   let asked = false
   let checked = false
   let gone = false
-  app.once('close', () => {
-    gone = true
-    if (!asked) quitAlone.add(app)
-  })
+  const exited = new Promise<void>((resolve) =>
+    app.once('close', () => {
+      gone = true
+      if (!asked) quitAlone.add(app)
+      resolve()
+    }),
+  )
   app.close = async () => {
     asked = true
     quitAlone.delete(app)
-    const closed = (gone ? Promise.resolve() : askQuit(app)).then(close)
+    // Playwright's own close asks again, through the inspector, so it may only run once Orbit has
+    // gone. Called earlier, it would finish a quit Orbit had cancelled, and it could run inside a timer.
+    const closed = (gone ? Promise.resolve() : askQuit(app).then(() => exited)).then(close)
     const timers: NodeJS.Timeout[] = []
     const stuck = await new Promise<string>((resolve, reject) => {
       const settle = () => {
@@ -258,12 +263,18 @@ export function checkQuit(app: ElectronApplication): () => string {
  * `evaluateBetweenTasks`), even between Node's check that a due timer is still set and its call.
  * A handler that clears that timer there (the state file's next write, `persist.ts`) makes Node call
  * a cleared timer: "timer._onTimeout is not a function", an exception nothing caught. Asked here,
- * the quit runs between tasks; Playwright's own `app.quit()` then finds Orbit quitting and does nothing.
+ * the quit runs between tasks, and `app.close()` calls Playwright's own close only once Orbit has gone.
  */
 async function askQuit(app: ElectronApplication): Promise<void> {
   let wait: NodeJS.Timeout | undefined
   await Promise.race([
-    app.evaluate((electron) => electron.app.quit()).catch(() => {}),
+    // The ask waits for a task of its own here too, in case `app.evaluate` isn't wrapped.
+    app
+      .evaluate(async (electron) => {
+        await new Promise((resolve) => setImmediate(resolve))
+        electron.app.quit()
+      })
+      .catch(() => {}),
     new Promise((resolve) => {
       wait = setTimeout(resolve, QUIT_ASK_WAIT)
     }),
