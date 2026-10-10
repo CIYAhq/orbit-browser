@@ -95,7 +95,10 @@ function evaluateBetweenTasks(app: ElectronApplication): void {
   }) as ElectronApplication['evaluate']
 }
 
-/** How Orbit's main process logs an exception nothing caught (src/main/index.ts). */
+/**
+ * How Orbit's main process logs an exception nothing caught, or a promise rejection nothing handled
+ * (src/main/index.ts).
+ */
 const UNCAUGHT = '[orbit] uncaught exception:'
 /** What Orbit's main process logs in e2e mode when a quit reaches it (src/main/index.ts). */
 const QUITTING = '[orbit] quit requested'
@@ -112,8 +115,8 @@ const quitAlone = new Set<ElectronApplication>()
 
 /**
  * `app.close()` checks the quit too (D28):
- * - the test fails if Orbit's main process logged an exception nothing caught, even one thrown
- *   while quitting;
+ * - the test fails if Orbit's main process logged an exception nothing caught or a promise
+ *   rejection nothing handled, even while quitting;
  * - if Orbit hasn't quit 15 s after the quit reached its main process, or the quit hasn't reached it
  *   35 s after `app.close()`, the test fails and Orbit is killed, so one stuck quit can't hang the
  *   rest of the run.

@@ -330,6 +330,14 @@ test('[TB-22] the quit check also catches an exception whose log is long (D28, P
   await expect.poll(() => orbit.takeUncaught()).toContain('long zzz')
 })
 
+test('[TB-22] the quit check also catches a promise rejection nothing handled (D28, PR #11 review F3)', async () => {
+  // Electron only prints a warning for these, so the check used to miss them.
+  await orbit.app.evaluate(() => {
+    void Promise.reject(new Error('a rejection nothing handled'))
+  })
+  await expect.poll(() => orbit.takeUncaught()).toContain('a rejection nothing handled')
+})
+
 test('[TB-02] opening tabs keeps every UI mirror in step without resyncs (review M2, F4)', async () => {
   const errors: string[] = []
   orbit.shell.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
