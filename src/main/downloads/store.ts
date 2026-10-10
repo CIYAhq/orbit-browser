@@ -8,7 +8,7 @@
  * - At most `max` entries: the oldest finished ones go first, running ones never.
  * - A download still running in the file was cut off by a crash or a quit: it loads as interrupted.
  */
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, type Stats, writeFileSync } from 'node:fs'
 import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { Download, ProfileId } from '../../shared/state'
@@ -25,14 +25,41 @@ export interface ResumeInfo {
   startTime: number
 }
 
+/**
+ * A finished file as it went into place (DL-04, DL-08): its size and when it was last written. A
+ * different file at its path (put there after it was moved away, or a later download saved over it,
+ * DL-07) isn't its file: Orbit neither opens nor deletes that one, and the download shows "File Missing".
+ */
+export interface FileIdentity {
+  size: number
+  mtimeMs: number
+}
+
 export interface DownloadRecord extends Download {
   resume?: ResumeInfo
+  /** Its finished file, as it went into place. */
+  file?: FileIdentity
+}
+
+export function identityOf(stats: Stats): FileIdentity {
+  return { size: stats.size, mtimeMs: stats.mtimeMs }
+}
+
+/**
+ * Whether a file on disk is the one a finished download put in place. A download with no identity
+ * kept (held back, DL-12, or listed by an older Orbit) goes by its path alone.
+ */
+export function isItsFile(record: Pick<DownloadRecord, 'file'>, stats: Stats): boolean {
+  if (!stats.isFile()) return false
+  const was = record.file
+  return !was || (was.size === stats.size && was.mtimeMs === stats.mtimeMs)
 }
 
 export const MAX_DOWNLOADS = 1000
 const WRITE_DELAY_MS = 500
 
 const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+const isNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 const STATES = new Set<Download['state']>(['progressing', 'paused', 'completed', 'cancelled', 'interrupted'])
 
 /** A stored entry, or undefined when it isn't one. */
@@ -62,6 +89,10 @@ function readRecord(value: unknown): DownloadRecord | undefined {
   if (typeof value.canResume === 'boolean') record.canResume = value.canResume
   // Held back as possibly harmful (DL-12): only a complete download can be.
   if (value.danger === 'file-type' && state === 'completed') record.danger = 'file-type'
+  const f = value.file
+  if (state === 'completed' && isRecord(f) && isNumber(f.size) && isNumber(f.mtimeMs)) {
+    record.file = { size: f.size, mtimeMs: f.mtimeMs }
+  }
   const r = value.resume
   if (isRecord(r) && Array.isArray(r.urlChain) && typeof r.tempPath === 'string') {
     record.resume = {

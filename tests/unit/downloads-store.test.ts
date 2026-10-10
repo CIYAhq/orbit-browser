@@ -1,4 +1,13 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -10,7 +19,7 @@ import {
   safeFilename,
   splitName,
 } from '../../src/main/downloads/names'
-import { type DownloadRecord, DownloadStore } from '../../src/main/downloads/store'
+import { type DownloadRecord, DownloadStore, identityOf, isItsFile } from '../../src/main/downloads/store'
 import { backupOf, isRuntimeOnlyPatch, normalizeState, Persistence } from '../../src/main/persist'
 import { Store } from '../../src/main/store'
 import { createInitialState } from '../../src/shared/defaults'
@@ -135,6 +144,47 @@ describe('downloads list', () => {
     const file = join(tmp(), 'downloads.json')
     writeFileSync(file, JSON.stringify({ version: 1, downloads: [record('d-1'), { id: 'd-2' }, 'x', null] }))
     expect(new DownloadStore(file).list().map((r) => r.id)).toEqual(['d-1'])
+  })
+
+  it("[DL-04][DL-08] knows a finished download's file by its size and date; another file at its path isn't it", () => {
+    const dir = tmp()
+    const path = join(dir, 'report.txt')
+    writeFileSync(path, 'downloaded')
+    const done = record('d-1', { savePath: path, file: identityOf(statSync(path)) })
+    expect(isItsFile(done, statSync(path))).toBe(true)
+    // Moved away and back: still its file.
+    renameSync(path, join(dir, 'moved.txt'))
+    renameSync(join(dir, 'moved.txt'), path)
+    expect(isItsFile(done, statSync(path))).toBe(true)
+    // Written over with other content, or another file put there with the same size: not its file.
+    writeFileSync(path, 'their own file')
+    expect(isItsFile(done, statSync(path))).toBe(false)
+    writeFileSync(path, 'downloadeX')
+    utimesSync(path, new Date(2020, 0, 1), new Date(2020, 0, 1))
+    expect(isItsFile(done, statSync(path))).toBe(false)
+    // A folder never is; one listed with no identity goes by its path.
+    expect(isItsFile(done, statSync(dir))).toBe(false)
+    expect(isItsFile(record('d-2'), statSync(path))).toBe(true)
+  })
+
+  it('[DL-04] keeps the identity across restarts; a malformed one is dropped', () => {
+    const file = join(tmp(), 'downloads.json')
+    const known = { size: 10, mtimeMs: 1700000000123.456 }
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        downloads: [
+          record('d-1', { file: known }),
+          { ...record('d-2'), file: { size: '10', mtimeMs: 5 } },
+          record('d-3', { state: 'interrupted', file: known }),
+        ],
+      }),
+    )
+    const store = new DownloadStore(file)
+    expect(store.get('d-1')?.file).toEqual(known)
+    expect(store.get('d-2')?.file).toBeUndefined()
+    expect(store.get('d-3')?.file).toBeUndefined()
   })
 })
 

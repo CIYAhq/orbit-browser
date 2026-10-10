@@ -9,7 +9,7 @@ import type { MainContext } from '../context'
 import type { FileActions } from './files'
 import type { DownloadManager } from './manager'
 import { listScreenshots, type Screenshot, type ScreenshotFolder } from './screenshots'
-import type { DownloadRecord } from './store'
+import { type DownloadRecord, isItsFile } from './store'
 
 export const isScreenshotId = (id: string): boolean => id.startsWith('shot-')
 
@@ -147,7 +147,8 @@ export class DownloadsLibrary {
       records.map(async (r): Promise<LibraryFile | undefined> => {
         try {
           const s = await stat(r.savePath)
-          if (!s.isFile()) return undefined
+          // Not there, or another file put at its path (DL-04).
+          if (!isItsFile(r, s)) return undefined
           return {
             id: r.id,
             name: r.filename,

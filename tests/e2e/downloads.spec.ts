@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createServer, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
@@ -752,6 +752,44 @@ test('[DL-04] a file moved away shows "File Missing" and downloads again', async
   expect(statSync(join(folder(), 'data.csv')).size).toBe(4096)
 })
 
+test('[DL-04][DL-08] another file at a download\'s path is not its file: "File Missing", never opened or deleted', async () => {
+  const { page } = await openPage()
+  await startDownloads(page, '/file/written.csv?size=1000', '/file/moved.csv?size=1000')
+  await expect.poll(async () => (await list()).filter((d) => d.state === 'completed').length).toBe(2)
+  // One file written over where it is; the other moved away, and another file put at its path.
+  const written = join(folder(), 'written.csv')
+  const moved = join(folder(), 'moved.csv')
+  const away = join(orbit.userData, 'moved.csv')
+  writeFileSync(written, 'my own notes, saved over the download')
+  renameSync(moved, away)
+  writeFileSync(moved, 'another file with the same name')
+  const others = {
+    'written.csv': 'my own notes, saved over the download',
+    'moved.csv': 'another file with the same name',
+  }
+  for (const [name, content] of Object.entries(others)) {
+    const id = await idOf(name)
+    // Delete File leaves that file where it is, and the download listed.
+    expect(await run(orbit.app, 'downloads.delete', { id }), `deleting ${name}`).toBe(false)
+    expect(sizeOf(join(folder(), name)) > 0 && readFileSync(join(folder(), name), 'utf8')).toBe(content)
+    expect(await entry(name), name).toMatchObject({ id, missing: true })
+    expect(await menuOf(id)).toEqual(['File Missing', 'Download Again', 'Copy Download Link', 'Remove from List'])
+    expect(await run(orbit.app, 'downloads.open', { id }), `opening ${name}`).toBe(false)
+  }
+  expect(await hooks((h) => h.opened)).toEqual([])
+  // Both stay listed, as "File Missing".
+  expect((await list()).map((d) => `${d.filename}: ${(d as DownloadEntry).missing}`).sort()).toEqual([
+    'moved.csv: true',
+    'written.csv: true',
+  ])
+  // Its own file back in place (a move keeps its date): it is the download's again.
+  rmSync(moved)
+  renameSync(away, moved)
+  expect((await entry('moved.csv')).missing).toBeUndefined()
+  expect(await run(orbit.app, 'downloads.open', { id: await idOf('moved.csv') })).toBe(true)
+  await expect.poll(() => hooks((h) => h.opened)).toEqual([moved])
+})
+
 test('[DL-04][DL-13] a downloaded SVG opens in its app, never as a page whose script could read other files', async () => {
   const { page } = await openPage()
   await startDownloads(page, '/attach/pic.svg', '/attach/chart.svg', '/attach/note.txt')
@@ -1067,6 +1105,44 @@ test('[DL-07] Ask every time: each download asks where to save; the dialog opens
   expect(readdirSync(mine).sort()).toEqual(['figures.csv', 'setup.exe.crdownload'])
   expect(await run(orbit.app, 'downloads.keep', { id: await idOf('setup.exe') })).toBe(true)
   expect(readdirSync(mine).sort()).toEqual(['figures.csv', 'setup.exe'])
+})
+
+test('[DL-07][DL-04][DL-08] a download saved over an older one\'s file: the older one shows "File Missing" and never deletes it', async () => {
+  await run(orbit.app, 'downloads.setAsk', { profileId: 'p-default', ask: true })
+  const { page } = await openPage()
+  const target = join(newFolder('Chosen'), 'report.csv')
+  await startDownloads(page, '/file/report.csv?size=1000')
+  await expect.poll(async () => (await saveDialogs()).length).toBe(1)
+  await answerSave(target)
+  await expect.poll(async () => (await named('report.csv'))?.state).toBe('completed')
+  const older = await idOf('report.csv')
+  // The next goes to the same place: the save dialog asked before replacing the file there.
+  await startDownloads(page, '/file/report.csv?size=2000')
+  await expect.poll(async () => (await saveDialogs()).length).toBe(2)
+  await answerSave(target)
+  await expect.poll(async () => (await list()).filter((d) => d.state === 'completed').length).toBe(2)
+  const byId = async (id: string) => (await list()).find((d) => d.id === id) as DownloadEntry
+  const newer = (await list()).find((d) => d.id !== older)?.id as string
+  expect((await byId(newer)).savePath).toBe(target)
+  expect(statSync(target).size).toBe(2000)
+  // The file there is the newer one's: the older one neither deletes nor opens it, and shows "File Missing".
+  expect(await run(orbit.app, 'downloads.delete', { id: older }), 'deleting the older one').toBe(false)
+  expect(sizeOf(target)).toBe(2000)
+  expect((await byId(older)).missing).toBe(true)
+  expect((await byId(newer)).missing).toBeUndefined()
+  expect(await run(orbit.app, 'downloads.open', { id: older }), 'opening the older one').toBe(false)
+  expect(await hooks((h) => h.opened)).toEqual([])
+  // Also after a restart.
+  const { userData } = orbit
+  await orbit.app.close()
+  orbit = await launchOrbit({ userData })
+  expect((await byId(older)).missing).toBe(true)
+  expect(await run(orbit.app, 'downloads.delete', { id: older })).toBe(false)
+  expect(sizeOf(target)).toBe(2000)
+  // The newer one's own file goes to the Trash with it.
+  expect(await run(orbit.app, 'downloads.delete', { id: newer })).toBe(true)
+  expect(existsSync(target)).toBe(false)
+  expect((await list()).map((d) => d.id)).toEqual([older])
 })
 
 test('[DL-07] a chosen folder is used, never the one last used with Ask every time; a folder that cannot be used asks', async () => {

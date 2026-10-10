@@ -1,5 +1,15 @@
-import { accessSync, constants, existsSync, linkSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
-import { access } from 'node:fs/promises'
+import {
+  accessSync,
+  constants,
+  existsSync,
+  linkSync,
+  mkdirSync,
+  renameSync,
+  rmSync,
+  type Stats,
+  statSync,
+} from 'node:fs'
+import { stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -12,8 +22,15 @@ import type { MainContext } from '../context'
 import { showsInline } from './file-kinds'
 import type { FileActions } from './files'
 import { freePath, moveFile, PARTIAL_SUFFIX, safeFilename } from './names'
-import { isDangerous, markFromInternet } from './safety'
-import type { DownloadRecord, DownloadStore, ResumeInfo } from './store'
+import { type FileOrigin, isDangerous, markFromInternet } from './safety'
+import {
+  type DownloadRecord,
+  type DownloadStore,
+  type FileIdentity,
+  identityOf,
+  isItsFile,
+  type ResumeInfo,
+} from './store'
 
 /** How long a finished download stays on the sidebar's row (DL-03: about 3–5 s). */
 export const DONE_LINGER_MS = 4000
@@ -156,15 +173,15 @@ export class DownloadManager {
 
   /**
    * A profile's downloads as the UI shows them (DL-10), newest first. Whether finished files are
-   * still there is checked off the main thread, all at once.
+   * still there (theirs, not another file put at their path) is checked off the main thread, all at once.
    */
   async entries(profileId: ProfileId, limit?: number): Promise<DownloadEntry[]> {
     const records = this.records(profileId, limit)
     const there = await Promise.all(
       records.map((r) =>
         r.state === 'completed'
-          ? access(fileOf(r)).then(
-              () => true,
+          ? stat(fileOf(r)).then(
+              (s) => isItsFile(r, s),
               () => false,
             )
           : true,
@@ -178,10 +195,10 @@ export class DownloadManager {
    * continue. `exists`: whether its file is there, when already known.
    */
   entry(record: DownloadRecord, exists?: boolean): DownloadEntry {
-    const { resume: _resume, ...stored } = record
+    const { resume: _resume, file: _file, ...stored } = record
     const out: DownloadEntry = { ...stored, ...this.ctx.store.state.downloads[record.id] }
     if (out.state === 'completed') {
-      if (!(exists ?? existsSync(fileOf(out)))) out.missing = true
+      if (!(exists ?? fileAt(record) === 'its')) out.missing = true
       else if (!out.danger) out.fileUrl = pathToFileURL(out.savePath).href
     }
     if (out.state === 'interrupted' && !this.live.has(record.id)) out.canResume = this.resumable(record)
@@ -331,13 +348,15 @@ export class DownloadManager {
       this.opts.notify(windowId, `Couldn't keep ${record.filename}`)
       return false
     }
-    void markFromInternet(savePath, record)
+    const file = identityAt(savePath)
     this.finish(id, record.profileId, {
       danger: undefined,
       savePath,
       filename: basename(savePath),
       endedAt: Date.now(),
+      file,
     })
+    void this.mark(id, savePath, record, file)
     return true
   }
 
@@ -372,7 +391,13 @@ export class DownloadManager {
   async trash(id: string, windowId?: WindowId): Promise<boolean> {
     const record = this.get(id)
     if (!record) return false
-    if (record.state === 'completed' && !record.danger && !this.live.has(id) && existsSync(record.savePath)) {
+    const file = record.state === 'completed' && !record.danger && !this.live.has(id) ? fileAt(record) : 'none'
+    if (file === 'other') {
+      // Another file is at its path now: that one stays, and so does the entry, as "File Missing" (DL-04).
+      this.opts.changed(record.profileId)
+      return false
+    }
+    if (file === 'its') {
       try {
         await this.opts.files.trashItem(record.savePath)
       } catch (err) {
@@ -451,11 +476,11 @@ export class DownloadManager {
     return false
   }
 
-  /** A finished download's file, when it is still there. */
+  /** A finished download's file, when it is still there: its own, not another one put at its path. */
   finishedFile(id: string): string | undefined {
     const record = this.get(id)
     if (record?.state !== 'completed' || record.danger || this.live.has(id)) return undefined
-    return existsSync(record.savePath) ? record.savePath : undefined
+    return fileAt(record) === 'its' ? record.savePath : undefined
   }
 
   /** Shows the file in its folder (DL-04): the finished file, or the partial one while it downloads. */
@@ -846,8 +871,9 @@ export class DownloadManager {
       return
     }
     const savePath = await this.place(live)
-    const record = this.get(live.id)
-    if (record) void markFromInternet(savePath, record)
+    const origin = this.get(live.id)
+    // Known from now on by its size and date (DL-04): a different file at its path isn't its file.
+    const file = identityAt(savePath)
     this.finish(live.id, live.profileId, {
       state: 'completed',
       endedAt,
@@ -857,7 +883,9 @@ export class DownloadManager {
       totalBytes: total,
       canResume: undefined,
       resume: undefined,
+      file,
     })
+    if (origin) void this.mark(live.id, savePath, origin, file)
     this.opts.feedback(live.windowId, 'done', { id: live.id, filename: basename(savePath) })
   }
 
@@ -885,7 +913,7 @@ export class DownloadManager {
    * download whose window has closed leaves every list (DL-16).
    */
   private finish(id: string, profileId: ProfileId, fields: Partial<DownloadRecord>): void {
-    const { resume: _resume, ...shown } = fields
+    const { resume: _resume, file: _file, ...shown } = fields
     const p = this.privates.get(id)
     const closed = !!p && this.closedSessions.has(p.session)
     const hide = fields.state === 'cancelled' || closed
@@ -913,6 +941,19 @@ export class DownloadManager {
       timer.unref?.()
       this.lingers.set(id, timer)
     }
+  }
+
+  /**
+   * Marks a file just put in place as from the internet (DL-12). On some systems the marker changes
+   * the file's date: its identity is taken again then.
+   */
+  private async mark(id: string, path: string, origin: FileOrigin, file: FileIdentity | undefined): Promise<void> {
+    if (!(await markFromInternet(path, origin)) || !file) return
+    const now = await stat(path).then(identityOf, () => undefined)
+    if (!now || now.size !== file.size || now.mtimeMs === file.mtimeMs) return
+    const p = this.privates.get(id)
+    if (p) p.record = { ...p.record, file: now }
+    else this.list.update(id, { file: now })
   }
 
   /** Off the list and the sidebar. */
@@ -948,6 +989,26 @@ function partialPath(record: DownloadRecord): string {
 /** Where a finished download's file is: in place, or under its partial name while held (DL-12). */
 function fileOf(record: DownloadRecord): string {
   return record.danger ? partialPath(record) : record.savePath
+}
+
+/** What is at a finished download's path now: its own file, another one, or nothing (DL-04, DL-08). */
+function fileAt(record: DownloadRecord): 'its' | 'other' | 'none' {
+  let stats: Stats
+  try {
+    stats = statSync(fileOf(record))
+  } catch {
+    return 'none'
+  }
+  return isItsFile(record, stats) ? 'its' : 'other'
+}
+
+/** A file's identity as it goes into place. */
+function identityAt(path: string): FileIdentity | undefined {
+  try {
+    return identityOf(statSync(path))
+  } catch {
+    return undefined
+  }
 }
 
 /**
