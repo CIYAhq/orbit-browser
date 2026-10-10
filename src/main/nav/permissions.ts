@@ -82,7 +82,7 @@ export interface Permissions {
   /** A permission's state as the site's pages should read it: "prompt" until the user decides. */
   pageState(profileId: ProfileId, origin: string, kinds: PermissionKind[]): PagePermissionState
   /** Test hooks. */
-  info(windowId: WindowId): { placed: boolean; bounds?: Rectangle }
+  info(windowId: WindowId): { placed: boolean; covered: boolean; bounds?: Rectangle }
   /** The plain dialogs asking for pages without a sidebar, oldest first (ORBIT_E2E: they wait for `answerDialog`). */
   dialogs(): PermissionDialogInfo[]
   /** Answers the oldest dialog with one of its buttons, or `cancel` (Esc, or closing it). */
@@ -642,6 +642,7 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
     if (pending) finish(pending, choice, pick)
   })
   commands.register('permissions.thumbnails', ({ id }) => thumbnails.get(id) ?? {})
+  commands.register('permissions.promptPlaced', (_args, c) => !!c.windowId && windows.promptOnScreen(c.windowId))
   commands.register('permissions.promptSize', ({ height }, c) => {
     const windowId = c.windowId
     if (!windowId || !(height > 0)) return
@@ -745,7 +746,7 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
     },
     info: (windowId) => {
       const placed = windows.promptInfo(windowId)
-      return { placed: placed.placed, bounds: placed.placed ? placed.bounds : undefined }
+      return { placed: placed.placed, covered: placed.covered, bounds: placed.placed ? placed.bounds : undefined }
     },
     dialogs: () =>
       testDialogs.map(({ message, detail, buttons, parent, requests }) => ({

@@ -31,8 +31,15 @@ export interface NavTestHooks extends LinksTestHooks, PageMenuTestHooks {
   chooseMenu: (label: string, newTab?: boolean) => boolean
   /** A window's page tools (default: the first): what the find bar and zoom indicator show, and where (NV-05, NV-06). */
   tools: (windowId?: WindowId) => PageToolsInfo
-  /** A window's permission prompt view (default: the first): placed while the sidebar is hidden (NV-15). */
-  prompt: (windowId?: WindowId) => { placed: boolean; bounds?: { x: number; y: number; width: number; height: number } }
+  /**
+   * A window's permission prompt view (default: the first): placed while the sidebar is hidden
+   * (NV-15); `covered` while it is placed under a page cover such as the Library.
+   */
+  prompt: (windowId?: WindowId) => {
+    placed: boolean
+    covered: boolean
+    bounds?: { x: number; y: number; width: number; height: number }
+  }
   /** The plain permission dialogs open for pages without a sidebar (Peek, Mini Window, pop-up), oldest first. */
   permissionDialogs: () => PermissionDialogInfo[]
   /** Answers the oldest permission dialog with a button's label, or `cancel` (Esc). */

@@ -78,6 +78,11 @@ interface WindowRecord {
   prompt?: WebContentsView
   promptShown: boolean
   /**
+   * What the prompt view's page was last told (`prompt:placed`): whether the view is on screen,
+   * placed and not under a page cover. Unset for a new page, which asks when it loads.
+   */
+  promptSaid?: boolean
+  /**
    * Other modules' small views over the pages (createUiView): the loading indicator (SB-28), the
    * link pill (SB-27), page dialogs (NV-24). Kept above the pages, closed with the window.
    */
@@ -707,14 +712,14 @@ export class WindowManager {
 
   /**
    * Places the permission prompt's view at `bounds` (window coordinates): above the pages, under
-   * the floating sidebar and the overlay (NV-15). Its page hears `prompt:placed` each time the view
-   * goes on or off screen: the card's choices wait a moment after it shows.
+   * the floating sidebar and the overlay (NV-15), and under a page cover such as the Library. Its
+   * page hears `prompt:placed` each time the view goes on or off screen, where under a cover counts
+   * as off: the card's choices wait a moment each time it shows (tellPrompt).
    */
   showPrompt(windowId: WindowId, bounds: Rect): void {
     const rec = this.records.get(windowId)
     if (!rec || rec.win.isDestroyed()) return
     const view = this.ensurePrompt(rec)
-    const placing = !rec.promptShown
     const next = roundRect(bounds)
     const current = view.getBounds()
     if (
@@ -728,7 +733,7 @@ export class WindowManager {
     rec.promptShown = true
     this.placeAbovePages(rec, view)
     view.setVisible(true)
-    if (placing) viewContents(view)?.send('orbit:prompt:placed', true)
+    this.tellPrompt(rec)
   }
 
   /** Takes the permission prompt's view out of the window; keyboard focus in it goes back to the page. */
@@ -741,15 +746,37 @@ export class WindowManager {
     const focused = !!contents && webContents.getFocusedWebContents() === contents
     if (focused && !rec.overlayShown && rec.win.isFocused()) this.focusActiveTab(rec.id)
     this.removeChild(rec, view)
-    contents?.send('orbit:prompt:placed', false)
+    this.tellPrompt(rec)
   }
 
-  /** Test/debug view of a window's permission prompt view. */
-  promptInfo(windowId: WindowId): { exists: boolean; placed: boolean; bounds?: Rect } {
+  /**
+   * Whether a window's permission prompt view is on screen: placed, and not under a page cover
+   * (the prompt view's page asks when it loads; after that it hears each change).
+   */
+  promptOnScreen(windowId: WindowId): boolean {
+    const rec = this.records.get(windowId)
+    return !!rec && rec.promptShown && !rec.cover
+  }
+
+  /**
+   * Tells the prompt view's page when the view goes on or off screen (`prompt:placed`), once per
+   * change. Under a page cover counts as off screen: clicks go to the cover, and the card's choices
+   * wait a moment again once the cover has gone (fix check B, M1).
+   */
+  private tellPrompt(rec: WindowRecord): void {
+    const onScreen = rec.promptShown && !rec.cover
+    if (rec.promptSaid === onScreen) return
+    rec.promptSaid = onScreen
+    viewContents(rec.prompt)?.send('orbit:prompt:placed', onScreen)
+  }
+
+  /** Test/debug view of a window's permission prompt view; `covered`: placed under a page cover. */
+  promptInfo(windowId: WindowId): { exists: boolean; placed: boolean; covered: boolean; bounds?: Rect } {
     const rec = this.records.get(windowId)
     const view = rec?.prompt
-    if (!rec || !view || !viewContents(view)) return { exists: false, placed: false }
-    return { exists: true, placed: rec.win.contentView.children.includes(view), bounds: view.getBounds() }
+    if (!rec || !view || !viewContents(view)) return { exists: false, placed: false, covered: false }
+    const placed = rec.win.contentView.children.includes(view)
+    return { exists: true, placed, covered: placed && !!rec.cover, bounds: view.getBounds() }
   }
 
   /**
@@ -812,15 +839,16 @@ export class WindowManager {
 
   /**
    * Sets the view that covers a window's page area while it is open (the Library, AR-02), or clears
-   * it. The page tools, the permission prompt and the small views over the page (loading indicator,
-   * link pill) belong to the page: while a cover is set they go under it, not over it. The overlay
-   * and the floating sidebar stay above it. The cover places itself above the pages, and sets itself
-   * again after it moves.
+   * it once that view has hidden. The page tools, the permission prompt and the small views over
+   * the page (loading indicator, link pill) belong to the page: while a cover is set they go under
+   * it, not over it, and the prompt counts as off screen. The overlay and the floating sidebar stay
+   * above it. The cover places itself above the pages, and sets itself again after it moves.
    */
   setPageCover(windowId: WindowId, view: WebContentsView | undefined): void {
     const rec = this.records.get(windowId)
     if (!rec || rec.win.isDestroyed()) return
     rec.cover = view
+    this.tellPrompt(rec)
     if (!view) return
     const children = rec.win.contentView.children
     for (const small of [rec.tools, rec.prompt, ...rec.uiViews]) {
@@ -1366,6 +1394,7 @@ export class WindowManager {
     loadRenderer(view.webContents, 'prompt')
     rec.prompt = view
     rec.promptShown = false
+    rec.promptSaid = undefined
     return view
   }
 

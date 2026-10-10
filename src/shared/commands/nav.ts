@@ -79,6 +79,11 @@ export interface NavCommands {
   'permissions.answer': { args: { id: number; choice: PromptChoice; pick?: string }; result: void }
   /** A screen picker's previews: data URLs by source id. */
   'permissions.thumbnails': { args: { id: number }; result: Record<string, string> }
+  /**
+   * Whether the prompt view is on screen now (it asks when it loads; after that main says each
+   * time): placed while the sidebar is hidden, and not under a page cover such as the Library.
+   */
+  'permissions.promptPlaced': { args: Record<string, never>; result: boolean }
   /** The prompt view's card height, so its view fits it (sidebar hidden). */
   'permissions.promptSize': { args: { height: number }; result: void }
   /** Opens the site controls panel for the active tab, under a point in window coordinates (NV-16). */

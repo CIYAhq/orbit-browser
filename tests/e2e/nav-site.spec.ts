@@ -1,5 +1,6 @@
 import { type ElectronApplication, expect, type Frame, type Page, test } from '@playwright/test'
-import { action, launchOrbit, type Orbit, state, tabPage } from './helpers'
+import { PROMPT_GUARD_MS } from '../../src/shared/site'
+import { action, launchOrbit, type Orbit, run, state, tabPage } from './helpers'
 import {
   closeWindow,
   cmd,
@@ -9,6 +10,7 @@ import {
   shellRoundTrip,
   startNavFixtures,
   uiPageOf,
+  viewStack,
   visit,
   waitLoaded,
   windowList,
@@ -641,6 +643,174 @@ test('[NV-15] a prompt takes no clicks as it shows, nor while they keep coming; 
     prompt?.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button: 'left', clickCount: 1 })
   }, at)
   await expect.poll(() => answerOf(p, 'camera')).toBe('granted')
+})
+
+/** Where the prompt view's first "Allow" button is, in the view's coordinates. */
+async function allowPoint(view: Page): Promise<{ x: number; y: number }> {
+  const box = await view.getByTestId('permission-allow').boundingBox()
+  if (!box) throw new Error('no Allow button')
+  return { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) }
+}
+
+/** One real click (input events, not script) on the prompt view at a point. */
+const clickPrompt = (app: ElectronApplication, point: { x: number; y: number }) =>
+  app.evaluate(({ webContents }, at) => {
+    const prompt = webContents.getAllWebContents().find((c) => c.getURL().includes('view=prompt'))
+    if (!prompt) throw new Error('no prompt view')
+    prompt.sendInputEvent({ type: 'mouseDown', x: at.x, y: at.y, button: 'left', clickCount: 1 })
+    prompt.sendInputEvent({ type: 'mouseUp', x: at.x, y: at.y, button: 'left', clickCount: 1 })
+  }, point)
+
+/** How many clicks the prompt view's page has handled (a listener of its own, after the card's). */
+const promptClicks = (view: Page) =>
+  view.evaluate(() => {
+    const w = window as unknown as { __clicks?: number }
+    if (w.__clicks === undefined) {
+      w.__clicks = 0
+      window.addEventListener('click', () => {
+        w.__clicks = (w.__clicks ?? 0) + 1
+      })
+    }
+    return w.__clicks
+  })
+
+/**
+ * Waits until the prompt view's page has handled `count` clicks in all, then until main has
+ * handled any call they made (calls from one page reach main in order).
+ */
+async function promptRoundTrip(view: Page, count: number): Promise<void> {
+  await expect.poll(() => promptClicks(view)).toBe(count)
+  await view.evaluate(() =>
+    (window as unknown as { orbit: { invoke: (n: string, a: unknown) => Promise<unknown> } }).orbit.invoke(
+      'app.info',
+      {},
+    ),
+  )
+}
+
+/** The prompt card's `data-armed` values seen in the prompt view's page every 40 ms for `ms` ms. */
+const armedOver = (view: Page, ms: number) =>
+  view.evaluate(async (span) => {
+    const seen = new Set<string>()
+    const end = performance.now() + span
+    while (performance.now() < end) {
+      const card = document.querySelector('[data-testid="permission-prompt"]')
+      seen.add(card?.getAttribute('data-armed') ?? 'no card')
+      await new Promise((r) => setTimeout(r, 40))
+    }
+    return [...seen]
+  }, ms)
+
+/**
+ * Closes the first window's Library and clicks the prompt view's "Allow" once (a real click) the
+ * moment the Library's view has hidden. Says whether the prompt counted as covered for as long as
+ * the Library's view showed.
+ */
+const closeLibraryAndClick = (app: ElectronApplication, point: { x: number; y: number }) =>
+  app.evaluate(async ({ webContents }, at) => {
+    const g = globalThis as unknown as {
+      __orbit: { run: (n: string, a: unknown, w?: string) => unknown; windowIds: () => string[] }
+      __orbitNav: { prompt: () => { placed: boolean; covered?: boolean } }
+    }
+    const windowId = g.__orbit.windowIds()[0]
+    const prompt = webContents.getAllWebContents().find((c) => c.getURL().includes('view=prompt'))
+    if (!prompt) throw new Error('no prompt view')
+    const libraryShown = async () =>
+      ((await g.__orbit.run('library.testInfo', {}, windowId)) as { visible: boolean }).visible
+    await g.__orbit.run('library.close', {}, windowId)
+    let uncoveredEarly = false
+    const deadline = Date.now() + 5000
+    while (await libraryShown()) {
+      if (g.__orbitNav.prompt().covered !== true) uncoveredEarly = true
+      if (Date.now() > deadline) throw new Error('the Library did not hide')
+      await new Promise((r) => setTimeout(r, 2))
+    }
+    prompt.sendInputEvent({ type: 'mouseDown', x: at.x, y: at.y, button: 'left', clickCount: 1 })
+    prompt.sendInputEvent({ type: 'mouseUp', x: at.x, y: at.y, button: 'left', clickCount: 1 })
+    return { uncoveredEarly }
+  }, point)
+
+/** Opens the first window's Library and waits until its view shows. */
+async function openLibrary(app: ElectronApplication): Promise<void> {
+  await run(app, 'library.open', {})
+  await expect
+    .poll(() => run(app, 'library.testInfo') as Promise<{ open: boolean; visible: boolean }>)
+    .toMatchObject({ open: true, visible: true })
+}
+
+test('[NV-15][AR-02] a prompt the closing Library uncovers takes no click at once; a click after a pause answers (fix check B, M1)', async () => {
+  const { app } = orbit
+  const { id, p } = await open(app, page('Uncovered'))
+  await action(app, 'sidebar.toggle')
+  await expect.poll(async () => (await windowState(app)).sidebar.visible).toBe(false)
+  await settledPage(app, id)
+  await ask(p, 'camera')
+  await expect.poll(async () => (await promptView(app)).placed).toBe(true)
+  const view = await promptPage(app)
+  const card = view.getByTestId('permission-prompt')
+  // The prompt has been on screen long enough: a click now would answer it.
+  await expect(card).toHaveAttribute('data-armed', 'true')
+  const at = await allowPoint(view)
+  const clicks = await promptClicks(view)
+
+  // The Library opens over the page and its prompt, then closes: one click on Allow the moment the
+  // Library's view has hidden.
+  await openLibrary(app)
+  const { uncoveredEarly } = await closeLibraryAndClick(app, at)
+  await promptRoundTrip(view, clicks + 1)
+  // The click came as the prompt showed again: the request still waits.
+  expect((await state(app)).tabs[id]?.permissionPrompt?.type).toBe('permission')
+  expect(await answerOf(p, 'camera')).toBeNull()
+  // It counted as covered, off screen, until the Library's view had hidden.
+  expect(uncoveredEarly).toBe(false)
+
+  // After a pause, the user's click answers.
+  await expect(view.getByTestId('permission-allow')).toBeEnabled()
+  await clickPrompt(app, at)
+  await expect.poll(() => answerOf(p, 'camera')).toBe('granted')
+})
+
+test('[NV-15][AR-02] a prompt that comes while the Library is open waits under it, its choices off; once the Library hides, a click at once does nothing (fix check B, M1)', async () => {
+  const { app } = orbit
+  const { id, p } = await open(app, page('UnderLibrary'))
+  await action(app, 'sidebar.toggle')
+  await expect.poll(async () => (await windowState(app)).sidebar.visible).toBe(false)
+  await settledPage(app, id)
+  /** Whether the prompt view is above the page and under the Library. */
+  const underLibrary = (stack: string[]) =>
+    stack.indexOf('view=prompt') > stack.indexOf(`page:${id}`) &&
+    stack.indexOf('view=prompt') < stack.indexOf('view=library')
+
+  // The window's first prompt comes while the Library is open: its view starts under the Library.
+  await openLibrary(app)
+  await ask(p, 'camera')
+  await expect.poll(async () => (await promptView(app)).placed).toBe(true)
+  await expect.poll(async () => underLibrary(await viewStack(app))).toBe(true)
+  const view = await promptPage(app)
+  await expect(view.getByTestId('permission-prompt')).toBeVisible()
+  // Under the Library it counts as off screen: its choices stay off for longer than the guard.
+  expect(await armedOver(view, PROMPT_GUARD_MS + 300)).toEqual(['false'])
+  const at = await allowPoint(view)
+  await promptClicks(view)
+  await closeLibraryAndClick(app, at)
+  await promptRoundTrip(view, 1)
+  expect((await state(app)).tabs[id]?.permissionPrompt?.type).toBe('permission')
+  await expect(view.getByTestId('permission-allow')).toBeEnabled()
+  await clickPrompt(app, at)
+  await expect.poll(() => answerOf(p, 'camera')).toBe('granted')
+  await expect.poll(async () => (await promptView(app)).placed).toBe(false)
+
+  // Another prompt while the Library is open, now that the prompt view's page is up.
+  await openLibrary(app)
+  await ask(p, 'location')
+  await expect.poll(async () => (await promptView(app)).placed).toBe(true)
+  await expect.poll(async () => underLibrary(await viewStack(app))).toBe(true)
+  await expect(view.getByTestId('permission-prompt')).toHaveAttribute('data-kinds', 'location')
+  expect(await armedOver(view, PROMPT_GUARD_MS + 300)).toEqual(['false'])
+  await closeLibraryAndClick(app, await allowPoint(view))
+  await promptRoundTrip(view, 3)
+  expect((await state(app)).tabs[id]?.permissionPrompt?.type).toBe('permission')
+  expect(await answerOf(p, 'location')).toBeNull()
 })
 
 test('[NV-15] a site asking for a serial port gets a device chooser; Connect waits for a pick, Cancel refuses', async () => {

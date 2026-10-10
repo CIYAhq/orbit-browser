@@ -171,15 +171,20 @@ export class LibraryHost {
     const w = windowId ? this.wins.get(windowId) : undefined
     if (!windowId || !w?.open) return
     w.open = false
-    this.ctx.windows.setPageCover(windowId, undefined)
     const view = w.view
     const page = pageOf(view)
     if (view && page) {
       page.send('orbit:library:hide', {})
       clearTimeout(w.hideTimer)
+      // The page's own views count as covered until the Library's view has hidden: a permission
+      // prompt it uncovers takes no click before its choices have waited again (NV-15).
       w.hideTimer = setTimeout(() => {
-        if (!w.open && pageOf(view)) view.setVisible(false)
+        if (w.open) return
+        if (pageOf(view)) view.setVisible(false)
+        this.ctx.windows.setPageCover(windowId, undefined)
       }, EXIT_MS)
+    } else {
+      this.ctx.windows.setPageCover(windowId, undefined)
     }
     const win = this.ctx.windows.get(windowId)
     if (opts.focusPage !== false && win && !win.isDestroyed() && win.isFocused()) {
