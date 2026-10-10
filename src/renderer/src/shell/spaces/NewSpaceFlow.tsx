@@ -1,6 +1,7 @@
 import { Check, Smile } from 'lucide-react'
 import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { DEFAULT_PROFILE_ID, NEW_SPACE_PRESETS, THEME_PRESETS } from '../../../../shared/defaults'
+import { isPrivateProfile } from '../../../../shared/private'
 import { placeholderName } from '../../../../shared/space-names'
 import type { SpaceTheme } from '../../../../shared/state'
 import { invoke } from '../../api'
@@ -41,9 +42,10 @@ export function NewSpaceFlow({ windowId }: { windowId: string }) {
   }, [])
   useEffect(() => switcher.setFlowTheme(theme), [theme])
 
-  const profileList = Object.values(profiles).sort((a, b) =>
-    a.id === DEFAULT_PROFILE_ID ? -1 : b.id === DEFAULT_PROFILE_ID ? 1 : a.createdAt - b.createdAt,
-  )
+  // The private windows' profile is not one to pick (NV-11).
+  const profileList = Object.values(profiles)
+    .filter((p) => !isPrivateProfile(p))
+    .sort((a, b) => (a.id === DEFAULT_PROFILE_ID ? -1 : b.id === DEFAULT_PROFILE_ID ? 1 : a.createdAt - b.createdAt))
 
   const create = () => {
     if (busy) return

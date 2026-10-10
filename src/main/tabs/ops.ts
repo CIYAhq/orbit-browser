@@ -3,9 +3,17 @@
  * drag-and-drop and the maintenance timers all go through these so the rules
  * (selection after close, archive, undo, pinned URL bookkeeping) live in one place.
  */
+import type { LoadURLOptions, WebContentsView } from 'electron'
 import { createWindowState, FAVORITES_FULL_MESSAGE, MAX_FAVORITES } from '../../shared/defaults'
 import { isFolderId, isTabId, newId } from '../../shared/ids'
 import { isMediaBusy } from '../../shared/media'
+import {
+  isLostPrivateTab,
+  isPrivateProfileId,
+  isPrivateSpace,
+  mayReopenIn,
+  privateMoveAllowed,
+} from '../../shared/private'
 import { isPendingPane, layoutLeaves, paneAfterClose, SPLIT_FULL_MESSAGE } from '../../shared/split'
 import type {
   ArchivedSplit,
@@ -64,6 +72,17 @@ import {
 } from './model'
 import type { SavedHistory } from './runtime'
 import { UndoStack } from './undo'
+
+/** How a new tab gets its page, when not by loading its URL as typed (review B-F1). */
+export interface TabPage {
+  /**
+   * The page the engine made for a link its page opened (`TabRuntime.openFromPage`). A page from
+   * another profile's session is closed, and the tab loads its URL instead.
+   */
+  view?: WebContentsView
+  /** Options for the tab's first load of its URL: the page a link came from, as referrer. */
+  load?: LoadURLOptions
+}
 
 export interface ClosedTab {
   tab: Tab
@@ -149,18 +168,20 @@ export class TabOps {
 
   // ---- Create / activate ----
 
-  createTab(opts: {
-    url?: string
-    spaceId?: SpaceId
-    container?: ContainerRef
-    index?: number
-    activate?: boolean
-    windowId?: WindowId
-    openerTabId?: TabId
-    history?: SavedHistory
-    title?: string
-    favicon?: string
-  }): TabId {
+  createTab(
+    opts: {
+      url?: string
+      spaceId?: SpaceId
+      container?: ContainerRef
+      index?: number
+      activate?: boolean
+      windowId?: WindowId
+      openerTabId?: TabId
+      history?: SavedHistory
+      title?: string
+      favicon?: string
+    } & TabPage,
+  ): TabId {
     const state = this.state
     const url = opts.url ?? 'about:blank'
     const space =
@@ -184,16 +205,29 @@ export class TabOps {
       tab.pinnedTitle = tab.title
     }
     if (opts.history) this.ctx.tabs.savedHistory.set(tab.id, opts.history)
+    // The engine's page is used only in the tab's own profile's session.
+    const given = opts.view?.webContents
+    const view =
+      given && !given.isDestroyed() && given.session === this.ctx.sessions.get(profileId) ? opts.view : undefined
+    if (given && !view && !given.isDestroyed()) given.close()
+    if (!view && opts.load) this.ctx.tabs.loadOptions.set(tab.id, opts.load)
     const index =
       opts.index ??
       (target.kind === 'today'
         ? todayInsertIndex(spaceObj, opts.activate === false ? 'background' : 'new')
         : Number.MAX_SAFE_INTEGER)
+    const activate = opts.activate !== false && !!opts.windowId
     this.ctx.store.update((d) => {
       d.tabs[tab.id] = tab
       insertItem(d, target, index, tab.id)
-      if (opts.activate !== false && opts.windowId) activateInDraft(d, opts.windowId, tab.id, this.now())
+      // A tab given its page is selected once it has it: selecting first would make the layout
+      // pass create a second view for it (review M1).
+      if (activate && !view && opts.windowId) activateInDraft(d, opts.windowId, tab.id, this.now())
     })
+    if (view) {
+      this.ctx.tabs.adopt(tab.id, view)
+      if (activate && opts.windowId) this.activate(opts.windowId, tab.id)
+    }
     return tab.id
   }
 
@@ -217,6 +251,8 @@ export class TabOps {
     unit?: SplitUnit,
   ): string | undefined {
     if (!tab.url || tab.url === 'about:blank') return undefined
+    // Private tabs leave nothing behind (NV-11).
+    if (isPrivateProfileId(tab.profileId)) return undefined
     const id = newId('a')
     // A whole split going at once comes back from the Archive as one unit (SV-19, SV-24).
     const split: ArchivedSplit | undefined = unit
@@ -366,7 +402,8 @@ export class TabOps {
 
   /** Puts closed tabs back where they were (or at the top of Today), with their history (TB-07). */
   restoreClosed(records: ClosedTab[], opts: { windowId?: WindowId; select: boolean }): TabId[] {
-    const live = records.filter((r) => !this.state.tabs[r.tab.id])
+    // A private tab whose window is gone never comes back (NV-11).
+    const live = records.filter((r) => !this.state.tabs[r.tab.id] && !isLostPrivateTab(this.state, r.tab))
     if (live.length === 0) return []
     const ids = new Set(live.map((r) => r.tab.id))
     for (let i = this.recentlyClosed.length - 1; i >= 0; i--) {
@@ -453,7 +490,7 @@ export class TabOps {
   reopen(tabId: TabId, windowId: WindowId | undefined): TabId | null {
     const i = this.recentlyClosed.findIndex((r) => r.tab.id === tabId)
     const rec = i >= 0 ? this.recentlyClosed[i] : undefined
-    if (!rec) return null
+    if (!rec || !mayReopenIn(this.state, rec.tab, windowId)) return null
     this.recentlyClosed.splice(i, 1)
     const [id] = this.restoreClosed(this.withUnit(rec), { windowId, select: true })
     return id ?? null
@@ -475,8 +512,11 @@ export class TabOps {
 
   /** ⌘⇧T: reopens the most recently closed tab (a stack). */
   reopenLast(windowId: WindowId | undefined): TabId | null {
-    while (this.recentlyClosed.length > 0) {
-      const rec = this.recentlyClosed.pop() as ClosedTab
+    // Private windows reopen their own tabs, normal windows never a private one (NV-11).
+    const fits = (r: ClosedTab) => mayReopenIn(this.state, r.tab, windowId)
+    while (this.recentlyClosed.some(fits)) {
+      const i = this.recentlyClosed.findLastIndex(fits)
+      const rec = this.recentlyClosed.splice(i, 1)[0] as ClosedTab
       if (this.state.tabs[rec.tab.id]) continue
       const restored = this.restoreClosed(this.withUnit(rec), { windowId, select: true })
       return restored[restored.length - 1] ?? null
@@ -816,6 +856,7 @@ export class TabOps {
     )
     if (items.length === 0) return false
     if (!items.every((id) => canMoveTo(state, id, to))) return false
+    if (!privateMoveAllowed(state, items, to)) return false
     // Never move a folder into one of the other moving folders' subtrees.
     if (to.kind === 'folder' && items.includes(to.folderId)) return false
     if (to.kind === 'favorites') {
@@ -1024,7 +1065,7 @@ export class TabOps {
     const tab = state.tabs[tabId]
     if (!tab) return null
     const spaceId = fromWindowId ? this.spaceOfWindow(fromWindowId) : tab.spaceId
-    const win = createWindowState(spaceId)
+    const win = createWindowState(spaceId, isPrivateSpace(state, spaceId) ? 'private' : 'main')
     win.activeTab[spaceId] = tabId
     const source = fromWindowId ? this.ctx.windows.get(fromWindowId) : undefined
     const size = source && !source.isDestroyed() ? source.getBounds() : { width: 1100, height: 760 }

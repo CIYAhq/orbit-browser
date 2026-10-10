@@ -22,6 +22,7 @@ import {
   tabPage,
   viewPage,
 } from './helpers'
+import { choosePageMenu, pageMenu } from './nav-support'
 import {
   browserFocused,
   focusBrowserWindow,
@@ -492,14 +493,8 @@ test("[ST-06] Search for a selection, from the page's menu, uses the engine of t
   await run(orbit.app, 'spaces.switch', { spaceId })
   await run(orbit.app, 'tabs.create', { url: fx.url('/page/Selected') })
   const web = await tabPage(orbit.app, '/page/Selected')
-  // The page's menu is kept for the test instead of being shown.
-  type Kept = { __pageMenu?: Electron.Menu }
-  await orbit.app.evaluate(({ Menu }) => {
-    Menu.prototype.popup = function (this: Electron.Menu) {
-      ;(globalThis as unknown as Kept).__pageMenu = this
-    }
-  })
-  // The heading's text, selected, and a right-click on it.
+  // The heading's text, selected, and a right-click on it. In tests, the page's menu is kept for the
+  // test hooks instead of being shown (NV-12).
   const at = await web.evaluate(() => {
     const range = document.createRange()
     range.selectNodeContents(document.getElementById('title') as HTMLElement)
@@ -509,13 +504,10 @@ test("[ST-06] Search for a selection, from the page's menu, uses the engine of t
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
   })
   await web.mouse.click(at.x, at.y, { button: 'right' })
-  const search = 'Search for “Selected”'
-  await expect
-    .poll(() => orbit.app.evaluate(() => (globalThis as unknown as Kept).__pageMenu?.items.map((i) => i.label) ?? []))
-    .toContain(search)
-  await orbit.app.evaluate((_electron, label) => {
-    ;(globalThis as unknown as Kept).__pageMenu?.items.find((i) => i.label === label)?.click()
-  }, search)
+  // The item names the engine it searches with (NV-12): the tab's profile's, not the global one.
+  const search = 'Search Bing for “Selected”'
+  await expect.poll(async () => (await pageMenu(orbit.app))?.labels ?? []).toContain(search)
+  expect(await choosePageMenu(orbit.app, search)).toBe(true)
   await expect.poll(activeUrl).toBe('https://www.bing.com/search?q=Selected')
 })
 

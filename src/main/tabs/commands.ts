@@ -8,6 +8,8 @@ import {
   type WebContentsViewConstructorOptions,
 } from 'electron'
 import { isFolderId, isTabId, newId } from '../../shared/ids'
+import { framesMayOpen, localFileBlockedMessage } from '../../shared/link-routing'
+import { isPrivateTab, privateTabMenu } from '../../shared/private'
 import type { ContainerRef, Folder, FolderId, ItemId, TabId, WindowId } from '../../shared/state'
 import {
   containerItems,
@@ -27,7 +29,7 @@ import { tabSplitMenuItems } from '../split/menu'
 import { TabMaintenance } from './maintenance'
 import { findMenuItem, folderMenu, type MenuOps, menuLabels, tabMenu } from './menus'
 import { makeTab, numberedTarget, steppedTarget, todayInsertIndex } from './model'
-import { TabOps } from './ops'
+import { TabOps, type TabPage } from './ops'
 
 /** Test-only handle (ORBIT_E2E=1): globalThis.__orbitTabs. */
 export interface TabTestHooks {
@@ -296,7 +298,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   commands.register('tabs.archiveBelow', ({ tabId }) => ops.archiveBelow(tabId))
   commands.register('tabs.copyLinks', ({ tabIds, markdown = false }, c) => copyLinks(windowOf(c), tabIds, markdown))
 
-  commands.register('tabs.duplicate', ({ tabId, to, index }, c) => {
+  commands.register('tabs.duplicate', ({ tabId, to, index, activate }, c) => {
     const state = store.state
     const tab = state.tabs[tabId]
     if (!tab) throw new Error('No such tab')
@@ -313,7 +315,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
       container: to ?? loc?.container,
       index: to ? index : loc ? loc.index + 1 : undefined,
       // A copy dropped with ⌥ stays in the background; Duplicate from the menu selects it.
-      activate: !to,
+      activate: activate ?? !to,
       windowId: windowOf(c),
       history: targetProfile === tab.profileId ? ops.historyOf(tabId) : undefined,
     })
@@ -370,7 +372,9 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     const windowId = windowOf(c)
     const state = store.state
     const mo = menuOps(windowId)
-    const items = isFolderId(id) ? folderMenu(state, id, mo) : isTabId(id) ? tabMenu(state, id, selection, mo) : []
+    const all = isFolderId(id) ? folderMenu(state, id, mo) : isTabId(id) ? tabMenu(state, id, selection, mo) : []
+    // Private windows have no pinned tabs, Favorites, folders or other Spaces (NV-11, SB-25).
+    const items = isTabId(id) && isPrivateTab(state, id) ? privateTabMenu(all) : all
     if (items.length === 0) return
     lastMenu = items
     if (ctx.e2e) return
@@ -431,16 +435,31 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
         // The size and position the page asked for (features) are kept.
         return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true, title: '' } }
       }
-      const background = details.disposition === 'background-tab'
-      if (background) {
-        // ⌘/middle-click: an ordinary tab that loads in the background. A view handed back through
-        // createWindow would never be shown, and Chromium keeps the opener page waiting for it.
+      // A new tab for the link, given its page or loading it with the page as referrer (review B-F1).
+      const linkTab = (activate: boolean) => (page: TabPage) => {
         const windowId = windows.windowOfTab(openerTabId) ?? windows.focusedWindowId()
         const spaceId = windowId ? ops.spaceOfWindow(windowId) : opener.spaceId
-        const id = ops.createTab({ url: details.url, spaceId, windowId, activate: false, openerTabId })
+        const id = ops.createTab({ url: details.url, spaceId, windowId, activate, openerTabId, ...page })
+        if (activate) return
         tabs.ensure(id)
         // With the sidebar hidden the new tab would open unseen: say so (TB-02, SB-13).
         if (windowId && !store.state.windows[windowId]?.sidebar.visible) toast(windowId, 'Opened in a new tab')
+      }
+      /** A link the engine left to the browser, opened by its page itself (TabRuntime.openFromPage). */
+      const fromPage = (open: (page: TabPage) => void) => {
+        const load = { httpReferrer: details.referrer }
+        tabs.openFromPage(
+          openerTabId,
+          details.url,
+          details.referrer,
+          (view) => open({ view, load }),
+          () => open({ load }),
+        )
+      }
+      if (details.disposition === 'background-tab') {
+        // ⌘/middle-click: an ordinary tab that loads in the background. A view handed back through
+        // createWindow would never be shown, and Chromium keeps the opener page waiting for it.
+        fromPage(linkTab(false))
         return { action: 'deny' }
       }
       return {
@@ -449,6 +468,15 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
         createWindow: (options) => {
           const windowId = windows.windowOfTab(openerTabId) ?? windows.focusedWindowId()
           const spaceId = windowId ? ops.spaceOfWindow(windowId) : opener.spaceId
+          if (!(options as { webContents?: unknown }).webContents) {
+            // ⇧⌘-click: the engine brings no page of its own (a view built from these options
+            // would throw), so the page opens the link itself, as a new selected tab (NV-08).
+            fromPage(linkTab(true))
+            // Electron uses nothing that comes back for an open without a page of its own.
+            const spare = new WebContentsView()
+            setImmediate(() => spare.webContents.close())
+            return spare.webContents
+          }
           const tab = makeTab({ spaceId, profileId: opener.profileId, url: details.url, openerTabId })
           // Add the tab, give it the real (opener-linked) view, and only then select it: selecting
           // first would make the layout pass create a second, orphan view (review M1).
@@ -482,6 +510,12 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
       }
     })
     wc.setWindowOpenHandler((details) => {
+      // As for a tab's page: a local file opens for no web page, and a toast names it (D49, round 2
+      // fix check F1, round 3 fix check F1).
+      if (!framesMayOpen(wc, details.url)) {
+        localFileRefused(openerTabId, details.url)
+        return { action: 'deny' }
+      }
       const windowId = windows.windowOfTab(openerTabId) ?? windows.focusedWindowId()
       if (gesture.used || Date.now() - gesture.at > 1000) {
         toast(windowId, 'Pop-up blocked')
@@ -505,6 +539,20 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
       }
     })
   }
+
+  /**
+   * A local file refused for a page (D49) is named in a toast, so a click that opens nothing says
+   * why: once per tab and file every few seconds, however often a page asks (round 3 fix check F1).
+   */
+  const refusedAt = new Map<TabId, { url: string; at: number }>()
+  const localFileRefused = (tabId: TabId, url: string) => {
+    const now = Date.now()
+    const last = refusedAt.get(tabId)
+    if (last?.url === url && now - last.at < 3000) return
+    refusedAt.set(tabId, { url, at: now })
+    toast(windows.windowOfTab(tabId) ?? windows.focusedWindowId(), localFileBlockedMessage(url))
+  }
+  tabs.onLocalFileRefused = localFileRefused
 
   // One "Pop-up blocked" per tab every few seconds, however often a page tries.
   const blockedAt = new Map<TabId, number>()
@@ -703,44 +751,12 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     send(windowId, 'sidebar:focus', {})
   })
 
-  // Navigation & page actions on the active tab.
+  // Page actions on the active tab. Back, Forward, Reload, Stop and zoom live in src/main/nav/.
   const onContents = (fn: (contents: Electron.WebContents) => void) =>
     withActive((tabId) => {
       const contents = tabs.contents(tabId)
       if (contents) fn(contents)
     })
-  actions.register(
-    'nav.back',
-    withActive((tabId) => goBack(tabId)),
-  )
-  actions.register(
-    'nav.forward',
-    onContents((w) => w.navigationHistory.goForward()),
-  )
-  actions.register(
-    'nav.reload',
-    onContents((w) => w.reload()),
-  )
-  actions.register(
-    'nav.hardReload',
-    onContents((w) => w.reloadIgnoringCache()),
-  )
-  actions.register(
-    'nav.stop',
-    onContents((w) => w.stop()),
-  )
-  actions.register(
-    'page.zoomIn',
-    onContents((w) => w.setZoomLevel(Math.min(w.getZoomLevel() + 0.5, 5))),
-  )
-  actions.register(
-    'page.zoomOut',
-    onContents((w) => w.setZoomLevel(Math.max(w.getZoomLevel() - 0.5, -5))),
-  )
-  actions.register(
-    'page.zoomReset',
-    onContents((w) => w.setZoomLevel(0)),
-  )
   actions.register(
     'page.print',
     onContents((w) => w.print()),

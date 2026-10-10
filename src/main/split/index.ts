@@ -181,7 +181,7 @@ export function registerSplit(ctx: MainContext): void {
     return result
   })
 
-  commands.register('split.openUrl', ({ url, target, side = 'right' }, c) => {
+  commands.register('split.openUrl', ({ url, target, side = 'right', referrer }, c) => {
     const windowId = windowOf(c)
     const anchor = store.state.tabs[target]
     if (!anchor) return null
@@ -190,6 +190,7 @@ export function registerSplit(ctx: MainContext): void {
       return null
     }
     const tab = makeTab({ spaceId: anchor.spaceId, profileId: anchor.profileId, url })
+    if (referrer) ctx.tabs.loadOptions.set(tab.id, { httpReferrer: referrer })
     let result: ReturnType<typeof addPaneInDraft> = 'invalid'
     store.update((d) => {
       d.tabs[tab.id] = tab
@@ -198,6 +199,7 @@ export function registerSplit(ctx: MainContext): void {
       else if (windowId) focusInDraft(d, windowId, tab.id)
     })
     if (isFailure(result)) {
+      ctx.tabs.loadOptions.delete(tab.id)
       refuse(windowId, result)
       return null
     }

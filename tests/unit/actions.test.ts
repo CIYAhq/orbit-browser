@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { describe, expect, it, vi } from 'vitest'
+import { ActionRegistry } from '../../src/main/registry'
 import {
   ACTIONS,
   actionForInput,
@@ -123,5 +126,32 @@ describe('keymap', () => {
   it('formats shortcuts for display', () => {
     expect(formatAccelerator('Cmd+Shift+T', 'darwin')).toBe('⇧⌘T')
     expect(formatAccelerator('Ctrl+Shift+T', 'linux')).toBe('Ctrl+Shift+T')
+  })
+})
+
+describe('action handlers', () => {
+  it('registers each action once: a later handler would silently replace the first (review A-F7)', () => {
+    const counts = new Map<string, number>()
+    const main = join(__dirname, '../../src/main')
+    for (const file of readdirSync(main, { recursive: true, encoding: 'utf8' })) {
+      if (!file.endsWith('.ts')) continue
+      for (const [, id] of readFileSync(join(main, file), 'utf8').matchAll(/actions\.register\(\s*'([^']+)'/g)) {
+        counts.set(id as string, (counts.get(id as string) ?? 0) + 1)
+      }
+    }
+    expect(counts.size).toBeGreaterThan(50)
+    expect([...counts].filter(([, n]) => n > 1).map(([id]) => id)).toEqual([])
+  })
+
+  it('refuses a second handler for an action, whatever made its id, so any start of Orbit finds it (round 2 fix check F5)', () => {
+    const actions = new ActionRegistry()
+    const first = vi.fn()
+    actions.register('tab.goto.1', first)
+    const n = 1
+    expect(() => actions.register(`tab.goto.${n}`, () => {})).toThrow('Action already registered: tab.goto.1')
+    void actions.run('tab.goto.1', {})
+    expect(first).toHaveBeenCalledTimes(1)
+    actions.register('tab.goto.2', () => {})
+    expect(actions.has('tab.goto.2')).toBe(true)
   })
 })

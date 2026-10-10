@@ -12,6 +12,7 @@ import { toElectronAccelerator } from '../../shared/actions'
 import { createWindowState } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
 import { routeFor } from '../../shared/link-routing'
+import { isPrivateTab } from '../../shared/private'
 import type { Rect } from '../../shared/rpc'
 import type { OrbitState, ProfileId, SpaceId, TabId, WindowId } from '../../shared/state'
 import { NEUTRAL_THEME, paletteFor } from '../../shared/theme'
@@ -489,7 +490,8 @@ export function registerMiniWindow(ctx: MainContext): void {
   const fromTab = (tabId: TabId): WindowId | undefined => {
     const state = store.state
     const tab = state.tabs[tabId]
-    if (!tab || tab.floating) return undefined
+    // A private window's tab stays in private windows: a Mini Window is a normal-profile window (NV-11).
+    if (!tab || tab.floating || isPrivateTab(state, tabId)) return undefined
     const section = sectionOf(state, tabId)
     if (section === 'today') return open(undefined, { adopt: tabId })
     const url = tabs.contents(tabId)?.getURL() || tab.url

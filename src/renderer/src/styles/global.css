@@ -18,6 +18,11 @@
   --radius-row: 8px;
   --row-h: 32px;
   --gutter: 8px;
+  /* With the sidebar hidden the page card keeps this margin on all four sides (SB-19). */
+  --gutter-hidden: 6px;
+  /* The sidebar's show/hide (FL-02): the standard token. */
+  --sidebar-dur: 260ms;
+  --sidebar-ease: cubic-bezier(0.2, 0.9, 0.1, 1);
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-spring: cubic-bezier(0.25, 1.2, 0.4, 1);
   --dur-fast: 120ms;
@@ -83,25 +88,58 @@ html.is-resizing * {
   position: relative;
   isolation: isolate;
   display: grid;
-  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  /* --sidebar-live-w: the width while the sidebar's edge is dragged (SB-14), ahead of the window's state. */
+  grid-template-columns: var(--sidebar-live-w, var(--sidebar-w)) minmax(0, 1fr);
   height: 100%;
   /* Space theme: three stops painted by the theme driver (src/renderer/src/theme.ts). */
   background: linear-gradient(180deg, var(--frame-top), var(--frame-mid, var(--frame-top)), var(--frame-bottom));
-  transition: grid-template-columns var(--dur) var(--ease-out);
+  /*
+   * Show/hide (SB-11, FL-02): the sidebar column, the card's margins and the sidebar's slide share
+   * one duration and curve, so the sidebar's right edge and the card's left edge move together.
+   * A reversal mid-way starts from where they are.
+   */
+  transition: grid-template-columns var(--sidebar-dur) var(--sidebar-ease);
 }
 
 .shell--sidebar-hidden {
-  grid-template-columns: 0 minmax(0, 1fr);
+  grid-template-columns: 0px minmax(0, 1fr);
 }
 
 .content {
   min-width: 0;
   padding: var(--gutter) var(--gutter) var(--gutter) 0;
-  transition: padding var(--dur) var(--ease-out);
+  transition: padding var(--sidebar-dur) var(--sidebar-ease);
 }
 
 .shell--sidebar-hidden .content {
-  padding-left: var(--gutter);
+  padding: var(--gutter-hidden);
+}
+
+/* Native full screen has no frame: the page meets the screen's edges, square (SB-19). */
+.shell--fullscreen .content,
+.shell--fullscreen.shell--sidebar-hidden .content {
+  padding: 0;
+}
+
+.shell--fullscreen .pane {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* Dragging the sidebar's edge is 1:1 with the pointer (SB-14, FL-01). */
+.shell--resizing,
+.shell--resizing .content,
+.shell--resizing .sidebar {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell,
+  .content,
+  .sidebar,
+  .shell--sidebar-hidden .sidebar {
+    transition: none;
+  }
 }
 
 .frame {
@@ -135,19 +173,37 @@ html.is-resizing * {
   position: relative;
   display: flex;
   flex-direction: column;
+  /*
+   * The sidebar keeps its width and slides out with its column's right edge (FL-02). A new width
+   * (double-click on the edge) grows it with its column, its left edge staying put.
+   */
+  width: var(--sidebar-live-w, var(--sidebar-w));
+  justify-self: end;
   min-width: 0;
   overflow: hidden;
   padding: 0 4px 6px 8px;
-  transition: opacity var(--dur) var(--ease-out);
+  transition: width var(--sidebar-dur) var(--sidebar-ease);
 }
 
 .shell--sidebar-hidden .sidebar {
-  opacity: 0;
+  visibility: hidden;
   pointer-events: none;
+  /* Out of reach (and of Tab focus) once it has slid out. */
+  transition:
+    width var(--sidebar-dur) var(--sidebar-ease),
+    visibility 0s linear var(--sidebar-dur);
 }
 
-.shell--blurred .sidebar {
-  --text: color-mix(in srgb, currentColor 100%, transparent);
+/* An inactive window's sidebar dims a little (SB-21): over 150 ms on blur, back at once on focus. */
+.shell--blurred .sidebar > * {
+  opacity: 0.84;
+  transition: opacity 150ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell--blurred .sidebar > * {
+    transition: none;
+  }
 }
 
 .topbar {
@@ -221,53 +277,6 @@ html.is-resizing * {
 }
 .window-controls:hover .window-controls__btn--max {
   background: #61c454;
-}
-
-.address {
-  -webkit-app-region: no-drag;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  height: 34px;
-  padding: 0 10px;
-  border-radius: 9px;
-  background: var(--hover);
-  color: var(--text);
-  text-align: left;
-  transition: background var(--dur-fast) ease;
-}
-
-.address:hover {
-  background: color-mix(in srgb, var(--hover) 100%, var(--hover));
-  box-shadow: inset 0 0 0 1px var(--divider);
-}
-
-.address__lock {
-  flex: none;
-  color: var(--text-muted);
-}
-
-.address__host {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.address--loading {
-  background-image: linear-gradient(90deg, transparent, var(--hover), transparent);
-  background-size: 50% 100%;
-  background-repeat: no-repeat;
-  animation: address-loading 1.1s linear infinite;
-}
-
-@keyframes address-loading {
-  from {
-    background-position: -50% 0;
-  }
-  to {
-    background-position: 150% 0;
-  }
 }
 
 /* Favorites grid */

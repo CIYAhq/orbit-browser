@@ -6,6 +6,7 @@
 import { current, type Draft, isDraft } from 'immer'
 import { createProfile, createSpace, DEFAULT_PROFILE_ID, NEW_SPACE_PRESETS, THEME_PRESETS } from '../../shared/defaults'
 import { isFolderId, isSplitId, isTabId, newId } from '../../shared/ids'
+import { isPrivateSpace, isPrivateWindow } from '../../shared/private'
 import { placeholderName } from '../../shared/space-names'
 import type {
   ArchivedTab,
@@ -99,6 +100,8 @@ export function reorderSpaceInDraft(d: OrbitState, spaceId: SpaceId, index: numb
 export function switchSpaceInDraft(d: OrbitState, windowId: WindowId, spaceId: SpaceId): boolean {
   const win = d.windows[windowId]
   if (!win || !d.spaces[spaceId] || win.spaceId === spaceId) return false
+  // A private window keeps its own Space, and no other window shows one (NV-11).
+  if (isPrivateWindow(d, windowId) || isPrivateSpace(d, spaceId)) return false
   win.spaceId = spaceId
   // The Space's remembered tab may be on screen in another window: a page is live in one
   // window at a time, so the window that switched keeps it and the other picks again (TB-17).

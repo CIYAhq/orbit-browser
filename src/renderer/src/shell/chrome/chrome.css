@@ -1,0 +1,264 @@
+/* Sidebar top row and address display (chrome lane: SB-03, SB-04, FL-15). */
+
+.topbar {
+  container: topbar / inline-size;
+}
+
+/* Top-row icon buttons press to 0.94 at once and release with the pop curve (FL-15). */
+.topbar .icon-button {
+  transition:
+    background var(--dur-fast) ease,
+    color var(--dur-fast) ease,
+    transform 240ms cubic-bezier(0.3, 1.3, 0.6, 1);
+}
+
+.topbar .icon-button:active:not(:disabled) {
+  transform: scale(0.94);
+  transition-duration: var(--dur-fast), var(--dur-fast), 60ms;
+}
+
+/* Narrow sidebar: the toggle goes first, Back and Forward stay (SB-03). ⌘S still toggles. */
+@container topbar (max-width: 177px) {
+  .topbar__toggle {
+    display: none;
+  }
+}
+@container topbar (max-width: 189px) {
+  .topbar--mac .topbar__toggle {
+    display: none;
+  }
+}
+
+/* ---------- Address display ---------- */
+
+.address {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  height: 34px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--hover);
+  color: var(--text);
+  transition: box-shadow var(--dur-fast) ease;
+}
+
+.address:hover {
+  box-shadow: inset 0 0 0 1px var(--divider);
+}
+
+.address__host {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  text-align: left;
+  border-radius: 7px;
+}
+
+.address__text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.address--empty .address__text {
+  color: var(--text-muted);
+}
+
+.address__button {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  transition:
+    background var(--dur-fast) ease,
+    color var(--dur-fast) ease,
+    opacity var(--dur-fast) ease,
+    transform 240ms cubic-bezier(0.3, 1.3, 0.6, 1);
+}
+
+.address__button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.address__button:active {
+  transform: scale(0.94);
+  transition-duration: var(--dur-fast), var(--dur-fast), var(--dur-fast), 60ms;
+}
+
+/* The copy button appears while the pointer is over the field or focus is in it. */
+.address__copy {
+  opacity: 0;
+}
+
+.address:hover .address__copy,
+.address:focus-within .address__copy,
+.address__copy.is-copied {
+  opacity: 1;
+}
+
+/* Pop-ups the page tried to open without a click (NV-09): shown until the next page. */
+.address__blocked {
+  color: var(--text);
+  animation: address-blocked-in 220ms cubic-bezier(0.3, 1.3, 0.6, 1);
+}
+
+@keyframes address-blocked-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .address__blocked {
+    animation: none;
+  }
+}
+
+/* Insecure pages: a clear warning before the host (no padlock on https). */
+.address__warning,
+.address__warning:hover {
+  color: #c9372c;
+}
+
+.shell[data-dark] .address__warning,
+.shell[data-dark] .address__warning:hover {
+  color: #ff8a7d;
+}
+
+/* The site controls button while its panel is open (NV-16). */
+.address__site.is-open {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* ---------- Hidden sidebar: the left edge and the floating card (SB-12, FL-03) ---------- */
+
+/* The window's left edge while the sidebar is hidden: the page card's margin there. */
+.sidebar-edge {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--gutter-hidden);
+  z-index: 30;
+  -webkit-app-region: no-drag;
+}
+
+/*
+ * The floating card's own view (view=sidebar): transparent, at the window's left edge, as wide as
+ * the card plus its margin and a 16 px band beside it for the shadow (the pointer there still
+ * counts as over the card).
+ */
+html[data-view="sidebar"] body {
+  background: transparent;
+}
+
+.shell.float-sidebar {
+  position: fixed;
+  inset: 0;
+  display: block;
+  background: none;
+  transition: none;
+}
+
+.float-sidebar__slide {
+  position: absolute;
+  top: var(--gutter-hidden);
+  bottom: var(--gutter-hidden);
+  left: var(--gutter-hidden);
+  width: var(--sidebar-w);
+  /* Out: the quick timing (FL-01, FL-03). */
+  transform: translateX(calc(-100% - var(--gutter-hidden) - 16px));
+  transition: transform 160ms cubic-bezier(0.2, 0, 0, 1);
+  will-change: transform;
+}
+
+.float-sidebar.is-out .float-sidebar__slide {
+  transform: none;
+  /* In: the snappy timing, no overshoot (structure doesn't bounce). */
+  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* The shadow fades in with the slide. */
+.float-sidebar__shadow {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-frame);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.14),
+    0 6px 14px -2px rgba(0, 0, 0, 0.22);
+  opacity: 0;
+  transition: opacity 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.float-sidebar.is-out .float-sidebar__shadow {
+  opacity: 1;
+  transition: opacity 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.float-sidebar__card {
+  position: absolute;
+  inset: 0;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: var(--radius-frame);
+}
+
+.sidebar.sidebar--floating {
+  width: 100%;
+  height: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .float-sidebar__slide,
+  .float-sidebar__shadow,
+  .float-sidebar.is-out .float-sidebar__slide,
+  .float-sidebar.is-out .float-sidebar__shadow {
+    transition: none;
+  }
+}
+
+/* ---------- Private window (SB-25, AP-05) ---------- */
+
+.private-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 4px 10px;
+  padding: 10px 10px 11px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+
+.private-header__label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+
+.private-header__label svg {
+  color: var(--accent);
+}
+
+.private-header__note {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}

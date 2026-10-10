@@ -14,6 +14,7 @@ import {
 } from '../shared/defaults'
 import { isFolderId, isSplitId, isTabId } from '../shared/ids'
 import { normalizeMediaSettings } from '../shared/media'
+import { withoutPrivate } from '../shared/private'
 import type { ItemId, OrbitState, ProfileId, SpaceId, SplitLayout, TabId } from '../shared/state'
 import { STATE_SCHEMA } from '../shared/state'
 import { normalizeSpaceTheme } from '../shared/theme'
@@ -149,6 +150,9 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
     tab.asleep = true
     tab.progress = undefined
     tab.error = undefined
+    tab.blockedPopups = undefined
+    tab.permissionPrompt = undefined
+    tab.pendingUrl = undefined
     tab.canGoBack = tab.canGoBack ?? false
     tab.canGoForward = tab.canGoForward ?? false
     tab.muted = tab.muted ?? false
@@ -318,6 +322,7 @@ function normalizeEntities(state: OrbitState, base: OrbitState): void {
     t.title = text(t.title, fallbackTitle(t.url))
     t.createdAt = time(t.createdAt)
     t.lastActiveAt = time(t.lastActiveAt)
+    if (typeof t.pageColor !== 'string' || !/^#[0-9a-f]{6}$/.test(t.pageColor)) delete t.pageColor
   }
   for (const [id, w] of Object.entries(state.windows)) {
     w.id = id
@@ -460,7 +465,19 @@ function repairReferences(state: OrbitState): void {
  * touch nothing else (loading flips, focus, audio, download progress…) don't cause a write.
  */
 const RUNTIME_ONLY: Record<string, ReadonlySet<string>> = {
-  tabs: new Set(['loading', 'audible', 'asleep', 'progress', 'error', 'canGoBack', 'canGoForward', 'media']),
+  tabs: new Set([
+    'loading',
+    'audible',
+    'asleep',
+    'progress',
+    'error',
+    'canGoBack',
+    'canGoForward',
+    'blockedPopups',
+    'permissionPrompt',
+    'pendingUrl',
+    'media',
+  ]),
   windows: new Set(['focused', 'fullscreen', 'overlay']),
   downloads: new Set(['receivedBytes', 'speed']),
 }
@@ -476,21 +493,11 @@ export function isRuntimeOnlyPatch(patch: Patch): boolean {
 }
 
 /**
- * Runtime-only fields are written too (they are small) and reset on load. A private session's
- * downloads never are (DL-16).
+ * Runtime-only fields are written too (they are small) and reset on load. Private windows and
+ * everything in them never are (NV-11), nor a private session's downloads (DL-16).
  */
 function serialize(state: OrbitState): string {
-  return JSON.stringify(withoutPrivateDownloads(state))
-}
-
-/**
- * The state without the sidebar's rows of private sessions' downloads (DL-16): they live in memory
- * only. Returns `state` itself when it has none.
- */
-export function withoutPrivateDownloads(state: OrbitState): OrbitState {
-  const rows = Object.entries(state.downloads)
-  if (!rows.some(([, d]) => d.private)) return state
-  return { ...state, downloads: Object.fromEntries(rows.filter(([, d]) => !d.private)) }
+  return JSON.stringify(withoutPrivate(state))
 }
 
 export const backupOf = (file: string): string => `${file}.bak`

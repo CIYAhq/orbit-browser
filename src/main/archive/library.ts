@@ -156,6 +156,8 @@ export class LibraryHost {
     view.setBounds(this.bounds(windowId))
     view.setBorderRadius(this.radii.get(windowId) ?? DEFAULT_RADIUS)
     this.place(windowId)
+    // The page's own small views (find bar, loading indicator) go under the Library (AR-02).
+    this.ctx.windows.setPageCover(windowId, view)
     view.setVisible(true)
     page.send('orbit:library:show', w.show)
     // With the command bar still up, focus comes here when it closes (onState).
@@ -174,9 +176,15 @@ export class LibraryHost {
     if (view && page) {
       page.send('orbit:library:hide', {})
       clearTimeout(w.hideTimer)
+      // The page's own views count as covered until the Library's view has hidden: a permission
+      // prompt it uncovers takes no click before its choices have waited again (NV-15).
       w.hideTimer = setTimeout(() => {
-        if (!w.open && pageOf(view)) view.setVisible(false)
+        if (w.open) return
+        if (pageOf(view)) view.setVisible(false)
+        this.ctx.windows.setPageCover(windowId, undefined)
       }, EXIT_MS)
+    } else {
+      this.ctx.windows.setPageCover(windowId, undefined)
     }
     const win = this.ctx.windows.get(windowId)
     if (opts.focusPage !== false && win && !win.isDestroyed() && win.isFocused()) {
@@ -307,6 +315,8 @@ export class LibraryHost {
     if (at > top) return
     // addChildView() moves a child it already holds to the index given (the views above shift down).
     parent.addChildView(view, at >= 0 ? top : top + 1)
+    // The page's own small views it went under come back under it.
+    this.ctx.windows.setPageCover(windowId, view)
   }
 
   /** A page under the open Library took focus (the window refocused it): give it back to the Library. */
