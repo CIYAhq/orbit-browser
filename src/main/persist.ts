@@ -1,6 +1,6 @@
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { mkdir, open, rm } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { dirname, isAbsolute } from 'node:path'
 import type { Patch } from 'immer'
 import {
   createInitialState,
@@ -173,6 +173,13 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
  * malformed entries.
  */
 function normalizeDownloads(state: OrbitState): void {
+  // Download locations (DL-07): folders are absolute paths.
+  const isFolder = (value: unknown) => typeof value === 'string' && isAbsolute(value)
+  for (const profile of Object.values(state.profiles)) {
+    if (!isFolder(profile.downloadFolder)) delete profile.downloadFolder
+    if (profile.downloadAsk !== true) delete profile.downloadAsk
+    if (!isFolder(profile.downloadAskFolder)) delete profile.downloadAskFolder
+  }
   for (const [id, d] of Object.entries(state.downloads)) {
     const named = typeof d.url === 'string' && typeof d.filename === 'string' && typeof d.savePath === 'string'
     // A complete download held back as possibly harmful (DL-12) waits for Keep or Discard.

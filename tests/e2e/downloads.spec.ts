@@ -22,6 +22,7 @@ import {
   viewPage,
 } from './helpers'
 import { pressInTab } from './peek-helpers'
+import { openSettings } from './settings-support'
 
 /**
  * Downloads (DL). A local server sends the files, with an ETag and byte ranges (so a download can
@@ -248,6 +249,8 @@ type Hooks = {
   menu: () => string[]
   clickMenu: (label: string) => boolean
   settle: () => Promise<void>
+  saveDialogs: { defaultPath: string; unavailable?: string }[]
+  folderPicks: string[]
 }
 
 /** Reads the downloads test hooks (main process). */
@@ -813,6 +816,163 @@ test("[DL-16] a private session's downloads are in no saved list, and leave when
   await run(orbit.app, 'tabs.close', { tabId })
   await expect.poll(async () => list(priv)).toEqual([])
   expect(existsSync(join(folder(), 'big.bin'))).toBe(true)
+})
+
+// ---- DL-07: where downloads go ----
+
+/** The save dialogs shown so far: where each opened, and the folder it asked instead of. */
+const saveDialogs = () => hooks((h) => h.saveDialogs)
+
+/** Answers the oldest save dialog still open: a path, or null for Cancel. */
+async function answerSave(path: string | null): Promise<void> {
+  const answered = await orbit.app.evaluate(
+    (_e, p) =>
+      (
+        globalThis as unknown as { __orbitDownloads: { answerSave: (p: string | null) => boolean } }
+      ).__orbitDownloads.answerSave(p),
+    path,
+  )
+  expect(answered, 'a save dialog is open').toBe(true)
+}
+
+/** What the folder picker (Download location → Other…) answers next. */
+async function willPickFolder(path: string | null): Promise<void> {
+  await orbit.app.evaluate((_e, p) => {
+    ;(globalThis as unknown as { __orbitDownloads: { pickFolder?: string | null } }).__orbitDownloads.pickFolder = p
+  }, path)
+}
+
+const profile = async (profileId = 'p-default') => (await state(orbit.app)).profiles[profileId]
+/** A folder of the test's own, beside Orbit's data. */
+const newFolder = (name: string) => {
+  const dir = join(orbit.userData, name)
+  mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+test('[DL-07] Settings → Profiles: each profile has its download folder; Other… picks one; downloads go there', async () => {
+  const work = (await run(orbit.app, 'profiles.create', { name: 'Work' })) as string
+  const settings = await openSettings(orbit.app, { section: 'profiles', profileId: 'p-default' })
+  const select = settings.getByTestId('download-location-p-default')
+  await expect(select).toHaveValue('folder')
+  await expect(select.locator('option')).toHaveText(['Downloads', 'Other…', 'Ask every time'])
+  await expect(settings.getByTestId('download-folder-p-default')).toHaveText(folder())
+  await expect(settings.getByTestId('setting-download-location').locator('.st-scope')).toHaveText('Default')
+  // Other…, cancelled: nothing changes.
+  await select.selectOption('other')
+  await expect.poll(() => hooks((h) => h.folderPicks.length)).toBe(1)
+  await expect(select).toHaveValue('folder')
+  expect((await profile())?.downloadFolder).toBeUndefined()
+  // Other…, a folder picked: it opened at the current folder; the new one shows.
+  const chosen = newFolder('Chosen')
+  await willPickFolder(chosen)
+  await select.selectOption('other')
+  await expect(settings.getByTestId('download-folder-p-default')).toHaveText(chosen)
+  await expect(select.locator('option').first()).toHaveText('Chosen')
+  await expect(select).toHaveValue('folder')
+  expect(await hooks((h) => h.folderPicks)).toEqual([folder(), folder()])
+  // A new profile starts with the OS Downloads folder.
+  await settings.getByTestId(`profile-${work}`).click()
+  await expect(settings.getByTestId(`download-location-${work}`)).toHaveValue('folder')
+  await expect(settings.getByTestId(`download-folder-${work}`)).toHaveText(folder())
+
+  // Each profile's downloads go to its folder, without asking.
+  const { page } = await openPage()
+  await page.locator('#attachment').click()
+  await expect.poll(async () => (await named('data.csv'))?.state).toBe('completed')
+  expect((await named('data.csv'))?.savePath).toBe(join(chosen, 'data.csv'))
+  expect(readdirSync(chosen)).toEqual(['data.csv'])
+  await run(orbit.app, 'spaces.create', { name: 'Work', profileId: work, activate: true })
+  const { page: workPage } = await openPage('Work')
+  await workPage.locator('#attachment').click()
+  await expect.poll(async () => (await list(work))[0]?.state).toBe('completed')
+  expect((await list(work))[0]?.savePath).toBe(join(folder(), 'data.csv'))
+  expect(await saveDialogs()).toEqual([])
+})
+
+test('[DL-07] Ask every time: each download asks where to save; the dialog opens where the last one went, also after a restart', async () => {
+  const settings = await openSettings(orbit.app, { section: 'profiles', profileId: 'p-default' })
+  await settings.getByTestId('download-location-p-default').selectOption('ask')
+  await expect.poll(async () => (await profile())?.downloadAsk).toBe(true)
+  await expect(settings.getByTestId('setting-download-location')).toContainText('Orbit asks where to save')
+
+  const { page } = await openPage()
+  await page.locator('#attachment').click()
+  // The first opens in the profile's folder; the download shows nowhere until it has a place.
+  await expect.poll(saveDialogs).toEqual([{ defaultPath: join(folder(), 'data.csv') }])
+  expect(await list()).toEqual([])
+  await expect(rows()).toHaveCount(0)
+  const mine = newFolder('Mine')
+  await answerSave(join(mine, 'figures.csv'))
+  await expect.poll(async () => (await named('figures.csv'))?.state).toBe('completed')
+  expect((await named('figures.csv'))?.savePath).toBe(join(mine, 'figures.csv'))
+  expect(readFileSync(join(mine, 'figures.csv')).length).toBe(4096)
+  // Nothing is left where it downloaded meanwhile.
+  expect(readdirSync(folder())).toEqual([])
+
+  // The next opens where the last one went. Cancel drops it: no file, no entry.
+  await page.locator('#attachment').click()
+  await expect.poll(async () => (await saveDialogs()).length).toBe(2)
+  expect((await saveDialogs())[1]).toEqual({ defaultPath: join(mine, 'data.csv') })
+  await answerSave(null)
+  await expect.poll(() => readdirSync(mine)).toEqual(['figures.csv'])
+  expect((await list()).map((d) => d.filename)).toEqual(['figures.csv'])
+
+  // After a restart it still opens there. A file held back as harmful waits beside its place (DL-12).
+  const { userData } = orbit
+  await orbit.app.close()
+  orbit = await launchOrbit({ userData })
+  const again = await openPage()
+  await startDownloads(again.page, '/file/setup.exe?size=2048')
+  await expect.poll(saveDialogs).toEqual([{ defaultPath: join(mine, 'setup.exe') }])
+  await answerSave(join(mine, 'setup.exe'))
+  await expect.poll(async () => (await named('setup.exe'))?.danger).toBe('file-type')
+  expect(readdirSync(mine).sort()).toEqual(['figures.csv', 'setup.exe.crdownload'])
+  expect(await run(orbit.app, 'downloads.keep', { id: await idOf('setup.exe') })).toBe(true)
+  expect(readdirSync(mine).sort()).toEqual(['figures.csv', 'setup.exe'])
+})
+
+test('[DL-07] a chosen folder is used, never the one last used with Ask every time; a folder that cannot be used asks', async () => {
+  await run(orbit.app, 'downloads.setAsk', { profileId: 'p-default', ask: true })
+  const { page } = await openPage()
+  const asked = newFolder('Asked')
+  await page.locator('#attachment').click()
+  await expect.poll(async () => (await saveDialogs()).length).toBe(1)
+  await answerSave(join(asked, 'data.csv'))
+  await expect.poll(async () => (await named('data.csv'))?.state).toBe('completed')
+  // A folder chosen: downloads go there without asking, also after a restart.
+  const chosen = newFolder('Chosen')
+  await willPickFolder(chosen)
+  expect(await run(orbit.app, 'downloads.chooseFolder', { profileId: 'p-default' })).toBe(chosen)
+  expect(await run(orbit.app, 'downloads.location', { profileId: 'p-default' })).toEqual({ folder: chosen, ask: false })
+  await startDownloads(page, '/file/second.csv?size=2048')
+  await expect.poll(async () => (await named('second.csv'))?.state).toBe('completed')
+  expect((await named('second.csv'))?.savePath).toBe(join(chosen, 'second.csv'))
+  const { userData } = orbit
+  await orbit.app.close()
+  orbit = await launchOrbit({ userData })
+  const again = await openPage()
+  await startDownloads(again.page, '/file/third.csv?size=2048')
+  await expect.poll(async () => (await named('third.csv'))?.state).toBe('completed')
+  expect((await named('third.csv'))?.savePath).toBe(join(chosen, 'third.csv'))
+  expect(await saveDialogs()).toEqual([])
+  expect(readdirSync(asked)).toEqual(['data.csv'])
+
+  // A folder that can't be written to (a drive that's gone): the save dialog asks, in the OS
+  // Downloads folder, and says why. Nothing is saved anywhere until then.
+  const blocked = join(orbit.userData, 'not-a-folder')
+  writeFileSync(blocked, 'a file')
+  await willPickFolder(join(blocked, 'Downloads'))
+  await run(orbit.app, 'downloads.chooseFolder', { profileId: 'p-default' })
+  await startDownloads(again.page, '/file/fourth.csv?size=2048')
+  await expect
+    .poll(saveDialogs)
+    .toEqual([{ defaultPath: join(folder(), 'fourth.csv'), unavailable: join(blocked, 'Downloads') }])
+  expect(await named('fourth.csv')).toBeUndefined()
+  await answerSave(join(chosen, 'fourth.csv'))
+  await expect.poll(async () => (await named('fourth.csv'))?.state).toBe('completed')
+  expect(readdirSync(chosen).sort()).toEqual(['fourth.csv', 'second.csv', 'third.csv'])
+  expect(readdirSync(asked)).toEqual(['data.csv'])
 })
 
 // ---- DL-05, DL-06, DL-09 to DL-12, DL-14: the Library's sections, recent files, the flyout, safety ----

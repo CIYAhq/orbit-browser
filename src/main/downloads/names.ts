@@ -1,8 +1,10 @@
 /**
  * What a download is saved as (DL-01): a name every file system takes, a free name next to the files
- * already in the folder (`report (1).pdf`), and the temporary name of the file while it downloads.
- * Pure Node, unit-tested.
+ * already in the folder (`report (1).pdf`), the temporary name of the file while it downloads, and
+ * moving it into place. Pure Node, unit-tested.
  */
+import { renameSync } from 'node:fs'
+import { copyFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 
 /** A file being downloaded has this suffix until it is complete (Chromium-standard). */
@@ -67,4 +69,22 @@ export function freePath(dir: string, name: string, taken: (path: string) => boo
   // Ten thousand copies: give up on numbers and use the time.
   const [base, ext] = splitName(name)
   return join(dir, `${base} (${Date.now()})${ext}`)
+}
+
+/**
+ * Moves a finished file into place, to another disk too (where the save dialog chose, DL-07): a
+ * rename, else a copy that doesn't block the app, then the original goes.
+ */
+export async function moveFile(
+  from: string,
+  to: string,
+  rename: (from: string, to: string) => void = renameSync,
+): Promise<void> {
+  try {
+    rename(from, to)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err
+    await copyFile(from, to)
+    await rm(from, { force: true })
+  }
 }

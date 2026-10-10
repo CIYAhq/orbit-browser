@@ -203,6 +203,15 @@ export interface Profile {
    * Unset: the Default profile's choice, then settings.searchEngine (`engineFor` in src/shared/url.ts).
    */
   searchEngine?: string
+  /**
+   * Where this profile's downloads are saved (DL-07). Unset: the OS Downloads folder. It stays while
+   * `downloadAsk` is on, for when that is turned off.
+   */
+  downloadFolder?: string
+  /** "Ask every time" (DL-07): each download shows the OS save dialog. */
+  downloadAsk?: boolean
+  /** Where that dialog opens: the folder the last download it asked about went to (DL-07). */
+  downloadAskFolder?: string
 }
 
 export type CommandBarMode = 'new-tab' | 'edit-url' | 'search-tabs'

@@ -1,5 +1,6 @@
-import { existsSync, linkSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
+import { accessSync, constants, existsSync, linkSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { access } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { DownloadItem, Session, WebContents } from 'electron'
@@ -10,7 +11,7 @@ import type { Download, ProfileId, TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import { showsInline } from './file-kinds'
 import type { FileActions } from './files'
-import { freePath, PARTIAL_SUFFIX, safeFilename } from './names'
+import { freePath, moveFile, PARTIAL_SUFFIX, safeFilename } from './names'
 import { isDangerous, markFromInternet } from './safety'
 import type { DownloadRecord, DownloadStore, ResumeInfo } from './store'
 
@@ -36,6 +37,26 @@ interface Live {
   pushTimer?: NodeJS.Timeout
   /** Taken off the list while it ran (Remove, Retry, Clear all): nothing of it is kept when it ends. */
   removed?: boolean
+  /** The save dialog is open for it (DL-07): it downloads meanwhile, and shows nowhere yet. */
+  choosing?: boolean
+  /** How it ended while the save dialog was open. */
+  ended?: 'completed' | 'cancelled' | 'interrupted'
+  /** The save dialog was cancelled: nothing of it stays. */
+  dropped?: boolean
+  /** Its place was chosen in the save dialog, which asked before replacing a file there (DL-07). */
+  replace?: boolean
+}
+
+/** Where a profile's downloads go (DL-07). */
+export interface SaveLocation {
+  /** The profile's folder. */
+  folder: string
+  /** "Ask every time": the OS save dialog chooses. */
+  ask: boolean
+  /** Where that dialog opens: the folder the last one saved to. */
+  askFolder?: string
+  /** The OS Downloads folder: where the dialog opens when it has nowhere else. */
+  fallback: string
 }
 
 /** A private window's download (DL-16): listed in memory only, while its session has pages. */
@@ -48,8 +69,16 @@ interface PrivateEntry {
 export type DownloadFeedback = 'started' | 'done' | 'failed' | 'held'
 
 export interface DownloadManagerOptions {
-  /** The folder a profile's downloads are saved to (DL-07). */
-  folder: (profileId: ProfileId) => string
+  /** Where a profile's downloads go (DL-07). */
+  location: (profileId: ProfileId) => SaveLocation
+  /**
+   * The OS save dialog (DL-07), over the window a download started from: resolves to the path
+   * chosen, or undefined for Cancel. `unavailable`: the profile's folder, when it asks because that
+   * folder can't be written to.
+   */
+  askWhere: (windowId: WindowId | undefined, defaultPath: string, unavailable?: string) => Promise<string | undefined>
+  /** The folder a profile's "Ask every time" dialog saved to: the next one opens there (DL-07). */
+  askedIn: (profileId: ProfileId, folder: string) => void
   /** The sidebar's start animation and row, or a toast where no sidebar shows them. */
   feedback: (
     windowId: WindowId | undefined,
@@ -73,7 +102,8 @@ export interface DownloadManagerOptions {
 /**
  * The downloads flow (DL-01): every profile session's `will-download`. A download is saved straight
  * to its profile's folder under a free name, written as `<name>.crdownload` until complete, and
- * tracked in OrbitState (what the sidebar shows) and the downloads list (DownloadStore). What can be
+ * tracked in OrbitState (what the sidebar shows) and the downloads list (DownloadStore). With "Ask
+ * every time", or a folder that can't be written to, the OS save dialog chooses instead (DL-07). What can be
  * done with one: pause, resume (also after a restart) and retry (DL-15); open, show, remove and
  * delete (DL-04, DL-08). A private session's downloads are in no list on disk (DL-16).
  */
@@ -108,7 +138,7 @@ export class DownloadManager {
   /** Downloads running or paused now. */
   activeCount(): number {
     let n = 0
-    for (const live of this.live.values()) if (live.item.getState() === 'progressing') n++
+    for (const live of this.live.values()) if (live.item.getState() === 'progressing' && !live.choosing) n++
     return n
   }
 
@@ -522,30 +552,37 @@ export class DownloadManager {
     const tabId = page ? tabs.tabIdFor(page) : undefined
     const tab = tabId ? store.state.tabs[tabId] : undefined
     const profileId = tab?.profileId ?? this.profileOf.get(ses) ?? DEFAULT_PROFILE_ID
-    const folder = this.opts.folder(profileId)
-    try {
-      mkdirSync(folder, { recursive: true })
-    } catch (err) {
-      console.error('[downloads] cannot create the download folder:', err)
-    }
-    const finalPath = freePath(folder, safeFilename(item.getFilename()), (p) => this.taken(p))
-    const tempPath = `${finalPath}${PARTIAL_SUFFIX}`
-    // Set now, inside the event: without a path the engine would ask where to save.
-    item.setSavePath(tempPath)
-    this.reserved.add(finalPath.toLowerCase())
-
     const blank = !!page && isBlank(page)
     const opener = tab?.openerTabId ? store.state.tabs[tab.openerTabId] : undefined
     const pageUrl = (!blank && page ? page.getURL() : opener?.url) || item.getInitiatorOrigin() || undefined
     const windowId = (tabId ? windows.windowOfTab(tabId) : undefined) ?? windows.focusedWindowId()
-    const id = newId('d')
-    const live: Live = { id, item, profileId, finalPath, tempPath, windowId, lastPush: 0 }
-    this.live.set(id, live)
+    const live: Live = { id: newId('d'), item, profileId, finalPath: '', tempPath: '', windowId, lastPush: 0 }
+    this.live.set(live.id, live)
+    this.listen(live)
+    const name = safeFilename(item.getFilename())
+    const where = this.opts.location(profileId)
+    if (!where.ask && usableFolder(where.folder)) {
+      live.finalPath = freePath(where.folder, name, (p) => this.taken(p))
+      live.tempPath = `${live.finalPath}${PARTIAL_SUFFIX}`
+      // Set now, inside the event: without a path the engine would ask where to save.
+      item.setSavePath(live.tempPath)
+      this.reserved.add(live.finalPath.toLowerCase())
+      this.begin(live, ses, pageUrl)
+    } else {
+      this.ask(live, ses, pageUrl, name, where)
+    }
+    // A tab opened just for this download (a link to a file in a new tab) closes itself.
+    if (blank && tabId) setImmediate(() => this.opts.closeBlankTab(tabId))
+  }
+
+  /** Lists a download and shows it in the sidebar: as it starts, or once the save dialog placed it. */
+  private begin(live: Live, ses: Session, pageUrl: string | undefined): void {
+    const { id, item, profileId } = live
     const record: DownloadRecord = stripUndefined({
       id,
       url: item.getURL(),
-      filename: basename(finalPath),
-      savePath: finalPath,
+      filename: basename(live.finalPath),
+      savePath: live.finalPath,
       state: 'progressing',
       receivedBytes: item.getReceivedBytes(),
       totalBytes: item.getTotalBytes(),
@@ -555,20 +592,51 @@ export class DownloadManager {
       pageUrl,
     })
     if (ses.isPersistent()) {
-      this.list.put({ ...record, resume: resumeInfo(item, tempPath) })
+      this.list.put({ ...record, resume: resumeInfo(item, live.tempPath) })
     } else {
       record.private = true
       this.privates.set(id, { record, session: ses })
     }
-    store.update((d) => {
+    this.ctx.store.update((d) => {
       d.downloads[id] = { ...record }
     })
     this.opts.changed(profileId)
+    this.opts.feedback(live.windowId, 'started', { id, filename: record.filename })
+  }
 
-    this.listen(live)
-    this.opts.feedback(windowId, 'started', { id, filename: record.filename })
-    // A tab opened just for this download (a link to a file in a new tab) closes itself.
-    if (blank && tabId) setImmediate(() => this.opts.closeBlankTab(tabId))
+  /**
+   * "Ask every time" (DL-07), or a folder that can't be written to: the OS save dialog chooses where
+   * the file goes. As in other browsers, it downloads meanwhile under a hidden name in the folder the
+   * dialog opens in, and moves into place once complete. It shows in the sidebar and the lists once
+   * its place is chosen; Cancel drops it.
+   */
+  private ask(live: Live, ses: Session, pageUrl: string | undefined, name: string, where: SaveLocation): void {
+    const opensIn = (where.ask ? [where.askFolder, where.folder] : []).find(isFolder) ?? where.fallback
+    const stage = [opensIn, where.fallback].find(usableFolder) ?? tmpdir()
+    live.tempPath = join(stage, `.orbit-${live.id}${PARTIAL_SUFFIX}`)
+    live.item.setSavePath(live.tempPath)
+    live.choosing = true
+    void this.opts
+      .askWhere(live.windowId, join(opensIn, name), where.ask ? undefined : where.folder)
+      .catch(() => undefined)
+      .then((chosen) => {
+        live.choosing = false
+        if (this.quitting) return
+        if (!chosen) {
+          live.dropped = true
+          if (live.ended) this.done(live, live.ended)
+          else live.item.cancel()
+          return
+        }
+        // The dialog asked before replacing a file; one another download will get keeps its name.
+        live.replace = !this.reserved.has(chosen.toLowerCase())
+        live.finalPath = live.replace ? chosen : freePath(dirname(chosen), basename(chosen), (p) => this.taken(p))
+        this.reserved.add(live.finalPath.toLowerCase())
+        if (where.ask && ses.isPersistent()) this.opts.askedIn(live.profileId, dirname(live.finalPath))
+        this.begin(live, ses, pageUrl)
+        if (live.ended) this.done(live, live.ended)
+        else this.progress(live, live.item.getState() === 'interrupted' ? 'interrupted' : 'progressing')
+      })
   }
 
   /** The download asked to continue that this item is (by its partial file, else its address). */
@@ -637,7 +705,7 @@ export class DownloadManager {
   }
 
   private progress(live: Live, state: 'progressing' | 'interrupted'): void {
-    if (this.quitting || live.removed) return
+    if (this.quitting || live.removed || live.choosing) return
     const { item } = live
     if (state === 'interrupted') {
       // The engine keeps it: it may get over it by itself, else it can be resumed or retried (DL-15).
@@ -715,13 +783,21 @@ export class DownloadManager {
     live.pushTimer = undefined
     // Quitting: the list keeps it as it was (DL-15); the engine keeps or deletes the partial file.
     if (this.quitting) return
+    // The save dialog is still open (DL-07): its answer decides.
+    if (live.choosing) {
+      live.ended = state
+      return
+    }
     this.live.delete(live.id)
     this.reserved.delete(live.finalPath.toLowerCase())
     const { item } = live
     const endedAt = Date.now()
+    if (live.dropped || (live.removed && state !== 'completed')) {
+      removeFile(live.tempPath)
+      return
+    }
     if (live.removed) {
-      if (state === 'completed') this.place(live)
-      else removeFile(live.tempPath)
+      void this.place(live)
       return
     }
     if (state === 'cancelled') {
@@ -743,11 +819,22 @@ export class DownloadManager {
       return
     }
     const received = item.getReceivedBytes()
-    const total = item.getTotalBytes() || received
+    void this.complete(live, endedAt, received, item.getTotalBytes() || received)
+  }
+
+  /** A complete download: held back as possibly harmful (DL-12), or moved into place. */
+  private async complete(live: Live, endedAt: number, received: number, total: number): Promise<void> {
     if (isDangerous(live.finalPath)) {
       // Held back (DL-12): complete, but under its partial name until the user keeps or discards it.
+      const partial = `${live.finalPath}${PARTIAL_SUFFIX}`
+      if (live.tempPath !== partial) {
+        // Downloaded where the save dialog opened (DL-07): beside its place, like any other.
+        await moveFile(live.tempPath, partial).catch((err) => {
+          console.error('[downloads] cannot move a held download beside its place:', err)
+        })
+      }
       this.finish(live.id, live.profileId, {
-        state,
+        state: 'completed',
         endedAt,
         danger: 'file-type',
         receivedBytes: received,
@@ -758,11 +845,11 @@ export class DownloadManager {
       this.opts.feedback(live.windowId, 'held', { id: live.id, filename: basename(live.finalPath) })
       return
     }
-    const savePath = this.place(live)
+    const savePath = await this.place(live)
     const record = this.get(live.id)
     if (record) void markFromInternet(savePath, record)
     this.finish(live.id, live.profileId, {
-      state,
+      state: 'completed',
       endedAt,
       savePath,
       filename: basename(savePath),
@@ -774,12 +861,17 @@ export class DownloadManager {
     this.opts.feedback(live.windowId, 'done', { id: live.id, filename: basename(savePath) })
   }
 
-  /** A complete file gets its real name, a free one if something took it meanwhile. */
-  private place(live: Live): string {
+  /**
+   * A complete file goes into place: where the save dialog chose (DL-07; it asked before replacing a
+   * file there), else under its name, a free one if something took it meanwhile.
+   */
+  private async place(live: Live): Promise<string> {
     let savePath = live.finalPath
     try {
-      if (existsSync(savePath)) savePath = freePath(dirname(live.finalPath), basename(savePath), (p) => this.taken(p))
-      renameSync(live.tempPath, savePath)
+      if (!live.replace && existsSync(savePath)) {
+        savePath = freePath(dirname(live.finalPath), basename(savePath), (p) => this.taken(p))
+      }
+      await moveFile(live.tempPath, savePath)
     } catch (err) {
       console.error('[downloads] cannot move the finished download into place:', err)
       savePath = live.tempPath
@@ -863,7 +955,8 @@ function fileOf(record: DownloadRecord): string {
  * beside it, and unique to the download.
  */
 function keptPath(record: DownloadRecord): string {
-  return join(dirname(record.savePath), `.${basename(record.savePath)}.${record.id}${PARTIAL_SUFFIX}`)
+  const dir = dirname(record.resume?.tempPath ?? record.savePath)
+  return join(dir, `.${basename(record.savePath)}.${record.id}${PARTIAL_SUFFIX}`)
 }
 
 /** Deletes what is left of a download that will never continue. */
@@ -887,6 +980,26 @@ function resumeInfo(item: DownloadItem, tempPath: string): ResumeInfo {
     lastModified: item.getLastModifiedTime(),
     tempPath,
     startTime: item.getStartTime(),
+  }
+}
+
+/** A folder downloads can be written to, made if it isn't there yet (DL-07). */
+function usableFolder(dir: string | undefined): dir is string {
+  if (!dir) return false
+  try {
+    mkdirSync(dir, { recursive: true })
+    accessSync(dir, constants.W_OK)
+    return statSync(dir).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+function isFolder(dir: string | undefined): dir is string {
+  try {
+    return !!dir && statSync(dir).isDirectory()
+  } catch {
+    return false
   }
 }
 

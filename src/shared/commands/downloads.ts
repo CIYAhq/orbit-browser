@@ -94,6 +94,26 @@ export interface DownloadCommands {
    * it when it is open. ⌘⇧J / ⌥⌘L on macOS open the Library's Downloads section instead.
    */
   'downloads.flyout': { args: Record<string, never>; result: void }
+  /**
+   * A profile's download location (DL-07, Settings → Profiles → Download location): its folder (the
+   * OS Downloads folder until another is chosen) and whether it asks where to save each download.
+   */
+  'downloads.location': { args: { profileId: ProfileId }; result: DownloadLocation }
+  /**
+   * Shows the OS folder picker for a profile's download folder (Download location → Other…). The
+   * folder picked is used from then on, and "Ask every time" goes off. Null when it was cancelled.
+   */
+  'downloads.chooseFolder': { args: { profileId: ProfileId }; result: string | null }
+  /** Turns "Ask every time" on or off for a profile (DL-07); off, its folder is used again. */
+  'downloads.setAsk': { args: { profileId: ProfileId; ask: boolean }; result: void }
+}
+
+/** Where a profile's downloads go (DL-07). */
+export interface DownloadLocation {
+  /** The folder they are saved to; it stays while `ask` is on, for when that goes off. */
+  folder: string
+  /** "Ask every time": each download shows the OS save dialog. */
+  ask: boolean
 }
 
 /** An entry of the downloads list. */

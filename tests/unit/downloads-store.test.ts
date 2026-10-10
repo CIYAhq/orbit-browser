@@ -2,7 +2,14 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } fro
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { freePath, numberedName, PARTIAL_SUFFIX, safeFilename, splitName } from '../../src/main/downloads/names'
+import {
+  freePath,
+  moveFile,
+  numberedName,
+  PARTIAL_SUFFIX,
+  safeFilename,
+  splitName,
+} from '../../src/main/downloads/names'
 import { type DownloadRecord, DownloadStore } from '../../src/main/downloads/store'
 import { isRuntimeOnlyPatch, normalizeState } from '../../src/main/persist'
 import { createInitialState } from '../../src/shared/defaults'
@@ -158,6 +165,56 @@ describe('downloads in saved state', () => {
     expect(isRuntimeOnlyPatch({ op: 'replace', path: ['downloads', 'd-1', 'receivedBytes'], value: 5 })).toBe(true)
     expect(isRuntimeOnlyPatch({ op: 'replace', path: ['downloads', 'd-1', 'speed'], value: 5 })).toBe(true)
     expect(isRuntimeOnlyPatch({ op: 'replace', path: ['downloads', 'd-1', 'state'], value: 'completed' })).toBe(false)
+  })
+})
+
+describe('download location', () => {
+  it('[DL-07] a finished file moves into place, to another disk too', async () => {
+    const dir = tmp()
+    const from = join(dir, '.orbit-d-1.crdownload')
+    writeFileSync(from, 'bytes')
+    await moveFile(from, join(dir, 'a.csv'))
+    expect(readdirSync(dir)).toEqual(['a.csv'])
+    // Another disk: the rename fails, a copy goes there.
+    const otherDisk = () => {
+      throw Object.assign(new Error('cross-device link not permitted'), { code: 'EXDEV' })
+    }
+    await moveFile(join(dir, 'a.csv'), join(dir, 'b.csv'), otherDisk)
+    expect(readdirSync(dir)).toEqual(['b.csv'])
+    expect(readFileSync(join(dir, 'b.csv'), 'utf8')).toBe('bytes')
+    // Any other failure is the caller's.
+    await expect(moveFile(join(dir, 'gone.csv'), join(dir, 'c.csv'))).rejects.toThrow()
+  })
+
+  it('[DL-07] saved locations: folders are absolute paths; Ask every time is on or unset', () => {
+    const raw = JSON.parse(JSON.stringify(createInitialState())) as OrbitState
+    const folder = join(tmpdir(), 'Chosen')
+    raw.profiles['p-default'] = {
+      ...(raw.profiles['p-default'] as OrbitState['profiles'][string]),
+      downloadFolder: folder,
+      downloadAsk: true,
+      downloadAskFolder: folder,
+    }
+    raw.profiles['p-2'] = {
+      ...(raw.profiles['p-default'] as OrbitState['profiles'][string]),
+      id: 'p-2',
+      downloadFolder: 'relative/folder',
+      downloadAsk: 'yes' as unknown as boolean,
+      downloadAskFolder: 42 as unknown as string,
+    }
+    const state = normalizeState(raw)
+    expect(state.profiles['p-default']).toMatchObject({
+      downloadFolder: folder,
+      downloadAsk: true,
+      downloadAskFolder: folder,
+    })
+    const other = state.profiles['p-2']
+    expect(other?.id).toBe('p-2')
+    expect([other?.downloadFolder, other?.downloadAsk, other?.downloadAskFolder]).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ])
   })
 })
 

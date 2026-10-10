@@ -1,16 +1,27 @@
 import { mkdirSync, renameSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import { app, type BrowserWindow, clipboard, Menu, type MenuItemConstructorOptions, type Session } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  Menu,
+  type MenuItemConstructorOptions,
+  type OpenDialogOptions,
+  type SaveDialogOptions,
+  type Session,
+  type WebContents,
+} from 'electron'
 import { DOWNLOADS_FLYOUT_PANEL } from '../../shared/commands/downloads'
 import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
-import type { ProfileId, Settings, TabId, WindowId } from '../../shared/state'
+import type { Profile, ProfileId, Settings, TabId, WindowId } from '../../shared/state'
 import { sectionOf } from '../../shared/tree'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
 import { activeTabOf } from '../windows'
 import { copyFileToClipboard, type FileActions, systemFiles } from './files'
 import { DownloadsLibrary, dragIcon, isScreenshotId } from './library'
-import { type DownloadFeedback, DownloadManager } from './manager'
+import { type DownloadFeedback, DownloadManager, type SaveLocation } from './manager'
 import { downloadMenu, fileMenu } from './menu'
 import { askToQuit, guardQuit, quitQuestion } from './quit'
 import { readMacScreenshotLocation, type ScreenshotFolder, screenshotFolders } from './screenshots'
@@ -28,6 +39,10 @@ import { DownloadStore } from './store'
  * - `dragged`: files dragged out of Orbit (DL-06); test runs never start the OS's drag.
  * - `screenshots`: the folder test runs take the OS's screenshots from (DL-05, DL-11).
  * - `platform`: the OS the Downloads keys act as on (DL-14), to try macOS's on another.
+ * - `saveDialogs`, `answerSave`: the save dialogs shown (DL-07), where each opened (and the folder it
+ *   asked instead of), and answering the oldest still open: a path, or null for Cancel.
+ * - `pickFolder`: what the folder picker (Download location → Other…, DL-07) answers next, a folder
+ *   or null for Cancel; `folderPicks`, where each opened.
  */
 export interface DownloadTestHooks {
   quitAnswer?: 'quit' | 'cancel'
@@ -43,12 +58,16 @@ export interface DownloadTestHooks {
   dragged: string[]
   screenshots: string
   platform?: NodeJS.Platform
+  saveDialogs: { defaultPath: string; unavailable?: string }[]
+  answerSave: (path: string | null) => boolean
+  pickFolder?: string | null
+  folderPicks: string[]
 }
 
 /**
- * Downloads (DL-01 to DL-06, DL-08, DL-10 to DL-12, DL-14 to DL-16): every profile session's
- * downloads go to that profile's download folder; the sidebar shows them while they run, the
- * Library's Downloads and Media sections afterwards.
+ * Downloads (DL-01 to DL-08, DL-10 to DL-16): every profile session's downloads go to that profile's
+ * download folder, or where the save dialog chooses (DL-07); the sidebar shows them while they run,
+ * the Library's Downloads and Media sections afterwards.
  * Main-process API for other features: `registerDownloads(ctx)` returns the DownloadManager.
  */
 export function registerDownloads(ctx: MainContext): DownloadManager {
@@ -56,7 +75,61 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
   // Test runs never write to the real Downloads folder.
   const defaultFolder =
     process.env.ORBIT_DOWNLOADS_DIR || (ctx.e2e ? join(ctx.paths.userData, 'Downloads') : app.getPath('downloads'))
-  const folder = (_profileId?: ProfileId) => defaultFolder
+  // Download location, per profile (DL-07): Settings → Profiles → [profile] → Download location.
+  const location = (profileId: ProfileId): SaveLocation => {
+    const p = store.state.profiles[profileId]
+    return {
+      folder: p?.downloadFolder ?? defaultFolder,
+      ask: p?.downloadAsk === true,
+      ...(p?.downloadAskFolder ? { askFolder: p.downloadAskFolder } : {}),
+      fallback: defaultFolder,
+    }
+  }
+  const changeProfile = (profileId: ProfileId, change: (p: Profile) => void) =>
+    store.update((d) => {
+      const p = d.profiles[profileId]
+      if (p) change(p)
+    })
+  /** Save dialogs open in test runs, oldest first: answering one resolves it. */
+  const openSaves: ((path: string | undefined) => void)[] = []
+  /** The OS save dialog for a download (DL-07), over its window. */
+  const askWhere = async (windowId: WindowId | undefined, defaultPath: string, unavailable?: string) => {
+    if (ctx.e2e) {
+      hooks.saveDialogs.push(unavailable ? { defaultPath, unavailable } : { defaultPath })
+      return new Promise<string | undefined>((resolve) => openSaves.push(resolve))
+    }
+    const options: SaveDialogOptions = unavailable
+      ? {
+          defaultPath,
+          title: 'Choose Where to Save',
+          message: `The download folder ${unavailable} can’t be used. Choose where to save this file.`,
+        }
+      : { defaultPath }
+    const win = windowId ? windows.get(windowId) : undefined
+    const { canceled, filePath } =
+      win && !win.isDestroyed() ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
+    return canceled || !filePath ? undefined : filePath
+  }
+  /** The OS folder picker for a profile's download folder (DL-07), over the window asking. */
+  const pickFolder = async (sender: WebContents | undefined, current: string): Promise<string | undefined> => {
+    if (ctx.e2e) {
+      hooks.folderPicks.push(current)
+      const answer = hooks.pickFolder ?? undefined
+      hooks.pickFolder = undefined
+      return answer
+    }
+    const options: OpenDialogOptions = {
+      title: 'Download Location',
+      defaultPath: current,
+      buttonLabel: 'Select',
+      properties: ['openDirectory', 'createDirectory'],
+    }
+    const win = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null
+    const { canceled, filePaths } = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    return canceled ? undefined : filePaths[0]
+  }
 
   let lastMenu: MenuItemConstructorOptions[] = []
   /** Shows a menu at the pointer, over a window (test runs keep it for the hooks instead). */
@@ -68,7 +141,7 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
   }
   const hooks: DownloadTestHooks = {
     asked: [],
-    folder: (profileId) => folder(profileId ?? DEFAULT_PROFILE_ID),
+    folder: (profileId) => location(profileId ?? DEFAULT_PROFILE_ID).folder,
     settle: () => manager.list.settle(),
     opened: [],
     shown: [],
@@ -81,6 +154,13 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
     },
     dragged: [],
     screenshots: process.env.ORBIT_SCREENSHOTS_DIR || join(ctx.paths.userData, 'Screenshots'),
+    saveDialogs: [],
+    answerSave: (path) => {
+      const answer = openSaves.shift()
+      answer?.(path ?? undefined)
+      return !!answer
+    },
+    folderPicks: [],
   }
   const files: FileActions = ctx.e2e
     ? {
@@ -136,7 +216,12 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
     ctx,
     new DownloadStore(join(ctx.paths.userData, 'downloads.json')),
     {
-      folder,
+      location,
+      askWhere,
+      askedIn: (profileId, folder) =>
+        changeProfile(profileId, (p) => {
+          if (p.downloadAskFolder !== folder) p.downloadAskFolder = folder
+        }),
       feedback: (windowId, event, d) => {
         feedback(windowId, event, d)
         if (event === 'started') void libraryOnDownloads(windowId).catch(() => {})
@@ -307,6 +392,27 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
     )
   }
   commands.register('downloads.flyout', (_args, c) => toggleFlyout(c.windowId))
+
+  commands.register('downloads.location', ({ profileId }, c) => {
+    const { folder, ask } = location(profileOf(profileId, c))
+    return { folder, ask }
+  })
+  commands.register('downloads.setAsk', ({ profileId, ask }) =>
+    changeProfile(profileId, (p) => {
+      if (ask) p.downloadAsk = true
+      else delete p.downloadAsk
+    }),
+  )
+  commands.register('downloads.chooseFolder', async ({ profileId }, c) => {
+    if (!store.state.profiles[profileId]) return null
+    const folder = await pickFolder(c.sender, location(profileId).folder)
+    if (!folder || !store.state.profiles[profileId]) return null
+    changeProfile(profileId, (p) => {
+      p.downloadFolder = folder
+      delete p.downloadAsk
+    })
+    return folder
+  })
   // ⌘⇧J / ⌥⌘L on macOS: the Library's Downloads section; Ctrl+J elsewhere: the flyout (DL-14).
   ctx.actions.register('app.downloads', (c) => {
     if ((hooks.platform ?? process.platform) !== 'darwin') {
