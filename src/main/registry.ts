@@ -49,6 +49,8 @@ export class EventRegistry {
 
 export interface ActionContext {
   windowId?: WindowId
+  /** The key is held down (the keyboard's auto-repeat); set by the keyboard router. */
+  repeat?: boolean
 }
 
 /** Takes an action over before its handler runs (e.g. an open Peek handles Close Tab). True when handled. */

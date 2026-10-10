@@ -752,10 +752,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
       if (url) ops.createTab({ url: `view-source:${url}`, windowId })
     }),
   )
-  actions.register(
-    'devtools.toggle',
-    onContents((w) => (w.isDevToolsOpened() ? w.closeDevTools() : w.openDevTools({ mode: 'detach' }))),
-  )
+  // DevTools keys (devtools.*) are registered by src/main/devtools.
 
   // Favicons in state are small data URLs on tabs only (lane review MF-2, F13): remote URLs (which
   // Orbit's UI would fetch in the wrong session) go, and archive entries' copies move to the

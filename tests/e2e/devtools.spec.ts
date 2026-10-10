@@ -1,0 +1,571 @@
+import { createServer, type Server } from 'node:http'
+import { expect, test } from '@playwright/test'
+import type { MainContext } from '../../src/main/context'
+import type { DevtoolsState, DockSide } from '../../src/shared/commands/devtools'
+import type { OrbitState } from '../../src/shared/state'
+import {
+  action,
+  activeTabId,
+  isMac,
+  launchOrbit,
+  listenInRange,
+  MOD,
+  type Orbit,
+  run,
+  state,
+  tabView,
+  viewPage,
+} from './helpers'
+
+/**
+ * DevTools (DT-01 to DT-03) and hard reload (DT-14). Keys are sent to whatever has the keyboard
+ * (`'focused'`), as the OS would, or to a page or its DevTools, through the browser's input
+ * handling (where Orbit's shortcuts listen). DevTools' own state is read in their page through the
+ * engine's front-end modules.
+ */
+
+type OrbitGlobal = { __orbit: { ctx: MainContext } }
+
+interface Request {
+  path: string
+  cacheControl?: string
+  pragma?: string
+}
+
+interface Site {
+  url: (path: string) => string
+  requests: (path: string) => Request[]
+  close: () => Promise<void>
+}
+
+const page = (title: string) => `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head>
+<body style="margin:0;font:16px system-ui;background:#f4f0ff">
+<h1 id="title" style="margin:16px">${title}</h1>
+<div id="target" style="position:absolute;left:40px;top:120px;width:200px;height:80px;background:#c9f">Target</div>
+<div id="other" style="position:absolute;left:40px;top:240px;width:200px;height:80px;background:#9cf">Other</div>
+</body></html>`
+
+/** `/page/<title>`: two boxes to inspect. `/cached/page` loads `/cached/asset.js`, cacheable for an hour. */
+async function startSite(): Promise<Site> {
+  const log: Request[] = []
+  const server: Server = createServer((req, res) => {
+    const path = new URL(req.url ?? '/', 'http://localhost').pathname
+    const header = (name: string) => {
+      const value = req.headers[name]
+      return Array.isArray(value) ? value.join(', ') : value
+    }
+    log.push({ path, cacheControl: header('cache-control'), pragma: header('pragma') })
+    if (path.startsWith('/page/')) {
+      res.writeHead(200, { 'content-type': 'text/html' })
+      res.end(page(decodeURIComponent(path.slice('/page/'.length))))
+    } else if (path === '/cached/page') {
+      res.writeHead(200, { 'content-type': 'text/html' })
+      res.end(`<!doctype html><title>Cached</title><h1 id="title">Cached</h1><script src="/cached/asset.js"></script>`)
+    } else if (path === '/cached/asset.js') {
+      res.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'max-age=3600' })
+      res.end('window.assetRuns = (window.assetRuns || 0) + 1')
+    } else {
+      res.writeHead(404, { 'content-type': 'text/plain' })
+      res.end('not found')
+    }
+  })
+  const port = await listenInRange(server, 3300 + (Number(process.env.TEST_PARALLEL_INDEX ?? 0) % 50))
+  return {
+    url: (path) => `http://localhost:${port}${path}`,
+    requests: (path) => log.filter((r) => r.path === path),
+    close: () => new Promise((r) => server.close(() => r())),
+  }
+}
+
+let site: Site
+let orbit: Orbit
+
+test.beforeEach(async () => {
+  site = await startSite()
+  orbit = await launchOrbit()
+  await orbit.app.evaluate(({ clipboard }) => clipboard.clear())
+})
+test.afterEach(async () => {
+  await orbit.app.close().catch(() => {})
+  await site.close()
+})
+
+// ---- Pages, keys and DevTools' own state ----
+
+/** Opens a fixture page in a new, selected tab. */
+async function openPage(title: string): Promise<string> {
+  const tabId = (await run(orbit.app, 'tabs.create', { url: site.url(`/page/${title}`) })) as string
+  await expect.poll(() => inPage(tabId, 'document.title')).toBe(title)
+  return tabId
+}
+
+/** Runs a script in a tab's page. */
+function inPage<T>(tabId: string, script: string): Promise<T | null> {
+  return orbit.app.evaluate(
+    async (_e, [id, code]) => {
+      const contents = (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id)
+      return contents && !contents.isDestroyed() && !contents.isCrashed() ? contents.executeJavaScript(code) : null
+    },
+    [tabId, script] as const,
+  )
+}
+
+/** Runs a script in a tab's DevTools page; null while they are closed. */
+function inDevtools<T>(tabId: string, script: string): Promise<T | null> {
+  return orbit.app.evaluate(
+    async (_e, [id, code]) => {
+      const contents = (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id)
+      const devtools = contents?.isDevToolsOpened() ? contents.devToolsWebContents : null
+      return devtools ? devtools.executeJavaScript(code) : null
+    },
+    [tabId, script] as const,
+  )
+}
+
+const legacy = (body: string) => `(async () => { const legacy = await import('./ui/legacy/legacy.js'); ${body} })()`
+/** What DevTools' dock menu does. */
+const setDockSide = (side: DockSide) => legacy(`legacy.DockController.DockController.instance().setDockSide('${side}')`)
+const SIZE = legacy('return legacy.InspectorView.InspectorView.instance().ownerSplitWidget.sidebarSize()')
+/** What dragging the divider between the page and DevTools does when the drag ends. */
+const setSize = (px: number) =>
+  legacy(`legacy.InspectorView.InspectorView.instance().ownerSplitWidget.setSidebarSize(${px})`)
+const PANEL = legacy('return legacy.InspectorView.InspectorView.instance().tabbedPane.selectedTabId')
+const SELECTED = `(async () => {
+  const SDK = await import('./core/sdk/sdk.js');
+  const UI = await import('./ui/legacy/legacy.js');
+  const node = UI.Context.Context.instance().flavor(SDK.DOMModel.DOMNode);
+  return node ? node.getAttribute('id') || node.nodeName() : null;
+})()`
+const PICKING = `(async () => {
+  const m = await import('./panels/elements/elements.js');
+  return m.InspectElementModeController.InspectElementModeController.instance().isInInspectElementMode();
+})()`
+const PROMPT = `(async () => (await import('./panels/console/console.js')).ConsoleView.ConsoleView.instance().prompt.text())()`
+/** DevTools' own guard against pasting into the Console ("allow pasting"), acknowledged. */
+const ALLOW_PASTING = `(async () => {
+  const common = await import('./core/common/common.js');
+  common.Settings.Settings.instance().createSetting('disable-self-xss-warning', false, 'Synced').set(true);
+})()`
+const DEVICE_MODE = `(async () =>
+  (await import('./core/common/common.js')).Settings.Settings.instance().createSetting('emulation.show-device-mode', false).get())()`
+
+const devtoolsState = (tabId: string) => run(orbit.app, 'devtools.state', { tabId }) as Promise<DevtoolsState>
+const isOpen = async (tabId: string) => (await devtoolsState(tabId)).open
+
+type Target = 'focused' | { tab: string } | { devtools: string }
+
+/**
+ * Sends a key event, through the browser's input handling, to what has the keyboard or to a given
+ * page or DevTools. `accel` is like "F12" or "Shift+Mod+R" (Mod: ⌘ on macOS, Ctrl elsewhere).
+ * Returns the URL of the web contents that got it.
+ */
+function key(target: Target, accel: string, type: 'keyDown' | 'keyUp', repeat = false): Promise<string> {
+  return orbit.app.evaluate(
+    ({ webContents }, [to, keys, kind, held, mac]) => {
+      const { ctx } = (globalThis as unknown as OrbitGlobal).__orbit
+      const contents =
+        to === 'focused'
+          ? webContents.getFocusedWebContents()
+          : 'tab' in to
+            ? ctx.tabs.contents(to.tab)
+            : ctx.tabs.contents(to.devtools)?.devToolsWebContents
+      if (!contents) throw new Error(`no web contents to press ${keys} in`)
+      const parts = keys.split('+')
+      const keyCode = parts.pop() as string
+      type Modifier = 'shift' | 'control' | 'alt' | 'meta' | 'isautorepeat'
+      const modifiers = parts.map((m) => (m === 'Mod' ? (mac ? 'meta' : 'control') : m.toLowerCase())) as Modifier[]
+      if (held) modifiers.push('isautorepeat')
+      contents.sendInputEvent({ type: kind, keyCode, modifiers })
+      return contents.getURL()
+    },
+    [target, accel, type, repeat, isMac] as const,
+  )
+}
+
+async function press(target: Target, accel: string): Promise<string> {
+  const url = await key(target, accel, 'keyDown')
+  await key(target, accel, 'keyUp')
+  return url
+}
+
+const TOGGLE = isMac ? 'Mod+Alt+I' : 'Shift+Ctrl+I'
+
+/** Gives a tab's page the keyboard. */
+async function focusPage(tabId: string): Promise<void> {
+  await orbit.app.evaluate((_e, id) => {
+    ;(globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id)?.focus()
+  }, tabId)
+  await expect.poll(() => focusedUrl()).toContain('/page/')
+}
+
+const focusedUrl = () =>
+  orbit.app.evaluate(({ webContents }) => webContents.getFocusedWebContents()?.getURL() ?? 'nothing')
+
+const clipboardText = () => orbit.app.evaluate(({ clipboard }) => clipboard.readText())
+
+/** Clicks an element of a tab's page, through the browser's input handling. */
+async function clickOn(tabId: string, selector: string, button: 'left' | 'right' = 'left'): Promise<void> {
+  const box = await inPage<{ x: number; y: number }>(
+    tabId,
+    `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } })()`,
+  )
+  if (!box) throw new Error(`no ${selector} in ${tabId}`)
+  await orbit.app.evaluate(
+    (_e, [id, point, which]) => {
+      const contents = (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id)
+      if (!contents) throw new Error(`no page for ${id}`)
+      contents.sendInputEvent({ type: 'mouseMove', ...point })
+      contents.sendInputEvent({ type: 'mouseDown', ...point, button: which, clickCount: 1 })
+      contents.sendInputEvent({ type: 'mouseUp', ...point, button: which, clickCount: 1 })
+    },
+    [tabId, box, button] as const,
+  )
+}
+
+/** Counts a tab's calls to open DevTools, from now on. */
+async function countOpenCalls(tabId: string): Promise<() => Promise<number>> {
+  await orbit.app.evaluate((_e, id) => {
+    const contents = (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id)
+    if (!contents) throw new Error(`no page for ${id}`)
+    const g = globalThis as unknown as { __openCalls: Record<string, number> }
+    g.__openCalls = { ...g.__openCalls, [id]: 0 }
+    const open = contents.openDevTools.bind(contents)
+    contents.openDevTools = (options?: Electron.OpenDevToolsOptions) => {
+      g.__openCalls[id] = (g.__openCalls[id] ?? 0) + 1
+      open(options)
+    }
+  }, tabId)
+  return () =>
+    orbit.app.evaluate(
+      (_e, id) => (globalThis as unknown as { __openCalls: Record<string, number> }).__openCalls[id] ?? 0,
+      tabId,
+    )
+}
+
+/** Windows, Orbit windows, tabs and DevTools pages there are. */
+const counts = () =>
+  orbit.app.evaluate(({ BrowserWindow, webContents }) => {
+    const s = (globalThis as unknown as { __orbit: { state: () => OrbitState } }).__orbit.state()
+    return {
+      windows: BrowserWindow.getAllWindows().length,
+      orbitWindows: Object.keys(s.windows).length,
+      tabs: Object.keys(s.tabs).length,
+      devtools: webContents.getAllWebContents().filter((w) => w.getURL().startsWith('devtools://')).length,
+    }
+  })
+
+/** From now on, native popup menus are recorded instead of shown. */
+async function recordMenus(): Promise<void> {
+  await orbit.app.evaluate(({ Menu }) => {
+    const g = globalThis as unknown as { __shownMenu?: unknown }
+    Menu.prototype.popup = function popup(this: unknown) {
+      g.__shownMenu = this
+    }
+  })
+}
+
+type RecordedMenu = { items: { label: string; type: string; click: () => void }[] }
+
+const shownMenu = () =>
+  orbit.app.evaluate(() =>
+    ((globalThis as unknown as { __shownMenu?: RecordedMenu }).__shownMenu?.items ?? [])
+      .filter((i) => i.type !== 'separator')
+      .map((i) => i.label),
+  )
+
+/** Clicks an item of the menu last shown; the menu is gone afterwards, as on screen. */
+function clickShownMenu(label: string): Promise<void> {
+  return orbit.app.evaluate((_e, name) => {
+    const g = globalThis as unknown as { __shownMenu?: RecordedMenu }
+    const item = g.__shownMenu?.items.find((i) => i.label === name)
+    if (!item) throw new Error(`no ${name} in the menu`)
+    g.__shownMenu = undefined
+    item.click()
+  }, label)
+}
+
+// ---- DT-01 ----
+
+test('[DT-01][KS-13] F12 opens DevTools docked in the window; F12 again closes them', async () => {
+  const tabId = await openPage('Docked')
+  const before = await counts()
+  await focusPage(tabId)
+  await press('focused', 'F12')
+  await expect.poll(() => devtoolsState(tabId)).toEqual({ open: true, dock: 'right', focused: true })
+  // Docked inside the tab's view: the page is narrower than its view; no window was added.
+  const view = await tabView(orbit.app, tabId)
+  await expect.poll(() => inPage(tabId, 'innerWidth')).toBeLessThan(view?.bounds.width ?? 0)
+  expect(await counts()).toEqual({ ...before, devtools: before.devtools + 1 })
+  // DevTools have the keyboard: the same key closes them, and the page has it again.
+  expect(await press('focused', 'F12')).toMatch(/^devtools:/)
+  await expect.poll(() => isOpen(tabId)).toBe(false)
+  await expect.poll(focusedUrl).toContain('/page/Docked')
+  // The other open key, then the key again from the page: docked DevTools close.
+  await press('focused', TOGGLE)
+  await expect.poll(() => devtoolsState(tabId)).toMatchObject({ open: true, focused: true })
+  await focusPage(tabId)
+  await press('focused', 'F12')
+  await expect.poll(() => isOpen(tabId)).toBe(false)
+})
+
+test('[DT-01] holding F12 opens DevTools once, and holding it again closes them for good', async () => {
+  const tabId = await openPage('Held')
+  const before = await counts()
+  const openCalls = await countOpenCalls(tabId)
+  await focusPage(tabId)
+  // Held down: the first press opens DevTools; repeats reach the page while they load…
+  await key('focused', 'F12', 'keyDown')
+  for (let i = 0; i < 10; i++) await key({ tab: tabId }, 'F12', 'keyDown', true)
+  expect(await openCalls()).toBe(1)
+  await expect.poll(() => devtoolsState(tabId)).toMatchObject({ open: true, focused: true })
+  // …then DevTools, which have the keyboard now.
+  for (let i = 0; i < 10; i++) await key('focused', 'F12', 'keyDown', true)
+  await key('focused', 'F12', 'keyUp')
+  // DevTools still take their keys (and the repeats didn't close them): the console key shows the Console.
+  await press('focused', isMac ? 'Mod+Alt+J' : 'Shift+Ctrl+J')
+  await expect.poll(() => inDevtools(tabId, PANEL)).toBe('console')
+  expect(await isOpen(tabId)).toBe(true)
+  // Held down again: the first press closes them; repeats then reach the page and don't reopen them.
+  await key('focused', 'F12', 'keyDown')
+  await expect.poll(() => isOpen(tabId)).toBe(false)
+  for (let i = 0; i < 10; i++) await key({ tab: tabId }, 'F12', 'keyDown', true)
+  await key({ tab: tabId }, 'F12', 'keyUp')
+  expect(await openCalls()).toBe(1)
+  expect(await counts()).toEqual(before)
+})
+
+test('[DT-01] in a split, DevTools open for the focused pane', async () => {
+  const left = await openPage('Left')
+  const right = await openPage('Right')
+  await run(orbit.app, 'split.create', { tabIds: [left, right], focus: right })
+  await expect.poll(() => activeTabId(orbit.app)).toBe(right)
+  await action(orbit.app, 'devtools.toggle')
+  await expect.poll(() => isOpen(right)).toBe(true)
+  expect(await isOpen(left)).toBe(false)
+  await run(orbit.app, 'split.focusPane', { tabId: left })
+  await expect.poll(() => activeTabId(orbit.app)).toBe(left)
+  await action(orbit.app, 'devtools.toggle')
+  await expect.poll(() => isOpen(left)).toBe(true)
+  expect(await isOpen(right)).toBe(true)
+})
+
+test('[DT-01] the console key opens DevTools on the Console; copy, paste and the device toolbar work there', async () => {
+  const tabId = await openPage('Console')
+  await focusPage(tabId)
+  await press('focused', isMac ? 'Mod+Alt+J' : 'Shift+Ctrl+J')
+  await expect.poll(() => inDevtools(tabId, PANEL)).toBe('console')
+  await expect.poll(() => devtoolsState(tabId)).toMatchObject({ open: true, focused: true })
+  // Text typed in the Console's prompt is copied with the usual keys (on macOS, the Edit menu's).
+  await orbit.app.evaluate(({ webContents }) => webContents.getFocusedWebContents()?.insertText('orbit-copy-test'))
+  await expect.poll(() => inDevtools(tabId, PROMPT)).toBe('orbit-copy-test')
+  const edit = async (command: 'selectAll' | 'copy' | 'paste', accel: string) => {
+    if (!isMac) return void (await press('focused', accel))
+    await orbit.app.evaluate(({ webContents }, c) => webContents.getFocusedWebContents()?.[c](), command)
+  }
+  await edit('selectAll', 'Mod+A')
+  await edit('copy', 'Mod+C')
+  await expect.poll(clipboardText).toBe('orbit-copy-test')
+  // Pasted back, once DevTools' own "allow pasting" guard is past.
+  await inDevtools(tabId, ALLOW_PASTING)
+  await edit('selectAll', 'Mod+A')
+  await press('focused', 'Backspace')
+  await expect.poll(() => inDevtools(tabId, PROMPT)).toBe('')
+  await edit('paste', 'Mod+V')
+  await expect.poll(() => inDevtools(tabId, PROMPT)).toBe('orbit-copy-test')
+  // The device toolbar is DevTools' own key.
+  await press('focused', 'Shift+Mod+M')
+  await expect.poll(() => inDevtools(tabId, DEVICE_MODE)).toBe(true)
+})
+
+test('[DT-01] a Peek and a Mini Window get DevTools of their own page', async () => {
+  const tabId = await openPage('Behind')
+  const peek = (await run(orbit.app, 'peek.open', { url: site.url('/page/Peeked') })) as string
+  await expect.poll(() => inPage(peek, 'document.title')).toBe('Peeked')
+  await press({ tab: peek }, 'F12')
+  await expect.poll(() => devtoolsState(peek)).toMatchObject({ open: true, dock: 'right' })
+  expect(await isOpen(tabId)).toBe(false)
+  await run(orbit.app, 'peek.close', {})
+  await run(orbit.app, 'mini.open', { url: site.url('/page/Mini') })
+  let mini = ''
+  await expect
+    .poll(async () => {
+      const s = await state(orbit.app)
+      mini = Object.values(s.tabs).find((t) => t.url.endsWith('/page/Mini'))?.id ?? ''
+      return mini ? inPage(mini, 'document.title') : null
+    })
+    .toBe('Mini')
+  await press({ tab: mini }, 'F12')
+  await expect.poll(() => devtoolsState(mini)).toMatchObject({ open: true, dock: 'right' })
+  expect(await isOpen(tabId)).toBe(false)
+})
+
+test('[DT-01] a link DevTools open becomes a selected tab', async () => {
+  const tabId = await openPage('Links')
+  expect(await run(orbit.app, 'devtools.open', { tabId })).toBe(true)
+  const url = site.url('/page/From-DevTools')
+  await inDevtools(tabId, `InspectorFrontendHost.openInNewTab(${JSON.stringify(url)})`)
+  await expect.poll(async () => (await state(orbit.app)).tabs[(await activeTabId(orbit.app)) ?? '']?.url).toBe(url)
+})
+
+// ---- DT-02 ----
+
+test('[DT-02] right-click → Inspect opens DevTools on that element; with DevTools open it just selects', async () => {
+  const tabId = await openPage('Inspect')
+  await recordMenus()
+  await clickOn(tabId, '#target', 'right')
+  await expect.poll(shownMenu).toContain('Inspect')
+  expect((await shownMenu()).at(-1)).toBe('Inspect')
+  await clickShownMenu('Inspect')
+  await expect.poll(() => inDevtools(tabId, SELECTED)).toBe('target')
+  expect(await devtoolsState(tabId)).toMatchObject({ open: true, dock: 'right' })
+  const devtoolsPage = () =>
+    orbit.app.evaluate(
+      (_e, id) => (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id)?.devToolsWebContents?.id,
+      tabId,
+    )
+  const first = await devtoolsPage()
+  await clickOn(tabId, '#other', 'right')
+  await expect.poll(shownMenu).toContain('Inspect')
+  await clickShownMenu('Inspect')
+  await expect.poll(() => inDevtools(tabId, SELECTED)).toBe('other')
+  expect(await devtoolsPage()).toBe(first)
+})
+
+test('[DT-02] the element picker picks what is clicked; ⇧⌘C stays Copy URL, except inside DevTools', async () => {
+  const tabId = await openPage('Picker')
+  // On the page, Shift+Mod+C copies its URL; DevTools stay closed.
+  await focusPage(tabId)
+  await press('focused', 'Shift+Mod+C')
+  await expect.poll(clipboardText).toBe(site.url('/page/Picker'))
+  expect(await isOpen(tabId)).toBe(false)
+  // The picker: ⌥⌘C on macOS; Inspect Element in the command bar everywhere.
+  if (isMac) {
+    await press('focused', 'Mod+Alt+C')
+  } else {
+    await orbit.shell.keyboard.press(`${MOD}+T`)
+    const overlay = await viewPage(orbit.app, 'overlay')
+    await overlay.getByTestId('command-input').fill('Inspect Element')
+    await expect(overlay.getByTestId('command-result').first()).toContainText('Inspect Element')
+    await overlay.getByTestId('command-input').press('Enter')
+  }
+  await expect.poll(() => inDevtools(tabId, PICKING)).toBe(true)
+  await clickOn(tabId, '#target')
+  await expect.poll(() => inDevtools(tabId, SELECTED)).toBe('target')
+  expect(await inDevtools(tabId, PICKING)).toBe(false)
+  // With DevTools focused, Shift+Mod+C is DevTools' own picker, not Copy URL.
+  await orbit.app.evaluate(({ clipboard }) => clipboard.clear())
+  await orbit.app.evaluate((_e, id) => {
+    ;(globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id)?.devToolsWebContents?.focus()
+  }, tabId)
+  await expect.poll(focusedUrl).toMatch(/^devtools:/)
+  await press('focused', 'Shift+Mod+C')
+  await expect.poll(() => inDevtools(tabId, PICKING)).toBe(true)
+  expect(await clipboardText()).toBe('')
+})
+
+// ---- DT-03 ----
+
+test("[DT-03] DevTools dock where DevTools' dock menu last put them, also after a restart", async () => {
+  const tabId = await openPage('Dock')
+  expect(await run(orbit.app, 'devtools.open', { tabId })).toBe(true)
+  await expect.poll(() => devtoolsState(tabId)).toMatchObject({ open: true, dock: 'right' })
+  await inDevtools(tabId, setDockSide('bottom'))
+  await expect.poll(async () => (await devtoolsState(tabId)).dock).toBe('bottom')
+  // At the bottom of the tab's view: the page is as wide as the view and shorter.
+  const view = (await tabView(orbit.app, tabId))?.bounds
+  await expect.poll(() => inPage(tabId, 'innerHeight')).toBeLessThan(view?.height ?? 0)
+  expect(await inPage(tabId, 'innerWidth')).toBe(view?.width)
+  await run(orbit.app, 'devtools.close', { tabId })
+  await expect.poll(() => isOpen(tabId)).toBe(false)
+  // Another tab's DevTools open there too.
+  const other = await openPage('Other')
+  await run(orbit.app, 'devtools.open', { tabId: other })
+  await expect.poll(() => devtoolsState(other)).toMatchObject({ open: true, dock: 'bottom' })
+  // And after a restart.
+  const { userData } = orbit
+  await orbit.app.close()
+  orbit = await launchOrbit({ userData })
+  await expect.poll(() => run(orbit.app, 'devtools.open', {})).toBe(true)
+  const active = (await activeTabId(orbit.app)) as string
+  await expect.poll(() => devtoolsState(active)).toMatchObject({ open: true, dock: 'bottom' })
+})
+
+test('[DT-03] each tab has its own DevTools; the docked size stays the same from tab to tab', async () => {
+  const a = await openPage('First')
+  await run(orbit.app, 'devtools.open', { tabId: a })
+  await expect.poll(() => inDevtools(a, SIZE)).toBeGreaterThan(0)
+  await inDevtools(a, setSize(400))
+  await expect.poll(() => inDevtools(a, SIZE)).toBe(400)
+  // Another tab: its own DevTools, closed; the first tab's are hidden with its page.
+  const b = await openPage('Second')
+  expect(await isOpen(b)).toBe(false)
+  expect(await isOpen(a)).toBe(true)
+  await expect.poll(async () => (await tabView(orbit.app, a))?.visible).toBe(false)
+  // Opened, they take the size last chosen; resized, the first tab's take it when shown again.
+  await run(orbit.app, 'devtools.open', { tabId: b })
+  await expect.poll(() => inDevtools(b, SIZE)).toBe(400)
+  await inDevtools(b, setSize(300))
+  await expect.poll(() => inDevtools(b, SIZE)).toBe(300)
+  await run(orbit.app, 'tabs.activate', { tabId: a })
+  await expect.poll(() => inDevtools(a, SIZE)).toBe(300)
+  expect(await isOpen(b)).toBe(true)
+})
+
+test('[DT-03] undocked DevTools come to the front with the open key; DevTools for many tabs add no windows', async () => {
+  const tabId = await openPage('Undocked')
+  const before = await counts()
+  await run(orbit.app, 'devtools.open', { tabId })
+  await expect.poll(() => isOpen(tabId)).toBe(true)
+  await inDevtools(tabId, setDockSide('undocked'))
+  await expect.poll(async () => (await devtoolsState(tabId)).dock).toBe('undocked')
+  // Undocked, the page has its whole view.
+  const view = (await tabView(orbit.app, tabId))?.bounds
+  await expect.poll(() => inPage(tabId, 'innerWidth')).toBe(view?.width)
+  // Behind the window (the page has the keyboard): the open key brings them forward…
+  await focusPage(tabId)
+  expect(await devtoolsState(tabId)).toMatchObject({ open: true, focused: false })
+  await press('focused', 'F12')
+  await expect.poll(() => devtoolsState(tabId)).toEqual({ open: true, dock: 'undocked', focused: true })
+  // …and, in front with the keyboard, closes them.
+  await press('focused', 'F12')
+  await expect.poll(() => isOpen(tabId)).toBe(false)
+  await run(orbit.app, 'devtools.open', { tabId })
+  await inDevtools(tabId, setDockSide('right'))
+  // DevTools for three tabs: three DevTools pages, no window or tab more.
+  const others = [await openPage('Two'), await openPage('Three')]
+  for (const id of others) await run(orbit.app, 'devtools.open', { tabId: id })
+  for (const id of [tabId, ...others]) await expect.poll(() => isOpen(id)).toBe(true)
+  expect(await counts()).toEqual({ ...before, tabs: before.tabs + 2, devtools: before.devtools + 3 })
+})
+
+// ---- DT-14 ----
+
+test('[DT-14] ⇧⌘R reloads bypassing the cache, and brings back a crashed tab', async () => {
+  const tabId = (await run(orbit.app, 'tabs.create', { url: site.url('/cached/page') })) as string
+  await expect.poll(() => inPage(tabId, 'window.assetRuns')).toBe(1)
+  const docs = () => site.requests('/cached/page')
+  const assets = () => site.requests('/cached/asset.js')
+  expect(assets()).toHaveLength(1)
+  // ⌘R: the page is checked with the server; the script, fresh in the cache, isn't fetched again.
+  await focusPage(tabId).catch(() => {})
+  await press({ tab: tabId }, 'Mod+R')
+  await expect.poll(() => docs().length).toBe(2)
+  expect(docs()[1]?.cacheControl).toBe('max-age=0')
+  await expect.poll(() => inPage(tabId, 'window.assetRuns')).toBe(1)
+  expect(assets()).toHaveLength(1)
+  // ⇧⌘R: the page and its script come from the server again.
+  await press({ tab: tabId }, 'Shift+Mod+R')
+  await expect.poll(() => assets().length).toBe(2)
+  expect(docs()[2]).toMatchObject({ cacheControl: 'no-cache', pragma: 'no-cache' })
+  expect(assets()[1]).toMatchObject({ cacheControl: 'no-cache', pragma: 'no-cache' })
+  // A crashed tab: the window keeps the keyboard, and ⇧⌘R brings the page back.
+  await orbit.app.evaluate((_e, id) => {
+    ;(globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id)?.forcefullyCrashRenderer()
+  }, tabId)
+  await expect.poll(async () => (await state(orbit.app)).tabs[tabId]?.error?.code).toBe(-1000)
+  await expect.poll(focusedUrl).toContain('view=shell')
+  await press('focused', 'Shift+Mod+R')
+  await expect.poll(() => inPage(tabId, 'document.title')).toBe('Cached')
+  expect(docs()[3]).toMatchObject({ cacheControl: 'no-cache' })
+  await expect.poll(async () => (await state(orbit.app)).tabs[tabId]?.error).toBeUndefined()
+})

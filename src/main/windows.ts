@@ -583,7 +583,7 @@ export class WindowManager {
         BrowserWindow.fromWebContents(contents)?.close()
         return
       }
-      void this.ctx.actions.run(action.id, { windowId })
+      void this.ctx.actions.run(action.id, { windowId, repeat: input.isAutoRepeat })
     })
   }
 

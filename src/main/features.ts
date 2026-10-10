@@ -2,6 +2,7 @@ import { registerArchive } from './archive'
 import { registerSearch } from './commandbar/search'
 import type { MainContext } from './context'
 import { registerCore } from './core'
+import { registerDevtools } from './devtools'
 import { registerDownloads } from './downloads'
 import { registerExtensions } from './extensions'
 import { registerHistory } from './history'
@@ -20,6 +21,8 @@ import { registerUpdates } from './updates'
 export function registerFeatures(ctx: MainContext): void {
   registerCore(ctx)
   registerTabs(ctx)
+  // Before Peek and Mini Windows: a DevTools key held down is ignored before they act on it.
+  registerDevtools(ctx)
   registerSpaces(ctx)
   const history = registerHistory(ctx)
   registerSearch(ctx, history)

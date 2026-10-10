@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 485 spec’d · 157 built (60 partial) · 222 tested · 0 feel right.
+**Totals:** 485 spec’d · 161 built (60 partial) · 227 tested · 0 feel right.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | ? | 7 | 0 | 0 |
-| P0 | 174 | 108 | 134 |
-| P1 | 221 | 42 | 79 |
+| P0 | 174 | 110 | 136 |
+| P1 | 221 | 44 | 82 |
 | P2 | 83 | 7 | 9 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -359,7 +359,7 @@ Spec: `spec/shortcuts.md`
 | KS-10 | Peek and Mini Window | P1 | – | – | – |  |
 | KS-11 | Media | P1 | 🟡 partial | ✅ e2e | – | Space and arrows in the focused player, Cmd/Ctrl+scroll and pinch zoom (tested), hardware media keys via Chromium (untested), Mute Tab action assignable; the calendar meeting shortcut (P2) belongs to TB-21/FV-09 |
 | KS-12 | Library, history, downloads, settings, extensions, help | P1 | – | – | – |  |
-| KS-13 | Developer tools | P1 | – | – | – |  |
+| KS-13 | Developer tools | P1 | – | ✅ e2e | – |  |
 | KS-14 | Canvases, notes, capture and Tweaks | P2 | – | – | – |  |
 | KS-15 | Standard app and window keys | P1 | – | – | – |  |
 | KS-16 | Text-editing keys keep their meaning | P0 | – | – | – |  |
@@ -490,9 +490,9 @@ Spec: `spec/devtools.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| DT-01 | Open / close DevTools | P0 | – | – | – |  |
-| DT-02 | Inspect element (context menu and picker) | P0 | – | – | – |  |
-| DT-03 | DevTools docking, size and focus | P1 | – | – | – |  |
+| DT-01 | Open / close DevTools | P0 | ✅ | ✅ e2e | – | ⌥⌘I / F12 (Ctrl+Shift+I / F12) open DevTools for the selected tab or focused split pane, docked inside its view, and close them, also from inside DevTools; a Peek's or Mini Window's page gets its own. ⌥⌘J (Ctrl+Shift+J) opens them on the Console; View → Developer menu (macOS) and the command bar. A key held down acts once. Copy, paste (after DevTools' own paste warning) and the device toolbar work; links DevTools open become tabs. Windows/Linux: while DevTools have the keyboard, only the DevTools keys reach Orbit |
+| DT-02 | Inspect element (context menu and picker) | P0 | ✅ | ✅ e2e | – | right-click → Inspect (last item) opens DevTools with that element selected, or just selects it when they're open. Picker: ⌥⌘C on macOS, no default key on Windows/Linux, Inspect Element in the command bar. ⇧⌘C stays Copy URL; inside DevTools it is DevTools' own picker. Remap: give the devtools.inspect action ⇧⌘C (and take it from tab.copyUrl) in src/shared/actions.ts, or in Settings → Shortcuts once remapping (ST-08) lands |
+| DT-03 | DevTools docking, size and focus | P1 | ✅ | ✅ e2e | – | docked right/left/bottom or undocked from DevTools' dock menu; the engine keeps the side per profile across restarts. Each tab (pane, Peek, Mini Window) has its own DevTools, shown and hidden with its page; a page shown again takes the docked size last chosen. Undocked: the open key brings them to the front (checked on Linux; macOS unverified), and closes them when they have the keyboard. No windows added, however many tabs have DevTools |
 | DT-04 | View page source | P1 | – | – | – |  |
 | DT-05 | Developer mode turns on automatically for local development URLs | P1 | – | – | – |  |
 | DT-06 | Turn Developer mode on/off for any site | P1 | – | – | – |  |
@@ -503,7 +503,7 @@ Spec: `spec/devtools.md`
 | DT-11 | Task manager (per-tab memory/CPU) | P1 | – | – | – |  |
 | DT-12 | Record a performance trace (local) | P2 | – | – | – |  |
 | DT-13 | Internal pages for engine-level settings | P1 | – | – | – |  |
-| DT-14 | Hard reload and cache-bypassing reload | P1 | – | – | – |  |
+| DT-14 | Hard reload and cache-bypassing reload | P1 | ✅ | ✅ e2e | – | ⇧⌘R (Ctrl+Shift+R) is the navigation lane's nav.hardReload: page and subresources refetched (no-cache). A crashed page hands the keyboard to the window, so ⇧⌘R brings it back. Stopping a load (Esc, the reload button) is NV-04, the navigation lane's |
 
 ## Downloads and the Library
 

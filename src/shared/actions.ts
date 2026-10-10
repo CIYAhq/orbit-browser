@@ -204,9 +204,26 @@ export const ACTIONS: ActionDef[] = [
     id: 'devtools.toggle',
     title: 'Developer Tools',
     category: 'Developer',
-    mac: ['Cmd+Alt+I'],
+    mac: ['Cmd+Alt+I', 'F12'],
     other: ['Ctrl+Shift+I', 'F12'],
     keywords: ['inspect', 'console'],
+  },
+  {
+    id: 'devtools.console',
+    title: 'JavaScript Console',
+    category: 'Developer',
+    mac: ['Cmd+Alt+J'],
+    other: ['Ctrl+Shift+J'],
+    keywords: ['developer tools', 'devtools'],
+  },
+  // The element picker. ⇧⌘C / Ctrl+Shift+C stays Copy URL (DT-02); it can be remapped here.
+  {
+    id: 'devtools.inspect',
+    title: 'Inspect Element',
+    category: 'Developer',
+    mac: ['Cmd+Alt+C'],
+    other: [],
+    keywords: ['developer tools', 'devtools', 'select an element', 'picker'],
   },
 
   // Sidebar & window

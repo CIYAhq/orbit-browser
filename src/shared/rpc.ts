@@ -11,6 +11,7 @@
 import type { ArchiveCommands } from './commands/archive'
 import type { CommandBarCommands } from './commands/commandbar'
 import type { CoreCommands, CoreEvents } from './commands/core'
+import type { DevtoolsCommands } from './commands/devtools'
 import type { DownloadCommands } from './commands/downloads'
 import type { ExtensionCommands } from './commands/extensions'
 import type { HistoryCommands } from './commands/history'
@@ -36,6 +37,7 @@ export interface OrbitCommands
     ExtensionCommands,
     SettingsCommands,
     DownloadCommands,
+    DevtoolsCommands,
     ImportCommands,
     MediaCommands {}
 
