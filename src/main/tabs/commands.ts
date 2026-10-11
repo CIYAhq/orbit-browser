@@ -5,6 +5,7 @@ import {
   WebContentsView,
   type WebContentsViewConstructorOptions,
 } from 'electron'
+import { sidebarUndoLabel } from '../../shared/actions'
 import { isFolderId, isTabId, newId } from '../../shared/ids'
 import { framesMayOpen, isLocalFileUrl, localFileBlockedMessage } from '../../shared/link-routing'
 import { isPrivateTab, privateTabMenu } from '../../shared/private'
@@ -178,13 +179,15 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     const count = tabsInItem(store.state, folderId).length
     if (count > 0 && !ctx.e2e) {
       const win = windowId ? windows.get(windowId) : undefined
+      // Sidebar undo's key as it is now (KS-05, KS-18).
+      const key = sidebarUndoLabel(process.platform)
       const options = {
         type: 'warning' as const,
         buttons: ['Delete', 'Cancel'],
         defaultId: 0,
         cancelId: 1,
         message: `Delete “${folder.name}”?`,
-        detail: `Its ${count} ${count === 1 ? 'tab moves' : 'tabs move'} to the Archive. You can undo this with ${process.platform === 'darwin' ? '⌘Z' : 'Ctrl+Z'}.`,
+        detail: `Its ${count} ${count === 1 ? 'tab moves' : 'tabs move'} to the Archive.${key ? ` You can undo this with ${key}.` : ''}`,
       }
       const { response } = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options)
       if (response !== 0) return
@@ -651,6 +654,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   })
   actions.register('tab.reopenClosed', (c) => void ops.reopenLast(windowOf(c)))
   actions.register('tab.undo', () => void ops.undo.undo())
+  actions.register('tab.redo', () => void ops.undo.redo())
   const step = (delta: number) => (c: CallContext) => {
     const windowId = windowOf(c)
     if (!windowId) return

@@ -36,6 +36,7 @@ const NO_TAB_NEEDED = new Set([
   'tab.recentBack',
   'tab.pasteAsNewTab',
   'tab.undo',
+  'tab.redo',
 ])
 
 export function actionNeedsTab(id: string, category: string): boolean {

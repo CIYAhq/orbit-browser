@@ -21,6 +21,7 @@ import {
   canonicalAccelerator,
   customBindings,
   editsText,
+  formatAccelerator,
   type KeyInput,
   keymapVersion,
   typedWithAltGr,
@@ -74,6 +75,14 @@ export interface ActionDef {
    * keyboard focus in a frame, the frame's own text field and handlers decide (D60).
    */
   pageFirstInFields?: boolean
+  /**
+   * Its keys are handled where they are pressed, by the view or page with the keyboard, and never
+   * by the key router or the UI's fallback: what they do depends on where focus is (sidebar undo is
+   * a text field's own undo inside one, KS-16; from a page it undoes only a recent change, and right
+   * after a Peek closed it brings the Peek back, PK-10). Menus and the command bar still run it.
+   * Read the key with `sidebarUndoFor`.
+   */
+  inPlace?: boolean
 }
 
 const numbered = (
@@ -176,7 +185,25 @@ export const ACTIONS: ActionDef[] = [
     other: ['Ctrl+Alt+V'],
     keywords: ['clipboard'],
   },
-  { id: 'tab.undo', title: 'Undo Sidebar Change', category: 'Tabs', keywords: ['undo', 'reopen'] },
+  // Sidebar undo and redo (TB-18, KS-05): outside text fields, which keep their own (KS-16).
+  {
+    id: 'tab.undo',
+    title: 'Undo Sidebar Change',
+    category: 'Tabs',
+    mac: ['Cmd+Z'],
+    other: ['Ctrl+Z'],
+    keywords: ['undo', 'reopen'],
+    inPlace: true,
+  },
+  {
+    id: 'tab.redo',
+    title: 'Redo Sidebar Change',
+    category: 'Tabs',
+    mac: ['Cmd+Shift+Z'],
+    other: ['Ctrl+Shift+Z'],
+    keywords: ['redo'],
+    inPlace: true,
+  },
   {
     id: 'pinned.toggleCollapsed',
     title: 'Collapse / Expand Pinned',
@@ -683,4 +710,26 @@ export function outsideTextActionFor(input: KeyInput, platform: string): ActionD
   if (!key) return undefined
   const keymap = liveIndex(platform)
   return keymap.outsideText.get(key) ?? (typedWithAltGr(input, platform) ? keymap.direct.get(key) : undefined)
+}
+
+/**
+ * Sidebar undo or redo (TB-18), as the keymap has them now (KS-05): `redo` for redo, and
+ * `outsideText` when the key edits text in a field (⌘Z), so it acts only outside one (KS-16).
+ * Undefined for any other key.
+ */
+export function sidebarUndoFor(input: KeyInput, platform: string): { redo: boolean; outsideText: boolean } | undefined {
+  const outside = outsideTextActionFor(input, platform)
+  const action = outside ?? actionForInput(input, platform)
+  if (action?.id !== 'tab.undo' && action?.id !== 'tab.redo') return undefined
+  return { redo: action.id === 'tab.redo', outsideText: !!outside }
+}
+
+/**
+ * Sidebar undo's first key as this platform shows it now ("⌘Z", "Ctrl+Z", or what the user gave
+ * it), '' when it has none: notes that say how to undo name the key that does (KS-05, KS-18).
+ */
+export function sidebarUndoLabel(platform: string): string {
+  const action = ACTIONS_BY_ID['tab.undo']
+  const accel = action ? shortcutsFor(action, platform)[0] : undefined
+  return accel ? formatAccelerator(accel, platform) : ''
 }

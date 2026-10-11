@@ -639,3 +639,63 @@ test('[TD-03][ST-05] archive timing set per profile in Settings applies at once:
   expect(s.tabs[homeTab]).toBeTruthy()
   expect(s.archive.find((a) => a.url.includes('/page/WorkIdle'))?.reason).toBe('auto')
 })
+
+// ---------- KS-05: sidebar undo and redo in the keymap ----------
+
+/** The key the command bar shows for the first action a search finds (KS-18). */
+async function expectBarKey(query: string, key: string): Promise<void> {
+  await act(orbit.app, 'tab.new')
+  const overlay = await viewPage(orbit.app, 'overlay')
+  const bar = overlay.getByTestId('command-bar')
+  await expect(bar.getByTestId('command-input')).toBeFocused()
+  await overlay.keyboard.type(query)
+  const top = bar.getByTestId('command-result').first()
+  await expect(top).toHaveAttribute('data-kind', 'action')
+  await expect(top.getByTestId('command-shortcut')).toHaveText(key)
+  await overlay.keyboard.press('Escape')
+  await expect.poll(overlayKind).toBe('none')
+}
+
+test('[KS-05][TB-18][KS-16][KS-18] sidebar undo and redo are in the keymap: remapped, the new keys work from a page and the sidebar, the old ones undo no sidebar change, and the command bar shows them', async () => {
+  const { app, shell } = orbit
+  const t = await newTab(app, fx.url('/page/Undone'))
+  await waitTab(app, t, '/page/Undone')
+  const title = async () => (await state(app)).tabs[t]?.customTitle
+  // ⌘Z and ⌘⇧Z by default (Ctrl elsewhere).
+  await expectBarKey('undo sidebar', isMac ? '⌘Z' : 'Ctrl+Z')
+  await expectBarKey('redo sidebar', isMac ? '⇧⌘Z' : 'Ctrl+Shift+Z')
+  expect(await run(app, 'keys.bind', { actionId: 'tab.undo', accel: 'F7', replace: `${PRIMARY}+Z` })).toEqual({
+    ok: true,
+  })
+  expect(await run(app, 'keys.bind', { actionId: 'tab.redo', accel: 'F8', replace: `${PRIMARY}+Shift+Z` })).toEqual({
+    ok: true,
+  })
+  await expectBarKey('undo sidebar', 'F7')
+  await expectBarKey('redo sidebar', 'F8')
+  await run(app, 'tabs.rename', { tabId: t, title: 'First' })
+  await run(app, 'tabs.rename', { tabId: t, title: 'Second' })
+  // The old key, from the page (through the browser process, as a person's) and from the sidebar.
+  await pressInPage(app, '/page/Undone', 'Z', [isMac ? 'meta' : 'control'])
+  await shell.keyboard.press(`${isMac ? 'Meta' : 'Control'}+Z`)
+  await shell.waitForTimeout(500)
+  expect(await title()).toBe('Second')
+  // The new ones, from the page: each undoes or redoes one change.
+  await pressInPage(app, '/page/Undone', 'F7')
+  await expect.poll(title).toBe('First')
+  await pressInPage(app, '/page/Undone', 'F8')
+  await expect.poll(title).toBe('Second')
+  // And from the sidebar.
+  await shell.keyboard.press('F7')
+  await expect.poll(title).toBe('First')
+  await shell.keyboard.press('F8')
+  await expect.poll(title).toBe('Second')
+  // While the note after a Space delete shows, the new key in the sidebar brings the Space back,
+  // and does only that (SP-12).
+  const gone = await cmd<string>(app, 'spaces.create', { name: 'Gone', activate: false })
+  await run(app, 'spaces.delete', { spaceId: gone })
+  await expect(shell.getByTestId('space-undo')).toBeVisible()
+  await pressInPage(app, 'view=shell', 'F7')
+  await expect.poll(async () => (await state(app)).spaceOrder).toContain(gone)
+  await shell.waitForTimeout(500)
+  expect(await title()).toBe('Second')
+})

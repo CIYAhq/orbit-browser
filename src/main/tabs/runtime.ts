@@ -9,6 +9,7 @@ import {
   type WebContentsViewConstructorOptions,
   type WindowOpenHandlerResponse,
 } from 'electron'
+import { sidebarUndoFor } from '../../shared/actions'
 import { framesMayOpen } from '../../shared/link-routing'
 import { reopenReferrerPolicy } from '../../shared/nav'
 import { isPrivateProfileId } from '../../shared/private'
@@ -286,17 +287,22 @@ export class TabRuntime {
       this.update(tabId, { title })
       this.trackPinnedTitle(tabId, title)
     })
-    contents.on('before-input-event', (_event, input) => {
+    contents.on('before-input-event', (event, input) => {
       if (input.type === 'keyUp' && input.key === 'Control') this.onControlUp?.()
-      // ⌘Z / Ctrl+Z (with ⇧: redo): the page's own undo wins in text fields; elsewhere it undoes the
-      // last sidebar change.
-      if (input.type !== 'keyDown' || input.alt || input.key.toLowerCase() !== 'z') return
-      const mod = process.platform === 'darwin' ? input.meta && !input.control : input.control && !input.meta
-      if (!mod || !this.onUndoShortcut) return
+      // Sidebar undo and redo, ⌘Z and ⌘⇧Z as the keymap has them (KS-05): a key that edits text is
+      // the page's own undo in a text field, and undoes the last sidebar change elsewhere (KS-16).
+      if (input.type !== 'keyDown' || !this.onUndoShortcut) return
+      const undo = sidebarUndoFor(input, process.platform)
+      if (!undo) return
+      if (!undo.outsideText) {
+        event.preventDefault()
+        this.onUndoShortcut(tabId, undo.redo)
+        return
+      }
       contents
         .executeJavaScriptInIsolatedWorld(999, [{ code: FOCUS_IS_EDITABLE }])
         .then((editable) => {
-          if (!editable) this.onUndoShortcut?.(tabId, !!input.shift)
+          if (!editable) this.onUndoShortcut?.(tabId, undo.redo)
         })
         .catch(() => {})
     })

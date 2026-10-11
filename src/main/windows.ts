@@ -1128,6 +1128,8 @@ export class WindowManager {
         actionForInput(input, process.platform),
         () => this.windowIdFor(contents) ?? this.focusedWindowId(),
       )
+      // Its keys are the view's or page's with the keyboard (sidebar undo, KS-05).
+      if (action?.inPlace) return
       if (!action || !this.ctx.actions.has(action.id)) {
         this.runOutsideText(contents, input)
         return
@@ -1154,7 +1156,7 @@ export class WindowManager {
    */
   private runOutsideText(contents: WebContents, input: Electron.Input): void {
     const action = outsideTextActionFor(input, process.platform)
-    if (!action || !this.ctx.actions.has(action.id)) return
+    if (!action || action.inPlace || !this.ctx.actions.has(action.id)) return
     const windowId = this.windowIdFor(contents) ?? this.focusedWindowId()
     void focusIsEditable(contents).then((editable) => {
       if (!editable && !contents.isDestroyed()) void this.ctx.actions.run(action.id, { windowId })

@@ -19,7 +19,8 @@ export function installShortcutFallback(): void {
         { key: e.key, code: e.code, meta: e.metaKey, control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey },
         window.orbit.platform,
       )
-      if (!action) return
+      // Sidebar undo's keys are the view's own (KS-05).
+      if (!action || action.inPlace) return
       e.preventDefault()
       e.stopPropagation()
       void window.orbit.invoke('action.run', { id: action.id })

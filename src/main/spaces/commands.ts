@@ -1,4 +1,5 @@
 import { screen, session } from 'electron'
+import { sidebarUndoLabel } from '../../shared/actions'
 import type { SpacePanel } from '../../shared/commands/spaces'
 import { createWindowState, DEFAULT_PROFILE_ID } from '../../shared/defaults'
 import type { SpaceId, TabId, WindowId } from '../../shared/state'
@@ -175,12 +176,12 @@ export function registerSpaces(ctx: MainContext): void {
     const windowId = windowOf(c)
     if (windowId) {
       windows.sendToWindow(windowId, 'spaces:deleted', { spaceId, name: deleted.space.name })
-      // The Undo note lives in the sidebar; with it hidden, say how to undo (review F12).
+      // The Undo note lives in the sidebar; with it hidden, say how to undo (review F12): with
+      // sidebar undo's key as it is now, or an Undo button when it has none (KS-05, KS-18).
       if (!store.state.windows[windowId]?.sidebar.visible) {
-        ctx.toast(
-          windowId,
-          `Deleted “${deleted.space.name}”. ${process.platform === 'darwin' ? '⌘Z' : 'Ctrl+Z'} restores it.`,
-        )
+        const key = sidebarUndoLabel(process.platform)
+        if (key) ctx.toast(windowId, `Deleted “${deleted.space.name}”. ${key} restores it.`)
+        else ctx.toast(windowId, `Deleted “${deleted.space.name}”.`, { label: 'Undo', command: 'spaces.undoDelete' })
       }
     }
     return true
