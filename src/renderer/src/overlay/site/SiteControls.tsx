@@ -1,5 +1,17 @@
-import { CircleAlert, FileText, Globe, Laptop, Minus, Plus, RotateCw, TriangleAlert, X } from 'lucide-react'
+import {
+  CircleAlert,
+  FileText,
+  Globe,
+  Laptop,
+  Minus,
+  PictureInPicture2,
+  Plus,
+  RotateCw,
+  TriangleAlert,
+  X,
+} from 'lucide-react'
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { sitePipMode } from '../../../../shared/media'
 import type { Connection } from '../../../../shared/nav'
 import {
   DEVICE_NAME,
@@ -246,6 +258,8 @@ export function SiteControls({ overlay, dark = false }: { overlay: PanelOverlay;
             </section>
           )}
 
+          {info.web && <PipRow url={info.url} />}
+
           <section className="site-panel__section" aria-label="Zoom">
             <div className="site-panel__row site-panel__zoom">
               <span className="site-panel__name">Zoom</span>
@@ -338,6 +352,41 @@ export function SiteControls({ overlay, dark = false }: { overlay: PanelOverlay;
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * Automatic picture-in-picture for this site (MD-08), on by default. It shows the player menu's
+ * "Turn off for today" and "Always turn off for this site" too, and switching it on undoes either.
+ */
+function PipRow({ url }: { url: string }) {
+  const allSites = useOrbit((s) => s.settings.autoPip)
+  const mode = useOrbit((s) => sitePipMode(s.settings, url, Date.now()))
+  const on = mode === 'on'
+  const state = mode === 'today' ? 'Off for today' : !on ? 'Off' : allSites ? 'On' : 'Off for every site in Settings'
+  return (
+    <section className="site-panel__section" aria-label="Picture in Picture">
+      <ul className="site-panel__rows">
+        <li className="site-panel__row" data-testid="site-controls-pip" data-mode={mode}>
+          <PictureInPicture2 size={14} aria-hidden />
+          <span className="site-panel__name" title="Videos float when you leave their tab">
+            Picture in Picture
+            <span className="site-panel__state">{state}</span>
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={on}
+            aria-label="Picture in Picture"
+            className={`site-switch${on ? ' is-on' : ''}`}
+            data-testid="site-switch-pip"
+            onClick={() => void invoke('media.setSitePip', { url, mode: on ? 'always' : 'on' })}
+          >
+            <span className="site-switch__knob" />
+          </button>
+        </li>
+      </ul>
+    </section>
   )
 }
 

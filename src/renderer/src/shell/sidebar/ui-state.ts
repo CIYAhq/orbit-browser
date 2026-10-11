@@ -39,6 +39,12 @@ export function clearSelection(): void {
   if (useSelection.getState().ids.length > 0) useSelection.setState({ ids: [], anchor: null })
 }
 
+/**
+ * A row just pressed (FL-05): drawn selected from the press's own frame, and the row selected before
+ * drawn as not, until main's state catches up (ItemList's `pressSelect`).
+ */
+export const usePressedTab = create<{ id: TabId | null; was: TabId | null }>(() => ({ id: null, was: null }))
+
 /** Keyboard focus inside the sidebar (SB-22): the row that has the focus ring. */
 export const useKeyboardFocus = create<{ id: ItemId | null }>(() => ({ id: null }))
 

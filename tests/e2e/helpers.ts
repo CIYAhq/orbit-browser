@@ -147,16 +147,25 @@ export function evaluateBetweenTasks(app: ElectronApplication): void {
 
 /**
  * A function's source as an expression. A method shorthand (`m(a) {…}`) becomes a function, as in
- * Playwright's own evaluate (PR #10 review F4).
+ * Playwright's own evaluate (PR #10 review F4). A source that is no expression either way (a getter,
+ * a computed method name, a bound function) throws Playwright's own error (PR #19 review F6).
  */
-function functionSource(fn: { toString(): string }): string {
-  const source = fn.toString()
-  try {
-    new Function(`(${source})`)
-    return source
-  } catch {
-    return source.startsWith('async ') ? `async function ${source.slice('async '.length)}` : `function ${source}`
+export function functionSource(fn: { toString(): string }): string {
+  const source = fn.toString().trim()
+  const parses = (text: string) => {
+    try {
+      new Function(`(${text})`)
+      return true
+    } catch {
+      return false
+    }
   }
+  if (parses(source)) return source
+  const converted = source.startsWith('async ')
+    ? `async function ${source.slice('async '.length)}`
+    : `function ${source}`
+  if (parses(converted)) return converted
+  throw new Error('Passed function is not well-serializable!')
 }
 
 /**

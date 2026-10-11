@@ -41,6 +41,21 @@ export interface PeekCommands {
   'mini.control': { args: { op: 'close' | 'minimize' | 'maximize' }; result: void }
   /** Gives the keyboard back to the Mini Window's page: Esc in its address field (KS-16, KS-20). */
   'mini.focusPage': { args: Record<string, never>; result: void }
+  /**
+   * The command bar over the Mini Window's page opened or closed (CB-23). While it is open it
+   * takes ⌘W and ⌘L first (KS-19). Opening returns a still image of the page (a data URL) for
+   * the card while the bar's list covers it; closing shows the page again.
+   */
+  'mini.bar': { args: { open: boolean }; result: string | null }
+  /** Hides the page's view while the bar is open, once the card shows its still image (CB-23). */
+  'mini.hidePage': { args: Record<string, never>; result: void }
+  /**
+   * Find in the Mini Window's page (NV-05): `query` as typed, or the next (`next`) match forward or
+   * back. Results come as `mini:find-result`.
+   */
+  'mini.find': { args: { query: string; next?: boolean; forward?: boolean }; result: void }
+  /** The find field closed: the match stays selected, and the page gets the keyboard back unless `keepFocus`. */
+  'mini.findClose': { args: { keepFocus?: boolean }; result: void }
 }
 
 export interface PeekEvents {
@@ -48,4 +63,11 @@ export interface PeekEvents {
   'peek.frame': { nonce: number; rect: Rect; radius: number; visible: boolean }
   /** Where a Mini Window's page card is (window coordinates, DIP). */
   'mini.layout': { rect: Rect; radius: number }
+  /**
+   * A Mini Window's UI took the open grow's starting size (MW-04): main shows the window now, and
+   * the grow takes `ms`.
+   */
+  'mini.growReady': { ms: number }
+  /** A Mini Window's UI is up and listening: what main held for it until now is sent. */
+  'mini.mounted': Record<string, never>
 }

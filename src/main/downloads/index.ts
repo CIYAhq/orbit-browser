@@ -17,6 +17,7 @@ import { isPrivateProfile, isPrivateProfileId, isPrivateWindow } from '../../sha
 import type { Profile, ProfileId, Settings, TabId, WindowId } from '../../shared/state'
 import { sectionOf } from '../../shared/tree'
 import type { MainContext } from '../context'
+import { withDialog } from '../media/dialog-watch'
 import type { CallContext } from '../registry'
 import { activeTabOf } from '../windows'
 import { type DockHooks, showDownloadsInDock } from './dock'
@@ -113,7 +114,9 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
       : { defaultPath }
     const win = windowId ? windows.get(windowId) : undefined
     const { canceled, filePath } =
-      win && !win.isDestroyed() ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
+      win && !win.isDestroyed()
+        ? await withDialog(win, dialog.showSaveDialog(win, options))
+        : await dialog.showSaveDialog(options)
     return canceled || !filePath ? undefined : filePath
   }
   /** The OS folder picker for a profile's download folder (DL-07), over the window asking. */
@@ -132,7 +135,7 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
     }
     const win = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null
     const { canceled, filePaths } = win
-      ? await dialog.showOpenDialog(win, options)
+      ? await withDialog(win, dialog.showOpenDialog(win, options))
       : await dialog.showOpenDialog(options)
     return canceled ? undefined : filePaths[0]
   }

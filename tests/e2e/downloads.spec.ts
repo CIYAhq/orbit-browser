@@ -1073,7 +1073,9 @@ async function recordFeedback(): Promise<void> {
 const feedbackSent = () =>
   orbit.app.evaluate(() => [...(globalThis as unknown as { __feedback: string[] }).__feedback].sort())
 
-type StateHandle = { __orbit: { flush: () => void; state: () => OrbitState } }
+type StateHandle = {
+  __orbit: { flush: () => Promise<void>; flushNow: () => void; state: () => OrbitState }
+}
 
 /** Writes Orbit's state file now; the file it replaces becomes its backup. */
 const saveState = () => orbit.app.evaluate(() => (globalThis as unknown as StateHandle).__orbit.flush())
@@ -1088,7 +1090,7 @@ async function saveStateWhen(downloadState: Download['state']): Promise<void> {
       orbit.app.evaluate((_e, wanted) => {
         const main = (globalThis as unknown as StateHandle).__orbit
         if (!Object.values(main.state().downloads).some((d) => d.private && d.state === wanted)) return false
-        main.flush()
+        main.flushNow()
         return true
       }, downloadState),
     )

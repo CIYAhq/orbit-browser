@@ -50,6 +50,15 @@
   background: var(--hover);
 }
 
+/* The page's own artwork (Media Session), filling the icon's box. */
+.media-ctl__art {
+  display: block;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
 .media-ctl__emoji {
   font-size: 14px;
   line-height: 1;
@@ -150,20 +159,18 @@
   box-shadow: 0 0 0 1.5px #e5484d;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .media-ctl__title.is-scrolling .media-ctl__title-inner {
-    animation: none;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    vertical-align: top;
-  }
-  .media-ctl__btn {
-    transition: none;
-  }
-  .media-ctl__btn:active {
-    transform: none;
-  }
+.reduce-motion .media-ctl__title.is-scrolling .media-ctl__title-inner {
+  animation: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: top;
+}
+.reduce-motion .media-ctl__btn {
+  transition: none;
+}
+.reduce-motion .media-ctl__btn:active {
+  transform: none;
 }
 
 /* Camera / microphone in use: a pulsing red mark on the tab row (TB-15, MD-11). */
@@ -180,6 +187,29 @@
   animation: capture-pulse 1.6s ease-in-out infinite;
 }
 
+/* On a split row's pane segment (SV-21), a size smaller to fit its pill. */
+.split-row .capture-indicator {
+  width: 16px;
+  height: 16px;
+  margin: 0 0 0 2px;
+}
+
+/* Sharing a screen or window: blue, so it reads apart from the camera and microphone. */
+.capture-indicator.is-screen {
+  background: #2f6fed;
+  animation-name: share-pulse;
+}
+
+@keyframes share-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(47, 111, 237, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(47, 111, 237, 0);
+  }
+}
+
 @keyframes capture-pulse {
   0%,
   100% {
@@ -190,8 +220,6 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .capture-indicator {
-    animation: none;
-  }
+.reduce-motion .capture-indicator {
+  animation: none;
 }

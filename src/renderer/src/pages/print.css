@@ -32,7 +32,8 @@
     0 0 0 0.5px rgba(0, 0, 0, 0.16),
     0 16px 40px rgba(0, 0, 0, 0.28),
     0 2px 6px rgba(0, 0, 0, 0.08);
-  animation: page-print-in 150ms var(--ease-out, ease-out);
+  /* The popover timing (FL-25): a fade and 0.98 → 1 in 150 ms on the snappy curve, a frame along. */
+  animation: page-print-in 150ms var(--ease-snappy) var(--motion-lead);
 }
 
 @keyframes page-print-in {
@@ -42,10 +43,9 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .page-print {
-    animation: none;
-  }
+/* Reduced motion (FL-28): the OS setting or Orbit's own, as the root's class (motion/reduced.ts). */
+.reduce-motion .page-print {
+  animation: none;
 }
 
 .page-print__preview {

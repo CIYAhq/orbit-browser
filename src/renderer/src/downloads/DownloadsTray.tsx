@@ -1,18 +1,18 @@
 import { ArrowDownToLine, Check, CircleAlert, Pause, Play, RotateCw, ShieldAlert, X } from 'lucide-react'
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
+import { AnimatePresence, motion } from 'motion/react'
 import { memo, type ReactNode, useEffect, useRef, useState } from 'react'
 import type { DownloadStarted } from '../../../shared/commands/downloads'
 import { isPrivateWindow } from '../../../shared/private'
 import type { Download, OrbitState, ProfileId, WindowState } from '../../../shared/state'
 import { invoke } from '../api'
-import { QUICK_EASE, SNAPPY } from '../shell/sidebar/motion-tokens'
+import { SNAPPY, tween, useReducedMotion } from '../motion'
 import { useOrbit, useOrbitShallow } from '../store'
 import { dragOut } from './file-ui'
 import { flyToLibrary } from './flight'
 import { formatBytes, formatProgress, formatTimeLeft, percentDone, secondsLeft, smoothSpeed, splitName } from './format'
 import './downloads.css'
 
-const FADE = { duration: 0.12, ease: QUICK_EASE }
+const FADE = tween('quick')
 /** Hovering this long opens the list of downloads; leaving it this long closes it. */
 const OPEN_DELAY_MS = 150
 const CLOSE_DELAY_MS = 250

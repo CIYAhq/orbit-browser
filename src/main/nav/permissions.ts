@@ -440,6 +440,9 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
       if (ALWAYS_ALLOW.has(permission)) return callback(true)
       if (permission === 'fileSystem') return askFile(profileId, contents, details, callback)
       const media = 'mediaTypes' in details ? details.mediaTypes : undefined
+      // Sharing the screen (getDisplayMedia) asks for 'media' naming neither camera nor microphone:
+      // the screen chooser asks the user which screen, if any (setDisplayMediaRequestHandler, MD-11).
+      if (permission === 'media' && media?.length === 0) return callback(true)
       const kinds = kindsOf(permission, media)
       const origin = requestOrigin(contents, details)
       if (!kinds || !origin) return callback(false)
@@ -539,6 +542,7 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
   const askScreen = (
     profileId: ProfileId,
     contents: WebContents | undefined,
+    frame: Electron.WebFrameMain | null,
     origin: string | null,
     audio: boolean,
     callback: (streams: { video: DesktopCapturerSource; audio?: 'loopback' } | null) => void,
@@ -568,7 +572,12 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
             const source = choice === 'allow' && pick ? sources.find((s) => s.id === pick) : undefined
             if (!source) return callback(null)
             // Sound comes along only where the system can share it (Windows).
-            callback(audio && process.platform === 'win32' ? { video: source, audio: 'loopback' } : { video: source })
+            const streams: { video: DesktopCapturerSource; audio?: 'loopback' } =
+              audio && process.platform === 'win32' ? { video: source, audio: 'loopback' } : { video: source }
+            // The tab's row says it shares (media, MD-11): it watches the frame before the page has the stream.
+            const ready =
+              tabId && contents && frame ? (ctx.hooks.screenShare ?? []).map((h) => h(tabId, contents, frame)) : []
+            void Promise.allSettled(ready).then(() => callback(streams))
           },
         })
       })
@@ -639,7 +648,7 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
         const contents = contentsOfFrame(request.frame)
         const origin = contents && !contents.isDestroyed() ? permissionOrigin(contents.getURL()) : null
         if (!request.videoRequested) return callback(null)
-        askScreen(profileId, contents, origin, request.audioRequested, callback)
+        askScreen(profileId, contents, request.frame, origin, request.audioRequested, callback)
       },
       // macOS 15 and later show the system's own picker.
       { useSystemPicker: true },

@@ -722,10 +722,11 @@ export class WindowManager {
 
   /**
    * Places the page tools at `bounds` (window coordinates): above the pages, under the floating
-   * sidebar and the overlay. Not before their page has loaded (round 2 fix check, M3): the nav
-   * module shows them again then (onToolsReady). Returns whether they are in the window.
+   * sidebar and the overlay; with `top`, above everything, as over a Peek's page (PK-11). Not
+   * before their page has loaded (round 2 fix check, M3): the nav module shows them again then
+   * (onToolsReady). Returns whether they are in the window.
    */
-  showTools(windowId: WindowId, bounds: Rect): boolean {
+  showTools(windowId: WindowId, bounds: Rect, opts: { top?: boolean } = {}): boolean {
     const rec = this.records.get(windowId)
     if (!rec || rec.win.isDestroyed()) return false
     const view = this.ensureTools(rec)
@@ -735,9 +736,9 @@ export class WindowManager {
     const parent = rec.win.contentView
     const children = parent.children
     const at = children.indexOf(view)
-    const above = [rec.overlay, rec.floating, rec.cover]
-      .map((v) => (v ? children.indexOf(v) : -1))
-      .filter((i) => i >= 0)
+    const above = opts.top
+      ? []
+      : [rec.overlay, rec.floating, rec.cover].map((v) => (v ? children.indexOf(v) : -1)).filter((i) => i >= 0)
     const ceiling = above.length > 0 ? Math.min(...above) : -1
     if (ceiling < 0) {
       if (at !== children.length - 1) parent.addChildView(view)
@@ -1055,7 +1056,7 @@ export class WindowManager {
   }
 
   /** Orbit's own UI must never stay blank: reload a shell or overlay renderer that died (a few times). */
-  private reloadUiOnCrash(contents: WebContents, view: RendererView): void {
+  reloadUiOnCrash(contents: WebContents, view: RendererView): void {
     const crashes: number[] = []
     contents.on('render-process-gone', (_event, details) => {
       if (this.quitting || contents.isDestroyed() || details.reason === 'clean-exit') return
@@ -1314,6 +1315,19 @@ export class WindowManager {
     const panes = tabId && frame ? fastSwitchPanes(state, prev, tabId, before, frame) : null
     if (panes) {
       rec.minPaneSeq = this.ctx.store.seq + 1
+      if (panes.some((p) => !this.liveContents(p.tabId))) {
+        // A sleeping tab's page takes longer than a frame to wake: it wakes just after this change
+        // has gone out, so the sidebar draws the new selection first (FL-29: ⌘W → next tab selected
+        // in a frame; the card shows the page's background meanwhile).
+        const shown = rec.panes
+        setImmediate(() => {
+          if (rec.win.isDestroyed() || rec.panes !== shown || activeTabOf(this.ctx.store.state, rec.id) !== tabId)
+            return
+          this.applyPanes(rec.id, panes, rec.radius)
+          if (tabId && !rec.overlayShown) this.liveContents(tabId)?.focus()
+        })
+        return
+      }
       this.applyPanes(rec.id, panes, rec.radius)
     } else if (!tabId) {
       rec.minPaneSeq = this.ctx.store.seq + 1

@@ -383,16 +383,20 @@ test('[CB-22][FL-16][FL-17] keys typed right after ⌘T are kept and results fol
   const latencies = await overlay.evaluate(
     () => (window as unknown as { __orbitCommandBar: { latencies: number[] } }).__orbitCommandBar.latencies,
   )
-  expect(latencies.length).toBeGreaterThan(0)
-  expect(Math.max(...latencies.slice(-10))).toBeLessThan(50 * FRAME_SLACK)
-  // The open itself is measured too (budget: 50 ms to a painted, focused input).
+  // Results follow the keystrokes: the upper median of the last 10. The worst keystroke and the open's
+  // budget are judged by the budget tests, each measured in up to three rounds (D46): CB-22 below, and
+  // FL-17 in feel-commandbar, with every keystroke timed frame by frame. One sample or a maximum here
+  // would judge the load on the machine more than the bar.
+  const last = latencies.slice(-10).sort((a, b) => a - b)
+  expect(last.length).toBeGreaterThan(0)
+  expect(last[last.length >> 1]).toBeLessThan(50 * FRAME_SLACK)
+  // The open is timed too, start to painted.
   const marks = (await orbit.app.evaluate(() =>
     (globalThis as unknown as { __orbit: { marks: () => { name: string; t: number }[] } }).__orbit.marks(),
   )) as { name: string; t: number }[]
   const start = marks.filter((m) => m.name === 'commandbar:open:start').at(-1)?.t ?? 0
   const painted = marks.filter((m) => m.name === 'commandbar:open:painted').at(-1)?.t ?? 0
   expect(painted).toBeGreaterThan(start)
-  expect(painted - start).toBeLessThan(150 * FRAME_SLACK)
 })
 
 test('[CB-22] typing a whole action name and Enter right after ⌘T runs it (no lost keys)', async () => {
@@ -906,7 +910,10 @@ test('[CB-22][CB-07][FL-17] at 500 tabs and 10,000 history entries: open ≤ 50 
       (globalThis as unknown as { __orbit: { marks: () => { name: string; t: number }[] } }).__orbit.marks(),
     )) as { name: string; t: number }[]
   const p95 = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length * 0.95)] ?? Number.POSITIVE_INFINITY
-  /** One round: open the bar four times and type a query each time. */
+  /**
+   * One round, in a launch of its own: open the bar five times and type a query each time. The first open is the
+   * first after the launch, which a user meets after every launch: it is judged on its own (PR #17 review F2).
+   */
   const measure = async () => {
     const overlay = await viewPage(orbit.app, 'overlay')
     // The bar keeps its last 100 timings; this round's are the ones after it starts.
@@ -917,7 +924,7 @@ test('[CB-22][CB-07][FL-17] at 500 tabs and 10,000 history entries: open ≤ 50 
       timings.replies.length = 0
     })
     const opens: number[] = []
-    for (let k = 0; k < 4; k++) {
+    for (let k = 0; k < 5; k++) {
       const before = (await marks()).filter((m) => m.name === 'commandbar:open:painted').length
       await orbit.shell.keyboard.press(`${MOD}+T`)
       await expect
@@ -935,17 +942,22 @@ test('[CB-22][CB-07][FL-17] at 500 tabs and 10,000 history entries: open ≤ 50 
     const timings = await overlay.evaluate(
       () => (window as unknown as { __orbitCommandBar: { latencies: number[]; replies: number[] } }).__orbitCommandBar,
     )
+    const rest = opens.slice(1).sort((a, b) => a - b)
     return {
       n: timings.replies.length,
       replies: p95(timings.replies),
       painted: p95(timings.latencies),
-      open: [...opens].sort((a, b) => a - b)[Math.floor((opens.length - 1) / 2)] ?? Number.POSITIVE_INFINITY,
+      opens,
+      first: opens[0] ?? Number.POSITIVE_INFINITY,
+      // The upper median of the other four: only the slowest of them goes unjudged.
+      open: rest[rest.length >> 1] ?? Number.POSITIVE_INFINITY,
     }
   }
   type Round = Awaited<ReturnType<typeof measure>>
   // §8 budgets: results ≤ 30 ms per keystroke (ranked in main and back in the bar), and open ≤ 50 ms to a visible,
   // focused input. FL-17: on screen within 50 ms at worst (this includes waiting for the next frame).
-  const meets = (r: Round) => r.replies <= 30 && r.painted <= 50 * FRAME_SLACK && r.open <= 50 * FRAME_SLACK
+  const meets = (r: Round) =>
+    r.replies <= 30 && r.painted <= 50 * FRAME_SLACK && r.first <= 50 * FRAME_SLACK && r.open <= 50 * FRAME_SLACK
   // Other work on a shared machine can only add delay, so a round that misses a budget is measured again, up to three
   // rounds; Orbit's own speed is the best of them (D46). Each retry runs in a fresh launch of the same profile: every
   // round is then the bar's first use after a launch, as a user meets it after every launch, so a slowdown in that
@@ -961,12 +973,13 @@ test('[CB-22][CB-07][FL-17] at 500 tabs and 10,000 history entries: open ≤ 50 
     const r = await measure()
     rounds.push(r)
     console.info(
-      `[commandbar e2e perf] round ${rounds.length}: p95 keystroke→results ${r.replies.toFixed(1)} ms, →painted ${r.painted.toFixed(1)} ms (n=${r.n}); open median ${r.open.toFixed(1)} ms`,
+      `[commandbar e2e perf] round ${rounds.length}: p95 keystroke→results ${r.replies.toFixed(1)} ms, →painted ${r.painted.toFixed(1)} ms (n=${r.n}); first open after launch ${r.first.toFixed(1)} ms, upper median of the rest ${r.open.toFixed(1)} ms (opens ${r.opens.map((x) => x.toFixed(1)).join(', ')})`,
     )
   }
   const best = rounds.find(meets) ?? (rounds.at(-1) as Round)
   expect(best.n).toBeGreaterThan(40)
   expect(best.replies).toBeLessThanOrEqual(30)
   expect(best.painted).toBeLessThanOrEqual(50 * FRAME_SLACK)
+  expect(best.first).toBeLessThanOrEqual(50 * FRAME_SLACK)
   expect(best.open).toBeLessThanOrEqual(50 * FRAME_SLACK)
 })

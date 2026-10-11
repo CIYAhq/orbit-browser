@@ -40,5 +40,9 @@ linux:
   target: [dir]
   category: Network
   icon: build/icon.png
+  # For the launcher entry Orbit writes for itself (MW-14) and the tray button (MW-13).
+  extraResources:
+    - from: build/icon.png
+      to: icon.png
 npmRebuild: false
 publish: null

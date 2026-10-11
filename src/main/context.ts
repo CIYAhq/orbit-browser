@@ -3,6 +3,7 @@ import type {
   HandlerDetails,
   MenuItemConstructorOptions,
   WebContents,
+  WebFrameMain,
   WindowOpenHandlerResponse,
 } from 'electron'
 import type { TabId } from '../shared/state'
@@ -25,6 +26,11 @@ export interface Hooks {
   tabNavigated: ((tabId: TabId, contents: WebContents, url: string) => void)[]
   /** Extra items at the top of a page's right-click menu (e.g. Picture in Picture on a video, MD-02). */
   pageContextMenu?: ((tabId: TabId, contents: WebContents, params: ContextMenuParams) => MenuItemConstructorOptions[])[]
+  /**
+   * A tab's frame is about to get the screen or window the user chose to share (MD-11). The stream
+   * goes to the page once these have settled.
+   */
+  screenShare?: ((tabId: TabId, contents: WebContents, frame: WebFrameMain) => Promise<void>)[]
 }
 
 /** Everything a feature module needs. Passed to each module's register(). */

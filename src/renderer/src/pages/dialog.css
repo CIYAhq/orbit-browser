@@ -34,7 +34,8 @@
     0 0 0 0.5px rgba(0, 0, 0, 0.16),
     0 12px 32px rgba(0, 0, 0, 0.22),
     0 2px 6px rgba(0, 0, 0, 0.08);
-  animation: page-dialog-in 150ms var(--ease-out, ease-out);
+  /* The popover timing (FL-25): a fade and 0.97 → 1 in 150 ms on the snappy curve, a frame along. */
+  animation: page-dialog-in 150ms var(--ease-snappy) var(--motion-lead);
   transform-origin: 50% 0;
 }
 
@@ -45,10 +46,9 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .page-dialog {
-    animation: none;
-  }
+/* Reduced motion (FL-28): the OS setting or Orbit's own, as the root's class (motion/reduced.ts). */
+.reduce-motion .page-dialog {
+  animation: none;
 }
 
 .page-dialog__title {

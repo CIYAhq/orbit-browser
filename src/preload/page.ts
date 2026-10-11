@@ -14,7 +14,8 @@
  * nothing. See `exposeInternalPage`.
  *
  * In every page's main frame, it also tells main whether the page used an Esc (D59, `watchEscape`),
- * and of a two-finger swipe the page doesn't take (NV-02, `watchSwipe`).
+ * of a two-finger swipe the page doesn't take (NV-02, `watchSwipe`), and how many of the page's
+ * shared-screen tracks are live (D69: for its tab's sharing indicators only, MD-11, TB-15).
  *
  * In a web page's main frame, the page's `alert`, `confirm` and `prompt` ask main, which shows
  * Orbit's dialog over that page only (NV-24): Electron has no `prompt`, and shows the others as
@@ -46,12 +47,23 @@ const notificationClicked = () => {
   ipcRenderer.send(PAGE_CHANNEL.notificationClick)
 }
 
+const screenShared = (count: number) => {
+  ipcRenderer.send(PAGE_CHANNEL.screenShare, count)
+}
+
 /**
  * Runs in the page's own world before its scripts (serialized: it may use only its arguments and
  * the page's globals). Built-ins are taken up front, so a page that replaces them later can't reach
  * Orbit's functions through them.
  */
-function patchPage(stateOf: StateOf, clicked: () => void, ask: AskDialog, print: () => void, holdClose: () => boolean) {
+function patchPage(
+  stateOf: StateOf,
+  clicked: () => void,
+  ask: AskDialog,
+  print: () => void,
+  holdClose: () => boolean,
+  shared: (count: number) => void,
+) {
   // Calls go through the captured `apply`, never a function's own `.call`: a page that replaces
   // `Function.prototype.call` (or `Reflect.apply`) would otherwise receive Orbit's functions.
   const apply = Reflect.apply
@@ -207,6 +219,91 @@ function patchPage(stateOf: StateOf, clicked: () => void, ask: AskDialog, print:
     const closeNow = (target: () => void, self: unknown, args: unknown[]) =>
       holdClose() ? undefined : apply(target, self, args)
     define(window, 'close', { ...ownClose, value: new Proxy(nativeClose, { apply: closeNow }) })
+  }
+
+  // Screen sharing (D69; MD-11, TB-15): main learns how many of the page's shared-screen tracks are
+  // live, for the tab's sharing indicators only. One stops being shared when the page stops it or
+  // its source ends (the window closed, or the system's own Stop sharing); a clone of it shares too.
+  // Nothing is sent until the page shares. This sees the shares the system's own picker grants
+  // (macOS 15 and later), which main never does.
+  const Devices = window.MediaDevices
+  const Track = window.MediaStreamTrack
+  const share = Devices ? describe(Devices.prototype, 'getDisplayMedia') : undefined
+  const kindOf = Track ? describe(Track.prototype, 'kind')?.get : undefined
+  const stateOfTrack = Track ? describe(Track.prototype, 'readyState')?.get : undefined
+  const settingsOf = Track ? describe(Track.prototype, 'getSettings')?.value : undefined
+  const stop = Track ? describe(Track.prototype, 'stop') : undefined
+  const clone = Track ? describe(Track.prototype, 'clone') : undefined
+  const videoTracks = window.MediaStream ? describe(window.MediaStream.prototype, 'getVideoTracks')?.value : undefined
+  const size = describe(Set.prototype, 'size')?.get
+  const { add, has, forEach } = Set.prototype
+  const remove = Set.prototype.delete
+  if (
+    Track &&
+    share?.configurable &&
+    typeof share.value === 'function' &&
+    kindOf &&
+    stateOfTrack &&
+    typeof settingsOf === 'function' &&
+    stop?.configurable &&
+    typeof stop.value === 'function' &&
+    clone?.configurable &&
+    typeof clone.value === 'function' &&
+    typeof videoTracks === 'function' &&
+    size
+  ) {
+    const live = new Set<MediaStreamTrack>()
+    let told = 0
+    const isShared = (track: MediaStreamTrack) => {
+      try {
+        if (apply(kindOf, track, []) !== 'video') return false
+        return typeof describe(apply(settingsOf, track, []), 'displaySurface')?.value === 'string'
+      } catch {
+        return false
+      }
+    }
+    const settle = () => {
+      apply(forEach, live, [
+        (track: MediaStreamTrack) => {
+          if (apply(stateOfTrack, track, []) !== 'live') apply(remove, live, [track])
+        },
+      ])
+      const count = apply(size, live, []) as number
+      if (count === told) return
+      told = count
+      shared(count)
+    }
+    const watch = (track: MediaStreamTrack) => {
+      if (!isShared(track) || apply(has, live, [track])) return
+      apply(add, live, [track])
+      apply(listen, track, ['ended', settle])
+      settle()
+    }
+    // Methods, as the engine's are (no prototype, can't be constructed).
+    const methods = {
+      getDisplayMedia(this: MediaDevices, ...args: unknown[]) {
+        return apply(then, apply(share.value, this, args), [
+          (stream: MediaStream) => {
+            const tracks = apply(videoTracks, stream, []) as MediaStreamTrack[]
+            for (let i = 0; i < tracks.length; i++) watch(tracks[i] as MediaStreamTrack)
+            return stream
+          },
+        ])
+      },
+      stop(this: MediaStreamTrack) {
+        const result = apply(stop.value, this, [])
+        if (apply(has, live, [this])) settle()
+        return result
+      },
+      clone(this: MediaStreamTrack) {
+        const copy = apply(clone.value, this, []) as MediaStreamTrack
+        if (apply(has, live, [this])) watch(copy)
+        return copy
+      },
+    }
+    define(Devices.prototype, 'getDisplayMedia', { ...share, value: methods.getDisplayMedia })
+    define(Track.prototype, 'stop', { ...stop, value: methods.stop })
+    define(Track.prototype, 'clone', { ...clone, value: methods.clone })
   }
 }
 
@@ -513,7 +610,7 @@ if (location.protocol === 'orbit:') {
   try {
     contextBridge.executeInMainWorld({
       func: patchPage,
-      args: [permissionState, notificationClicked, askDialog, printDialog, holdClose],
+      args: [permissionState, notificationClicked, askDialog, printDialog, holdClose, screenShared],
     })
   } catch {
     // A page without its own world to patch keeps the engine's answers.

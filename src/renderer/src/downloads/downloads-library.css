@@ -507,18 +507,16 @@
   color: var(--dl-card-muted);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .dl-lib-row__fill,
-  .dl-media__tile,
-  .dl-media__name {
-    transition: none;
-  }
-  .dl-media__tile:hover {
-    transform: none;
-  }
-  .dl-lib-row__bar.is-indeterminate .dl-lib-row__fill {
-    animation: none;
-    width: 100%;
-    opacity: 0.5;
-  }
+.reduce-motion .dl-lib-row__fill,
+.reduce-motion .dl-media__tile,
+.reduce-motion .dl-media__name {
+  transition: none;
+}
+.reduce-motion .dl-media__tile:hover {
+  transform: none;
+}
+.reduce-motion .dl-lib-row__bar.is-indeterminate .dl-lib-row__fill {
+  animation: none;
+  width: 100%;
+  opacity: 0.5;
 }

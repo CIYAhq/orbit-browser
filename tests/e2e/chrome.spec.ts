@@ -675,16 +675,13 @@ test('[SB-12][FL-03] with the sidebar hidden, the left edge brings it in over th
   const info = await floatingInfo(app)
   expect(info.placed).toBe(true)
   expect(info.bounds).toEqual({ x: 0, y: 0, width: MARGIN_HIDDEN + width + FLOAT_BAND, height })
-  // A card inset from the window's edges, sliding in with the snappy timing.
+  // A card inset from the window's edges, slid in (its timing, frame by frame: feel-sidebar.spec.ts).
   const slide = floating.locator('.float-sidebar__slide')
   await expect
     .poll(() => slide.evaluate((el) => getComputedStyle(el).transform))
     .toMatch(/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/)
   const box = await slide.boundingBox()
   expect(box).toEqual({ x: MARGIN_HIDDEN, y: MARGIN_HIDDEN, width, height: height - 2 * MARGIN_HIDDEN })
-  const duration = await slide.evaluate((el) => Number.parseFloat(getComputedStyle(el).transitionDuration) * 1000)
-  expect(duration).toBeGreaterThanOrEqual(180)
-  expect(duration).toBeLessThanOrEqual(220)
   // Everything a docked sidebar has.
   await expect(floating.getByTestId('nav-reload')).toBeVisible()
   await expect(floating.getByTestId('address')).toContainText('localhost')

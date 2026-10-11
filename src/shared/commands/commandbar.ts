@@ -1,4 +1,4 @@
-import type { CommandBarMode, FolderId, SiteSearchEngine, SpaceId, TabId } from '../state'
+import type { CommandBarMode, FolderId, SiteSearchEngine, SpaceId, SplitId, TabId } from '../state'
 
 /**
  * What a command bar row does when chosen (CB-06):
@@ -43,6 +43,8 @@ export interface SearchResult {
   favicon?: string
   /** Favicons of every pane when the tab is part of a split view (CB-06). */
   splitFavicons?: (string | null)[]
+  /** The split view a tab row stands for: a split is one row ("Switch to split", SV-21). */
+  splitId?: SplitId
   tabId?: TabId
   spaceId?: SpaceId
   folderId?: FolderId
@@ -78,6 +80,11 @@ export interface SearchQueryArgs {
   actionsOnly?: boolean
   /** The last edit removed text, so don't add an inline completion again (CB-08). */
   noAutocomplete?: boolean
+  /**
+   * A Mini Window's bar (CB-23), also before main knows the window: a hidden spare one has no
+   * window state yet. Nothing browser-wide is offered there.
+   */
+  mini?: boolean
 }
 
 export interface SearchResponse {

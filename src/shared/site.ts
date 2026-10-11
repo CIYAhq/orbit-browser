@@ -227,6 +227,12 @@ export const PAGE_CHANNEL = {
    * or forward, for a main frame of a page in a window's page card only (src/main/pages/swipe.ts).
    */
   swipe: 'orbit-page:swipe',
+  /**
+   * send(count): how many of the page's shared-screen tracks are live, on each change (D69; MD-11,
+   * TB-15; main side: src/main/media/index.ts). Read only from a tab's main frame, clamped, and
+   * only for that tab's sharing indicators.
+   */
+  screenShare: 'orbit-page:screen-share',
 } as const
 
 /** A tab comes forward for its notifications' clicks at most this often (a flood can't stall the shell). */

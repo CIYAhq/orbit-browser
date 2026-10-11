@@ -1,16 +1,21 @@
-import { AnimatePresence, domAnimation, LazyMotion, MotionConfig } from 'motion/react'
+import { AnimatePresence, domAnimation, LazyMotion } from 'motion/react'
 import { type CSSProperties, useEffect, useState } from 'react'
 import { DOWNLOADS_FLYOUT_PANEL } from '../../../shared/commands/downloads'
 import { SHORTCUT_SHEET } from '../../../shared/commands/keys'
 import { invoke } from '../api'
 import { DownloadsFlyout } from '../downloads/DownloadsFlyout'
 import { ShortcutSheet } from '../keys/ShortcutSheet'
+import { OrbitMotionConfig } from '../motion'
 import { isSpacePanel, SpacePanels } from '../shell/spaces/SpacePanels'
 import { useWindow } from '../store'
 import { paletteVars, usePalette } from '../theme'
 import { CommandBar } from './CommandBar'
+import { installTypeahead } from './commandbar/typeahead'
 import { PeekLayer } from './PeekLayer'
 import { SiteControls } from './site/SiteControls'
+
+// Keys typed before the bar mounts (CB-22). Only here: a Mini Window's bar takes its keys itself.
+installTypeahead()
 
 /**
  * Transparent full-window layer above the tab views. It is only visible while
@@ -30,7 +35,7 @@ export function OverlayApp() {
   }, [])
   return (
     <LazyMotion features={domAnimation} strict>
-      <MotionConfig reducedMotion="user">
+      <OrbitMotionConfig>
         <div
           className={`overlay overlay--${kind}`}
           style={paletteVars(palette) as CSSProperties}
@@ -74,7 +79,7 @@ export function OverlayApp() {
             )}
           </AnimatePresence>
         </div>
-      </MotionConfig>
+      </OrbitMotionConfig>
     </LazyMotion>
   )
 }

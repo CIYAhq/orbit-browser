@@ -168,7 +168,7 @@ html[data-view="library"] body {
     0 8px 24px rgba(0, 0, 0, 0.16),
     0 0 0 0.5px rgba(0, 0, 0, 0.12);
   pointer-events: auto;
-  animation: library-toast-in 230ms cubic-bezier(0.3, 1.25, 0.5, 1);
+  animation: library-toast-in 230ms var(--ease-pop);
 }
 
 .library-toast.is-clickable {
@@ -618,16 +618,14 @@ html[data-view="library"] body {
   font-weight: 600;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .archive__scroller.is-animating .archive-day,
-  .archive__scroller.is-animating .archive-row,
-  .archive-row.is-leaving {
-    transition: opacity 120ms linear;
-  }
-  .library-toast,
-  .library__content {
-    animation: none;
-  }
+.reduce-motion .archive__scroller.is-animating .archive-day,
+.reduce-motion .archive__scroller.is-animating .archive-row,
+.reduce-motion .archive-row.is-leaving {
+  transition: opacity 120ms linear;
+}
+.reduce-motion .library-toast,
+.reduce-motion .library__content {
+  animation: none;
 }
 
 /* ---- Questions over the Library (AR-07 Clear Archive, AR-11 Restore Data) ---- */
@@ -725,11 +723,9 @@ html[data-view="library"] body {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .library-dialog__backdrop,
-  .library-dialog {
-    animation: none;
-  }
+.reduce-motion .library-dialog__backdrop,
+.reduce-motion .library-dialog {
+  animation: none;
 }
 
 /* ---- History (AR-10): the Archive's list, without the Space column; × removes on hover ---- */

@@ -103,6 +103,15 @@ export interface TabMedia {
   /** Track details from the page's Media Session, when it sets them. */
   title?: string
   artist?: string
+  /** The Media Session's artwork, as a small data: image (MD-09). */
+  artwork?: string
+  /** The tab shares a screen or window (getDisplayMedia; MD-11, TB-15): its sharing indicators show. */
+  screen?: boolean
+  /**
+   * A share Orbit's own screen chooser granted is live, as main's watcher says (D69). Only this,
+   * never the page preload's count behind `screen`, keeps the tab awake and unarchived.
+   */
+  screenGranted?: boolean
   /** The main media has a known length: seeking, next and previous work. */
   seekable: boolean
   /** The main media played to its end. */
@@ -162,6 +171,8 @@ export interface Split {
   createdAt: number
   /** User-chosen name; when set, the sidebar row shows it instead of the pane titles (SV-21, SV-22). */
   name?: string
+  /** User-chosen emoji that replaces the panes' favicons on its row and Favorites tile (SV-21, SV-22, TB-12). */
+  icon?: string
   /** The pane focused last: selecting the split returns to it (SV-14). */
   focus?: TabId
   /** A pane still waiting for its first page while the command bar is open for it (SV-02). */
@@ -317,6 +328,8 @@ export interface Settings {
   miniWindowProfiles: Record<string, ProfileId>
   /** Size and position of the last Mini Window the user moved or resized (MW-04). */
   miniWindowBounds?: { x: number; y: number; width: number; height: number }
+  /** A menu-bar (macOS) or tray (Windows, Linux) button that opens a blank Mini Window (MW-13). */
+  miniWindowTrayButton: boolean
   /** First-run onboarding is done or skipped (OB-01): later starts open the browser at once. */
   onboarded: boolean
   /** The onboarding step a quit left off at, resumed on the next start (OB-14); see ONBOARDING_STEPS. */
@@ -370,6 +383,11 @@ export interface Settings {
   recentFiles: { downloads: boolean; screenshots: boolean }
   /** The OS's screenshots show in the Library's Media section (DL-11). */
   libraryScreenshots: boolean
+  /**
+   * Reduced motion even when the OS doesn't ask for it (FL-28, AP-17): slides, flights and springs
+   * become short cross-fades. Off: Orbit follows the OS setting.
+   */
+  reduceMotion: boolean
 }
 
 /** Secure DNS choices (ST-12): providers are src/main/settings/dns.ts's DOH_SERVERS. */

@@ -11,7 +11,10 @@ html[data-view="mini"] body {
   background: linear-gradient(180deg, var(--frame-top), var(--frame-bottom));
 }
 
+/* Above the card: the command bar's list drops from here over it (CB-23). */
 .mini__bar {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -79,25 +82,65 @@ html[data-view="mini"] body {
   font-weight: 500;
 }
 
-.mini__address-form {
+/* Find in the page (NV-05): beside the address. */
+.mini__find {
   -webkit-app-region: no-drag;
-  flex: 1;
-  min-width: 0;
+  flex: 0 1 300px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 150px;
+  height: 28px;
+  padding: 0 3px 0 8px;
+  border-radius: 8px;
+  background: var(--hover);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 10%, transparent);
 }
 
-.mini__address-input {
-  width: 100%;
-  height: 28px;
-  padding: 0 10px;
+.mini__find-icon {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.mini__find-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 4px;
   border: 0;
-  border-radius: 8px;
   outline: none;
-  font: inherit;
+  background: transparent;
   color: var(--text);
+  font: inherit;
+}
+
+.mini__find-count {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mini__find--none .mini__find-count {
+  color: var(--danger, #c62828);
+}
+
+.mini__find-button {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--text);
+}
+
+.mini__find-button:hover:not(:disabled) {
   background: var(--active);
-  box-shadow:
-    var(--active-shadow),
-    0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.mini__find-button:disabled {
+  opacity: 0.4;
 }
 
 .mini__pill {
@@ -140,58 +183,112 @@ html[data-view="mini"] body {
   overflow: hidden;
 }
 
-.mini--blurred .mini__bar {
+/* The command bar's list keeps its look (a blurred window's open bar is on its way out). */
+.mini--blurred .mini__bar > :not(.cmdbar--mini) {
   opacity: 0.7;
 }
 
-/* Lookup bar of a blank Mini Window (MW-06) */
-.mini-lookup {
+/* The command bar's compact variant (CB-23): the lookup bar of a blank Mini Window (MW-06), and
+   the address field over its page (MW-03). Rows keep the main bar's look (.cmdbar__row). */
+.cmdbar--mini {
+  will-change: auto;
+}
+
+.cmdbar--mini-blank {
   position: absolute;
   left: 50%;
   top: 22%;
-  display: flex;
-  align-items: center;
-  gap: 12px;
   width: min(560px, calc(100% - 48px));
-  height: 52px;
-  padding: 0 16px;
   transform: translateX(-50%);
   border-radius: 14px;
-  background: color-mix(in srgb, var(--frame-top) 14%, rgba(255, 255, 255, 0.98));
-  color: #1c1c1f;
   box-shadow:
     0 0 0 0.5px rgba(0, 0, 0, 0.14),
     0 16px 40px rgba(0, 0, 0, 0.16);
 }
 
-.mini-lookup__icon {
-  flex: none;
-  opacity: 0.5;
+.cmdbar--mini-blank .cmdbar__input-row {
+  height: 52px;
+  gap: 12px;
 }
 
-.mini-lookup__input {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  border: 0;
-  outline: none;
-  background: transparent;
-  font: inherit;
+.cmdbar--mini-blank .cmdbar__input {
   font-size: 17px;
-  color: inherit;
 }
 
-.mini-lookup__input::placeholder {
-  color: currentColor;
-  opacity: 0.38;
+/* Over a page the field takes the host's place in the top bar; its list drops over the card. */
+.cmdbar--mini-page {
+  -webkit-app-region: no-drag;
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 560px;
+  width: auto;
+  overflow: visible;
+  border-radius: 8px;
+  background: none;
+  box-shadow: none;
+}
+
+.cmdbar--mini-page .cmdbar__input-row {
+  height: 28px;
+  gap: 6px;
+  padding: 0 10px 0 8px;
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--active);
+  box-shadow:
+    var(--active-shadow),
+    0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.cmdbar--mini-page .cmdbar__lead {
+  width: 14px;
+}
+
+.cmdbar--mini-page .cmdbar__input {
+  font-size: inherit;
+}
+
+.cmdbar--mini-page .cmdbar__chip {
+  height: 20px;
+  font-size: 12px;
+}
+
+.cmdbar--mini-page .cmdbar__results {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: -4px;
+  width: max(100%, min(460px, calc(100vw - 24px)));
+  border-top: 0;
+  border-radius: 10px;
+  background: var(--cmd-bg);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.16),
+    0 16px 40px rgba(0, 0, 0, 0.22);
+}
+
+/* The page's still image while the bar's list covers it, under the main bar's light scrim. */
+.mini__cover {
+  position: absolute;
+  inset: 0;
+}
+
+.mini__cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+}
+
+.mini__cover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 10, 14, 0.07);
 }
 
 @media (prefers-color-scheme: dark) {
   .mini__frame {
     background: color-mix(in srgb, var(--frame-top) 40%, #1b1b1f);
-  }
-  .mini-lookup {
-    background: color-mix(in srgb, var(--frame-top) 26%, rgba(32, 32, 36, 0.98));
-    color: #f3f3f5;
   }
 }

@@ -367,9 +367,9 @@ test('[NV-05] ⌘F starts from the selected text, else the tab’s last search; 
   await expect(count).toHaveText('3/3')
 })
 
-test('[NV-05][PK-11] ⌘F and ⌘G with a Peek open leave the tab under it alone: no find bar comes, and the keyboard stays in the Peek (review A-M3)', async () => {
+test('[NV-05][PK-11] ⌘F and ⌘G with a Peek open leave the tab under it alone: the bar that comes finds in the Peek (review A-M3)', async () => {
   const { app } = orbit
-  await openTab(app, findPage('Under'))
+  const under = await openTab(app, findPage('Under'))
   // The tab under the Peek has a search of its own, which ⌘G would bring back.
   const tools = await openFind('/page/Under')
   await tools.keyboard.type('orbit')
@@ -380,15 +380,23 @@ test('[NV-05][PK-11] ⌘F and ⌘G with a Peek open leave the tab under it alone
   const peekTab = await cmd<string>(app, 'peek.open', { url: peekUrl })
   await waitLoaded(app, peekTab, peekUrl)
   await expect.poll(() => focusedUrl(app)).toContain('/page/Peeked')
-  const peek = await tabPage(app, '/page/Peeked')
-  await pressInPage(app, '/page/Peeked', 'F', [mod])
+  // ⌘G: the Peek has no search yet, so the bar opens for it, empty (PK-11); the tab's stays closed.
   await pressInPage(app, '/page/Peeked', 'G', [mod])
-  // Keys reach main in order: once the page has a later key, Orbit has dealt with ⌘F and ⌘G.
-  await pressInPage(app, '/page/Peeked', 'End')
-  await expect.poll(() => keysSeen(peek)).toContain('End')
-  expect(await focusedUrl(app)).toContain('/page/Peeked')
-  expect(await toolsInfo(app)).toMatchObject({ placed: false, find: { open: false } })
+  await expect
+    .poll(async () => {
+      const info = await toolsInfo(app)
+      return info.placed ? info.find : null
+    })
+    .toMatchObject({ tabId: peekTab, open: true, query: '' })
+  await expect.poll(() => focusedUrl(app)).toContain('view=tools')
+  await tools.keyboard.press('Escape')
+  await expect.poll(async () => (await toolsInfo(app)).placed).toBe(false)
+  await expect.poll(() => focusedUrl(app)).toContain('/page/Peeked')
   expect((await windowState(app)).overlay.kind).toBe('peek')
+  // The Peek closes: the tab under it still has its own search, closed.
+  await pressInPage(app, '/page/Peeked', 'Escape')
+  await expect.poll(async () => (await windowState(app)).overlay.kind).toBe('none')
+  expect(await toolsInfo(app)).toMatchObject({ placed: false, find: { tabId: under, open: false, query: 'orbit' } })
 })
 
 test('[NV-05][NV-06] with the Library open, ⌘G, F3 and ⌘+ leave the tab under it alone: no find bar, no zoom, and the keyboard stays in the Library (fix check A, M2)', async () => {

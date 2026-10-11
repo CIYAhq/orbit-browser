@@ -3,6 +3,7 @@
  * process (which places the page view before the overlay's first frame arrives). All rects are in
  * page-area coordinates: the area the overlay covers while a Peek shows (the content frame).
  */
+import { SPRING, springFrom } from './motion'
 
 export interface Box {
   x: number
@@ -25,11 +26,15 @@ export interface Spring {
   stiffness: number
   damping: number
 }
-/** Open: grows into place in about 280–320 ms with no visible overshoot (FL-19). */
-export const PEEK_OPEN_SPRING: Spring = { stiffness: 520, damping: 42 }
-/** Expand to a tab: the card meets the page frame in about 220–260 ms (FL-19). */
-export const PEEK_EXPAND_SPRING: Spring = { stiffness: 632, damping: 45 }
-/** Close: a slight shrink (to about 0.96) and a fade over about 150–180 ms (FL-19). */
+/**
+ * Open: grows into place in about 280–320 ms with no visible overshoot (FL-19). A spring tuned to
+ * FL-19's 280–320 ms (D70): response 0.275 s, ratio 0.92, a little quicker and stiller than the
+ * standard token FL-19 names, which takes longer than 320 ms to come to rest over a card's travel.
+ */
+export const PEEK_OPEN_SPRING: Spring = springFrom(0.275, 0.92)
+/** Expand to a tab: the card meets the page frame in about 220–260 ms (FL-19): the snappy token. */
+export const PEEK_EXPAND_SPRING: Spring = SPRING.snappy
+/** Close: a slight shrink (to about 0.96) and a fade over about 150–180 ms (FL-19's own timing). */
 export const PEEK_CLOSE_MS = 160
 export const PEEK_CLOSE_SCALE = 0.96
 

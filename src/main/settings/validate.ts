@@ -21,6 +21,7 @@ const CHECKS: { [K in keyof Required<SettingsPatch>]: Check } = {
   externalLinksSpace: (v, state) => v === null || (typeof v === 'string' && !!state.spaces[v]),
   // 0 = never (MW-09); otherwise up to 30 days.
   miniWindowArchiveAfterMs: (v) => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 30 * DAY,
+  miniWindowTrayButton: bool,
   autoPip: bool,
   searchSuggestions: bool,
   searchTopResult: bool,
@@ -29,6 +30,7 @@ const CHECKS: { [K in keyof Required<SettingsPatch>]: Check } = {
   hardwareAcceleration: bool,
   secureDns: (v) => (SECURE_DNS_CHOICES as readonly unknown[]).includes(v),
   updateChecks: bool,
+  reduceMotion: bool,
 }
 
 /**

@@ -20,13 +20,14 @@
   --gutter: 8px;
   /* With the sidebar hidden the page card keeps this margin on all four sides (SB-19). */
   --gutter-hidden: 6px;
-  /* The sidebar's show/hide (FL-02): the standard token. */
-  --sidebar-dur: 260ms;
-  --sidebar-ease: cubic-bezier(0.2, 0.9, 0.1, 1);
-  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --ease-spring: cubic-bezier(0.25, 1.2, 0.4, 1);
-  --dur-fast: 120ms;
-  --dur: 200ms;
+  /* Older names for the motion tokens (FL-01, motion/motion.css). The sidebar's show/hide (FL-02)
+     is the standard token. */
+  --sidebar-dur: var(--motion-standard);
+  --sidebar-ease: var(--ease-standard);
+  --ease-out: var(--ease-snappy);
+  --ease-spring: var(--ease-pop);
+  --dur-fast: var(--motion-quick);
+  --dur: var(--motion-snappy);
   --text: #1c1c1f;
   --text-muted: rgba(28, 28, 31, 0.56);
   --hover: rgba(0, 0, 0, 0.05);
@@ -96,9 +97,10 @@ html.is-resizing * {
   /*
    * Show/hide (SB-11, FL-02): the sidebar column, the card's margins and the sidebar's slide share
    * one duration and curve, so the sidebar's right edge and the card's left edge move together.
-   * A reversal mid-way starts from where they are.
+   * A reversal mid-way starts from where they are. They start a frame along, so the frame that draws
+   * ⌘S already moves (FL-29).
    */
-  transition: grid-template-columns var(--sidebar-dur) var(--sidebar-ease);
+  transition: grid-template-columns var(--sidebar-dur) var(--sidebar-ease) var(--motion-lead);
 }
 
 .shell--sidebar-hidden {
@@ -108,7 +110,7 @@ html.is-resizing * {
 .content {
   min-width: 0;
   padding: var(--gutter) var(--gutter) var(--gutter) 0;
-  transition: padding var(--sidebar-dur) var(--sidebar-ease);
+  transition: padding var(--sidebar-dur) var(--sidebar-ease) var(--motion-lead);
 }
 
 .shell--sidebar-hidden .content {
@@ -133,13 +135,11 @@ html.is-resizing * {
   transition: none;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .shell,
-  .content,
-  .sidebar,
-  .shell--sidebar-hidden .sidebar {
-    transition: none;
-  }
+.reduce-motion .shell,
+.reduce-motion .content,
+.reduce-motion .sidebar,
+.reduce-motion .shell--sidebar-hidden .sidebar {
+  transition: none;
 }
 
 .frame {
@@ -200,10 +200,8 @@ html.is-resizing * {
   transition: opacity 150ms ease-out;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .shell--blurred .sidebar > * {
-    transition: none;
-  }
+.reduce-motion .shell--blurred .sidebar > * {
+  transition: none;
 }
 
 .topbar {
@@ -238,7 +236,8 @@ html.is-resizing * {
   color: var(--text-muted);
   transition:
     background var(--dur-fast) ease,
-    color var(--dur-fast) ease;
+    color var(--dur-fast) ease,
+    transform var(--motion-pop) var(--ease-pop);
 }
 
 .icon-button:hover:not(:disabled) {
@@ -246,8 +245,16 @@ html.is-resizing * {
   color: var(--text);
 }
 
+/* Every icon button presses to 0.94 at once and releases with the pop curve; a disabled one stays still (FL-15). */
 .icon-button:active:not(:disabled) {
   transform: scale(0.94);
+  transition-duration: var(--dur-fast), var(--dur-fast), 60ms;
+}
+
+/* Reduced motion (FL-28): the press still shows, with no spring either way. */
+.reduce-motion .icon-button,
+.reduce-motion .icon-button:active:not(:disabled) {
+  transition-duration: var(--dur-fast), var(--dur-fast), 0s;
 }
 
 .icon-button:disabled {
@@ -392,7 +399,7 @@ html.is-resizing * {
 .item-list {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 1px; /* ItemList's LIST_GAP: a row growing in or leaving takes its gap with it */
 }
 
 .tab-row,
@@ -476,6 +483,10 @@ html.is-resizing * {
   height: 22px;
   border-radius: 6px;
   color: var(--text-muted);
+  /* The button's own circle fades in with the instant timing (FL-08). */
+  transition:
+    background-color var(--motion-instant) var(--ease-instant),
+    color var(--motion-instant) var(--ease-instant);
 }
 
 .tab-row__close {
@@ -532,7 +543,7 @@ html.is-resizing * {
 
 /* Split view row (split lane, SV-21): one pill, one segment per pane. */
 .split-row {
-  animation: split-row-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: split-row-in 220ms var(--ease-snappy);
   position: relative;
   display: flex;
   align-items: center;
@@ -852,7 +863,7 @@ html[data-view="strip"] body {
 .pane-strip.is-leaving {
   opacity: 0;
   pointer-events: none;
-  transition: opacity 110ms cubic-bezier(0.2, 0, 0, 1);
+  transition: opacity 110ms var(--ease-quick);
 }
 
 @keyframes pane-strip-in {
@@ -897,13 +908,11 @@ html[data-view="strip"] body {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .split-row,
-  .pane--blank,
-  .pane--drop,
-  .pane-strip {
-    animation-duration: 1ms;
-  }
+.reduce-motion .split-row,
+.reduce-motion .pane--blank,
+.reduce-motion .pane--drop,
+.reduce-motion .pane-strip {
+  animation-duration: 1ms;
 }
 
 /* Space bar: see src/renderer/src/shell/spaces/spaces.css (spaces lane). */
@@ -919,14 +928,14 @@ html[data-view="strip"] body {
   z-index: 2;
 }
 
-/* Toasts */
+/* Toasts: at most three stack, 8 px apart; they move with motion (Toasts.tsx, FL-22). */
 .toasts {
   position: fixed;
   left: 12px;
   bottom: 52px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   pointer-events: none;
   z-index: 10;
 }
@@ -938,14 +947,6 @@ html[data-view="strip"] body {
   color: #fff;
   background: rgba(24, 24, 28, 0.88);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
-  animation: toast-in 220ms var(--ease-spring);
-}
-
-@keyframes toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px) scale(0.98);
-  }
 }
 
 /* A toast with a button (AR-05 "Go to Space") takes clicks. */
@@ -994,6 +995,11 @@ html[data-view="strip"] body {
 .row-slot {
   position: relative;
   flex: none;
+}
+
+/* Clipped while its height springs (growing in, closing): a settled row needs no clip of its own (FL-21). */
+.row-slot.is-growing,
+.row-slot.is-exiting {
   overflow: clip;
   overflow-clip-margin: 3px;
 }
@@ -1141,6 +1147,21 @@ html[data-view="strip"] body {
   overflow-clip-margin: 3px;
 }
 
+/*
+ * A folder or the pinned section the user opens (FL-12): while the box grows, its rows fade in one
+ * after another, 12 ms apart (10–15 ms); from the thirteenth on they come together.
+ */
+.is-revealing > .item-list > [data-slot] {
+  animation: reveal-row var(--motion-quick) var(--ease-quick) backwards;
+  animation-delay: calc(min(sibling-index() - 1, 12) * 12ms);
+}
+
+@keyframes reveal-row {
+  from {
+    opacity: 0;
+  }
+}
+
 .today-block {
   position: relative;
   flex: none;
@@ -1270,19 +1291,22 @@ html.is-dragging-tab * {
   background: color-mix(in srgb, var(--active) 70%, transparent);
 }
 
-/* Off-screen rows stay out of layout and paint work (FL-21). */
-.row-slot {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 32px;
+/*
+ * A row far from the list's visible band keeps its slot, at a row's height, and draws nothing
+ * (FL-21). Its slot is a plain box: no layer or clip of its own for each frame's hit tests,
+ * pre-paint and layerization to walk.
+ */
+.row-placeholder {
+  height: var(--row-h);
 }
 
-/* A row growing in is always drawn: skipped mid-growth, it would keep that height once done. */
-.row-slot.is-growing {
-  content-visibility: visible;
+.row-slot.is-far {
+  position: static;
+  overflow: visible;
 }
 
-/* A tab opened in the background glows briefly so the eye finds it (FL-06). */
-.tab-row.is-new-background {
+/* A tab opened in the background glows briefly so the eye finds it (FL-06); selected, it shows at once. */
+.tab-row.is-new-background:not(.is-active) {
   animation: row-glow 420ms ease-out;
 }
 
@@ -1436,6 +1460,9 @@ html.is-dragging-tab * {
   border-radius: 6px;
   color: var(--text-muted);
   opacity: 0;
+  transition:
+    background-color var(--motion-instant) var(--ease-instant),
+    color var(--motion-instant) var(--ease-instant);
 }
 
 .folder-row:hover .folder-row__search,
@@ -1448,10 +1475,27 @@ html.is-dragging-tab * {
   color: var(--text);
 }
 
-.tab-row__close:active,
-.tab-row__audio:active,
-.folder-row__search:active {
+/*
+ * A row button's press (FL-08): the glyph is drawn at 0.9 at once and springs back with the pop curve
+ * on release. The click fires on release as ever; nothing waits for the glyph.
+ */
+.tab-row__close > svg,
+.tab-row__audio > svg,
+.folder-row__search > svg {
+  transition: transform var(--motion-pop) var(--ease-pop);
+}
+
+.tab-row__close:active > svg,
+.tab-row__audio:active > svg,
+.folder-row__search:active > svg {
   transform: scale(0.9);
+  transition-duration: 0s;
+}
+
+.reduce-motion .tab-row__close > svg,
+.reduce-motion .tab-row__audio > svg,
+.reduce-motion .folder-row__search > svg {
+  transition: none;
 }
 
 .folder-search {
@@ -1498,11 +1542,9 @@ html.is-dragging-tab * {
   color: var(--text-muted);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .reveal-pill {
-    transition: none;
-    animation: none;
-  }
+.reduce-motion .reveal-pill {
+  transition: none;
+  animation: none;
 }
 
 /* ---------- Overlay ---------- */
@@ -1767,4 +1809,11 @@ html[data-view="overlay"] body {
 
 .cmdbar__remove:hover {
   color: var(--cmd-text);
+}
+
+/* Reduce Transparency (FL-28): the dragged row drops its blur; it is opaque anyway. */
+@media (prefers-reduced-transparency: reduce) {
+  .drag-ghost {
+    backdrop-filter: none;
+  }
 }

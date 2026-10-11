@@ -1,9 +1,9 @@
 import { CircleCheck, SlidersHorizontal } from 'lucide-react'
 import { useState } from 'react'
 import type { DefaultBrowserStatus, SettingsCapabilities } from '../../../../shared/commands/settings'
-import { invoke } from '../../api'
+import { invoke, isMac } from '../../api'
 import { useOrbit } from '../../store'
-import { Button, Checkbox, type Option, Select, SettingGroup, SettingRow } from '../controls'
+import { Button, Checkbox, type Option, Select, SettingGroup, SettingRow, Switch } from '../controls'
 import { HOUR, withCurrent } from '../format'
 import { useMainValue } from '../hooks'
 import type { SettingsSection } from '../registry'
@@ -80,8 +80,12 @@ function DefaultBrowserRow() {
   )
 }
 
+/** The Mini Window button in the menu bar or tray (MW-13). */
+const TRAY_LABEL = isMac ? 'Show the Mini Window button in the menu bar' : 'Show the Mini Window button in the tray'
+
 function GeneralPage() {
   const miniAfter = useOrbit((s) => s.settings.miniWindowArchiveAfterMs)
+  const trayButton = useOrbit((s) => s.settings.miniWindowTrayButton)
   const [capabilities] = useMainValue<SettingsCapabilities>(readCapabilities)
   return (
     <>
@@ -121,6 +125,18 @@ function GeneralPage() {
             onChange={(v) => void invoke('settings.update', { miniWindowArchiveAfterMs: v })}
           />
         </SettingRow>
+        <SettingRow
+          id="mini-window-tray"
+          label={TRAY_LABEL}
+          description="Click it from any app for a blank Mini Window, ready for a quick lookup."
+        >
+          <Switch
+            label={TRAY_LABEL}
+            checked={trayButton}
+            testId="mini-window-tray"
+            onChange={(next) => void invoke('settings.update', { miniWindowTrayButton: next })}
+          />
+        </SettingRow>
       </SettingGroup>
     </>
   )
@@ -132,5 +148,15 @@ export default {
   icon: SlidersHorizontal,
   order: 10,
   component: GeneralPage,
-  keywords: ['default browser', 'updates', 'check for updates', 'update feed', 'import', 'export', 'mini window'],
+  keywords: [
+    'default browser',
+    'updates',
+    'check for updates',
+    'update feed',
+    'import',
+    'export',
+    'mini window',
+    'menu bar',
+    'tray',
+  ],
 } satisfies SettingsSection

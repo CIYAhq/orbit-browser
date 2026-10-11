@@ -17,7 +17,10 @@ export function exposeTestHooks(ctx: MainContext, persistence: Persistence): voi
     run: (name: CommandName, args: unknown, windowId?: string) =>
       later(() => ctx.commands.run(name, args as never, { windowId })),
     action: (id: string, windowId?: string) => later(() => ctx.actions.run(id, { windowId })),
-    flush: () => persistence.flush(),
+    /** Writes the state file in a task of its own: the write clears its timer, never to be done by interrupt. */
+    flush: () => later(() => persistence.flush()),
+    /** Writes it in the calling task, for a caller already in a task of its own (the e2e evaluate) that checks the state first. */
+    flushNow: () => persistence.flush(),
     marks: () => ctx.perf.marks,
     windowIds: () => ctx.windows.ids(),
     liveTabs: () => ctx.tabs.liveTabIds(),

@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { fieldMatch, INSIDE, initials, PREFIX, WORD } from '../../src/main/commandbar/match'
 import {
@@ -17,6 +19,7 @@ import { HistoryStore, hostOf, urlKeyOf } from '../../src/main/history/store'
 import { hideImportTabs, releaseImportTabs } from '../../src/main/import/unplaced'
 import { makeTab } from '../../src/main/tabs/model'
 import { mergeSuggestions, type SearchResult } from '../../src/shared/commands/commandbar'
+import { SETTINGS_ACTIONS } from '../../src/shared/commands/settings'
 import { createInitialState, DEFAULT_SITE_SEARCH } from '../../src/shared/defaults'
 import { fillSearchTemplate, parseInput, topResultUrl } from '../../src/shared/url'
 
@@ -161,6 +164,84 @@ describe('ranking', () => {
     expect(r.results[0]).toMatchObject({ kind: 'tab', hint: 'Switch to tab', label: 'Split' })
     expect(r.results[0]?.subtitle).toBe('Work · docs.example')
     expect(r.results[0]?.splitFavicons).toHaveLength(2)
+  })
+
+  it("[SV-21][CB-06] an open split is one result with every pane's favicon, for its best-matching pane", () => {
+    const split = {
+      splitId: 'v-1',
+      splitTitle: 'Mail | Docs',
+      splitFavicons: ['https://mail.example/f.ico', 'https://docs.example/f.ico'],
+    }
+    const tabs = [
+      tab('t-1', 'Mail', 'https://mail.example/', { ...split, lastActiveAt: NOW - 1_000 }),
+      tab('t-2', 'Docs', 'https://docs.example/', { ...split, lastActiveAt: NOW - 2_000 }),
+      tab('t-3', 'Docs elsewhere', 'https://docs.example/other'),
+    ]
+    // Both panes match: one row, labelled as a split, that shows the pane that matched best.
+    const docs = rank(input('docs', { tabs })).results.filter((r) => r.kind === 'tab')
+    expect(docs.map((r) => r.id)).toEqual(['split:v-1', 'tab:t-3'])
+    expect(docs[0]).toMatchObject({ title: 'Mail | Docs', hint: 'Switch to split', label: 'Split', tabId: 't-2' })
+    expect(docs[0]?.splitFavicons).toHaveLength(2)
+    // A title both panes share: the pane used last.
+    const both = rank(input('example', { tabs })).results.filter((r) => r.splitId === 'v-1')
+    expect(both).toHaveLength(1)
+    expect(both[0]?.tabId).toBe('t-1')
+    // The empty state lists it once too.
+    const recent = rank(input('', { tabs, mode: 'search-tabs' })).results
+    expect(recent.map((r) => r.id)).toEqual(['split:v-1', 'tab:t-3'])
+    // While one of its panes is the current tab, the split isn't offered, like the current tab.
+    const inSplit = rank(input('docs', { tabs, activeTabId: 't-1' })).results.filter((r) => r.kind === 'tab')
+    expect(inSplit.map((r) => r.id)).toEqual(['tab:t-3'])
+    // Its pane's exact URL as the top row: still the split, and only once.
+    const typed = rank(input('https://docs.example/', { tabs })).results
+    expect(typed[0]).toMatchObject({ id: 'split:v-1', tabId: 't-2' })
+    expect(typed.filter((r) => r.splitId === 'v-1')).toHaveLength(1)
+  })
+
+  it("[SV-21] a split's pages aren't offered again from history or the Archive", () => {
+    const split = { splitId: 'v-1', splitTitle: 'Mail | Docs', splitFavicons: [null, null] }
+    const tabs = [
+      tab('t-1', 'Mail', 'https://mail.example/', split),
+      tab('t-2', 'Docs', 'https://docs.example/', split),
+      tab('t-3', 'Elsewhere', 'https://else.example/'),
+    ]
+    const h = historyOf([
+      ['https://mail.example/', 'Mail inbox'],
+      ['https://docs.example/', 'Docs'],
+    ])
+    const archive: ArchiveDoc[] = [
+      {
+        id: 'a-1',
+        title: 'Mail',
+        url: 'https://mail.example/',
+        spaceId: 's-a',
+        archivedAt: NOW - 1000,
+        titleLower: 'mail',
+        urlKey: 'mail.example/',
+      },
+    ]
+    const rows = (q: string, activeTabId?: string) =>
+      rank(input(q, { tabs, archive, history: h.entries(), hosts: h.hostList(), activeTabId })).results
+    const pages = (q: string, activeTabId?: string) =>
+      rows(q, activeTabId).filter((r) => r.kind === 'history' || r.kind === 'archived')
+    // Listed as one row: neither pane's page is listed again.
+    expect(rows('example').filter((r) => r.splitId === 'v-1')).toHaveLength(1)
+    expect(pages('example')).toEqual([])
+    // On screen as the current split: neither is offered.
+    expect(pages('example', 't-1')).toEqual([])
+    // A split that isn't listed (no pane matches "inbox") hides nothing.
+    expect(pages('inbox').map((r) => r.url)).toEqual(['https://mail.example/'])
+  })
+
+  it('[SV-21][SV-22] a named split shows and matches its name', () => {
+    const split = { splitId: 'v-2', splitTitle: 'Research', splitNameLower: 'research', splitFavicons: [null, null] }
+    const tabs = [
+      tab('t-1', 'Paper', 'https://papers.example/', split),
+      tab('t-2', 'Notes', 'https://notes.example/', split),
+    ]
+    const r = rank(input('resea', { tabs })).results.filter((x) => x.kind === 'tab')
+    expect(r).toHaveLength(1)
+    expect(r[0]).toMatchObject({ id: 'split:v-2', title: 'Research', hint: 'Switch to split' })
   })
 
   it('[CB-13] runs actions by name with their shortcut; "pin" puts Pin Tab on top', () => {
@@ -456,6 +537,162 @@ describe('sources', () => {
     } finally {
       releaseImportTabs([unshown, reached])
     }
+  })
+})
+
+describe('the action catalogue (CB-13)', () => {
+  /**
+   * Each name the spec's catalogue gives an action whose feature Orbit has, and the action it finds
+   * first. The rest wait for the lanes that own them (FEATURES.md, CB-13's note).
+   */
+  const CATALOGUE: [string, string][] = [
+    // Tabs
+    ['Pin Tab', 'tab.togglePin'],
+    ['Unpin Tab', 'tab.togglePin'],
+    ['Pin to Work', 'tab.pinToSpace'],
+    ['Duplicate Tab', 'tab.duplicate'],
+    ['Close Tab', 'tab.close'],
+    ['Reopen Closed Tab', 'tab.reopenClosed'],
+    ['Rename Tab', 'tab.rename'],
+    ['Reset Tab', 'tab.resetToPinned'],
+    ['Move to Work', 'tab.moveToSpace'],
+    ['Favorite this tab', 'tab.favorite'],
+    ['Unfavorite Tab', 'tab.favorite'],
+    ['Copy URL', 'tab.copyUrl'],
+    ['Copy URL as Markdown', 'tab.copyUrlMarkdown'],
+    ['Copy URLs', 'tab.copyUrl'],
+    ['Paste URL as New Tab', 'tab.pasteAsNewTab'],
+    ['Archive Tabs Below', 'tab.archiveBelow'],
+    ['Clear Today tabs', 'tabs.clearToday'],
+    // Sidebar and window
+    ['Toggle Sidebar', 'sidebar.toggle'],
+    ['New Window', 'window.new'],
+    ['New Private Window', 'window.newPrivate'],
+    ['New Mini Window', 'window.newMini'],
+    ['Collapse Pinned', 'pinned.toggleCollapsed'],
+    ['Expand Pinned', 'pinned.toggleCollapsed'],
+    // Spaces and folders
+    ['New Space', 'space.new'],
+    ['Rename Space', 'space.rename'],
+    ['Change Theme', 'space.theme'],
+    ['New Folder', 'folder.new'],
+    // Split view
+    ['Add Split View', 'split.add'],
+    ['Add Right Split', 'split.addRight'],
+    ['Add Left Split', 'split.addLeft'],
+    ['Add Top Split', 'split.addAbove'],
+    ['Add Bottom Split', 'split.addBelow'],
+    ['Close Split', 'split.closeSplit'],
+    // Library and archive
+    ['Open Library', 'app.library'],
+    ['View Archive', 'app.archive'],
+    ['Clear Archive', 'archive.clear'],
+    ['View History', 'app.history'],
+    ['Downloads', 'app.downloads'],
+    // Page
+    ['Reload', 'nav.reload'],
+    ['Hard Reload', 'nav.hardReload'],
+    ['Find in Page', 'page.find'],
+    ['Zoom In', 'page.zoomIn'],
+    ['Zoom Out', 'page.zoomOut'],
+    ['Zoom Reset', 'page.zoomReset'],
+    ['Print', 'page.print'],
+    ['View Source', 'page.viewSource'],
+    ['Developer Tools', 'devtools.toggle'],
+    ['Site controls', 'site.controls'],
+    // Settings and help
+    ['Settings', 'app.settings'],
+    ['Shortcuts', 'settings.shortcuts'],
+    ['Keyboard Shortcuts', 'help.shortcuts'],
+    ['Link settings', 'settings.links'],
+    ['Site search settings', 'settings.siteSearch'],
+    ['Clear browsing data', 'settings.clearBrowsingData'],
+    ['Import', 'app.import'],
+    ['Set as default browser', 'settings.defaultBrowser'],
+    ['Check for updates', 'app.checkForUpdates'],
+    ["What's new", 'help.releaseNotes'],
+    ['Help', 'help.open'],
+  ]
+
+  it.each(CATALOGUE)('"%s" finds %s first, with its live shortcut', (name, id) => {
+    const docs = new SourceCache().actions(() => true, 'darwin')
+    const tabs = [tab('t-1', 'Current', 'https://cur.example/')]
+    const rows = rank(input(name, { actions: docs, activeTabId: 't-1', tabs })).results
+    const first = rows.find((r) => r.kind === 'action')
+    expect(first?.actionId).toBe(id)
+    const doc = docs.find((d) => d.id === id)
+    if (doc) expect(first?.shortcut).toBe(doc.shortcut)
+  })
+})
+
+describe('sources: Settings sections (CB-05)', () => {
+  /** The section ids the Settings window's registry finds (every `*.settings.tsx` default export). */
+  function registeredSections(): string[] {
+    const root = join(__dirname, '../../src/renderer/src')
+    return (readdirSync(root, { recursive: true }) as string[])
+      .filter((f) => f.endsWith('.settings.tsx'))
+      .map((f) => /export default \{\s*id: '([^']+)'/.exec(readFileSync(join(root, f), 'utf8'))?.[1] ?? f)
+      .sort()
+  }
+
+  it('every section in the Settings registry is a row of its own, labelled Settings', () => {
+    const sections = registeredSections()
+    expect(sections).toEqual(expect.arrayContaining(['advanced', 'general', 'links', 'privacy', 'shortcuts']))
+    const docs = new SourceCache().actions(() => true, 'darwin')
+    for (const section of sections) {
+      const def = SETTINGS_ACTIONS.find((a) => a.settings.section === section && !a.settings.item)
+      expect(def, `an action for the "${section}" section`).toBeDefined()
+      const r = rank(input((def as (typeof SETTINGS_ACTIONS)[number]).title, { actions: docs })).results
+      expect(r.find((x) => x.actionId === def?.id)).toMatchObject({ kind: 'action', label: 'Settings' })
+    }
+    // Other actions keep their own label.
+    const other = rank(input('new space', { actions: docs })).results.find((x) => x.actionId === 'space.new')
+    expect(other?.label).toBe('Action')
+  })
+})
+
+describe('sources: splits (SV-21)', () => {
+  it('each pane carries its split, its name or pane titles in reading order, and every favicon', () => {
+    const state = createInitialState(0)
+    const spaceId = state.spaceOrder[0] as string
+    const space = state.spaces[spaceId] as (typeof state.spaces)[string]
+    const add = (url: string, title: string) => {
+      const tab = makeTab({ spaceId, profileId: space.profileId, url }, NOW)
+      tab.title = title
+      tab.favicon = `${url}favicon.ico`
+      state.tabs[tab.id] = tab
+      return tab.id
+    }
+    const a = add('https://a.example/', 'Alpha')
+    const b = add('https://b.example/', 'Bravo')
+    // Bravo is the left pane: titles follow the panes on screen, not the order the tabs were opened.
+    state.splits['v-x'] = {
+      id: 'v-x',
+      layout: {
+        type: 'row',
+        sizes: [0.5, 0.5],
+        children: [
+          { type: 'leaf', tabId: b },
+          { type: 'leaf', tabId: a },
+        ],
+      },
+      createdAt: NOW,
+    }
+    space.today.push('v-x')
+    const cache = new SourceCache()
+    const doc = (id: string) => cache.tabs(state).find((d) => d.id === id)
+    expect(doc(a)).toMatchObject({
+      splitId: 'v-x',
+      splitTitle: 'Bravo | Alpha',
+      splitFavicons: ['https://b.example/favicon.ico', 'https://a.example/favicon.ico'],
+    })
+    expect(doc(a)?.splitNameLower).toBeUndefined()
+    // Renamed: the name, which it also matches on.
+    state.splits = {
+      ...state.splits,
+      'v-x': { ...(state.splits['v-x'] as (typeof state.splits)[string]), name: 'Pair' },
+    }
+    expect(doc(b)).toMatchObject({ splitTitle: 'Pair', splitNameLower: 'pair' })
   })
 })
 

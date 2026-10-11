@@ -13,7 +13,7 @@
  * The same URL appears once (open tab > archived > history).
  */
 import { findSiteSearch, type SearchResponse, type SearchResult } from '../../shared/commands/commandbar'
-import type { CommandBarMode, FolderId, SiteSearchEngine, SpaceId, TabId } from '../../shared/state'
+import type { CommandBarMode, FolderId, SiteSearchEngine, SpaceId, SplitId, TabId } from '../../shared/state'
 import { fillSearchTemplate, parseInput, SEARCH_ENGINES } from '../../shared/url'
 import { frecency, type HostInfo, type IndexedEntry, urlKeyOf } from '../history/store'
 import { type DocMatch, initials, matchDoc, matchName, PREFIX, terms as splitTerms } from './match'
@@ -29,6 +29,12 @@ export interface TabDoc {
   spaceId: SpaceId
   lastActiveAt: number
   section?: 'favorite' | 'pinned' | 'today'
+  /** The split view the tab is a pane of: the split is one result, for its best-matching pane (SV-21). */
+  splitId?: SplitId
+  /** The split's name, or its panes' titles in reading order. */
+  splitTitle?: string
+  /** A named split also matches on its name. */
+  splitNameLower?: string
   /** Favicons of every pane when the tab is part of a split view. */
   splitFavicons?: (string | null)[]
   titleLower: string
@@ -75,6 +81,8 @@ export interface ActionDoc {
   needsTab: boolean
   /** Target Space of a "Move to / Pin to [Space]" action (TB-11, PN-02, SP-22). */
   spaceId?: SpaceId
+  /** Opens a Settings section or setting (CB-05, ST-02): its row says Settings, not Action. */
+  settings?: boolean
 }
 
 /** Bar-only actions with a Space parameter; search.open carries them out. */
@@ -302,23 +310,35 @@ function sectionLabel(t: TabDoc): string {
   return 'Tab'
 }
 
+/**
+ * An open tab's row. A split pane's row is the split's (SV-21): its name or its panes' titles, every
+ * pane's favicon, "Switch to split"; choosing it shows the split with this pane focused.
+ */
 function tabRow(t: TabDoc, input: RankInput, score: number): SearchResult {
   const inSpace = t.spaceId === input.currentSpaceId || t.section === 'favorite'
   const spaceName = input.spaceNames[t.spaceId]
+  const split = t.splitId
   return {
-    id: `tab:${t.id}`,
+    id: split ? `split:${split}` : `tab:${t.id}`,
     kind: 'tab',
-    title: t.title || displayUrl(t.url),
+    title: (split ? t.splitTitle : t.title) || t.title || displayUrl(t.url),
     subtitle: inSpace || !spaceName ? displayUrl(t.url) : `${spaceName} · ${displayUrl(t.url)}`,
     label: sectionLabel(t),
-    hint: 'Switch to tab',
+    hint: split ? 'Switch to split' : 'Switch to tab',
     url: t.url,
     favicon: t.favicon,
     ...(t.splitFavicons ? { splitFavicons: t.splitFavicons } : {}),
+    ...(split ? { splitId: split } : {}),
     tabId: t.id,
     spaceId: t.spaceId,
     score,
   }
+}
+
+/** The split the current tab is a pane of: like the current tab, it isn't offered (SV-21). */
+function activeSplitOf(input: RankInput): SplitId | undefined {
+  if (!input.activeTabId) return undefined
+  return input.tabs.find((t) => t.id === input.activeTabId)?.splitId
 }
 
 function historyRow(e: IndexedEntry, score: number): SearchResult {
@@ -357,7 +377,7 @@ function actionRow(a: ActionDoc, score: number): SearchResult {
     id: a.spaceId ? `action:${a.id}:${a.spaceId}` : `action:${a.id}`,
     kind: 'action',
     title: a.title,
-    label: 'Action',
+    label: a.settings ? 'Settings' : 'Action',
     actionId: a.id,
     ...(a.spaceId ? { spaceId: a.spaceId } : {}),
     ...(a.shortcut ? { shortcut: a.shortcut } : {}),
@@ -429,10 +449,19 @@ export function rank(input: RankInput): SearchResponse {
 
   // The current page never shows up as a history or archive row.
   const activeKey = input.current ? normKey(input.current.url) : undefined
+  const activeSplit = activeSplitOf(input)
   const tabs = new TopN(6)
+  // A split is one row: its best-matching pane's (SV-21).
+  const panes = new Map<SplitId, { t: TabDoc; score: number; strong: boolean }>()
+  const paneKeys = new Map<SplitId, string[]>()
   for (const t of input.tabs) {
-    if (t.id === input.activeTabId) continue
-    const m = matchDoc(ts, t.titleLower, t.urlKey, t.pinnedKey)
+    if (t.splitId) paneKeys.set(t.splitId, [...(paneKeys.get(t.splitId) ?? []), keyOf(t)])
+    if (t.id === input.activeTabId || (t.splitId && t.splitId === activeSplit)) continue
+    let m = matchDoc(ts, t.titleLower, t.urlKey, t.pinnedKey)
+    if (t.splitNameLower) {
+      const named = matchName(ts, t.splitNameLower)
+      if (named.score > m.score) m = named
+    }
     if (m.score === 0) continue
     const score =
       600 +
@@ -440,9 +469,23 @@ export function rank(input: RankInput): SearchResponse {
       (m.hostPrefix ? 100 : 0) +
       (t.spaceId === input.currentSpaceId ? 20 : 0) +
       recencyBonus(t.lastActiveAt, now)
+    if (t.splitId) {
+      const best = panes.get(t.splitId)
+      if (!best || score > best.score || (score === best.score && t.lastActiveAt > best.t.lastActiveAt))
+        panes.set(t.splitId, { t, score, strong: m.strong })
+      continue
+    }
     if (!tabs.accepts(score)) continue
     tabs.add({ r: tabRow(t, input, score), key: keyOf(t), strong: m.strong, prio: 4 })
   }
+  for (const { t, score, strong } of panes.values()) {
+    if (tabs.accepts(score)) tabs.add({ r: tabRow(t, input, score), key: keyOf(t), strong, prio: 4 })
+  }
+  // The pages of a split listed as one row, or on screen in the current one, aren't offered again
+  // from history or the Archive (as a listed tab's page isn't).
+  const splitKeys = (id: SplitId | undefined) => (id && paneKeys.get(id)) || []
+  const shown = new Set<string>(splitKeys(activeSplit))
+  for (const c of tabs.items) for (const k of splitKeys(c.r.splitId)) shown.add(k)
 
   const spaces = new TopN(3)
   const folders = new TopN(2)
@@ -530,7 +573,7 @@ export function rank(input: RankInput): SearchResponse {
       const score = 400 + m.score + 6 * f + (m.hostPrefix ? 40 : 0)
       if (!history.accepts(score)) continue
       const key = keyOf(e)
-      if (key === activeKey) continue
+      if (key === activeKey || shown.has(key)) continue
       history.add({ r: historyRow(e, score), key, strong: m.strong, prio: 1 })
     }
     rememberMatches(input.history, lower, ts, matched)
@@ -541,7 +584,7 @@ export function rank(input: RankInput): SearchResponse {
       const score = 250 + m.score + recencyBonus(a.archivedAt, now)
       if (!archived.accepts(score)) continue
       const key = keyOf(a)
-      if (key === activeKey) continue
+      if (key === activeKey || shown.has(key)) continue
       archived.add({
         r: {
           id: `archived:${a.id}`,
@@ -568,7 +611,9 @@ export function rank(input: RankInput): SearchResponse {
         if (a.needsTab && !input.activeTabId) continue
         const m = actionMatch(ts, lower, a)
         if (m.score === 0) continue
-        actions.add({ r: actionRow(a, 150 + m.score), strong: m.strong, prio: 0 })
+        // Its whole title typed beats a longer title that starts with it (Close Split, Close Split Pane).
+        const exact = a.titleLower === ts.join(' ') ? 1 : 0
+        actions.add({ r: actionRow(a, 150 + m.score + exact), strong: m.strong, prio: 0 })
       }
     }
   }
@@ -593,7 +638,9 @@ export function rank(input: RankInput): SearchResponse {
   let topKey: string | undefined
   if (target && !tabsOnly) {
     topKey = normKey(target)
-    const tab = input.tabs.find((t) => t.id !== input.activeTabId && keyOf(t) === topKey)
+    const tab = input.tabs.find(
+      (t) => t.id !== input.activeTabId && !(t.splitId && t.splitId === activeSplit) && keyOf(t) === topKey,
+    )
     if (tab) {
       top = tabRow(tab, input, 10_000)
     } else {
@@ -614,7 +661,15 @@ export function rank(input: RankInput): SearchResponse {
     }
   }
 
-  const rest = pool.filter((c) => c.r !== top && (!topKey || c.key !== topKey))
+  // The top row's split isn't listed again, for another of its panes or their pages.
+  const topSplit = top?.splitId
+  const topPages = new Set(splitKeys(topSplit))
+  const rest = pool.filter(
+    (c) =>
+      c.r !== top &&
+      (!topKey || c.key !== topKey) &&
+      (!topSplit || (c.r.splitId !== topSplit && !(c.key && c.r.kind !== 'tab' && topPages.has(c.key)))),
+  )
   rest.sort((a, b) => b.r.score - a.r.score)
 
   const results: SearchResult[] = []
@@ -735,11 +790,22 @@ function actionResults(input: RankInput, q: string, max: number): SearchResult[]
 }
 
 function recentTabs(input: RankInput, n: number): SearchResult[] {
-  return input.tabs
+  const activeSplit = activeSplitOf(input)
+  // A split once, for its pane used last (SV-21).
+  const splits = new Set<SplitId>()
+  const out: TabDoc[] = []
+  const recent = input.tabs
     .filter((t) => t.id !== input.activeTabId && t.url && t.url !== 'about:blank')
     .sort((a, b) => b.lastActiveAt - a.lastActiveAt)
-    .slice(0, n)
-    .map((t, i) => tabRow(t, input, 100 - i))
+  for (const t of recent) {
+    if (out.length >= n) break
+    if (t.splitId) {
+      if (t.splitId === activeSplit || splits.has(t.splitId)) continue
+      splits.add(t.splitId)
+    }
+    out.push(t)
+  }
+  return out.map((t, i) => tabRow(t, input, 100 - i))
 }
 
 function editUrlState(input: RankInput): SearchResult[] {

@@ -9,6 +9,7 @@ import { activeTabId } from '../selectors'
 import { useOrbit } from '../store'
 import { DROP_PANE, type DropPreview, dividerKey, FRAME_RADIUS, PaneEngine } from './split/engine'
 import { useAltClickSplit } from './split/useAltClickSplit'
+import { useLinkDrop } from './split/useLinkDrop'
 import { usePaneDrag, useTabDrop } from './split/useTabDrop'
 
 export { FRAME_RADIUS }
@@ -61,6 +62,7 @@ export function ContentArea({ win }: { win: WindowState }) {
   useLayoutEffect(() => window.orbit.on('split:relayout', () => engine.invalidate()), [engine])
   useTabDrop(engine, setDrop)
   usePaneDrag(engine, setDrop)
+  useLinkDrop(engine, setDrop)
   useAltClickSplit()
 
   const layout = frame?.layout ?? null

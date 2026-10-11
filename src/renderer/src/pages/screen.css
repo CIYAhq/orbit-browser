@@ -25,7 +25,7 @@
   align-items: flex-start;
   gap: 6px;
   width: min(520px, 100%);
-  animation: page-screen-in 180ms var(--ease-out, ease-out);
+  animation: page-screen-in var(--motion-snappy) var(--ease-snappy) var(--motion-lead);
 }
 
 @keyframes page-screen-in {
@@ -35,10 +35,9 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .page-screen {
-    animation: none;
-  }
+/* Reduced motion (FL-28): the OS setting or Orbit's own, as the root's class (motion/reduced.ts). */
+.reduce-motion .page-screen {
+  animation: none;
 }
 
 .page-screen__icon {

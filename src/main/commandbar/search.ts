@@ -73,12 +73,15 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
     const visibleTo = (profileId: string | undefined) =>
       isPrivate ? profileId === profile?.id : !profileId || !privateProfiles.has(profileId)
     const spaceProfile = (spaceId: string | undefined) => (spaceId ? state.spaces[spaceId]?.profileId : undefined)
+    // A Mini Window's bar loads its choice in that window (CB-23): open tabs, the archive, Spaces,
+    // folders, actions and Settings sections all act on the browser, so none of them is offered.
+    const mini = !!args.mini || (!!windowId && state.windows[windowId]?.kind === 'mini')
     const input: RankInput = {
       query: args.query,
       mode: args.mode,
       now: Date.now(),
       engine: { name: engine.name, search: engine.search },
-      tabs: privateProfiles.size ? allTabs.filter((t) => visibleTo(state.tabs[t.id]?.profileId)) : allTabs,
+      tabs: mini ? [] : privateProfiles.size ? allTabs.filter((t) => visibleTo(state.tabs[t.id]?.profileId)) : allTabs,
       activeTabId,
       currentSpaceId: space?.id ?? '',
       spaceNames: sources.spaceNames(state),
@@ -87,10 +90,10 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
         : undefined,
       history: hs?.entries() ?? [],
       hosts: hs?.hostList() ?? [],
-      archive: profile && !isPrivate ? sources.archive(state, profile.id) : [],
-      spaces: isPrivate ? [] : sources.spaces(state).filter((sp) => visibleTo(spaceProfile(sp.id))),
-      folders: isPrivate ? [] : sources.folders(state).filter((f) => visibleTo(spaceProfile(f.spaceId))),
-      actions: sources.actions((id) => actions.has(id), process.platform),
+      archive: profile && !isPrivate && !mini ? sources.archive(state, profile.id) : [],
+      spaces: isPrivate || mini ? [] : sources.spaces(state).filter((sp) => visibleTo(spaceProfile(sp.id))),
+      folders: isPrivate || mini ? [] : sources.folders(state).filter((f) => visibleTo(spaceProfile(f.spaceId))),
+      actions: mini ? [] : sources.actions((id) => actions.has(id), process.platform),
       siteSearches,
       scope: args.siteSearchId ? siteSearches.find((s) => s.id === args.siteSearchId) : undefined,
       actionsOnly: args.actionsOnly,
@@ -99,6 +102,14 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
     }
     return input
   }
+
+  // The catalogue's Archive Tabs Below (CB-13): what a Today tab's menu item does (TD-05), for the
+  // current tab, or the split it is in.
+  actions.register('tab.archiveBelow', (c) => {
+    const windowId = windowOf(c)
+    const tabId = windowId ? activeTabOf(store.state, windowId) : null
+    if (tabId) void commands.run('tabs.archiveBelow', { tabId }, { windowId })
+  })
 
   commands.register('search.query', async (args, c) => {
     const wantsClipboard = args.mode === 'new-tab' && !args.query.trim() && !args.actionsOnly && !args.siteSearchId
@@ -171,8 +182,35 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
     (store.state.settings.siteSearch ?? []).map((s) => ({ id: s.id, name: s.name, keyword: s.keyword })),
   )
 
+  /**
+   * A Mini Window's bar (CB-23): the choice loads in that Mini Window, whatever the modifier; its
+   * current page row reloads it.
+   */
+  const openInMini = async (windowId: WindowId, result: SearchResult, topResult?: boolean) => {
+    const state = store.state
+    const current = activeTabOf(state, windowId)
+    if (result.kind === 'current') {
+      if (current) await commands.run('tabs.reload', { tabId: current })
+      return
+    }
+    const searching = result.kind === 'search' || result.kind === 'suggestion'
+    const lucky =
+      searching && topResult && state.settings.searchTopResult && result.query && !result.siteSearchId
+        ? topResultUrl(engineForWindow(state, windowId).id, result.query)
+        : undefined
+    const url = lucky ?? result.url
+    if (!url) return
+    const typed = result.kind === 'url' || result.kind === 'history' || result.kind === 'paste'
+    if (typed && current) history.noteTyped(current)
+    await commands.run('mini.navigate', { input: url }, { windowId })
+    // A blank Mini Window gets its page now.
+    const page = activeTabOf(store.state, windowId)
+    if (typed && !current && page) history.noteTyped(page)
+  }
+
   commands.register('search.open', async ({ result, mode, disposition, topResult }, c) => {
     const windowId = windowOf(c)
+    if (windowId && store.state.windows[windowId]?.kind === 'mini') return openInMini(windowId, result, topResult)
     closeBar(windowId)
     const state = store.state
     const current = windowId ? activeTabOf(state, windowId) : null
