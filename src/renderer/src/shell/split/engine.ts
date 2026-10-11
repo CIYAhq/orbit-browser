@@ -15,6 +15,7 @@ import {
   type PaneSide,
   paneDropZone,
   removePane,
+  replacePane,
   type SplitAxis,
   sameLayout,
   setSizesAt,
@@ -230,9 +231,27 @@ export class PaneEngine {
       if (!sameLayout(this.model.layout, model.layout)) this.preview = null
     } else if (this.preview && after.includes(this.preview.tabId)) this.preview = null
     else if (this.preview?.link && after.some((id) => !before.includes(id))) this.preview = null
+    if (related) this.handOver(this.model.layout, model.layout, before, after)
     this.model = model
     this.ready = true
     this.relayout(related && !prefersReducedMotion())
+  }
+
+  /**
+   * A pane whose tab was replaced where it is (an open tab chosen for an empty pane, SV-02; ⌘L on a
+   * pane, SV-15): the new tab takes over its card as it is, instead of growing in from a sliver
+   * while the old card fades.
+   */
+  private handOver(old: SplitLayout | null, next: SplitLayout | null, before: TabId[], after: TabId[]): void {
+    const gone = before.filter((id) => !after.includes(id))
+    const added = after.filter((id) => !before.includes(id))
+    const from = gone[0]
+    const to = added[0]
+    if (!old || !next || gone.length !== 1 || added.length !== 1 || !from || !to) return
+    const anim = this.anims.get(from)
+    if (!anim || this.anims.has(to) || !sameLayout(replacePane(old, from, to), next)) return
+    this.anims.delete(from)
+    this.anims.set(to, anim)
   }
 
   /** Drop indicator for a tab dragged over the frame (SV-04), or null to clear it. */

@@ -196,7 +196,7 @@ Spec: `spec/split-view.md`
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
 | SV-01 | What a split view is | P0 | ✅ | ✅ e2e+unit | ✅ | 2-4 live panes shown together; the split is one sidebar item |
-| SV-02 | Create with the keyboard shortcut | P0 | ✅ | ✅ e2e+unit | – | Ctrl+Shift+= adds an empty pane and opens the command bar; a URL or open tab fills it, Escape removes it; refused in an empty window |
+| SV-02 | Create with the keyboard shortcut | P0 | ✅ | ✅ e2e+unit | – | Ctrl+Shift+= adds an empty pane and opens the command bar; a URL or open tab fills it (an open tab goes into the pane in the update that closes the bar, never shown alone), Escape removes it; refused in an empty window |
 | SV-03 | Create from the command bar | P0 | ✅ | ✅ e2e | – | Add Split Right/Left/Above/Below and New Split View actions; the command bar stays open for the new pane |
 | SV-04 | Create by dragging a tab onto the page | P0 | ✅ | ✅ e2e+unit | ✅ | drag a tab row over the page: theme-coloured drop indicator, the page makes room, release adds the pane |
 | SV-05 | Create by dropping a tab onto another tab row | P0 | ✅ | ✅ e2e+unit | ✅ | resting a dragged tab on a tab or split row's middle band (~400 ms) highlights that half; dropping makes or extends a split there, undoable with Cmd/Ctrl+Z; quick drags reorder as usual |

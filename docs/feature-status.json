@@ -89,7 +89,7 @@
   "FV-08": {"built": "yes", "note": "Favorites sleep only after 4x the sleep period"},
   "FV-10": {"built": "yes", "note": "see TB-04"},
   "SV-01": {"built": "yes", "feel": true, "note": "2-4 live panes shown together; the split is one sidebar item"},
-  "SV-02": {"built": "yes", "note": "Ctrl+Shift+= adds an empty pane and opens the command bar; a URL or open tab fills it, Escape removes it; refused in an empty window"},
+  "SV-02": {"built": "yes", "note": "Ctrl+Shift+= adds an empty pane and opens the command bar; a URL or open tab fills it (an open tab goes into the pane in the update that closes the bar, never shown alone), Escape removes it; refused in an empty window"},
   "SV-03": {"built": "yes", "note": "Add Split Right/Left/Above/Below and New Split View actions; the command bar stays open for the new pane"},
   "SV-04": {"built": "yes", "feel": true, "note": "drag a tab row over the page: theme-coloured drop indicator, the page makes room, release adds the pane"},
   "SV-05": {"built": "yes", "feel": true, "note": "resting a dragged tab on a tab or split row's middle band (~400 ms) highlights that half; dropping makes or extends a split there, undoable with Cmd/Ctrl+Z; quick drags reorder as usual"},

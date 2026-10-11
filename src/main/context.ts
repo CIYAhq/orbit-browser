@@ -6,7 +6,7 @@ import type {
   WebFrameMain,
   WindowOpenHandlerResponse,
 } from 'electron'
-import type { TabId } from '../shared/state'
+import type { OrbitState, TabId, WindowId } from '../shared/state'
 import type { Perf } from './perf'
 import type { ActionRegistry, CommandRegistry, EventRegistry } from './registry'
 import type { Sessions } from './sessions'
@@ -31,6 +31,12 @@ export interface Hooks {
    * goes to the page once these have settled.
    */
   screenShare?: ((tabId: TabId, contents: WebContents, frame: WebFrameMain) => Promise<void>)[]
+  /**
+   * The command bar chose an open tab to switch to. A hook that takes the choice (a pane being filled,
+   * SV-02) carries it out in one store update that also runs `closeBar`, and returns true; the bar
+   * then does nothing more. Otherwise the bar closes and selects the tab.
+   */
+  barChoice?: ((windowId: WindowId, tabId: TabId, closeBar: (d: OrbitState) => void) => boolean)[]
 }
 
 /** Everything a feature module needs. Passed to each module's register(). */

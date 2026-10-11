@@ -12,6 +12,12 @@ import { normKey, pastSearchOf, type RankInput, rank } from './rank'
 import { SourceCache } from './sources'
 import { parseSuggestions } from './suggest'
 
+/** Closes a window's command bar (in a store update's draft). */
+const closeIn = (windowId: WindowId) => (d: OrbitState) => {
+  const win = d.windows[windowId]
+  if (win && win.overlay.kind === 'commandbar') win.overlay = { kind: 'none' }
+}
+
 /**
  * The command bar's main-process side: ranks open tabs, history, archived
  * tabs, Spaces, actions and the typed URL/search per keystroke (no state
@@ -27,10 +33,7 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
 
   const closeBar = (windowId: WindowId | undefined) => {
     if (!windowId) return
-    store.update((d) => {
-      const win = d.windows[windowId]
-      if (win && win.overlay.kind === 'commandbar') win.overlay = { kind: 'none' }
-    })
+    store.update(closeIn(windowId))
   }
 
   /** Profile of the window's current Space, and whether it is private (non-persistent session). */
@@ -211,6 +214,12 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
   commands.register('search.open', async ({ result, mode, disposition, topResult }, c) => {
     const windowId = windowOf(c)
     if (windowId && store.state.windows[windowId]?.kind === 'mini') return openInMini(windowId, result, topResult)
+    // An open tab chosen for a pane goes into it in the update that closes the bar (SV-02).
+    const tabId = result.kind === 'tab' && disposition !== 'new-tab' ? result.tabId : undefined
+    if (windowId && tabId && store.state.tabs[tabId] && barOpen(windowId)) {
+      const close = closeIn(windowId)
+      if ((ctx.hooks.barChoice ?? []).some((take) => take(windowId, tabId, close))) return
+    }
     closeBar(windowId)
     const state = store.state
     const current = windowId ? activeTabOf(state, windowId) : null
