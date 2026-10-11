@@ -20,6 +20,7 @@ import { withShortcut } from '../shell/chrome/shortcut-label'
 import { useOrbit, useWindow } from '../store'
 import { paletteVars, useDark } from '../theme'
 import { Favicon } from '../ui/Favicon'
+import { GROWN_EVENT, isGrowing } from './grow'
 import './mini.css'
 
 /** Kept in step with MINI_BAR / MINI_INSET / MINI_RADIUS in src/main/miniwindow. */
@@ -425,6 +426,8 @@ function useCardReporter(ref: RefObject<HTMLDivElement | null>) {
     if (!el) return
     let last = ''
     const report = () => {
+      // Scaled while the window grows open (MW-04): measured again when it ends.
+      if (isGrowing()) return
       const r = el.getBoundingClientRect()
       const rect = { x: r.left, y: r.top, width: r.width, height: r.height }
       const key = JSON.stringify(rect)
@@ -436,9 +439,11 @@ function useCardReporter(ref: RefObject<HTMLDivElement | null>) {
     const observer = new ResizeObserver(report)
     observer.observe(el)
     window.addEventListener('resize', report)
+    window.addEventListener(GROWN_EVENT, report)
     return () => {
       observer.disconnect()
       window.removeEventListener('resize', report)
+      window.removeEventListener(GROWN_EVENT, report)
     }
   }, [ref])
 }

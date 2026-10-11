@@ -57,6 +57,11 @@ interface Mini {
   bar?: boolean
   /** The page's view is hidden behind the bar's still image of it (CB-23). */
   pageHidden?: boolean
+  /**
+   * The open grow (MW-04): waiting for the UI to take its starting size (`ready`), then growing;
+   * the page's view sits out the grow (`pageOut`) and joins at full size when it ends.
+   */
+  grow?: { ready?: (ms: number | null) => void; pageOut: boolean }
   /** Find in the page (NV-05): its field is in the top bar. */
   find?: MiniFind
 }
@@ -84,6 +89,13 @@ const CASCADE = 24
 const isMac = process.platform === 'darwin'
 /** Window opacity animations exist on macOS and Windows only. */
 const canFade = isMac || process.platform === 'win32'
+/**
+ * The open grow (MW-04): the window's content starts at this scale. The OS window itself is not
+ * resized (that would lay the page out again every frame): its UI grows in its own layer.
+ */
+const GROW_FROM = 0.92
+/** How long main waits for the UI to take its starting size before showing the window anyway. */
+const GROW_READY_WAIT_MS = 100
 
 interface MiniApi {
   open(url?: string): WindowId | undefined
@@ -280,7 +292,9 @@ export function registerMiniWindow(ctx: MainContext): void {
     if (!view) return
     view.setBounds(roundRect(cardRect(mini)))
     view.setBorderRadius(MINI_RADIUS)
-    view.setVisible(true)
+    // While the window grows open the page waits out of sight, then joins at full size (MW-04).
+    view.setVisible(!mini.grow)
+    if (mini.grow) mini.grow.pageOut = true
     mini.win.contentView.addChildView(view)
     if (mini.win.isFocused()) view.webContents.focus()
   }
@@ -304,7 +318,7 @@ export function registerMiniWindow(ctx: MainContext): void {
     }
   }
 
-  const fadeIn = (win: BrowserWindow) => {
+  const fadeIn = (win: BrowserWindow, ms: number) => {
     if (!canFade || reducedMotion()) {
       win.show()
       return
@@ -314,10 +328,61 @@ export function registerMiniWindow(ctx: MainContext): void {
     const start = Date.now()
     const timer = setInterval(() => {
       if (win.isDestroyed()) return clearInterval(timer)
-      const t = Math.min(1, (Date.now() - start) / 180)
+      const t = Math.min(1, (Date.now() - start) / ms)
       win.setOpacity(1 - (1 - t) ** 3)
       if (t >= 1) clearInterval(timer)
     }, 12)
+  }
+
+  /**
+   * Shows a Mini Window with a quick scale-and-fade rather than the OS's own animation (MW-04):
+   * its UI grows from 92% to full size in its own layer as the window fades in (where windows can
+   * fade; elsewhere the UI fades too). The page's native view can't scale, so it sits out the
+   * grow and joins at full size when it ends; it has been loading all along (MW-15). `shown` runs
+   * once the window is on screen.
+   */
+  const growOpen = (mini: Mini, shown: () => void) => {
+    const win = mini.win
+    if (reducedMotion()) {
+      win.show()
+      shown()
+      return
+    }
+    const view = mini.tabId ? tabs.get(mini.tabId) : undefined
+    const pageOut = !!view && !mini.pageHidden && !mini.fullscreen
+    if (pageOut) view?.setVisible(false)
+    const grow: NonNullable<Mini['grow']> = { pageOut }
+    mini.grow = grow
+    const end = () => {
+      if (mini.grow !== grow) return
+      mini.grow = undefined
+      const page = mini.tabId ? tabs.get(mini.tabId) : undefined
+      if (!grow.pageOut || !page || win.isDestroyed() || mini.pageHidden || mini.fullscreen) return
+      page.setVisible(true)
+      // A hidden view can't take the keyboard: the page gets it now, unless the bar or find has it.
+      if (win.isFocused() && !mini.bar && !mini.find?.open) page.webContents.focus()
+    }
+    const start = (ms: number | null) => {
+      if (grow.ready !== start) return
+      grow.ready = undefined
+      clearTimeout(wait)
+      if (win.isDestroyed()) return
+      if (ms === null) {
+        // The UI didn't answer in time (still starting): the window shows without the grow.
+        send(mini, 'mini:grow', { phase: 'cancel' })
+        win.show()
+        shown()
+        end()
+        return
+      }
+      fadeIn(win, ms)
+      shown()
+      send(mini, 'mini:grow', { phase: 'run' })
+      setTimeout(end, ms)
+    }
+    grow.ready = start
+    const wait = setTimeout(() => start(null), GROW_READY_WAIT_MS)
+    send(mini, 'mini:grow', { phase: 'prepare', scale: GROW_FROM, fade: !canFade })
   }
 
   /**
@@ -364,9 +429,10 @@ export function registerMiniWindow(ctx: MainContext): void {
       win.setAlwaysOnTop(true, 'floating')
       win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     }
-    fadeIn(win)
-    win.focus()
-    if (overFullscreen) setTimeout(() => !win.isDestroyed() && win.setVisibleOnAllWorkspaces(false), 300)
+    growOpen(mini, () => {
+      win.focus()
+      if (overFullscreen) setTimeout(() => !win.isDestroyed() && win.setVisibleOnAllWorkspaces(false), 300)
+    })
   }
 
   /** Closes idle Mini Windows after the set time, archiving their page; never while media plays (MW-09). */
@@ -828,6 +894,11 @@ export function registerMiniWindow(ctx: MainContext): void {
     mini.rect = rect
     const view = mini.tabId ? tabs.get(mini.tabId) : undefined
     if (view && !mini.fullscreen) view.setBounds(roundRect(rect))
+  })
+  // The UI took the grow's starting size: the window shows and grows (MW-04).
+  ctx.events.on('mini.growReady', ({ ms }, { windowId }) => {
+    const ready = minis.get(windowId ?? '')?.grow?.ready
+    if (ready) ready(Number.isFinite(ms) && ms > 0 ? Math.min(ms, 1000) : null)
   })
 
   actions.register('window.newMini', () => {

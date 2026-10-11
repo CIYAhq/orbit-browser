@@ -1047,3 +1047,88 @@ test('[MW-03][NV-05] ⌘F in a Mini Window finds in its page: the field in the t
   await field.press('Escape')
   await expect(field).toHaveCount(0)
 })
+
+// ---- The Mini Window's open grow (MW-04) ----
+
+test('[MW-04][MW-15] a Mini Window opens with a quick scale-and-fade: its UI grows from 92% to full size in about 200 ms, and its page, loading all along, joins on the card at full size when the grow ends', async () => {
+  const { app } = orbit
+  // A ready window, as Orbit keeps one (the harness asks for it), so its UI can be watched from the start.
+  await run(app, 'mini.prepare', {})
+  let ui: Page | undefined
+  await expect
+    .poll(async () => {
+      ui = app.windows().find((p) => p.url().includes('view=mini'))
+      return ui ? await ui.getByTestId('mini').count() : 0
+    })
+    .toBe(1)
+  if (!ui) throw new Error('no Mini Window UI')
+  type Sample = { t: number; scale: number; opacity: number }
+  await ui.evaluate(() => {
+    const root = document.querySelector('[data-testid="mini"]') as HTMLElement
+    const samples: Sample[] = []
+    ;(window as unknown as { __grow: Sample[] }).__grow = samples
+    const began = performance.now()
+    const timer = setInterval(() => {
+      const cs = getComputedStyle(root)
+      const scale = cs.transform === 'none' ? 1 : new DOMMatrixReadOnly(cs.transform).a
+      samples.push({ t: performance.now(), scale, opacity: Number(cs.opacity) })
+      if (performance.now() - began > 5000) clearInterval(timer)
+    }, 4)
+  })
+  type Shown = { shown: boolean; page: boolean | null }
+  await app.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows().find((b) => b.webContents.getURL().includes('view=mini'))
+    const samples: Shown[] = []
+    ;(globalThis as unknown as { __miniShown: Shown[] }).__miniShown = samples
+    const began = Date.now()
+    const timer = setInterval(() => {
+      if (!win || win.isDestroyed() || Date.now() - began > 5000) return clearInterval(timer)
+      const page = win.contentView.children[0]
+      samples.push({ shown: win.isVisible(), page: page ? page.getVisible() : null })
+    }, 2)
+  })
+
+  const id = (await run(app, 'mini.open', { url: fx.url('/page/Grown') })) as string
+  const samples = () => (ui as Page).evaluate(() => (window as unknown as { __grow: Sample[] }).__grow)
+  const grew = (s: Sample[]) => {
+    const from = s.findIndex((x) => x.scale < 0.999)
+    const to = from < 0 ? -1 : s.findIndex((x, i) => i > from && x.scale >= 0.999)
+    return { from, to }
+  }
+  await expect.poll(async () => grew(await samples()).to, { timeout: 5000 }).toBeGreaterThan(0)
+  const s = await samples()
+  const { from, to } = grew(s)
+  const growing = s.slice(from, to)
+  // From about 92%, only ever larger, through the sizes between, in about 200 ms.
+  expect(growing[0]?.scale).toBeGreaterThan(0.9)
+  expect(growing[0]?.scale).toBeLessThan(0.94)
+  for (let i = 1; i < growing.length; i++) {
+    expect(growing[i]?.scale).toBeGreaterThanOrEqual((growing[i - 1]?.scale ?? 0) - 0.001)
+  }
+  expect(growing.some((x) => x.scale > 0.94 && x.scale < 0.99)).toBe(true)
+  const took = (s[to]?.t ?? 0) - (growing[0]?.t ?? 0)
+  expect(took).toBeGreaterThan(150)
+  expect(took).toBeLessThan(200 + 300 * FRAME_SLACK)
+  // Where the window itself can't fade (Linux), the UI fades in with the grow.
+  if (process.platform === 'linux') expect(growing[0]?.opacity).toBeLessThan(0.05)
+
+  // The page was in the window, loading, when it appeared, but out of sight until the grow ended.
+  const shown = await app.evaluate(() => (globalThis as unknown as { __miniShown: Shown[] }).__miniShown)
+  const first = shown.find((x) => x.shown)
+  expect(first).toEqual({ shown: true, page: false })
+  await expect.poll(async () => (await miniPage(id)).visible).toBe(true)
+  // It joins at full size, on the card.
+  const card = await app.evaluate(({ BrowserWindow }, wid) => {
+    const ctx = (globalThis as unknown as OrbitGlobal).__orbit.ctx
+    const w = ctx.store.state.windows[wid]
+    const tabId = w ? w.activeTab[w.spaceId] : undefined
+    const view = tabId ? ctx.tabs.get(tabId) : undefined
+    const win = BrowserWindow.getAllWindows().find(
+      (b) => ctx.windows.isUi(b.webContents) && ctx.windows.windowIdFor(b.webContents) === wid,
+    )
+    const [width = 0, height = 0] = win?.getContentSize() ?? []
+    return { view: view?.getBounds(), width, height }
+  }, id)
+  expect(card.view).toEqual({ x: 6, y: 40, width: card.width - 12, height: card.height - 46 })
+  await expect(ui.getByTestId('mini')).toHaveCSS('transform', 'none')
+})

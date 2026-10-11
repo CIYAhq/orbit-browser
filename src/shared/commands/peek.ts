@@ -63,4 +63,9 @@ export interface PeekEvents {
   'peek.frame': { nonce: number; rect: Rect; radius: number; visible: boolean }
   /** Where a Mini Window's page card is (window coordinates, DIP). */
   'mini.layout': { rect: Rect; radius: number }
+  /**
+   * A Mini Window's UI took the open grow's starting size (MW-04): main shows the window now, and
+   * the grow takes `ms`.
+   */
+  'mini.growReady': { ms: number }
 }
