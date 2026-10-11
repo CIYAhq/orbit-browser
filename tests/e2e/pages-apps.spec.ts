@@ -240,3 +240,33 @@ test('[NV-19] after Cancel, the page asks again only with a new user gesture: a 
   expect(await noDialogs(app)).toBe(true)
   expect(await launchedLinks(app)).toEqual([])
 })
+
+test('[NV-19] after Open too, the page asks again only with a new user gesture: a link it follows without one asks nothing, and a click asks again (D77)', async () => {
+  const { app } = orbit
+  const { tabId, page } = await openApps(app)
+  const CALL = 'tel:+15550100'
+  await page.locator('#mail').click()
+  const asked = await waitDialog(app, (d) => d.tabId === tabId && d.kind === 'app' && d.focused)
+  await (await dialogPage(app, asked.id)).getByTestId('page-dialog-ok').click()
+  await expect.poll(() => launchedLinks(app)).toEqual([MAIL])
+  await expect.poll(() => noDialogs(app)).toBe(true)
+  // Open used the click up as Cancel does: a link the page follows without a new gesture (a timer,
+  // say) asks nothing.
+  await page.evaluate((call) => {
+    location.href = call
+  }, CALL)
+  await expect
+    .poll(() => appLinks(app))
+    .toEqual([
+      { url: MAIL, outcome: 'asked' },
+      { url: CALL, outcome: 'dropped' },
+    ])
+  expect(await noDialogs(app)).toBe(true)
+  // A click is a new gesture: its link asks.
+  await page.locator('#call').click()
+  const again = await waitDialog(app, (d) => d.kind === 'app' && d.id > asked.id && d.focused)
+  expect(again.title).toBe('Open this link in another app?')
+  await (await dialogPage(app, again.id)).getByTestId('page-dialog-cancel').click()
+  await expect.poll(() => noDialogs(app)).toBe(true)
+  expect(await launchedLinks(app)).toEqual([MAIL])
+})

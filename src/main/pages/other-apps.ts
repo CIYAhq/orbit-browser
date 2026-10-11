@@ -175,9 +175,9 @@ function neverShowedPage(page: WebContents): boolean {
  * `launch`, the one place Orbit starts another app. A site always allowed for a kind of link opens
  * it without asking, once per user gesture in the page (a click or a key in any of its frames,
  * `gestureCount`, D77), as in Chromium: a page can't open the app again and again unasked. A page
- * asks one question at a time: a link it follows meanwhile is dropped. Once the user answers Cancel,
- * the page asks again only after a new user gesture in it, as in Chromium: a page can't keep asking
- * once the user said no.
+ * asks one question at a time: a link it follows meanwhile is dropped. Once it has asked, it asks
+ * again only after a new user gesture in it, whatever the answer was, Open or Cancel (D77): a page
+ * can't keep asking.
  *
  * A tab, Peek, Mini Window or pop-up opened only for such a link (`target=_blank`, `window.open`,
  * or a redirect there) never shows a page: it closes itself once its navigation ends, and the tab
@@ -212,8 +212,8 @@ export function registerOtherApps(
   const going = new Map<number, string>()
   /** Each page's gesture count (by contents id) when it last followed a link to another app: that link used them up. */
   const used = new Map<number, number>()
-  /** Pages (by contents id) whose last question the user answered Cancel: they ask again only with a new gesture. */
-  const refused = new Set<number>()
+  /** Pages (by contents id) that asked, or opened an app, already: they do again only with a new gesture. */
+  const spent = new Set<number>()
 
   const launchOnly = (page: WebContents) =>
     !page.isDestroyed() && !asking.has(page.id) && !!appScheme(going.get(page.id)) && neverShowedPage(page)
@@ -276,7 +276,7 @@ export function registerOtherApps(
       going.delete(id)
       asking.delete(id)
       used.delete(id)
-      refused.delete(id)
+      spent.delete(id)
     })
   }
   ctx.hooks.tabCreated.push((_tabId, contents) => {
@@ -312,8 +312,6 @@ export function registerOtherApps(
     } finally {
       asking.delete(id)
     }
-    // Cancel (or Esc): the page's next link asks only with a new gesture (Chromium's rule).
-    if (answer && !answer.ok) refused.add(id)
     if (answer?.ok) {
       if (answer.checked === true && origin && /^https?:\/\//i.test(origin)) choices.add(profileId, origin, scheme)
       launch(page, url)
@@ -333,16 +331,20 @@ export function registerOtherApps(
     used.set(page.id, count)
     if (origin && /^https?:\/\//i.test(origin) && choices.has(profileId, origin, scheme)) {
       // Always allowed: it opens without asking, but only for a gesture no link used yet (NV-19).
-      if (fresh) launch(page, url)
+      if (fresh) {
+        spent.add(page.id)
+        launch(page, url)
+      }
       deps.note?.(url, fresh ? 'opened' : 'dropped')
       return
     }
-    // One question at a time; and after a Cancel, none until the user does something in the page.
-    if (asking.has(page.id) || (refused.has(page.id) && !fresh)) {
+    // One question at a time; and once the page has asked, whatever the answer (Open or Cancel),
+    // none until the user does something in it (D77).
+    if (asking.has(page.id) || (spent.has(page.id) && !fresh)) {
       deps.note?.(url, 'dropped')
       return
     }
-    refused.delete(page.id)
+    spent.add(page.id)
     asking.add(page.id)
     deps.note?.(url, 'asked')
     void ask(profileId, page, url, scheme, origin).catch((err: unknown) => console.error('[pages] link to an app', err))
