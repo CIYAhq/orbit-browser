@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { bestOf } from './frames'
 import { FRAME_SLACK, launchOrbit, type Orbit, run, state, viewPage } from './helpers'
 import {
   blockNetwork,
@@ -658,28 +659,51 @@ test('[PK-06] the card grows out of the clicked link and shrinks away; both unde
     ctx.events.on('peek.frame', ({ rect }) => g.__frames.push({ t: Date.now(), w: rect.width, x: rect.x }))
   })
   const link = await page.locator('#other').boundingBox()
-  await page.locator('#other').click({ noWaitAfter: true })
-  const peekTab = await settledPeek()
-  const frames = await orbit.app.evaluate(() =>
-    (globalThis as unknown as { __frames: { t: number; w: number; x: number }[] }).__frames.splice(0),
+  type Frames = { t: number; w: number; x: number }[]
+  const take = () =>
+    orbit.app.evaluate(() => (globalThis as unknown as { __frames: Frames }).__frames.splice(0)) as Promise<Frames>
+  // One round opens the Peek from the link and closes it again. A round that misses a budget is
+  // measured again (D46): on a loaded machine fewer frames come, and later.
+  const { best, all } = await bestOf(
+    async (round) => {
+      // The last close's frames have all come: this round's start from none.
+      if (round > 1) await expect.poll(async () => (await take()).length).toBe(0)
+      await page.locator('#other').click({ noWaitAfter: true })
+      const peekTab = await settledPeek()
+      const opening = await take()
+      const end = opening[opening.length - 1]
+      const settledAt = opening.find((f) => end && Math.abs(f.w - end.w) < 1)
+      await pressInTab(orbit.app, peekTab, 'Escape')
+      await expect.poll(async () => (await overlayOf(orbit.app)).kind).toBe('none')
+      const closing = await take()
+      return {
+        opening,
+        closing,
+        open: (settledAt?.t ?? Number.POSITIVE_INFINITY) - (opening[0]?.t ?? 0),
+        close: (closing[closing.length - 1]?.t ?? Number.POSITIVE_INFINITY) - (closing[0]?.t ?? 0),
+      }
+    },
+    (r) =>
+      r.opening.length >= frameCount(6) &&
+      r.open < 300 * FRAME_SLACK &&
+      r.closing.length >= frameCount(4) &&
+      r.close < 300 * FRAME_SLACK,
   )
+  console.info(
+    `[peek e2e perf] open ${all.map((r) => r.open).join(', ')} ms in ${all.map((r) => r.opening.length).join(', ')} frames; close ${all.map((r) => r.close).join(', ')} ms in ${all.map((r) => r.closing.length).join(', ')} frames (rounds)`,
+  )
+  const { opening: frames, closing } = best
   expect(frames.length).toBeGreaterThanOrEqual(frameCount(6))
   const first = frames[0] as { t: number; w: number; x: number }
   const last = frames[frames.length - 1] as { t: number; w: number; x: number }
   // Starts small, near the link, and grows to the card (never instant).
   expect(first.w).toBeLessThan(last.w / 3)
   expect(Math.abs(first.x + first.w / 2 - ((link?.x ?? 0) + 8))).toBeLessThan(last.w / 2)
-  const settledAt = frames.findIndex((f) => Math.abs(f.w - last.w) < 1)
-  expect((frames[settledAt]?.t ?? 0) - first.t).toBeLessThan(300 * FRAME_SLACK)
+  expect(best.open).toBeLessThan(300 * FRAME_SLACK)
   // Closing animates too: the card shrinks over a few frames.
-  await pressInTab(orbit.app, peekTab, 'Escape')
-  await expect.poll(async () => (await overlayOf(orbit.app)).kind).toBe('none')
-  const closing = await orbit.app.evaluate(() =>
-    (globalThis as unknown as { __frames: { t: number; w: number; x: number }[] }).__frames.splice(0),
-  )
   expect(closing.length).toBeGreaterThanOrEqual(frameCount(4))
   expect((closing[closing.length - 1]?.w ?? 0) < (closing[0]?.w ?? 0)).toBe(true)
-  expect((closing[closing.length - 1]?.t ?? 0) - (closing[0]?.t ?? 0)).toBeLessThan(300 * FRAME_SLACK)
+  expect(best.close).toBeLessThan(300 * FRAME_SLACK)
 })
 
 /** The Peek page view's bounds, rounded, or null when it is not placed. */

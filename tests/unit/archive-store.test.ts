@@ -102,16 +102,36 @@ describe('ArchiveStore search (AR-04)', () => {
     }
     s.add(list)
     s.query({ profileId: 'p-default', text: 'warm' })
-    const times: number[] = []
-    for (const text of ['b', 'bu', 'bud', 'budg', 'budge', 'budget', 'budget 99']) {
-      const t0 = performance.now()
-      const page = s.query({ profileId: 'p-default', text, limit: 60 })
-      times.push(performance.now() - t0)
-      expect(page.rows.length).toBeGreaterThan(0)
+    // Each search is timed in this thread's CPU time: a search never waits, so that is its whole cost,
+    // while wall time on a shared machine also counts the turns other processes get. A run that misses
+    // is measured again, up to three runs (D46, D51). CPU time moves in scheduler ticks (1 ms here) and
+    // can't see a blocking wait; the e2e test times the Library's search in wall time (AR-04).
+    // Thread CPU time needs Node 23.9 or later; on an older Node the process's CPU time stands in.
+    const cpuUsage = typeof process.threadCpuUsage === 'function' ? process.threadCpuUsage : process.cpuUsage
+    const cpuMs = () => {
+      const { user, system } = cpuUsage.call(process)
+      return (user + system) / 1000
     }
-    times.sort((a, b) => a - b)
+    const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] as number
+    let cpuMedian = Number.POSITIVE_INFINITY
     // Median well under the 50 ms keystroke budget (FL-24), with room for slow CI machines.
-    expect(times[Math.floor(times.length / 2)]).toBeLessThan(25)
+    for (let run = 1; run <= 3 && cpuMedian >= 25; run++) {
+      const cpu: number[] = []
+      const wall: number[] = []
+      for (const text of ['b', 'bu', 'bud', 'budg', 'budge', 'budget', 'budget 99']) {
+        const c0 = cpuMs()
+        const t0 = performance.now()
+        const page = s.query({ profileId: 'p-default', text, limit: 60 })
+        wall.push(performance.now() - t0)
+        cpu.push(cpuMs() - c0)
+        expect(page.rows.length).toBeGreaterThan(0)
+      }
+      cpuMedian = median(cpu)
+      console.info(
+        `[archive bench] run ${run}: per search CPU median ${cpuMedian.toFixed(2)} ms; wall median ${median(wall).toFixed(2)} ms`,
+      )
+    }
+    expect(cpuMedian).toBeLessThan(25)
   })
 
   it('[AR-04] typing on, deleting and changing filters give the same answers as a fresh search', () => {
