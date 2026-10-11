@@ -216,11 +216,52 @@ test('[BO-04][BO-05] invert makes a white page dark and keeps the photo’s colo
   await expect.poll(filter).toBe('none')
 })
 
+/** Main's store, as a test watches it (read only). */
+type Watched = {
+  __orbit: {
+    ctx: {
+      store: {
+        subscribe: (
+          l: (
+            next: { tweaks: Record<string, { style: unknown }> },
+            prev: { tweaks: Record<string, { style: unknown }> },
+          ) => void,
+        ) => () => void
+      }
+    }
+  }
+  __styleEdits?: { count: number; stop: () => void }
+}
+
+/**
+ * Starts counting the style edits main takes for a Tweak (each changes its saved style). In a task of
+ * its own, as the e2e helpers' evaluates are: never inside a store update.
+ */
+const countStyleEdits = (app: ElectronApplication, id: string) =>
+  app.evaluate(async (_e, tweakId) => {
+    await new Promise((resolve) => setImmediate(resolve))
+    const g = globalThis as unknown as Watched
+    const edits = { count: 0, stop: () => {} }
+    edits.stop = g.__orbit.ctx.store.subscribe((next, prev) => {
+      if (next.tweaks[tweakId]?.style !== prev.tweaks[tweakId]?.style) edits.count++
+    })
+    g.__styleEdits = edits
+  }, id)
+
+/** Stops counting: how many style edits main took. */
+const styleEdits = (app: ElectronApplication) =>
+  app.evaluate(async () => {
+    await new Promise((resolve) => setImmediate(resolve))
+    const g = globalThis as unknown as Watched
+    g.__styleEdits?.stop()
+    return g.__styleEdits?.count ?? 0
+  })
+
 test('[BO-03] dragging the wheel recolours the page as fast as the page could change its own colours', async () => {
   orbit = await launchOrbit()
   const { app } = orbit
   const { tabId, page } = await openPage(app, '/look/Fps')
-  const { view } = await newTweak(app, tabId)
+  const { id, view } = await newTweak(app, tabId)
   const at = await wheelOf(view)
   const filter = () => page.evaluate(() => getComputedStyle(document.documentElement).filter)
 
@@ -265,13 +306,18 @@ test('[BO-03] dragging the wheel recolours the page as fast as the page could ch
   }
   // The drag: a press on the big handle, then once round the wheel with a move in each of the panel's
   // frames, as a hand gives them. The moves are the page's own events: Playwright's take ~30 ms each
-  // under load, too slow to give one a frame.
+  // under load, too slow to give one a frame. Main takes an edit for each move: the page's rate
+  // below can't tell one from every other one where the page itself manages only ~30 a second.
+  const MOVES = 60
   const drag = async () => {
     const start = at.main(0, 0.7)
     await view.mouse.move(start.x, start.y)
     await view.mouse.down()
+    // The press's own edit lands first (from the site's own colours, strength 0).
+    await expect.poll(async () => (await styleOf(app, id)).intensity).toBeGreaterThan(0.5)
     const rec = await watch()
-    const points = Array.from({ length: 60 }, (_v, i) => at.main((i + 1) * 6, 0.7))
+    await countStyleEdits(app, id)
+    const points = Array.from({ length: MOVES }, (_v, i) => at.main((i + 1) * 6, 0.7))
     await view.evaluate(
       (list) =>
         new Promise<void>((resolve) => {
@@ -292,7 +338,8 @@ test('[BO-03] dragging the wheel recolours the page as fast as the page could ch
     await expect.poll(filter).toContain('hue-rotate')
     await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 250)))
     await view.mouse.up()
-    return summary((await rec.stop()).frames)
+    const edits = await styleEdits(app)
+    return { ...summary((await rec.stop()).frames), edits }
   }
   const measure = async () => {
     const base = await own()
@@ -302,9 +349,12 @@ test('[BO-03] dragging the wheel recolours the page as fast as the page could ch
     await expect.poll(filter).toBe('none')
     return { base, wheel }
   }
-  // D46: the drag keeps up with the page's own rate, and costs it at most a frame more at its slowest.
+  // D46: the drag keeps up with the page's own rate, and costs it at most a frame more at its slowest;
+  // main takes nearly every move (one may share a frame with the next when a frame runs long).
   const meets = (r: Awaited<ReturnType<typeof measure>>) =>
-    r.wheel.rate >= 0.85 * r.base.rate && r.wheel.p99 <= Math.max(34, r.base.p99 + 17) * FRAME_SLACK
+    r.wheel.edits >= 0.9 * MOVES &&
+    r.wheel.rate >= 0.85 * r.base.rate &&
+    r.wheel.p99 <= Math.max(34, r.base.p99 + 17) * FRAME_SLACK
   const { best, all } = await bestOf(measure, meets)
   for (const r of all) {
     note(
@@ -321,6 +371,7 @@ test('[BO-03] dragging the wheel recolours the page as fast as the page could ch
       `≥ ${Math.round(r.base.rate * 0.85)}/s (0.85× the page's own)`,
       '/s',
     )
+    note('BO-03', 'edits main took for 60 moves of the wheel, one a frame', r.wheel.edits, '≥ 54 (0.9 a move)', '')
     note(
       'BO-03',
       'slowest page frame during the drag (p99)',
@@ -329,6 +380,7 @@ test('[BO-03] dragging the wheel recolours the page as fast as the page could ch
     )
   }
   expect(best.base.changes).toBeGreaterThan(50)
+  expect(best.wheel.edits).toBeGreaterThanOrEqual(0.9 * MOVES)
   expect(best.wheel.changes).toBeGreaterThan(25)
   expect(best.wheel.rate).toBeGreaterThanOrEqual(0.85 * best.base.rate)
   expect(best.wheel.p99).toBeLessThanOrEqual(Math.max(34, best.base.p99 + 17) * FRAME_SLACK)
