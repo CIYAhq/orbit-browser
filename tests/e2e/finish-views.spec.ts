@@ -1009,6 +1009,17 @@ test('[MW-03][NV-05] ⌘F in a Mini Window finds in its page: the field in the t
   const field = ui.getByTestId('mini-find-input')
   await expect(field).toBeFocused()
   await expect.poll(focusedUrl).toContain('view=mini')
+  // The window coming to the front only now (on a busy machine, after ⌘F) leaves the keyboard there.
+  await app.evaluate(({ BrowserWindow }, wid) => {
+    const ctx = (globalThis as unknown as OrbitGlobal).__orbit.ctx
+    BrowserWindow.getAllWindows()
+      .find(
+        (b) => !b.isDestroyed() && ctx.windows.isUi(b.webContents) && ctx.windows.windowIdFor(b.webContents) === wid,
+      )
+      ?.emit('focus')
+  }, id)
+  await expect.poll(focusedUrl).toContain('view=mini')
+  await expect(field).toBeFocused()
   // The address stays beside it.
   await expect(ui.getByTestId('mini-address')).toBeVisible()
   const count = ui.getByTestId('mini-find-count')

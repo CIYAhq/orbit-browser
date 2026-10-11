@@ -464,8 +464,10 @@ export function registerMiniWindow(ctx: MainContext): void {
       mini.focused = true
       mini.lastActive = Date.now()
       clearTimeout(mini.archiveTimer)
+      // The page takes the keyboard, unless the bar or the find field has it: the window can come
+      // to the front a moment after ⌘F opened the field (a busy machine).
       const contents = mini.tabId ? tabs.contents(mini.tabId) : undefined
-      if (contents) contents.focus()
+      if (contents && !mini.bar && !mini.find?.open) contents.focus()
     })
     win.on('blur', () => {
       mini.focused = false
