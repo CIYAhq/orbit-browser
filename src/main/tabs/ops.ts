@@ -154,6 +154,8 @@ export class TabOps {
   sleepGuard?: (tabId: TabId) => boolean
   /** Off only in the test that stands for a route main doesn't guard (D65 (2)): see `hiddenByImport`. */
   guardImports = true
+  /** Tabs whose close waits on the engine: the main windows that showed each (D77 (4)). */
+  private shownWhenClosing = new Map<TabId, WindowId[]>()
 
   constructor(
     private ctx: MainContext,
@@ -275,6 +277,8 @@ export class TabOps {
 
   activate(windowId: WindowId, tabId: TabId): void {
     if (!this.state.tabs[tabId] || this.hiddenByImport(tabId)) return
+    // Shown again while its close waits (a page that warns asks over it): undo goes by what it shows.
+    this.shownWhenClosing.delete(tabId)
     this.ctx.store.update((d) => activateInDraft(d, windowId, tabId, this.now()))
   }
 
@@ -332,7 +336,13 @@ export class TabOps {
    * `remove` also removes pinned tabs (delete from sidebar).
    */
   closeTabs(tabIds: TabId[], reason: ArchivedTab['reason'], opts: CloseTabsOptions = {}): void {
-    if (!opts.confirmed && this.closeGuard?.(tabIds, reason, opts)) return
+    if (!opts.confirmed && this.closeGuard?.(tabIds, reason, opts)) {
+      // A page that may warn closes once the engine lets it go, which a busy page holds up to the
+      // engine's 1 s limit (D77): the next tab shows meanwhile, as the close would show it (FL-09).
+      // A page that warns shows again to ask (the pages lane's `reveal`), and Cancel keeps it there.
+      if (!opts.idle) this.showNextWhileClosing(tabIds, opts)
+      return
+    }
     const state = this.state
     const removing: TabId[] = []
     const unloading: TabId[] = []
@@ -356,22 +366,20 @@ export class TabOps {
       closedAt,
       ...splitInfo.get(id),
     }))
-    // The tabs main windows were showing: undo shows them there again (⌘Z reopens, AR-09).
+    // The tabs main windows were showing (or showed until the close began): undo shows them there
+    // again (⌘Z reopens, AR-09).
     const shownBefore = Object.values(state.windows).flatMap((w) => {
       const active = w.kind === 'main' ? w.activeTab[w.spaceId] : undefined
       return active && removing.includes(active) ? [{ windowId: w.id, tabId: active }] : []
     })
-    const todayTabs = (spaceId: SpaceId) =>
-      new Set((state.spaces[spaceId]?.today ?? []).flatMap((id) => tabsInItem(state, id)))
-    const pick =
-      opts.reselect === 'pinned'
-        ? (spaceId: SpaceId, _current: TabId, excluding: Set<TabId>) => {
-            const today = todayTabs(spaceId)
-            return mostRecentTab(state, spaceId, excluding, (t) => !today.has(t.id))
-          }
-        : // A closing pane hands focus to a pane of its split, so the split stays on screen (SV-17).
-          (spaceId: SpaceId, current: TabId, excluding: Set<TabId>) =>
-            paneAfterClose(state, current, excluding) ?? nextAfterClose(state, spaceId, current, excluding)
+    for (const id of tabIds) {
+      for (const windowId of this.shownWhenClosing.get(id) ?? []) {
+        const known = shownBefore.some((s) => s.windowId === windowId && s.tabId === id)
+        if (!known && removing.includes(id) && state.windows[windowId]) shownBefore.push({ windowId, tabId: id })
+      }
+      this.shownWhenClosing.delete(id)
+    }
+    const pick = this.nextShown(state, opts)
     this.ctx.store.update((d) => {
       reselectAway(d, all, pick, this.now())
       // Archive bottom-up so the first tab of a batch ends up newest (the top of the Archive list).
@@ -437,6 +445,38 @@ export class TabOps {
         () => records.every((r) => !!this.state.tabs[r.tab.id]),
       )
     }
+  }
+
+  /** Which tab a window shows next when the tab it shows closes (TB-06, FL-09). */
+  private nextShown(state: OrbitState, opts: CloseTabsOptions) {
+    if (opts.reselect === 'pinned') {
+      return (spaceId: SpaceId, _current: TabId, excluding: Set<TabId>) => {
+        const today = new Set((state.spaces[spaceId]?.today ?? []).flatMap((id) => tabsInItem(state, id)))
+        return mostRecentTab(state, spaceId, excluding, (t) => !today.has(t.id))
+      }
+    }
+    // A closing pane hands focus to a pane of its split, so the split stays on screen (SV-17).
+    return (spaceId: SpaceId, current: TabId, excluding: Set<TabId>) =>
+      paneAfterClose(state, current, excluding) ?? nextAfterClose(state, spaceId, current, excluding)
+  }
+
+  /**
+   * The close of these tabs waits on the engine (`closeGuard`): each main window showing one shows
+   * the next tab now (D77 (4)), and remembers it showed it, for undo once the close is done. Not a
+   * pane of a split view: its split stays on screen with it until it goes.
+   */
+  private showNextWhileClosing(tabIds: TabId[], opts: CloseTabsOptions): void {
+    const state = this.state
+    const closing = new Set(tabIds.filter((id) => !!state.tabs[id] && !splitOfTab(state, id)))
+    for (const w of Object.values(state.windows)) {
+      const active = w.kind === 'main' ? w.activeTab[w.spaceId] : undefined
+      const shown = active && closing.has(active) ? (this.shownWhenClosing.get(active) ?? []) : undefined
+      if (active && shown && !shown.includes(w.id)) this.shownWhenClosing.set(active, [...shown, w.id])
+    }
+    const showing = (id: TabId | null | undefined) => !!id && closing.has(id)
+    if (!Object.values(state.windows).some((w) => Object.values(w.activeTab).some(showing))) return
+    const pick = this.nextShown(state, opts)
+    this.ctx.store.update((d) => reselectAway(d, closing, pick, this.now()))
   }
 
   /** Puts closed tabs back where they were (or at the top of Today), with their history (TB-07). */

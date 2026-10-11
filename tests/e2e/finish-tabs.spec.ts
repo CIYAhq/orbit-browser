@@ -22,7 +22,8 @@ import {
   tabView,
   viewPage,
 } from './helpers'
-import { closeWindow, flushState, pressInPage, uiPageOf, windowList } from './nav-support'
+import { clickInPage, closeWindow, flushState, pressInPage, uiPageOf, windowList } from './nav-support'
+import { dialogPage, leaveInfo, pageDialogs, startInTab, startPagesFixtures, waitDialog } from './pages-support'
 import { openSettings } from './settings-support'
 import {
   act,
@@ -37,6 +38,7 @@ import {
   rowMenu,
   settled,
   space,
+  tab,
   tabsHook,
   toastView,
   waitTab,
@@ -2043,4 +2045,63 @@ test('[AR-11][FD-01] a folder that comes back with its tabs in one update (Resto
   }
   console.log(`[AR-11] tab rows drawn without their folder row: ${orphans.length} (first tab frame ${firstShown?.i})`)
   expect(orphans).toEqual([])
+})
+
+test('[NV-24][FL-09] ⌘W on a busy page with a leave listener shows the next tab at once; a page that warns shows again to ask, and Cancel keeps it (D77 (4))', async () => {
+  const { app } = orbit
+  const pages = await startPagesFixtures()
+  try {
+    const other = await newTab(app, pages.url('/page/Other'))
+    await waitTab(app, other, '/page/Other')
+    // A page that may warn: it was clicked (D77).
+    const clicked = async (path: string) => {
+      const url = pages.url(path)
+      const id = await newTab(app, url)
+      await waitTab(app, id, path)
+      await clickInPage(app, url, '#area')
+      await expect.poll(async () => (await leaveInfo(app, id))?.gestures ?? 0).toBeGreaterThan(0)
+      return id
+    }
+
+    // Busy, with a leave listener that lets it go: the engine waits on the page's answer, up to its
+    // limit (under test, with a debugger attached, until the page answers). The next tab shows meanwhile.
+    const busy = await clicked('/page/Busy')
+    await startInTab(
+      app,
+      busy,
+      `addEventListener('beforeunload', () => {}); { const end = Date.now() + 2000; while (Date.now() < end) {} }`,
+    )
+    await new Promise((r) => setTimeout(r, 200))
+    await act(app, 'tab.close')
+    expect(await activeId(app), 'the next tab shows as the close starts').toBe(other)
+    expect(await tab(app, busy), 'its page is still being let go').toBeTruthy()
+    await expect.poll(async () => (await tabView(app, busy))?.visible ?? false, { timeout: 500 }).toBe(false)
+    await expect.poll(async () => (await tabView(app, other))?.visible, { timeout: 500 }).toBe(true)
+    await expect.poll(async () => await tab(app, busy)).toBeUndefined()
+    expect(await activeId(app)).toBe(other)
+    expect(await pageDialogs(app)).toEqual([])
+    // ⌘Z reopens it where it showed (AR-09).
+    expect(await cmd(app, 'tabs.undo')).toBe('Close Tab')
+    await expect.poll(async () => await activeId(app)).toBe(busy)
+
+    // A page that warns shows again, with the question over it: Cancel keeps it there, Leave closes it.
+    const warns = await clicked('/warn')
+    await act(app, 'tab.close')
+    const asked = await waitDialog(app, (x) => x.tabId === warns && x.onScreen && x.kind === 'leave')
+    expect(await activeId(app)).toBe(warns)
+    await (await dialogPage(app, asked.id)).getByTestId('page-dialog-cancel').click()
+    await expect.poll(async () => (await pageDialogs(app)).length).toBe(0)
+    expect(await activeId(app)).toBe(warns)
+    expect(await liveTabs(app)).toContain(warns)
+    expect((await tabView(app, warns))?.visible).toBe(true)
+    await act(app, 'tab.close')
+    const again = await waitDialog(app, (x) => x.tabId === warns && x.onScreen && x.kind === 'leave')
+    await (await dialogPage(app, again.id)).getByTestId('page-dialog-ok').click()
+    await expect.poll(async () => await tab(app, warns)).toBeUndefined()
+    const next = await activeId(app)
+    expect(next).toBeTruthy()
+    await expect.poll(async () => (await tabView(app, next as string))?.visible).toBe(true)
+  } finally {
+    await pages.close()
+  }
 })
