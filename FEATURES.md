@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 295 built (60 partial) · 359 tested · 74 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 295 built (61 partial) · 360 tested · 74 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 160 | 173 |
-| P1 | 219 | 118 | 165 |
+| P1 | 219 | 118 | 166 |
 | P2 | 79 | 17 | 21 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -157,7 +157,7 @@ Spec: `spec/spaces.md`
 | PR-07 | Profile indicator | P1 | ✅ | ✅ e2e | – | hover badge on the title row, 'Space · Profile' tooltip, check mark in the Profile submenu |
 | PR-08 | Delete a profile | P1 | ✅ | ✅ e2e+unit | – | Settings → Profiles → Delete Profile…, disabled with a reason while a Space or a blank window uses the profile, and not offered for Default; the confirmation names the profile and what goes (logins, cookies, history, Favorites, site data; Orbit has no extensions yet); on confirm its Favorites close, its session's data is cleared, its history and archive entries go, and its folder on disk is removed at once and again at the next launch, in case its session wrote to it as Orbit quit; a Space deleted keeps its profile (SP-12) |
 | PR-09 | Rename a profile | P1 | ✅ | ✅ e2e | – | Settings → Profiles → select a profile and rename it inline, Default too when it is the only one; the new name shows at once in Settings, the Space menu, the profile badge (PR-07) and the switcher's tooltip |
-| PR-10 | Profiles and other features | P1 | – | – | – |  |
+| PR-10 | Profiles and other features | P1 | 🟡 partial | ✅ e2e | – | an import goes to the profile chosen, and several source profiles at once each get a matching profile and Space (IM-06); the Library's Archive, History and Downloads list the current Space's profile (AR-03, AR-10, DL-10); Settings acts for the profile of the Space it was opened from (Clear Browsing Data…, search engine, download folder, archive timing; ST-20); picture-in-picture Back to tab returns to a tab in another profile's Space; profiles are local, with no sync or accounts (ST-12). Not built: passwords and site settings pages, which don't exist yet (ST-13, ST-20) |
 
 ## Command bar (prefix CB)
 

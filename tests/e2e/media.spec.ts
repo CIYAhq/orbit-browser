@@ -2958,3 +2958,24 @@ test("[MD-11][TB-15] the page's share count is taken only from a tab's own page,
   expect((await shareCounts(app, id)).page).toBe(0)
   await expect(sharing).toHaveCount(0)
 })
+
+test('[PR-10][MD-04] Back to tab returns to a tab in another profile’s Space: the window shows that Space again, the tab selected', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const home = (await windowState(app)).spaceId
+  const work = (await cmd(app, 'spaces.create', { name: 'Work' })) as string
+  await cmd(app, 'profiles.create', { name: 'Work', assignSpaceId: work })
+  await expect.poll(async () => (await windowState(app)).spaceId).toBe(work)
+  const v = await openPlaying(app, '/media/long-video/Film')
+  expect((await tab(app, v.id))?.spaceId).toBe(work)
+  // Another Space, of the Default profile: the video floats in the player.
+  await cmd(app, 'spaces.switch', { spaceId: home })
+  await expectPlayer(app, v.id)
+  const pip = await pipPage(app)
+  await pip.getByTestId('pip').hover({ position: { x: 40, y: 60 } })
+  await pip.getByTestId('pip-back').click()
+  await expect.poll(async () => (await windowState(app)).spaceId).toBe(work)
+  await expect.poll(() => activeId(app)).toBe(v.id)
+  await expectNoPlayer(app)
+  expect(await paused(v.page, '#v')).toBe(false)
+})

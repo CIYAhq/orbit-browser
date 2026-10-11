@@ -2161,3 +2161,21 @@ test('[PN-05][PK-02][PK-03][PK-07][PK-12] in a Favorite, a same-site link stays 
     await sites.close()
   }
 })
+
+test('[PR-10][ST-12][ST-20] Settings acts for the profile of the Space it is opened from: Clear Browsing Data… is the Work profile’s from a Work Space, the Default profile’s from another', async () => {
+  const { app } = orbit
+  const home = (await mainWindow(app)).spaceId
+  const spaceId = (await run(app, 'spaces.create', { name: 'Work', activate: false })) as string
+  const work = (await run(app, 'profiles.create', { name: 'Work', assignSpaceId: spaceId })) as string
+  for (const [space, profile, name] of [
+    [spaceId, work, 'Work'],
+    [home, DEFAULT_PROFILE_ID, 'Default'],
+  ] as const) {
+    await run(app, 'spaces.switch', { spaceId: space })
+    const page = await openSettings(app, { section: 'privacy', item: 'clear-data' })
+    await expect(page.getByTestId('clear-data-dialog')).toBeVisible()
+    await expect(page.getByTestId('clear-data-profile')).toHaveValue(profile)
+    await expect(page.getByTestId('setting-clear-data').locator('.st-scope')).toHaveText(name)
+    await run(app, 'settings.close')
+  }
+})
