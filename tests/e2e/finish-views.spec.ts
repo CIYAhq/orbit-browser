@@ -11,9 +11,20 @@ import {
   run,
   startFixtures,
   state,
+  tabPage,
+  tabView,
   viewPage,
 } from './helpers'
-import { floatingInfo, floatingPage, pressInPage, windowState } from './nav-support'
+import {
+  cmd,
+  floatingInfo,
+  floatingPage,
+  pressInPage,
+  toolsInfo,
+  toolsPage,
+  waitLoaded,
+  windowState,
+} from './nav-support'
 import { blockNetwork, clickInTab, findPage, type OrbitGlobal, overlayOf, startSites } from './peek-helpers'
 
 /** Views lane follow-ups: the command bar, split view, Peek, Mini Windows and media. */
@@ -900,4 +911,139 @@ test("[SV-08][SV-04] over Orbit's own surface in the frame a dragged link drops 
   await expect(shell.getByTestId('split-pane')).toHaveCount(4)
   expect(Object.keys((await state(app)).tabs).length).toBe(tabs)
   await expect(indicator).toHaveCount(0)
+})
+
+// ---- Find in a Peek (PK-11) ----
+
+test('[PK-11][NV-05] ⌘F with a Peek open finds in the Peek, over its card; Esc gives the Peek the keyboard back, and the tab under it keeps its own search', async () => {
+  const { app } = orbit
+  const mod = process.platform === 'darwin' ? 'meta' : 'control'
+  // The tab under the Peek has a search of its own.
+  const under = fx.url('/page/Under')
+  const underTab = await cmd<string>(app, 'tabs.create', { url: under })
+  await waitLoaded(app, underTab, under)
+  await pressInPage(app, '/page/Under', 'F', [mod])
+  const tools = await toolsPage(app)
+  const field = tools.getByTestId('find-input')
+  const count = tools.getByTestId('find-count')
+  await expect(field).toBeFocused()
+  await tools.keyboard.type('Under')
+  await expect(count).toHaveText('1/1')
+  await tools.keyboard.press('Escape')
+  await expect.poll(async () => (await toolsInfo(app)).placed).toBe(false)
+
+  const url = fx.url('/page/kiwi%20kiwi%20kiwi')
+  const peekTab = await cmd<string>(app, 'peek.open', { url })
+  await waitLoaded(app, peekTab, url)
+  await expect.poll(() => focusedUrl()).toContain('kiwi')
+  await pressInPage(app, 'kiwi', 'F', [mod])
+  // The bar is in the window for the Peek's page, with the keyboard.
+  await expect
+    .poll(async () => {
+      const info = await toolsInfo(app)
+      return info.placed && info.find.open ? info.find.tabId : null
+    })
+    .toBe(peekTab)
+  await expect.poll(() => focusedUrl()).toContain('view=tools')
+  await expect(field).toBeFocused()
+  // A Peek has no search yet: the bar starts empty, and finds in the Peek's page.
+  await expect(field).toHaveValue('')
+  await tools.keyboard.type('kiwi')
+  await expect(count).toHaveText('1/3')
+  await tools.keyboard.press('Enter')
+  await expect(count).toHaveText('2/3')
+  expect((await toolsInfo(app)).find).toMatchObject({ tabId: peekTab, open: true, matches: 3 })
+  // Over the card's top-right corner (10 px in, plus the 8 px shadow margin), above the Peek's page.
+  await expect
+    .poll(async () => {
+      const [info, view] = [await toolsInfo(app), await tabView(app, peekTab)]
+      const b = info.bounds
+      const v = view?.bounds
+      if (!info.placed || !b || !v) return null
+      return { right: b.x + b.width - (v.x + v.width), top: b.y - v.y }
+    })
+    .toEqual({ right: -2, top: 2 })
+  // The views of the window, bottom to top: the bar is above the Peek's page.
+  const order = await app.evaluate(({ BrowserWindow }) => {
+    const urls = BrowserWindow.getAllWindows().map((w) =>
+      w.contentView.children.map((v) => {
+        const c = (v as Electron.WebContentsView).webContents
+        return c && !c.isDestroyed() ? c.getURL() : ''
+      }),
+    )
+    const views = urls.find((u) => u.some((x) => x.includes('view=tools'))) ?? []
+    return { tools: views.findIndex((u) => u.includes('view=tools')), peek: views.findIndex((u) => u.includes('kiwi')) }
+  })
+  expect(order.peek).toBeGreaterThanOrEqual(0)
+  expect(order.tools).toBeGreaterThan(order.peek)
+
+  // Esc closes the bar and the Peek has the keyboard again; it stays open.
+  await tools.keyboard.press('Escape')
+  await expect.poll(async () => (await toolsInfo(app)).placed).toBe(false)
+  await expect.poll(() => focusedUrl()).toContain('kiwi')
+  expect((await windowState(app)).overlay.kind).toBe('peek')
+  // ⌘G brings the Peek's search back.
+  await pressInPage(app, 'kiwi', 'G', [mod])
+  await expect(field).toHaveValue('kiwi')
+  await expect(count).toHaveText(/\/3$/)
+  await tools.keyboard.press('Escape')
+  await expect.poll(async () => (await toolsInfo(app)).placed).toBe(false)
+
+  // Closing the Peek: the tab under it was left alone and keeps its search.
+  await pressInPage(app, 'kiwi', 'Escape')
+  await expect.poll(async () => (await windowState(app)).overlay.kind).toBe('none')
+  expect((await toolsInfo(app)).find).toMatchObject({ tabId: underTab, open: false, query: 'Under' })
+})
+
+test('[MW-03][NV-05] ⌘F in a Mini Window finds in its page: the field in the top bar finds as you type, Enter and ⌘G go on, Esc keeps the match selected and gives the page the keyboard (keys review F3)', async () => {
+  const { app } = orbit
+  const path = '/page/kiwi%20kiwi%20kiwi'
+  const url = fx.url(path)
+  const id = (await run(app, 'mini.open', { url })) as string
+  await expect.poll(async () => (await miniPage(id)).url).toBe(url)
+  const tabId = (await miniPage(id)).tabId ?? ''
+  await expect.poll(async () => (await state(app)).tabs[tabId]?.loading).toBe(false)
+  const ui = await miniUi(id)
+  const mod = MOD === 'Meta' ? 'meta' : 'control'
+  await pressInPage(app, path, 'F', [mod])
+  const field = ui.getByTestId('mini-find-input')
+  await expect(field).toBeFocused()
+  await expect.poll(focusedUrl).toContain('view=mini')
+  // The address stays beside it.
+  await expect(ui.getByTestId('mini-address')).toBeVisible()
+  const count = ui.getByTestId('mini-find-count')
+  await field.pressSequentially('kiwi')
+  await expect(count).toHaveText('1/3')
+  await field.press('Enter')
+  await expect(count).toHaveText('2/3')
+  await field.press(`${MOD}+G`)
+  await expect(count).toHaveText('3/3')
+  await field.press('Shift+Enter')
+  await expect(count).toHaveText('2/3')
+  await field.fill('kiwis')
+  await expect(count).toHaveText('No matches')
+  await field.fill('kiwi')
+  await expect(count).toHaveText('1/3')
+  await ui.getByTestId('mini-find-next').click()
+  await expect(count).toHaveText('2/3')
+  await field.press('Escape')
+  await expect(ui.getByTestId('mini-find')).toHaveCount(0)
+  await expect.poll(focusedUrl).toBe(url)
+  // The second match stays selected.
+  const page = await tabPage(app, path)
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const s = getSelection()
+        return s && s.rangeCount > 0 ? [String(s), s.getRangeAt(0).startOffset] : null
+      }),
+    )
+    .toEqual(['kiwi', 5])
+  // ⌘G with the field closed opens it on the last search.
+  await pressInPage(app, path, 'G', [mod])
+  await expect(field).toBeFocused()
+  await expect(field).toHaveValue('kiwi')
+  await expect(count).toHaveText(/^\d\/3$/)
+  await field.press('Escape')
+  await expect(field).toHaveCount(0)
 })

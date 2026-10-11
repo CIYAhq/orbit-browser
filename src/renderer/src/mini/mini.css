@@ -82,6 +82,67 @@ html[data-view="mini"] body {
   font-weight: 500;
 }
 
+/* Find in the page (NV-05): beside the address. */
+.mini__find {
+  -webkit-app-region: no-drag;
+  flex: 0 1 300px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 150px;
+  height: 28px;
+  padding: 0 3px 0 8px;
+  border-radius: 8px;
+  background: var(--hover);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.mini__find-icon {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.mini__find-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 4px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+
+.mini__find-count {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mini__find--none .mini__find-count {
+  color: var(--danger, #c62828);
+}
+
+.mini__find-button {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--text);
+}
+
+.mini__find-button:hover:not(:disabled) {
+  background: var(--active);
+}
+
+.mini__find-button:disabled {
+  opacity: 0.4;
+}
+
 .mini__pill {
   -webkit-app-region: no-drag;
   flex: none;

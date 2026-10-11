@@ -1,4 +1,4 @@
-import { ChevronDown, Lock, UserRound } from 'lucide-react'
+import { ChevronDown, ChevronUp, Lock, Search, UserRound, X } from 'lucide-react'
 import {
   type CSSProperties,
   type RefObject,
@@ -16,6 +16,7 @@ import { invoke, isMac, perfMark } from '../api'
 import { useShortcutLabel } from '../keys/live'
 import { CommandBar, type MiniBar } from '../overlay/CommandBar'
 import { activeTabId } from '../selectors'
+import { withShortcut } from '../shell/chrome/shortcut-label'
 import { useOrbit, useWindow } from '../store'
 import { paletteVars, useDark } from '../theme'
 import { Favicon } from '../ui/Favicon'
@@ -23,6 +24,21 @@ import './mini.css'
 
 /** Kept in step with MINI_BAR / MINI_INSET / MINI_RADIUS in src/main/miniwindow. */
 const CARD_RADIUS = 10
+
+/** The find field opening (⌘F): its text, and whether it still has to be searched (a selection). */
+interface FindStart {
+  query: string
+  search: boolean
+  nonce: number
+}
+
+/** What main says of the search (`mini:find-result`). */
+interface FindResult {
+  matches: number
+  active: number
+  searched: boolean
+}
+let findNonce = 0
 
 /**
  * A Mini Window's chrome (MW-03): a slim top bar (window controls, the page's host which edits
@@ -81,6 +97,33 @@ export function MiniApp() {
     if (!tab) setEditing(false)
   }, [tab])
 
+  // Find in the page (NV-05): ⌘F opens the field in the top bar, beside the address.
+  const [finding, setFinding] = useState<FindStart | null>(null)
+  // Heard here, not in the field: the first result can come before the field is on screen.
+  const [findResult, setFindResult] = useState<FindResult | null>(null)
+  useEffect(() => window.orbit.on('mini:find-result', (p) => setFindResult(p as FindResult)), [])
+  /** Something was typed in the find field since it opened: the page's selection no longer replaces it. */
+  const findEdited = useRef(false)
+  useEffect(
+    () =>
+      window.orbit.on('mini:find', (p) => {
+        const { query, selection } = p as { query: string; selection?: boolean }
+        if (selection && findEdited.current) return
+        findEdited.current = false
+        setEditing(false)
+        setFinding({ query, search: !!selection, nonce: ++findNonce })
+      }),
+    [],
+  )
+  const closeFind = useCallback((keepFocus: boolean) => {
+    setFinding(null)
+    setFindResult(null)
+    void invoke('mini.findClose', { keepFocus })
+  }, [])
+  useEffect(() => {
+    if (!tab) setFinding(null)
+  }, [tab])
+
   return (
     <div
       className={`mini${win?.focused === false ? ' mini--blurred' : ''}`}
@@ -97,9 +140,25 @@ export function MiniApp() {
             mini={pageBar}
           />
         ) : tab ? (
-          <Address tab={tab} onEdit={() => setEditing(true)} />
+          <Address
+            tab={tab}
+            onEdit={() => {
+              if (finding) closeFind(true)
+              setEditing(true)
+            }}
+          />
         ) : (
           <span className="mini__title">Mini Window</span>
+        )}
+        {tab && !editing && finding && (
+          <MiniFind
+            start={finding}
+            result={findResult}
+            onEdit={() => {
+              findEdited.current = true
+            }}
+            onClose={() => closeFind(false)}
+          />
         )}
         <div className="mini__spacer" />
         {tab && profileCount > 1 && (
@@ -170,6 +229,117 @@ function Address({ tab, onEdit }: { tab: Tab; onEdit: () => void }) {
       {secure && <Lock size={10} className="mini__lock" />}
       <span className="mini__host">{displayHost(tab.url) || tab.title}</span>
     </button>
+  )
+}
+
+/**
+ * Find in the Mini Window's page (NV-05), in the top bar: finds as you type, n/m, Enter and ⇧Enter
+ * (⌘G, ⇧⌘G, F3) go on and back, Esc closes it and keeps the match selected.
+ */
+function MiniFind({
+  start,
+  result,
+  onEdit,
+  onClose,
+}: {
+  start: FindStart
+  result: FindResult | null
+  onEdit: () => void
+  onClose: () => void
+}) {
+  const input = useRef<HTMLInputElement>(null)
+  const composing = useRef(false)
+  const [query, setQuery] = useState(start.query)
+  useLayoutEffect(() => {
+    setQuery(start.query)
+    if (start.search) void invoke('mini.find', { query: start.query })
+    input.current?.focus()
+    input.current?.select()
+  }, [start])
+  const step = (forward: boolean) => void invoke('mini.find', { query, next: true, forward })
+  const none = !!query && !!result?.searched && result.matches === 0
+  const count =
+    !query || !result?.searched ? '' : none ? 'No matches' : `${Math.max(result.active, 1)}/${result.matches}`
+  return (
+    <div className={`mini__find${none ? ' mini__find--none' : ''}`} role="search" data-testid="mini-find">
+      <Search size={13} className="mini__find-icon" aria-hidden />
+      <input
+        ref={input}
+        className="mini__find-input"
+        data-testid="mini-find-input"
+        type="text"
+        value={query}
+        placeholder="Find in page"
+        aria-label="Find in page"
+        spellCheck={false}
+        autoComplete="off"
+        onChange={(e) => {
+          setQuery(e.target.value)
+          onEdit()
+          // An input method composes first: search for what it commits, not each step.
+          if (!composing.current) void invoke('mini.find', { query: e.target.value })
+        }}
+        onCompositionStart={() => {
+          composing.current = true
+        }}
+        onCompositionEnd={(e) => {
+          composing.current = false
+          void invoke('mini.find', { query: e.currentTarget.value })
+        }}
+        onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing || composing.current) return
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            step(!e.shiftKey)
+          } else if (e.key === 'Escape') {
+            e.preventDefault()
+            onClose()
+          }
+        }}
+      />
+      <span
+        className="mini__find-count"
+        data-testid="mini-find-count"
+        data-empty={none ? 'true' : 'false'}
+        aria-live="polite"
+      >
+        {count}
+      </span>
+      <button
+        type="button"
+        className="mini__find-button"
+        data-testid="mini-find-prev"
+        aria-label="Previous match"
+        title={withShortcut('Previous match', 'page.findPrevious')}
+        disabled={!result?.matches}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => step(false)}
+      >
+        <ChevronUp size={15} />
+      </button>
+      <button
+        type="button"
+        className="mini__find-button"
+        data-testid="mini-find-next"
+        aria-label="Next match"
+        title={withShortcut('Next match', 'page.findNext')}
+        disabled={!result?.matches}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => step(true)}
+      >
+        <ChevronDown size={15} />
+      </button>
+      <button
+        type="button"
+        className="mini__find-button"
+        data-testid="mini-find-close"
+        aria-label="Close find"
+        title="Close (Esc)"
+        onClick={onClose}
+      >
+        <X size={14} />
+      </button>
+    </div>
   )
 }
 

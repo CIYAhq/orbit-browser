@@ -722,10 +722,11 @@ export class WindowManager {
 
   /**
    * Places the page tools at `bounds` (window coordinates): above the pages, under the floating
-   * sidebar and the overlay. Not before their page has loaded (round 2 fix check, M3): the nav
-   * module shows them again then (onToolsReady). Returns whether they are in the window.
+   * sidebar and the overlay; with `top`, above everything, as over a Peek's page (PK-11). Not
+   * before their page has loaded (round 2 fix check, M3): the nav module shows them again then
+   * (onToolsReady). Returns whether they are in the window.
    */
-  showTools(windowId: WindowId, bounds: Rect): boolean {
+  showTools(windowId: WindowId, bounds: Rect, opts: { top?: boolean } = {}): boolean {
     const rec = this.records.get(windowId)
     if (!rec || rec.win.isDestroyed()) return false
     const view = this.ensureTools(rec)
@@ -735,9 +736,9 @@ export class WindowManager {
     const parent = rec.win.contentView
     const children = parent.children
     const at = children.indexOf(view)
-    const above = [rec.overlay, rec.floating, rec.cover]
-      .map((v) => (v ? children.indexOf(v) : -1))
-      .filter((i) => i >= 0)
+    const above = opts.top
+      ? []
+      : [rec.overlay, rec.floating, rec.cover].map((v) => (v ? children.indexOf(v) : -1)).filter((i) => i >= 0)
     const ceiling = above.length > 0 ? Math.min(...above) : -1
     if (ceiling < 0) {
       if (at !== children.length - 1) parent.addChildView(view)

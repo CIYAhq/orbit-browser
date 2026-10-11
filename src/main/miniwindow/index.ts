@@ -12,6 +12,7 @@ import { toElectronAccelerator } from '../../shared/actions'
 import { createWindowState } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
 import { routeFor } from '../../shared/link-routing'
+import { findTextFromSelection } from '../../shared/nav'
 import { isPrivateTab } from '../../shared/private'
 import type { Rect } from '../../shared/rpc'
 import type { OrbitState, ProfileId, SpaceId, TabId, WindowId } from '../../shared/state'
@@ -19,6 +20,7 @@ import { NEUTRAL_THEME, paletteFor } from '../../shared/theme'
 import { insertItem, removeItem, sectionOf } from '../../shared/tree'
 import { engineForWindow, parseInput, siteOf } from '../../shared/url'
 import type { MainContext } from '../context'
+import { NAV_WORLD } from '../nav/focus'
 import { archiveFloating, floatingTab, keepFloatingPagesOutOfTabClose } from '../peek/floating'
 import { runPageAction } from '../peek/page-actions'
 import type { CallContext } from '../registry'
@@ -55,6 +57,22 @@ interface Mini {
   bar?: boolean
   /** The page's view is hidden behind the bar's still image of it (CB-23). */
   pageHidden?: boolean
+  /** Find in the page (NV-05): its field is in the top bar. */
+  find?: MiniFind
+}
+
+interface MiniFind {
+  open: boolean
+  query: string
+  /** The latest find request: results of older ones are ignored. */
+  request: number
+}
+
+/** What the find field shows of a search (`mini:find-result`). */
+interface MiniFindResult {
+  matches: number
+  active: number
+  searched: boolean
 }
 
 /** Layout of the mini renderer (kept in step with mini.css): top bar height and card inset. */
@@ -635,6 +653,79 @@ export function registerMiniWindow(ctx: MainContext): void {
     if (!anyVisible) open.at(-1)?.win.focus()
   }
 
+  // ---- Find in page (NV-05) ----
+
+  const pageContents = (mini: Mini): WebContents | undefined => {
+    const contents = mini.tabId ? tabs.contents(mini.tabId) : undefined
+    return contents && !contents.isDestroyed() ? contents : undefined
+  }
+  const findResult = (mini: Mini, result: MiniFindResult) => send(mini, 'mini:find-result', result)
+
+  /** Searches the page for `query` from the start (a new text), or for its next match forward or back. */
+  const search = (mini: Mini, query: string, opts: { next?: boolean; forward?: boolean } = {}) => {
+    const contents = pageContents(mini)
+    const f = mini.find
+    if (!contents || !f?.open) return
+    const fresh = query !== f.query || !opts.next || f.request === 0
+    f.query = query
+    if (!query) {
+      f.request = 0
+      contents.stopFindInPage('clearSelection')
+      findResult(mini, { matches: 0, active: 0, searched: false })
+      return
+    }
+    try {
+      f.request = contents.findInPage(query, { forward: opts.forward ?? true, findNext: fresh })
+    } catch {
+      f.request = 0
+    }
+  }
+
+  /**
+   * ⌘F: the find field opens in the top bar with the keyboard, on the page's selected text, else
+   * this window's last search (NV-05).
+   */
+  const openFind = (mini: Mini) => {
+    const contents = pageContents(mini)
+    if (!contents || mini.win.isDestroyed()) return
+    if (!mini.find) mini.find = { open: false, query: '', request: 0 }
+    const f = mini.find
+    const reopened = !f.open
+    f.open = true
+    mini.win.webContents.focus()
+    send(mini, 'mini:find', { query: f.query })
+    if (reopened && f.query) search(mini, f.query)
+    contents
+      .executeJavaScriptInIsolatedWorld(NAV_WORLD, [{ code: 'String(getSelection() || "")' }])
+      .then((selected: unknown) => {
+        const text = typeof selected === 'string' ? findTextFromSelection(selected) : ''
+        // The field takes it unless something was typed there meanwhile.
+        if (text && text !== f.query && f.open && mini.find === f)
+          send(mini, 'mini:find', { query: text, selection: true })
+      })
+      .catch(() => {})
+  }
+
+  /** ⌘G, F3, Enter: the next match (or the previous); with the field closed it opens on the last search. */
+  const stepFind = (mini: Mini, forward: boolean) => {
+    const f = mini.find
+    if (!f?.open || !f.query) {
+      openFind(mini)
+      return
+    }
+    search(mini, f.query, { next: true, forward })
+  }
+
+  const closeFind = (mini: Mini, keepFocus = false) => {
+    const f = mini.find
+    if (!f?.open) return
+    f.open = false
+    f.request = 0
+    const contents = pageContents(mini)
+    contents?.stopFindInPage('keepSelection')
+    if (!keepFocus) contents?.focus()
+  }
+
   // ---- Commands, events, actions ----
 
   const miniOf = (c: CallContext): Mini | undefined => {
@@ -714,6 +805,14 @@ export function registerMiniWindow(ctx: MainContext): void {
     view.setVisible(false)
     mini.pageHidden = true
   })
+  commands.register('mini.find', ({ query, next, forward }, c) => {
+    const mini = miniOf(c)
+    if (mini) search(mini, query, { next, forward })
+  })
+  commands.register('mini.findClose', ({ keepFocus }, c) => {
+    const mini = miniOf(c)
+    if (mini) closeFind(mini, keepFocus)
+  })
   commands.register('mini.control', ({ op }, c) => {
     const mini = miniOf(c)
     if (!mini || mini.win.isDestroyed()) return
@@ -783,6 +882,14 @@ export function registerMiniWindow(ctx: MainContext): void {
         void actions.run('tab.new', { windowId: mainId })
         return true
       }
+      // Find in the page, with its field in the top bar (NV-05; keys review F3).
+      case 'page.find':
+        openFind(mini)
+        return true
+      case 'page.findNext':
+      case 'page.findPrevious':
+        stepFind(mini, id === 'page.findNext')
+        return true
     }
     if (APP_ACTIONS.has(id) || id === 'mini.toggleAll') return false
     const contents = mini.tabId ? tabs.contents(mini.tabId) : undefined
@@ -792,6 +899,18 @@ export function registerMiniWindow(ctx: MainContext): void {
 
   // Pages in a Mini Window: a video's fullscreen covers the window (MW-12).
   ctx.hooks.tabCreated.push((tabId, contents: WebContents) => {
+    contents.on('found-in-page', (_event, result) => {
+      const mini = miniOfTab(tabId)
+      if (!mini?.find?.open || result.requestId !== mini.find.request) return
+      findResult(mini, { matches: result.matches, active: result.activeMatchOrdinal, searched: true })
+    })
+    // A new page: the old matches are gone (the field stays open with its text).
+    contents.on('did-navigate', () => {
+      const mini = miniOfTab(tabId)
+      if (!mini?.find?.open) return
+      mini.find.request = 0
+      findResult(mini, { matches: 0, active: 0, searched: false })
+    })
     // A page that closes itself (window.close()) closes its Mini Window.
     contents.once('destroyed', () => {
       const mini = miniOfTab(tabId)

@@ -23,7 +23,7 @@ import type { SavedHistory } from '../tabs/runtime'
 import { activeTabOf } from '../windows'
 import { archiveFloating, floatingTab, keepFloatingPagesOutOfTabClose } from './floating'
 import { ClickTracker, heldModifiers, isMiniClick, PAGE_WORLD, type PageClick } from './input'
-import { runPageAction } from './page-actions'
+import { runPageAction, setPeekPages } from './page-actions'
 
 /** A Peek card open in a window: a floating tab whose view sits above the overlay, in the card. */
 interface Session {
@@ -511,6 +511,15 @@ export function registerPeek(ctx: MainContext): void {
     s.area = area
     setOverlay(s, { area: { width: area.width, height: area.height } })
     if (s.phase === 'open') applyRect(s, toWindow(s, peekCard(area)), PEEK_RADIUS, true)
+  })
+
+  // Find in page acts on the open Peek's page, over the top-right corner of its card (PK-11).
+  setPeekPages((windowId) => {
+    const s = sessions.get(windowId)
+    const area = windows.pageArea(windowId) ?? s?.area
+    if (s?.phase !== 'open' || s.fullscreen || !s.view || !area) return undefined
+    const card = peekCard(area)
+    return { tabId: s.tabId, card: { ...card, x: area.x + card.x, y: area.y + card.y } }
   })
 
   // ⌘O with nothing to expand does nothing (a Mini Window takes it over, MW-05).

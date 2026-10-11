@@ -49,6 +49,13 @@ export interface PeekCommands {
   'mini.bar': { args: { open: boolean }; result: string | null }
   /** Hides the page's view while the bar is open, once the card shows its still image (CB-23). */
   'mini.hidePage': { args: Record<string, never>; result: void }
+  /**
+   * Find in the Mini Window's page (NV-05): `query` as typed, or the next (`next`) match forward or
+   * back. Results come as `mini:find-result`.
+   */
+  'mini.find': { args: { query: string; next?: boolean; forward?: boolean }; result: void }
+  /** The find field closed: the match stays selected, and the page gets the keyboard back unless `keepFocus`. */
+  'mini.findClose': { args: { keepFocus?: boolean }; result: void }
 }
 
 export interface PeekEvents {
