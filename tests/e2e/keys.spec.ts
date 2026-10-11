@@ -1460,8 +1460,8 @@ test('[KS-20][KS-06] in full screen with the sidebar hidden, ⌘1–9 and ⌘⌥
   const b = await openTab(app, fx.url('/page/FsSecond'))
   const a = await openTab(app, fx.url('/page/FsFirst'))
   expect((await state(app)).spaces[spaceId]?.today).toEqual([a, b, c])
+  // Full screen hides the sidebar by itself (NV-20).
   await setNativeFullScreen(app, true)
-  await action(app, 'sidebar.toggle')
   await expect.poll(async () => (await windowState(app)).sidebar.visible).toBe(false)
   await selectPage(a, fx.url('/page/FsFirst'))
   const mod: Mod = isMac ? 'meta' : 'control'

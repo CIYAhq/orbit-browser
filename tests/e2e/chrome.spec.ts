@@ -1167,18 +1167,20 @@ test('[SB-19] native full screen takes the frame away; leaving brings it back', 
   const { width } = await sidebarState()
   await expect.poll(async () => (await tabView(app, id))?.bounds.x).toBe(width)
   await setNativeFullScreen(app, true)
+  // The sidebar hides in full screen (NV-20): the page has the whole window.
   await expect
     .poll(async () => {
       const size = await contentSize()
       return (
         JSON.stringify((await tabView(app, id))?.bounds) ===
-        JSON.stringify({ x: width, y: 0, width: size.width - width, height: size.height })
+        JSON.stringify({ x: 0, y: 0, width: size.width, height: size.height })
       )
     })
     .toBe(true)
   expect(await pageCorner(app, id)).toBe(0)
   await setNativeFullScreen(app, false)
   await expect.poll(async () => (await tabView(app, id))?.bounds.y).toBe(MARGIN)
+  expect((await tabView(app, id))?.bounds.x).toBe(width)
   expect(await pageCorner(app, id)).toBe(RADIUS)
 })
 

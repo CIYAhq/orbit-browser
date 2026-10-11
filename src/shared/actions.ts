@@ -347,6 +347,27 @@ export const ACTIONS: ActionDef[] = [
   // Alt+F4 closes the window too, as the system's key (KS-05).
   { id: 'window.close', title: 'Close Window', category: 'Window', mac: ['Cmd+Shift+W'], other: ['Ctrl+Shift+W'] },
   {
+    // NV-20. On macOS fn+F (Globe+F) does it too: the system's key, which never reaches Orbit.
+    id: 'window.toggleFullScreen',
+    title: 'Toggle Full Screen',
+    category: 'Window',
+    mac: ['Cmd+Ctrl+F'],
+    other: ['F11', 'Alt+Shift+F'],
+    keywords: ['full screen', 'fullscreen', 'enter full screen', 'exit full screen', 'presentation'],
+  },
+  {
+    // Esc in a page leaves full screen (NV-20): pressed twice within about a second, or held; the
+    // page gets the first press (KS-02, D68). Esc is no binding of it: an overlay's Esc closes the
+    // overlay first (KS-19), so the rule lives with the page (src/main/pages/fullscreen.ts). Settings
+    // → Shortcuts sets its priority, and can give it keys of its own.
+    id: 'window.exitFullScreen',
+    title: 'Exit Full Screen',
+    category: 'Window',
+    hidden: true,
+    preferWebsites: true,
+    keywords: ['esc', 'escape', 'hold esc', 'press esc twice', 'leave full screen', 'fullscreen'],
+  },
+  {
     // Keyboard focus between the sidebar and the page (KS-05, SB-22).
     id: 'focus.cycle',
     title: 'Move Focus Between Sidebar and Page',

@@ -12,6 +12,7 @@ import { join } from 'node:path'
 import type { ElectronApplication, Locator, Page } from '@playwright/test'
 import { expect } from '@playwright/test'
 import type { PageDialogInfo } from '../../src/main/pages/dialogs'
+import type { FullScreenInfo } from '../../src/main/pages/fullscreen'
 import type { LeaveInfo } from '../../src/main/pages/leave'
 import type { PageScreenInfo } from '../../src/main/pages/screens'
 import { listenInRange, tabPage } from './helpers'
@@ -52,6 +53,8 @@ const html = (title: string, body: string, head = '') => `<!doctype html>
  *   (mailto: in a new tab), `#app-tab` (a new tab that redirects to zoommtg:), `#pop` (a pop-up
  *   window for mailto:), and an `#frame` loading `frame` (`/app-frame`: a `#frame-mail` link).
  * - `/to-app?to=…`: redirects to `to`.
+ * - `/esc?prevent=1`: notes each Escape it gets in `window.__escapes` (`keydown`, `keydown (repeat)`,
+ *   `keyup`), and with `prevent=1` uses it (`preventDefault`), as a web app closing its own menu does.
  *
  * Every page has an icon (PAGE_ICON). `port` listens on that port only (a server back on the port
  * it left).
@@ -174,6 +177,26 @@ addEventListener('pagehide', () => note('pagehide', prompt('Your name?', 'Ada'))
 <script>document.getElementById('open').addEventListener('click', () => {
   window.open(${JSON.stringify(to)}, 'popup', 'popup,width=520,height=420')
 })</script>`,
+        ),
+      )
+      return
+    }
+    if (u.pathname === '/esc') {
+      const prevent = u.searchParams.get('prevent') === '1'
+      send(
+        html(
+          'Esc',
+          `<h1>Esc</h1><div id="area"></div>
+<script>
+window.__escapes = []
+for (const type of ['keydown', 'keyup']) {
+  addEventListener(type, (e) => {
+    if (e.key !== 'Escape') return
+    window.__escapes.push(type + (e.repeat ? ' (repeat)' : ''))
+    ${prevent ? 'e.preventDefault()' : ''}
+  })
+}
+</script>`,
         ),
       )
       return
@@ -325,6 +348,7 @@ type PagesGlobal = {
     mayDiscard: (tabId: string) => boolean
     screens: () => PageScreenInfo[]
     launched: string[]
+    fullScreen: (windowId: string) => FullScreenInfo
   }
 }
 
@@ -550,4 +574,9 @@ export function pageBounds(app: ElectronApplication, tabId: string): Promise<unk
     const g = globalThis as unknown as { __orbit: { tabView: (id: string) => { bounds: unknown } | null } }
     return g.__orbit.tabView(id)?.bounds
   }, tabId)
+}
+
+/** A window's full screen as Orbit keeps it (NV-20). */
+export function fullScreenInfo(app: ElectronApplication, windowId: string): Promise<FullScreenInfo> {
+  return app.evaluate((_e, id) => (globalThis as unknown as PagesGlobal).__orbitPages.fullScreen(id), windowId)
 }

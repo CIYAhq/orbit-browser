@@ -22,6 +22,7 @@ import type { MainContext } from '../context'
 import type { TabOps } from '../tabs/ops'
 import { type CoverInfo, createCovers } from './covers'
 import type { PageDialogs$ } from './dialogs'
+import type { FullScreen$ } from './fullscreen'
 
 /**
  * A main-frame navigation that gets no answer from its server within this time is stopped and gets
@@ -130,6 +131,7 @@ export function registerScreens(
   ctx: MainContext,
   ops: TabOps,
   dialogs: PageDialogs$,
+  fullScreen: FullScreen$,
   loadTimeout = LOAD_TIMEOUT_MS,
 ): PageScreens {
   const { store, tabs, commands } = ctx
@@ -146,6 +148,11 @@ export function registerScreens(
     // A screen takes the keyboard only where the page would have it: not from the sidebar's field.
     mayTakeKeyboard: (page, focused) =>
       pageHasKeyboard(page, focused) || states.get(page.id)?.state.screen?.hadKeyboard === true,
+    // In full screen, Esc on a screen leaves it as on a page: pressed twice, or held (NV-20).
+    onKey: (page, view, event, input) => {
+      const tabId = page.isDestroyed() ? undefined : tabs.tabIdFor(page)
+      fullScreen.onKey(tabId ? ctx.windows.windowOfTab(tabId) : undefined, view, event, input)
+    },
   })
 
   const stateOf = (page: WebContents): PageState => {

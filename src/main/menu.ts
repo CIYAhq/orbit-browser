@@ -125,7 +125,8 @@ export function installMenu(ctx: MainContext): void {
         item('page.zoomIn'),
         item('page.zoomOut'),
         { type: 'separator' },
-        { role: 'togglefullscreen' },
+        // Orbit's own (NV-20), so the menu shows its keys as the user set them.
+        item('window.toggleFullScreen'),
         { type: 'separator' },
         // View → Developer (DT-01, DT-02, DT-04).
         {

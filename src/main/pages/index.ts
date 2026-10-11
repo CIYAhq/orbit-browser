@@ -1,9 +1,10 @@
 import { app } from 'electron'
 import { authDialog } from '../../shared/pages'
-import type { TabId } from '../../shared/state'
+import type { TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import type { TabOps } from '../tabs/ops'
 import { type PageDialogInfo, type PageDialogs$, registerDialogs } from './dialogs'
+import { type FullScreenInfo, registerFullScreen } from './fullscreen'
 import { type LeaveInfo, registerLeave } from './leave'
 import { findSystemApp, findTestApp, launchInApp, registerOtherApps } from './other-apps'
 import { LOAD_TIMEOUT_MS, type PageScreenInfo, registerScreens } from './screens'
@@ -20,13 +21,16 @@ export interface PagesTestHooks {
   screens: () => PageScreenInfo[]
   /** Links Orbit opened in another app, oldest first (NV-19): test runs never start one. */
   launched: string[]
+  /** A window's full screen (NV-20). */
+  fullScreen: (windowId: WindowId) => FullScreenInfo
 }
 
 /**
  * The pages lane: what a page does beyond loading. Page dialogs (NV-24): a page's alert, confirm and
  * prompt, the leave-page warning and HTTP sign-in, in Orbit's own dialog over that page. Error and
  * crash screens (NV-13, NV-14): what the page's area shows when its page couldn't load, crashed or
- * stopped responding. Links that open other apps (NV-19): asked about over the page.
+ * stopped responding. Links that open other apps (NV-19): asked about over the page. Window full
+ * screen (NV-20): the sidebar hidden, and Esc in the page.
  */
 export function registerPages(ctx: MainContext, ops: TabOps): void {
   const dialogs = registerDialogs(ctx)
@@ -34,7 +38,8 @@ export function registerPages(ctx: MainContext, ops: TabOps): void {
   registerSignIn(dialogs)
   // Tests give a navigation's first answer less time (ORBIT_E2E_LOAD_TIMEOUT_MS).
   const testTimeout = ctx.e2e ? Number(process.env.ORBIT_E2E_LOAD_TIMEOUT_MS) : Number.NaN
-  const screens = registerScreens(ctx, ops, dialogs, testTimeout > 0 ? testTimeout : LOAD_TIMEOUT_MS)
+  const fullScreen = registerFullScreen(ctx)
+  const screens = registerScreens(ctx, ops, dialogs, fullScreen, testTimeout > 0 ? testTimeout : LOAD_TIMEOUT_MS)
   // Test runs record each launch instead, and take the OS's apps from ORBIT_E2E_APPS.
   const launched: string[] = []
   registerOtherApps(
@@ -60,6 +65,7 @@ export function registerPages(ctx: MainContext, ops: TabOps): void {
       mayDiscard: (tabId) => leave.mayDiscard(tabId),
       screens: () => screens.info(),
       launched,
+      fullScreen: (windowId) => fullScreen.info(windowId),
     }
     ;(globalThis as unknown as { __orbitPages: PagesTestHooks }).__orbitPages = hooks
   }

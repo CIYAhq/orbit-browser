@@ -77,6 +77,8 @@ export function createCovers<C extends CoverContent>(
      * `focused` (what has it now). By default it always does, as a page's own dialog does.
      */
     mayTakeKeyboard?: (page: WebContents, focused: WebContents | null) => boolean
+    /** A key pressed in the view (`view`) while it shows over `page`. */
+    onKey?: (page: WebContents, view: WebContents, event: Electron.Event, input: Electron.Input) => void
   },
 ): PageCovers<C> {
   const { store, tabs, windows } = ctx
@@ -154,8 +156,15 @@ export function createCovers<C extends CoverContent>(
     contents.setWindowOpenHandler(() => ({ action: 'deny' }))
   }
 
-  const watchLoads = (view: WebContentsView) => {
+  /** Follows a view: its loads, its crashes, and keys pressed in it. */
+  const watchView = (view: WebContentsView) => {
     const contents = viewContents(view)
+    const { onKey } = opts
+    if (contents && onKey) {
+      contents.on('before-input-event', (event, input) => {
+        for (const c of covers.values()) if (c.view === view && c.onScreen) onKey(c.page, contents, event, input)
+      })
+    }
     contents?.on('did-finish-load', () => {
       for (const c of covers.values()) {
         if (c.view !== view) continue
@@ -184,7 +193,7 @@ export function createCovers<C extends CoverContent>(
     const view = windows.createUiView(windowId, opts.view)
     if (!view) return undefined
     pool.add(view)
-    watchLoads(view)
+    watchView(view)
     windows.get(windowId)?.once('closed', () => {
       for (const v of pool) inUse.delete(v)
       pools.delete(windowId)
@@ -206,7 +215,7 @@ export function createCovers<C extends CoverContent>(
     contents.once('render-process-gone', (_event, details) => {
       if (details.reason !== 'clean-exit' && !contents.isDestroyed()) loadRenderer(contents, opts.view)
     })
-    watchLoads(view)
+    watchView(view)
     loadRenderer(contents, opts.view)
     host.win.once('closed', () => viewContents(view)?.close())
     return view
