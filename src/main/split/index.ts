@@ -720,6 +720,15 @@ export function registerSplit(ctx: MainContext): void {
         })),
       })
     }
+    // As a Today tab's row offers it (TD-05): the Today items under the split go to the Archive.
+    if (first && spaceId && loc.container.kind === 'today') {
+      const today = state.spaces[spaceId]?.today ?? []
+      items.push({
+        label: 'Archive Tabs Below',
+        enabled: loc.index < today.length - 1,
+        click: () => void commands.run('tabs.archiveBelow', { tabId: first }, { windowId }),
+      })
+    }
     items.push(
       { type: 'separator' },
       { label: 'Separate Tabs', click: () => void commands.run('split.separate', { splitId }) },

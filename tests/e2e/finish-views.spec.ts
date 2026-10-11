@@ -177,6 +177,36 @@ test("[SV-21][SV-22][SV-23] a split's icon replaces its panes' favicons on its r
   await expect.poll(async () => (await state(orbit.app)).splits[splitId]?.icon).toBeUndefined()
 })
 
+test('[SV-22][TD-05] a split row in Today offers Archive Tabs Below: the items under it go, the split stays', async () => {
+  const { app, shell } = orbit
+  const below = await newTab('Below')
+  const a = await newTab('Alpha')
+  const b = await newTab('Bravo')
+  const splitId = (await run(app, 'split.create', { tabIds: [a, b] })) as string
+  const above = await newTab('Above')
+  // Today lists the newest first: Above, the split, Below.
+  const spaceId = (await state(app)).tabs[a]?.spaceId as string
+  await expect.poll(async () => (await state(app)).spaces[spaceId]?.today).toEqual([above, splitId, below])
+
+  await recordMenus(app)
+  const row = shell.locator(`[data-testid="split-row"][data-split-id="${splitId}"]`)
+  await row.click({ button: 'right' })
+  await expect.poll(() => shownMenu(app)).toContain('Archive Tabs Below')
+  expect(await clickShownMenu(app, 'Archive Tabs Below')).toBe(true)
+  await expect.poll(async () => (await state(app)).spaces[spaceId]?.today).toEqual([above, splitId])
+  const s = await state(app)
+  expect(s.tabs[below]).toBeUndefined()
+  expect(s.splits[splitId]).toBeDefined()
+
+  // Now the last item: there's nothing below it, so the item is there but can't be chosen.
+  await app.evaluate(() => {
+    ;(globalThis as unknown as { __shownMenu?: unknown }).__shownMenu = undefined
+  })
+  await row.click({ button: 'right' })
+  await expect.poll(() => shownMenu(app)).toContain('Archive Tabs Below')
+  expect(await clickShownMenu(app, 'Archive Tabs Below')).toBe(false)
+})
+
 // ---- The action catalogue (CB-13) ----
 
 /** Opens the bar, types `text` and returns the top row once it is the action `title`. */
