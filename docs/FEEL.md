@@ -31,12 +31,13 @@
   - FL-22's Before is read from the old toast code (a 220 ms CSS keyframe, toasts 6 px apart, removed after 2.2 s), because the test doesn't run on the old toasts.
 - **After:** the lane's app code at `5416e5c`. Three runs on 2026-10-11 at load 3–4.5. FL-19 ran at load 0.7–1. FL-03's leave row ran at load 5, after its poll was made finer. FL-26 ran nine times on the lane merged with `main` at `592096b`, which has the keys lane's switcher, at load 2.5–5.6.
   - FL-26 was measured again once TB-05 built the switcher's list (the finish-tabs lane): three runs at load 16–18, with two other lanes' e2e runs beside them. A row's Before is the keys lane's switcher as measured at `592096b`; a blank Before is a row that came with the list.
+  - FL-12's folder icon row came with FD-07's full-colour icon (the finish-tabs lane): three runs at load 5.4–6.3.
   - Fix round 1 (PR #25's review) measured the rows it touched again, on the lane after its fixes: FL-01's interruptions, FL-05's scroll, FL-09, FL-19's close, FL-21's accessibility row and the toasts under reduced motion. Their runs and loads are in the notes. The Before of a row new in this round is the lane just before its fix, in one run: FL-05's scroll at `a4adf9b` (load 4.4), the toasts at `0f9fbfb` (load 6.2–7.9). FL-21's accessibility row is the review's reading of `0f9fbfb`.
 - A blank Before cell has one of four causes:
   - the row's test came with its fix;
   - on the old build the test failed an earlier check and stopped before the row (FL-07's ⌘Z and other-Space rows, FL-12's closing);
   - the row is an audit with no change (FL-23, FL-27), so its After is also how it was before;
-  - the row came with TB-05's list (FL-26).
+  - the row came with TB-05's list (FL-26) or FD-07's folder icon (FL-12).
 - **gap** marks a value that misses its target. The notes below the table say why each After gap remains. No number was tuned to pass on one run.
 
 | ID | Observable | Target | Before | After |
@@ -96,6 +97,7 @@
 | FL-12 | Click → content below in place / largest step share | ≤ 250 ms / < 60 % | 243 ms (237–245) / 17% | 239 ms (238–240) / 17% |
 | FL-12 | Children: first shown → last shown | 5 × 10–15 ms | **gap**: 0 ms | 67 ms |
 | FL-12 | Closing: content below moves for / click → closed | 150–180 ms / ≤ 250 ms |  | 167 ms (150–167) / 175 ms (167–179) |
+| FL-12 | Folder icon (FD-07), closed → open: cross-fade, first to last changing frame | about 150 ms |  | 100 ms (100–100), 130 ms set |
 | FL-13 | Swipe: frames off the fingers by > 0.5 px | 0 | 0 | 0 |
 | FL-13 | Swipe release → settled (release seen 90 ms after the last event) | ≤ 350 + 90 ms | **gap**: 476 ms (396–479) | 412 ms (394–412) |
 | FL-13 | Flick: travel / last event → settled | < 25 % / ≤ 350 + 90 ms | 23% / 361 ms (356–364) | 23% / 276 ms (275–291) |

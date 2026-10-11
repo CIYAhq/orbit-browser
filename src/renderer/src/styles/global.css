@@ -1138,10 +1138,26 @@ html[data-view="strip"] body {
   color: var(--text-muted);
 }
 
-/* Full-colour default folder glyph, distinct open and closed shapes (FD-07). */
-.folder-row__icon svg {
-  color: var(--accent);
-  fill: color-mix(in srgb, var(--accent) 28%, transparent);
+/*
+ * The default folder glyph in full colour (FD-07): the back in the Space's accent, the front a
+ * lighter tone of it. Opening or closing, the closed front and the open one cross-fade (FL-12).
+ */
+.folder-glyph__back {
+  fill: var(--accent);
+}
+
+.folder-glyph__front {
+  fill: color-mix(in srgb, var(--accent) 58%, #fff);
+  transition: opacity var(--motion-quick) var(--ease-quick);
+}
+
+.folder-glyph__lid,
+.folder-glyph.is-open .folder-glyph__shut {
+  opacity: 0;
+}
+
+.folder-glyph.is-open .folder-glyph__lid {
+  opacity: 1;
 }
 
 .folder-row.is-drop-into {

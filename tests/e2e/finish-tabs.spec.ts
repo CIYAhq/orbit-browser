@@ -8,7 +8,7 @@ import { expect, type Page, test } from '@playwright/test'
 import type { SearchResult } from '../../src/shared/commands/commandbar'
 import { DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
 import { switcherOf } from '../../src/shared/tab-switcher'
-import { bestOf, frameAfterWall, mainInputs, ms, note, record, viewShown } from './frames'
+import { bestOf, frameAfterWall, mainInputs, motionOf, ms, note, record, series, viewShown } from './frames'
 import {
   type Fixtures,
   FRAME_SLACK,
@@ -1800,4 +1800,56 @@ test('[PR-08] deleting a profile in Settings removes its folder on disk at once,
   writeFileSync(join(folder, 'Cookies'), 'written as Orbit quit')
   orbit = await launchOrbit({ userData })
   expect(existsSync(folder)).toBe(false)
+})
+
+// ---------- FD-07: the folder glyph ----------
+
+test('[FD-07][FL-12] a folder without an icon shows a folder in full colour, closed or open; opening cross-fades the two in about 150 ms', async () => {
+  const { app, shell } = orbit
+  const kids = [await newTab(app, fx.url('/page/In1'), { activate: false })]
+  const spaceId = (await shownSpace()) as string
+  const folderId = await cmd<string>(app, 'folders.create', {
+    container: { kind: 'pinned', spaceId },
+    name: 'Box',
+    items: kids,
+  })
+  await cmd(app, 'folders.setCollapsed', { folderId, collapsed: true })
+  const glyph = shell.locator(`[data-folder-id="${folderId}"] [data-testid="folder-glyph"]`).first()
+  await expect(glyph).toBeVisible()
+  // Filled with opaque colours, not drawn in lines or greys.
+  const fills = await glyph.locator('path').evaluateAll((els) => els.map((el) => getComputedStyle(el).fill))
+  for (const fill of fills) {
+    // rgb(0–255) or, for a mixed colour, color(srgb 0–1).
+    const unit = fill.startsWith('color(') ? 255 : 1
+    const [r = 0, g = 0, b = 0, a = 1] = (fill.match(/[\d.]+/g) ?? []).map((n, i) => Number(n) * (i < 3 ? unit : 1))
+    expect(a, fill).toBe(1)
+    expect(Math.max(r, g, b) - Math.min(r, g, b), fill).toBeGreaterThan(20)
+  }
+  const fronts = () =>
+    glyph.locator('.folder-glyph__front').evaluateAll((els) => els.map((el) => Number(getComputedStyle(el).opacity)))
+  await expect.poll(fronts).toEqual([1, 0])
+  await settled(shell)
+  const rec = await record(shell, {
+    shut: `[data-folder-id="${folderId}"] .folder-glyph__shut`,
+    lid: `[data-folder-id="${folderId}"] .folder-glyph__lid`,
+  })
+  await shell.locator(`[data-folder-id="${folderId}"] [data-testid="folder-row"]`).first().click()
+  const r = await rec.until(600)
+  await expect.poll(fronts).toEqual([0, 1])
+  const fade = motionOf(
+    series(r, 'lid', (b) => b.opacity * 100),
+    1,
+  )
+  const both = r.frames.filter((f) => (f.els.lid?.opacity ?? 0) > 0.1 && (f.els.shut?.opacity ?? 0) > 0.1).length
+  note(
+    'FD-07',
+    'folder icon, closed → open: cross-fade, first to last changing frame',
+    (fade.end ?? 0) - (fade.start ?? 0),
+    'about 150 ms (FL-12)',
+  )
+  // A cross-fade, not a swap: it changes over several frames, in some of which both show.
+  expect(fade.travel).toBeCloseTo(100, 0)
+  expect(fade.moving).toBeGreaterThanOrEqual(3)
+  expect(both).toBeGreaterThanOrEqual(1)
+  expect((fade.end ?? 0) - (fade.start ?? 0)).toBeLessThanOrEqual(250 * FRAME_SLACK)
 })

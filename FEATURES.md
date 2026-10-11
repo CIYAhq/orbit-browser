@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 292 built (62 partial) · 358 tested · 0 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 293 built (61 partial) · 358 tested · 0 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 160 | 173 |
-| P1 | 219 | 115 | 164 |
+| P1 | 219 | 116 | 164 |
 | P2 | 79 | 17 | 21 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -110,7 +110,7 @@ Spec: `spec/tabs.md`
 | FD-04 | Collapse and expand folders | P0 | ✅ | ✅ e2e | – | click toggles with height reveal; selected child peeks under a closed folder |
 | FD-05 | Drag into and out of folders | P0 | ✅ | ✅ e2e+unit | – | drop into closed folder (no expand, peeks) or between children; folders drag/nest |
 | FD-06 | Nested folders | P1 | ✅ | ✅ e2e | – | nesting by drag or New Folder from children; 14px indent per level |
-| FD-07 | Folder icon | P1 | 🟡 partial | ✅ e2e | – | emoji icon via Change Icon; open/closed glyphs; not full-colour |
+| FD-07 | Folder icon | P1 | ✅ | ✅ e2e | – | Change Icon picks an emoji; without one, a folder glyph drawn in full colour in the Space's accent, with a closed and an open version that cross-fade as the folder opens or closes (130 ms, --motion-quick; FL-12), which reduced motion keeps as it is a fade |
 | FD-08 | Folder hover preview and search | P1 | ✅ | ✅ e2e | – | magnifier on folder hover opens a search popover (custom names, first match selected, Enter opens and peeks) |
 | FD-09 | Folder context menu | P1 | ✅ | ✅ e2e+unit | – | Rename, Change Icon, Duplicate, Copy All Links, Paste URL as New Tab, Move to ▸ Space and Delete; the command bar finds a folder by its name or by "Open" and its name, and opens it expanded (CB-13); Share is a later phase |
 | FD-10 | Delete a folder | P1 | ✅ | ✅ e2e+unit | – | confirm when non-empty, contents to Archive, Cmd+Z restores all |

@@ -1,4 +1,4 @@
-import { ChevronRight, Folder, FolderOpen, Search, Undo2, Volume2, VolumeX, X } from 'lucide-react'
+import { ChevronRight, Search, Undo2, Volume2, VolumeX, X } from 'lucide-react'
 import { AnimatePresence, animate, motion, useIsPresent, useMotionValue, type Variants } from 'motion/react'
 import {
   createContext,
@@ -35,6 +35,7 @@ import { getOrbitState, useMirror, useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
 import { CaptureIndicator } from '../media/CaptureIndicator'
 import { pressItem } from './drag'
+import { FolderGlyph } from './FolderGlyph'
 import { menuAt } from './menu-at'
 import { RenameField } from './RenameField'
 import { RowWindowContext, useInRowWindow } from './row-window'
@@ -809,7 +810,6 @@ const FolderRow = memo(function FolderRow({
   const childAncestors = ancestors ? `${ancestors},${folderId}` : folderId
   // A deleted folder animating out draws no children (they're gone or moved on).
   const open = !!liveFolder && !folder.collapsed
-  const FolderIcon = open ? FolderOpen : Folder
   return (
     <div className={`folder${hidden ? ' is-drag-hidden' : ''}`} data-testid="folder" data-folder-id={folderId}>
       <RowSlot
@@ -861,11 +861,7 @@ const FolderRow = memo(function FolderRow({
             <ChevronRight size={13} />
           </motion.span>
           <span className="folder-row__icon">
-            {folder.icon ? (
-              <span className="tab-row__emoji">{folder.icon}</span>
-            ) : (
-              <FolderIcon size={15} strokeWidth={1.7} />
-            )}
+            {folder.icon ? <span className="tab-row__emoji">{folder.icon}</span> : <FolderGlyph open={open} />}
           </span>
           {renaming ? (
             <RenameField id={folderId} mode="name" initial={folder.name} />
