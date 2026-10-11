@@ -20,8 +20,9 @@
  * Orbit's dialog over that page only (NV-24): Electron has no `prompt`, and shows the others as
  * app-wide boxes. A frame has no preload (D40), so a dialog a frame asks for itself is the engine's
  * own box (and a frame's `prompt` returns null). Its `window.print()` opens Orbit's print dialog over
- * the page (NV-07); a frame's is the engine's, the system's own dialog. It also answers main about
- * the leave-page warning (`exposeLeave`).
+ * the page (NV-07), and its `window.close()` waits while that dialog is open (`holdForPrint`); a
+ * frame's `print()` is the engine's, the system's own dialog. It also answers main about the
+ * leave-page warning (`exposeLeave`).
  */
 import { contextBridge, ipcRenderer } from 'electron'
 import { isWheelNotch } from '../renderer/src/shell/spaces/physics'
@@ -50,7 +51,7 @@ const notificationClicked = () => {
  * the page's globals). Built-ins are taken up front, so a page that replaces them later can't reach
  * Orbit's functions through them.
  */
-function patchPage(stateOf: StateOf, clicked: () => void, ask: AskDialog, print: () => void) {
+function patchPage(stateOf: StateOf, clicked: () => void, ask: AskDialog, print: () => void, holdClose: () => boolean) {
   // Calls go through the captured `apply`, never a function's own `.call`: a page that replaces
   // `Function.prototype.call` (or `Reflect.apply`) would otherwise receive Orbit's functions.
   const apply = Reflect.apply
@@ -187,7 +188,9 @@ function patchPage(stateOf: StateOf, clicked: () => void, ask: AskDialog, print:
   }
 
   // window.print(): Orbit's print dialog over this page (NV-07), where the engine's would be the
-  // system's own dialog. It returns at once, and the page goes on while the dialog shows.
+  // system's own dialog. It returns at once, and the page goes on while the dialog shows; what
+  // would take the page away waits for the dialog, as after the engine's `print()`, which returns
+  // only once its dialog closes (`holdForPrint`).
   const nativePrint = window.print
   const ownPrint = describe(window, 'print')
   if (typeof nativePrint === 'function' && ownPrint?.configurable) {
@@ -196,12 +199,51 @@ function patchPage(stateOf: StateOf, clicked: () => void, ask: AskDialog, print:
     }
     define(window, 'print', { ...ownPrint, value: new Proxy(nativePrint, { apply: printNow }) })
   }
+  // window.close() while the print dialog the page asked for is open: the page closes once the
+  // dialog does (`holdForPrint`). Otherwise it's the engine's.
+  const nativeClose = window.close
+  const ownClose = describe(window, 'close')
+  if (typeof nativeClose === 'function' && ownClose?.configurable) {
+    const closeNow = (target: () => void, self: unknown, args: unknown[]) =>
+      holdClose() ? undefined : apply(target, self, args)
+    define(window, 'close', { ...ownClose, value: new Proxy(nativeClose, { apply: closeNow }) })
+  }
 }
 
 type AskDialog = (kind: 'alert' | 'confirm' | 'prompt', message: string, value: string) => unknown
 
+/** A navigation the page started, as the Navigation API's `navigate` event told it. */
+interface PageNavigation {
+  url: string
+  type: string
+  /** The form a submission came from, and its submit button. */
+  form?: WeakRef<HTMLFormElement>
+  submitter?: WeakRef<HTMLElement>
+}
+
+/**
+ * The print dialog the page asked for (NV-07): whether it's open, and what the page started while it
+ * was (`holdForPrint`).
+ */
+const printing: { open: boolean; close: boolean; navigation: PageNavigation | null } = {
+  open: false,
+  close: false,
+  navigation: null,
+}
+
 const printDialog = () => {
-  ipcRenderer.send(PAGE_CHANNEL.print)
+  try {
+    if (ipcRenderer.sendSync(PAGE_CHANNEL.print) === true) printing.open = true
+  } catch {
+    // No dialog: nothing waits for one.
+  }
+}
+
+/** The page's `window.close()`: true when it waits for the print dialog. */
+const holdClose = (): boolean => {
+  if (!printing.open) return false
+  printing.close = true
+  return true
 }
 
 const askDialog: AskDialog = (kind, message, value) => {
@@ -215,12 +257,36 @@ const askDialog: AskDialog = (kind, message, value) => {
 /** Main asks which navigation a warning stopped just after it; one the page started longer ago isn't it. */
 const STOPPED_MS = 2_000
 
-interface StoppedNavigation {
-  url: string
-  type: string
-  /** The form a submission came from, and its submit button. */
-  form?: WeakRef<HTMLFormElement>
-  submitter?: WeakRef<HTMLElement>
+/** The Navigation API's `navigate` event, as far as this reads it. */
+type NavigateEventLike = Event & {
+  destination?: { url?: string; sameDocument?: boolean }
+  navigationType?: string
+  formData?: FormData | null
+  sourceElement?: Element | null
+  downloadRequest?: string | null
+}
+
+/**
+ * Starts a navigation of the page's again, from here: a link or `location` loads its URL (as a new
+ * history entry or in place of this one, as it did), a form is submitted again, a reload reloads.
+ * False when it can't be: a move through history, or a form that's gone or changed.
+ */
+function restart(again: PageNavigation): boolean {
+  if (again.type === 'traverse') return false
+  if (again.type === 'reload') location.reload()
+  else if (again.form) {
+    const form = again.form.deref()
+    const submitter = again.submitter?.deref()
+    if (!form?.isConnected) return false
+    try {
+      form.requestSubmit((submitter as HTMLButtonElement | undefined)?.form === form ? submitter : null)
+    } catch {
+      // The form changed: the user submits it again.
+      return false
+    }
+  } else if (again.type === 'replace') location.replace(again.url)
+  else location.assign(again.url)
+  return true
 }
 
 /**
@@ -242,16 +308,11 @@ interface StoppedNavigation {
 function exposeLeave(): void {
   const nav = (window as { navigation?: EventTarget }).navigation
   /** The last cross-document navigation the page started, its event, and when (`performance.now()`). */
-  let starting: (StoppedNavigation & { event: Event; at: number }) | null = null
+  let starting: (PageNavigation & { event: Event; at: number }) | null = null
   /** The navigation main last asked about: the one a warning stopped. */
-  let stopped: StoppedNavigation | null = null
+  let stopped: PageNavigation | null = null
   nav?.addEventListener('navigate', (event) => {
-    const e = event as Event & {
-      destination?: { url?: string; sameDocument?: boolean }
-      navigationType?: string
-      formData?: FormData | null
-      sourceElement?: Element | null
-    }
+    const e = event as NavigateEventLike
     if (!e.destination?.url || e.destination.sameDocument) return
     if (e.formData) ipcRenderer.send(PAGE_CHANNEL.formSent, e.destination.url)
     const source = e.sourceElement ?? null
@@ -276,21 +337,7 @@ function exposeLeave(): void {
   const redo = (): boolean => {
     const again = stopped
     stopped = null
-    if (!again || again.type === 'traverse') return false
-    if (again.type === 'reload') location.reload()
-    else if (again.form) {
-      const form = again.form.deref()
-      const submitter = again.submitter?.deref()
-      if (!form?.isConnected) return false
-      try {
-        form.requestSubmit((submitter as HTMLButtonElement | undefined)?.form === form ? submitter : null)
-      } catch {
-        // The form changed: the user submits it again.
-        return false
-      }
-    } else if (again.type === 'replace') location.replace(again.url)
-    else location.assign(again.url)
-    return true
+    return !!again && restart(again)
   }
   Object.defineProperty(globalThis, '__orbitLeave', {
     value: Object.freeze({
@@ -303,6 +350,40 @@ function exposeLeave(): void {
       },
       redo,
     }),
+  })
+}
+
+/**
+ * While the print dialog the page asked for is open (NV-07), what would take the page away waits,
+ * as it would behind the engine's `print()`, which returns only once its dialog has closed: the
+ * page's `window.close()` (patched in `patchPage`), and a navigation it starts that the Navigation
+ * API lets this stop and that can start again as it was (a link, `location`, a form that gets its
+ * page, a reload: the same address, and the same kind of history entry). Once main says the dialog
+ * closed (`PAGE_CHANNEL.printClosed`), the close goes on, or else the page's last such navigation
+ * starts again. A form the page posts goes at once (sending it again would run the page's own
+ * submit handlers twice), and so does a move through history, which the engine doesn't let a
+ * script stop: either takes the dialog with it.
+ */
+function holdForPrint(): void {
+  const nav = (window as { navigation?: EventTarget }).navigation
+  nav?.addEventListener('navigate', (event) => {
+    const e = event as NavigateEventLike
+    if (!printing.open || !e.cancelable || !e.destination?.url || e.destination.sameDocument) return
+    // A download leaves the page where it is; a posted form isn't sent twice.
+    if (e.downloadRequest != null || e.formData) return
+    const type = e.navigationType ?? 'push'
+    if (type !== 'push' && type !== 'replace' && type !== 'reload') return
+    e.preventDefault()
+    printing.navigation = { url: e.destination.url, type }
+  })
+  ipcRenderer.on(PAGE_CHANNEL.printClosed, () => {
+    if (!printing.open) return
+    const { close, navigation } = printing
+    printing.open = false
+    printing.close = false
+    printing.navigation = null
+    if (close) window.close()
+    else if (navigation) restart(navigation)
   })
 }
 
@@ -432,10 +513,13 @@ if (location.protocol === 'orbit:') {
   try {
     contextBridge.executeInMainWorld({
       func: patchPage,
-      args: [permissionState, notificationClicked, askDialog, printDialog],
+      args: [permissionState, notificationClicked, askDialog, printDialog, holdClose],
     })
   } catch {
     // A page without its own world to patch keeps the engine's answers.
   }
-  if (window.top === window) exposeLeave()
+  if (window.top === window) {
+    exposeLeave()
+    holdForPrint()
+  }
 }

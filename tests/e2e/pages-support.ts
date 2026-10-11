@@ -63,6 +63,9 @@ const html = (title: string, body: string, head = '') => `<!doctype html>
  * - `/print`: a few pages long, with a field (`#field`), a button that calls `window.print()`
  *   (`#print`), and `window.__print`: its `beforeprint` and `afterprint` events, whether `print()`
  *   returned, and how many times the tab has loaded it (`loads`).
+ * - `/receipt?how=popup|tab|nav`: a button (`#go`) that prints a receipt as shops' pages do: it
+ *   writes "Receipt copy" into a new pop-up window (`popup`) or tab (`tab`), prints it and closes it
+ *   at once; or (`nav`) prints this page and goes on to `/page/Printed` at once.
  * - `/swipe`: a strip that scrolls sideways (`#strip`, scrolled to its middle), and an area that uses
  *   the wheel itself (`#grab`, preventDefault), as a map does.
  *
@@ -226,6 +229,31 @@ addEventListener('afterprint', () => window.__print.after++)
 document.getElementById('print').addEventListener('click', () => {
   window.print()
   window.__print.returned = true
+})
+</script>`,
+        ),
+      )
+      return
+    }
+    if (u.pathname === '/receipt') {
+      const how = u.searchParams.get('how') ?? 'popup'
+      send(
+        html(
+          'Receipt',
+          `<h1>Receipt</h1><button id="go">Print receipt</button><div id="area"></div>
+<script>
+document.getElementById('go').addEventListener('click', () => {
+  const how = ${JSON.stringify(how)}
+  if (how === 'nav') {
+    window.print()
+    location.href = '/page/Printed'
+    return
+  }
+  const w = how === 'popup' ? window.open('', 'receipt', 'width=500,height=400') : window.open('')
+  w.document.write('<title>Receipt copy</title><h1>Receipt copy</h1><p>Total: 12.50</p>')
+  w.document.close()
+  w.print()
+  w.close()
 })
 </script>`,
         ),

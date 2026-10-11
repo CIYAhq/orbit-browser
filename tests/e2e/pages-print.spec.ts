@@ -11,7 +11,7 @@ import {
   startPagesFixtures,
   waitPrint,
 } from './pages-support'
-import { newTab, waitTab } from './tabs-support'
+import { newTab, tab, waitTab } from './tabs-support'
 
 /**
  * Print (NV-07): Orbit's print dialog over the page. Test runs print nothing and save nothing: the
@@ -60,6 +60,24 @@ async function printTab(app: ElectronApplication, scrolled = false) {
       loads: (window as unknown as { __print: { loads: number } }).__print.loads,
     }))
   return { tabId, page, pageState }
+}
+
+/** Pages titled "Receipt copy" that are open: the copies `/receipt` writes and prints. */
+function receiptCopies(app: ElectronApplication): Promise<number> {
+  return app.evaluate(
+    ({ webContents }) =>
+      webContents.getAllWebContents().filter((w) => !w.isDestroyed() && w.getTitle() === 'Receipt copy').length,
+  )
+}
+
+/** A tab's history: its entries' addresses, and which one it's on. */
+function tabHistory(app: ElectronApplication, url: string): Promise<{ urls: string[]; index: number } | null> {
+  return app.evaluate(({ webContents }, u) => {
+    const page = webContents.getAllWebContents().find((w) => w.getURL() === u)
+    if (!page) return null
+    const history = page.navigationHistory
+    return { urls: history.getAllEntries().map((e) => e.url), index: history.getActiveIndex() }
+  }, url)
 }
 
 /** Presses Esc where the keyboard is, as the keyboard does (through the browser process). */
@@ -241,4 +259,56 @@ test('[NV-07] the page menu’s Print… and a Peek’s ⌘P open it over that p
   const windowId = Object.keys((await state(app)).windows)[0] as string
   expect((await state(app)).windows[windowId]?.overlay.kind).toBe('peek')
   expect(await printedJobs(app)).toEqual([])
+})
+
+test('[NV-07] a pop-up window the page writes, prints and closes at once shows the print dialog over it; the window closes once the dialog has printed', async () => {
+  const { app } = orbit
+  const url = fx.url('/receipt?how=popup')
+  const tabId = await newTab(app, url)
+  await waitTab(app, tabId, '/receipt')
+  await clickInPage(app, url, '#go')
+  // The page's close waits for the dialog, as it would behind the engine's print(), which returns
+  // only once its dialog has closed.
+  const dialog = await waitPrint(app, (d) => d.host === 'popup' && d.onScreen && d.preview === 'ready')
+  expect(await receiptCopies(app)).toBe(1)
+  const view = await printPage(app, dialog.dialog)
+  await view.getByTestId('print-destination').selectOption('Office')
+  await view.getByTestId('print-ok').click()
+  await expect.poll(() => receiptCopies(app)).toBe(0)
+  expect(await printedJobs(app)).toEqual([expect.objectContaining({ kind: 'printer', url: 'about:blank' })])
+  expect(await printDialogs(app)).toEqual([])
+  expect(await tab(app, tabId)).toBeTruthy()
+})
+
+test('[NV-07] a new tab the page writes, prints and closes at once shows the print dialog over it; Cancel closes the dialog, and then the tab', async () => {
+  const { app } = orbit
+  const url = fx.url('/receipt?how=tab')
+  const tabId = await newTab(app, url)
+  await waitTab(app, tabId, '/receipt')
+  await clickInPage(app, url, '#go')
+  const opened = await waitPrint(app, (d) => d.host === 'tab' && !!d.tabId && d.tabId !== tabId)
+  const copy = opened.tabId as string
+  await run(app, 'tabs.activate', { tabId: copy })
+  const dialog = await waitPrint(app, (d) => d.tabId === copy && d.onScreen && d.preview === 'ready')
+  expect(await tab(app, copy)).toBeTruthy()
+  const view = await printPage(app, dialog.dialog)
+  await view.getByTestId('print-cancel').click()
+  await expect.poll(async () => await tab(app, copy)).toBeUndefined()
+  expect(await printedJobs(app)).toEqual([])
+  expect(await tab(app, tabId)).toBeTruthy()
+})
+
+test('[NV-07] a page that prints and goes to another page at once shows the print dialog first; once it closes, the page goes on as it would have, to a new history entry', async () => {
+  const { app } = orbit
+  const url = fx.url('/receipt?how=nav')
+  const tabId = await newTab(app, url)
+  await waitTab(app, tabId, '/receipt')
+  await clickInPage(app, url, '#go')
+  const dialog = await waitPrint(app, (d) => d.tabId === tabId && d.onScreen && d.preview === 'ready')
+  expect((await tab(app, tabId))?.url).toBe(url)
+  const view = await printPage(app, dialog.dialog)
+  await view.getByTestId('print-cancel').click()
+  await waitTab(app, tabId, '/page/Printed')
+  expect(await printDialogs(app)).toEqual([])
+  expect(await tabHistory(app, fx.url('/page/Printed'))).toEqual({ urls: [url, fx.url('/page/Printed')], index: 1 })
 })

@@ -177,6 +177,8 @@ export function registerPrint(ctx: MainContext, deps: { deliver: DeliverPrint; p
     s.off()
     // The view goes, and the page gets the keyboard back (KS-16).
     covers.update(page)
+    // A close or a navigation the page started after its `print()` goes on now (the page preload).
+    if (!page.isDestroyed()) page.send(PAGE_CHANNEL.printClosed)
   }
 
   const preview = async (s: Session) => {
@@ -323,11 +325,21 @@ export function registerPrint(ctx: MainContext, deps: { deliver: DeliverPrint; p
     else if (!s.busy) close(s.page)
   })
 
-  // The page's own `window.print()` (the page preload): only a page's main frame has it (D40).
+  // The page's own `window.print()` (the page preload): only a page's main frame has it (D40). The
+  // reply says whether the page has a print dialog open now: its close and navigations wait for it.
+  // The reply goes out as soon as returnValue is set, so it is set once.
   ipcMain.on(PAGE_CHANNEL.print, (event: IpcMainEvent) => {
-    const frame = event.senderFrame
-    if (!frame || frame.parent || event.sender.isDestroyed()) return
-    open(event.sender)
+    let opened = false
+    try {
+      const frame = event.senderFrame
+      if (frame && !frame.parent && !event.sender.isDestroyed()) {
+        open(event.sender)
+        opened = sessions.has(event.sender.id)
+      }
+    } catch (err) {
+      console.error('[pages] print', err)
+    }
+    event.returnValue = opened
   })
 
   setPageEntries({ print: open })

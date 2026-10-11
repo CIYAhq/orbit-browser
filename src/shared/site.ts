@@ -213,10 +213,14 @@ export const PAGE_CHANNEL = {
    */
   dialog: 'orbit-page:dialog',
   /**
-   * send(): the page called `window.print()` (NV-07). Main shows Orbit's print dialog over that
-   * page, for a tab's or a pop-up's main frame only (src/main/pages/print.ts).
+   * sendSync(): the page called `window.print()` (NV-07). Main shows Orbit's print dialog over that
+   * page, for a tab's or a pop-up's main frame only, and replies at once whether the page has one
+   * open now (src/main/pages/print.ts). While it does, the page's `window.close()` and the
+   * navigations it starts wait (src/preload/page.ts).
    */
   print: 'orbit-page:print',
+  /** Main → page: the page's print dialog closed (NV-07); what waited on it goes on. */
+  printClosed: 'orbit-page:print-closed',
   /**
    * send('move', direction, travel) and send('end', direction, commit): a two-finger swipe over the
    * page that the page doesn't take (NV-02, src/preload/swipe.ts). Main shows the arrow and goes back
