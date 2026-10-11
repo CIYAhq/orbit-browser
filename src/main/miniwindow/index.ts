@@ -684,6 +684,7 @@ export function registerMiniWindow(ctx: MainContext): void {
   // ⌘⇧L) act in the browser window behind (OB-12, KS-12, AR-10, keys lane).
   const APP_ACTIONS = new Set([
     'window.new',
+    'window.newBlank',
     'window.newMini',
     'window.newPrivate',
     'app.settings',

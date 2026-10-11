@@ -100,11 +100,8 @@ test('[TB-17] selecting in a second window the tab another window shows hands it
   const other = await newTab(app, fx.url('/page/Other'), { activate: false })
   const t = await newTab(app, fx.url('/page/Shared'))
   await waitTab(app, t, '/page/Shared')
-  await act(app, 'window.new')
-  await expect.poll(async () => Object.keys((await state(app)).windows).length).toBe(2)
-  const ids = await app.evaluate(() =>
-    (globalThis as unknown as { __orbit: { windowIds: () => string[] } }).__orbit.windowIds(),
-  )
+  await newWindow(orbit)
+  const ids = await windowIds(orbit)
   await cmd(app, 'tabs.activate', { tabId: t }, 1)
   const s = await state(app)
   const sp = s.spaceOrder[0] as string
@@ -312,6 +309,19 @@ function windowIds(o: Orbit): Promise<string[]> {
   return o.app.evaluate(() => (globalThis as unknown as { __orbit: { windowIds: () => string[] } }).__orbit.windowIds())
 }
 
+/**
+ * ⌘N in the first window, then waits until the new window is drawn with the command bar it opens
+ * with (SP-24): what follows doesn't race its start, however slow the machine.
+ */
+async function newWindow(o: Orbit): Promise<string> {
+  const before = await windowIds(o)
+  await act(o.app, 'window.new')
+  await expect.poll(async () => (await windowIds(o)).length).toBe(before.length + 1)
+  const id = (await windowIds(o)).find((w) => !before.includes(w)) as string
+  await expect.poll(async () => (await state(o.app)).windows[id]?.overlay.kind, { timeout: 30_000 }).toBe('commandbar')
+  return id
+}
+
 /** Which window each tab's live view is placed in. */
 function holderOf(o: Orbit, tabId: string): Promise<string | undefined> {
   return o.app.evaluate(
@@ -343,7 +353,11 @@ async function expectDistinct(o: Orbit) {
     .toBe('ok')
 }
 
+/** Narrows a window by 40 px and waits until the tab it shows is laid out again at that width. */
 async function resize(o: Orbit, windowId: string) {
+  const win = (await state(o.app)).windows[windowId]
+  const shown = win?.activeTab[win.spaceId] ?? undefined
+  const before = shown ? (await tabView(o.app, shown))?.bounds.width : undefined
   await o.app.evaluate((_e, id) => {
     const win = (
       globalThis as unknown as { __orbit: { ctx: { windows: { get: (w: string) => Electron.BrowserWindow } } } }
@@ -351,7 +365,8 @@ async function resize(o: Orbit, windowId: string) {
     const b = win.getBounds()
     win.setBounds({ ...b, width: b.width - 40 })
   }, windowId)
-  await new Promise((r) => setTimeout(r, 400))
+  if (shown && before) await expect.poll(async () => (await tabView(o.app, shown))?.bounds.width).toBeLessThan(before)
+  else await new Promise((r) => setTimeout(r, 400))
 }
 
 test('[TB-17][TB-06] two windows on one Space: closing or clearing never leaves both on the same tab (lane review MF-1)', async () => {
@@ -362,8 +377,7 @@ test('[TB-17][TB-06] two windows on one Space: closing or clearing never leaves 
   const y = await newTab(app, fx.url('/page/Y'), { activate: false })
   const x = await newTab(app, fx.url('/page/X'))
   await waitTab(app, x, '/page/X')
-  await act(app, 'window.new')
-  await expect.poll(async () => (await windowIds(orbit)).length).toBe(2)
+  await newWindow(orbit)
   const [w1, w2] = (await windowIds(orbit)) as [string, string]
   await cmd(app, 'tabs.activate', { tabId: y }, 1)
   await expectDistinct(orbit)
@@ -391,9 +405,8 @@ test('[TB-17] three windows: a handoff leaves every window on a different tab (l
   const b = await newTab(app, fx.url('/page/B'), { activate: false })
   const a = await newTab(app, fx.url('/page/A'))
   await waitTab(app, a, '/page/A')
-  await act(app, 'window.new')
-  await act(app, 'window.new')
-  await expect.poll(async () => (await windowIds(orbit)).length).toBe(3)
+  await newWindow(orbit)
+  await newWindow(orbit)
   await cmd(app, 'tabs.activate', { tabId: b }, 1)
   await cmd(app, 'tabs.activate', { tabId: c }, 2)
   await expectDistinct(orbit)

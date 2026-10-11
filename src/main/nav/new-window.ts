@@ -1,3 +1,4 @@
+import { isBlankWindow } from '../../shared/blank'
 import { createWindowState } from '../../shared/defaults'
 import { isPrivateWindow } from '../../shared/private'
 import type { SpaceId, WindowId } from '../../shared/state'
@@ -22,10 +23,11 @@ export function openUrlInNewWindow(
   const state = store.state
   const from = fromWindowId ? state.windows[fromWindowId] : undefined
   const spaceId: SpaceId | undefined =
-    from && from.kind === 'main' && !isPrivateWindow(state, from.id) && state.spaces[from.spaceId]
+    from && from.kind === 'main' && !isPrivateWindow(state, from.id) && !isBlankWindow(state, from.id)
       ? from.spaceId
-      : (Object.values(state.windows).find((w) => w.kind === 'main' && !isPrivateWindow(state, w.id))?.spaceId ??
-        state.spaceOrder[0])
+      : (Object.values(state.windows).find(
+          (w) => w.kind === 'main' && !isPrivateWindow(state, w.id) && !isBlankWindow(state, w.id),
+        )?.spaceId ?? state.spaceOrder[0])
   if (!spaceId) return null
   const winState = createWindowState(spaceId)
   winState.bounds = windows.cascadeFrom(fromWindowId)

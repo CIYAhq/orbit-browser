@@ -4,9 +4,9 @@ import { bindingProblem, canonicalAccelerator, type KeyInput } from '../../src/s
 
 /**
  * The default keymap against the shortcut tables of the spec (KS-03 audit): every row Orbit binds,
- * on macOS and on Windows/Linux. Rows for features no lane has built yet (blank window, top
- * toolbar, save page, full screen keys, reader mode, developer mode, notes, canvases, extensions)
- * are left out; so are keys that belong to an open overlay (KS-04's Esc, Tab, arrows).
+ * on macOS and on Windows/Linux. Rows for features no lane has built yet (top toolbar, save page,
+ * full screen keys, reader mode, developer mode, notes, canvases, extensions) are left out; so are
+ * keys that belong to an open overlay (KS-04's Esc, Tab, arrows).
  */
 const TABLE: [id: string, mac: string[], other: string[]][] = [
   // KS-04
@@ -16,6 +16,8 @@ const TABLE: [id: string, mac: string[], other: string[]][] = [
   // KS-05
   ['window.new', ['Cmd+N'], ['Ctrl+N']],
   ['window.newPrivate', ['Cmd+Shift+N'], ['Ctrl+Shift+N']],
+  // ⌃⌘N; none on Windows and Linux, where the command bar has it (TB-17).
+  ['window.newBlank', ['Cmd+Ctrl+N'], []],
   ['window.newMini', ['Cmd+Alt+N'], ['Ctrl+Alt+N']],
   ['tab.close', ['Cmd+W'], ['Ctrl+W', 'Ctrl+F4']],
   ['window.close', ['Cmd+Shift+W'], ['Ctrl+Shift+W']],

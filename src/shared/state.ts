@@ -198,6 +198,8 @@ export interface Space {
   createdAt: number
   /** Pinned section collapsed under the Space title (PN-09). */
   pinnedCollapsed?: boolean
+  /** A blank window's own Space (TB-17): out of the Space order, shown by that window only. */
+  blank?: true
 }
 
 export interface Profile {

@@ -5,6 +5,7 @@ import {
   useLayoutEffect,
   useRef,
 } from 'react'
+import { isBlankSpace } from '../../../../shared/blank'
 import { DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH } from '../../../../shared/defaults'
 import { pageMayOpen } from '../../../../shared/link-routing'
 import type { SpaceId, WindowState } from '../../../../shared/state'
@@ -19,6 +20,7 @@ import { MediaTray } from '../media/MediaTray'
 import { SpaceStrip } from '../spaces/SpaceStrip'
 import { UndoToast } from '../spaces/UndoToast'
 import { dropLink, endLinkDrag, isDragging, linkDragLeave, linkDragOver } from './drag'
+import { SidebarItems } from './SidebarItems'
 import { SpaceBar } from './SpaceBar'
 import { TopBar } from './TopBar'
 
@@ -27,18 +29,21 @@ import { TopBar } from './TopBar'
  * (Favorites, title row, pinned, Today; swipeable between Spaces), then the
  * Space switcher. Space content lives in ../spaces/. `floating` is the hidden
  * sidebar's card shown over the page (SB-12), which has no resize edge.
- * A private window's sidebar has only its own tabs under a "Private" label (SB-25).
+ * A private window's sidebar has only its own tabs under a "Private" label (SB-25); a blank
+ * window's has only its own tabs (TB-17).
  */
 export function Sidebar({ win, floating = false }: { win: WindowState; floating?: boolean }) {
   const exists = useOrbit((s) => !!s.spaces[win.spaceId])
+  const blank = useOrbit((s) => isBlankSpace(s, win.spaceId))
   if (!exists) return null
   const isPrivate = win.kind === 'private'
   return (
     <aside
       className={`sidebar${floating ? ' sidebar--floating' : ''}${isPrivate ? ' sidebar--private' : ''}`}
       data-testid="sidebar"
+      data-blank={blank || undefined}
       aria-hidden={!floating && !win.sidebar.visible}
-      onMouseUp={isPrivate ? undefined : onSideButtons}
+      onMouseUp={isPrivate || blank ? undefined : onSideButtons}
       onAuxClick={preventSideButtons}
       onDragEnter={onLinkDragOver}
       onDragOver={onLinkDragOver}
@@ -50,6 +55,13 @@ export function Sidebar({ win, floating = false }: { win: WindowState; floating?
         <>
           <PrivateSidebar spaceId={win.spaceId} />
           {/* Downloads lane: the private window's own downloads, and only those (DL-03, DL-16). */}
+          <DownloadsTray win={win} />
+        </>
+      ) : blank ? (
+        <>
+          {/* Its own tabs, starting with none: no Spaces, pinned tabs or Favorites (TB-17). */}
+          <SidebarItems spaceId={win.spaceId} simple />
+          <MediaTray windowId={win.id} />
           <DownloadsTray win={win} />
         </>
       ) : (

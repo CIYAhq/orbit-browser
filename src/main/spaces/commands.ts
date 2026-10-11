@@ -1,5 +1,6 @@
 import { screen, session } from 'electron'
 import { sidebarUndoLabel } from '../../shared/actions'
+import { isBlankSpace } from '../../shared/blank'
 import type { SpacePanel } from '../../shared/commands/spaces'
 import { createWindowState, DEFAULT_PROFILE_ID } from '../../shared/defaults'
 import type { SpaceId, TabId, WindowId } from '../../shared/state'
@@ -321,7 +322,8 @@ export function registerSpaces(ctx: MainContext): void {
     const source = sourceId ? store.state.windows[sourceId] : undefined
     const sourceWin = sourceId ? windows.get(sourceId) : undefined
     const spaceId =
-      (source?.kind === 'main' ? source.spaceId : undefined) ??
+      // From a blank window (TB-17): a normal one, on the Space used last.
+      (source?.kind === 'main' && !isBlankSpace(store.state, source.spaceId) ? source.spaceId : undefined) ??
       (lastSpaceId && store.state.spaces[lastSpaceId] ? lastSpaceId : undefined) ??
       (store.state.spaceOrder[0] as SpaceId)
     const winState = createWindowState(spaceId)

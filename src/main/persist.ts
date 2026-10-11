@@ -15,7 +15,7 @@ import {
 import { isFolderId, isSplitId, isTabId } from '../shared/ids'
 import { normalizeMediaSettings } from '../shared/media'
 import { withoutPrivate } from '../shared/private'
-import type { ItemId, OrbitState, ProfileId, SpaceId, SplitLayout, TabId } from '../shared/state'
+import type { ItemId, OrbitState, ProfileId, Space, SpaceId, SplitLayout, TabId } from '../shared/state'
 import { STATE_SCHEMA } from '../shared/state'
 import { normalizeSpaceTheme } from '../shared/theme'
 import { fallbackTitle } from '../shared/url'
@@ -142,9 +142,22 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
   if (typeof state.settings.libraryScreenshots !== 'boolean') {
     state.settings.libraryScreenshots = DEFAULT_SETTINGS.libraryScreenshots
   }
+  // A blank window's Space (TB-17) stays out of the Space order; one no window shows any more is
+  // gone, and its tabs with it (nothing else places them).
+  for (const [id, space] of Object.entries(state.spaces)) {
+    if (space.blank !== true) delete space.blank
+    else if (!Object.values(state.windows).some((w) => w.spaceId === id)) delete state.spaces[id]
+  }
   // spaceOrder must list exactly the existing spaces.
-  state.spaceOrder = [...new Set(state.spaceOrder)].filter((id) => state.spaces[id])
-  for (const id of Object.keys(state.spaces)) if (!state.spaceOrder.includes(id)) state.spaceOrder.push(id)
+  state.spaceOrder = [...new Set(state.spaceOrder)].filter((id) => state.spaces[id] && !state.spaces[id].blank)
+  for (const [id, space] of Object.entries(state.spaces)) {
+    if (!space.blank && !state.spaceOrder.includes(id)) state.spaceOrder.push(id)
+  }
+  if (state.spaceOrder.length === 0) {
+    const first = base.spaceOrder[0] as SpaceId
+    state.spaces[first] = base.spaces[first] as Space
+    state.spaceOrder = [first]
+  }
   repairReferences(state)
   normalizeLinkSettings(state)
   for (const tab of Object.values(state.tabs)) {
@@ -427,7 +440,9 @@ function repairReferences(state: OrbitState): void {
   for (const profile of Object.values(state.profiles)) {
     profile.favorites = clean(profile.favorites, { profileId: profile.id })
   }
-  for (const spaceId of state.spaceOrder) {
+  // The Space list's, then blank windows' (TB-17).
+  const blank = Object.keys(state.spaces).filter((id) => state.spaces[id]?.blank)
+  for (const spaceId of [...state.spaceOrder, ...blank]) {
     const space = state.spaces[spaceId]
     if (!space) continue
     const where = { spaceId, profileId: space.profileId }

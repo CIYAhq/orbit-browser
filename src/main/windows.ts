@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { BrowserWindow, nativeTheme, screen, type WebContents, WebContentsView, webContents } from 'electron'
 import { actionForInput, outsideTextActionFor } from '../shared/actions'
+import { isBlankSpace } from '../shared/blank'
 import { createWindowState, DEFAULT_SIDEBAR_WIDTH } from '../shared/defaults'
 import { isPrivateSpace, PRIVATE_PALETTE } from '../shared/private'
 import type { Rect, RendererView } from '../shared/rpc'
@@ -376,9 +377,10 @@ export class WindowManager {
     const state = this.ctx.store.state
     let winState = existing ?? this.takeClosedMain(spaceId)
     if (!winState) {
-      // A window opened from a private one shows a normal Space (NV-11).
+      // A window opened from a private or blank one shows a normal Space (NV-11, TB-17).
       const focused = state.windows[this.focusedWindowId() ?? '']?.spaceId
-      const space = spaceId ?? (focused && !isPrivateSpace(state, focused) ? focused : undefined) ?? state.spaceOrder[0]
+      const normal = focused && !isPrivateSpace(state, focused) && !isBlankSpace(state, focused)
+      const space = spaceId ?? (normal ? focused : undefined) ?? state.spaceOrder[0]
       if (!space) throw new Error('No spaces')
       winState = createWindowState(space)
       const created = winState

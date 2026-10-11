@@ -59,6 +59,7 @@ import {
   splitAnchor,
   splitCloseInfo,
 } from '../split/model'
+import { blankSpace } from './blank'
 import {
   activateInDraft,
   dedupeDisplayed,
@@ -749,19 +750,25 @@ export class TabOps {
         return ka < kb ? -1 : ka > kb ? 1 : a.loc.index - b.loc.index
       })
       for (const b of sorted) {
+        // Its place gone meanwhile (a blank window closed, TB-17): the top of the first Space's
+        // Today, and its tabs belong to that Space.
+        let gone: ContainerRef | undefined
         if (containerItems(d, b.loc.container)) insertItem(d, b.loc.container, b.loc.index, b.id)
         else {
           const first = d.spaceOrder[0]
-          if (first) insertItem(d, { kind: 'today', spaceId: first }, 0, b.id)
+          gone = first ? { kind: 'today', spaceId: first } : undefined
+          if (gone) insertItem(d, gone, 0, b.id)
         }
         for (const [tid, placement] of Object.entries(b.tabs)) {
           const tab = d.tabs[tid]
           if (!tab) continue
-          if (tab.profileId !== placement.profileId) reload.push(tid)
-          tab.spaceId = placement.spaceId
-          tab.profileId = placement.profileId
+          const spaceId = (gone && spaceOfContainer(d, gone)) || placement.spaceId
+          const profileId = (gone && profileOfContainer(d, gone)) || placement.profileId
+          if (tab.profileId !== profileId) reload.push(tid)
+          tab.spaceId = spaceId
+          tab.profileId = profileId
           tab.lastActiveAt = placement.lastActiveAt
-          if (placement.pinnedUrl) {
+          if (placement.pinnedUrl && !gone) {
             tab.pinnedUrl = placement.pinnedUrl
             tab.pinnedTitle = placement.pinnedTitle
             tab.pinnedResolvedUrl = placement.pinnedResolvedUrl
@@ -1059,14 +1066,23 @@ export class TabOps {
     return this.moveItems(ids, { kind: section, spaceId }, index, { windowId, undoLabel: 'Move to Space' })
   }
 
-  /** Drag out of the window (TB-09): a new window showing the tab exactly as it was. */
+  /**
+   * Drag out of the window (TB-09, SP-24): a blank window holding the tab (TB-17), with a sidebar
+   * of its own. A Today tab moves there as it is (same page, history and scroll), and ⌘Z puts it
+   * back; a pinned tab or Favorite stays where it is, and the window opens its page in a tab of its
+   * own. A private window's tab goes to a new private window on its Space (NV-11).
+   */
   toNewWindow(tabId: TabId, fromWindowId: WindowId | undefined, at?: { x: number; y: number }): WindowId | null {
     const state = this.state
     const tab = state.tabs[tabId]
     if (!tab) return null
-    const spaceId = fromWindowId ? this.spaceOfWindow(fromWindowId) : tab.spaceId
-    const win = createWindowState(spaceId, isPrivateSpace(state, spaceId) ? 'private' : 'main')
-    win.activeTab[spaceId] = tabId
+    const fromSpace = fromWindowId ? this.spaceOfWindow(fromWindowId) : tab.spaceId
+    const isPrivate = isPrivateSpace(state, fromSpace)
+    // A tab of a split stays in it: its page opens in the new window, as a pinned tab's does.
+    const moves = !isPrivate && sectionOf(state, tabId) === 'today' && !splitOfTab(state, tabId)
+    const space = isPrivate ? undefined : blankSpace(tab.profileId, this.now())
+    const win = createWindowState(space?.id ?? fromSpace, isPrivate ? 'private' : 'main')
+    if (!space || moves) win.activeTab[win.spaceId] = tabId
     const source = fromWindowId ? this.ctx.windows.get(fromWindowId) : undefined
     const size = source && !source.isDestroyed() ? source.getBounds() : { width: 1100, height: 760 }
     if (at) {
@@ -1074,20 +1090,39 @@ export class TabOps {
       const height = Math.max(480, Math.round(size.height * 0.8))
       win.bounds = { x: Math.round(at.x - 120), y: Math.round(at.y - 24), width, height }
     }
-    const moving = new Set([tabId])
+    const before = moves ? this.capture([tabId]) : []
+    const moving = new Set(space && !moves ? [] : [tabId])
     this.ctx.store.update((d) => {
       if (fromWindowId) {
         const from = d.windows[fromWindowId]
-        if (from && from.activeTab[from.spaceId] === tabId) {
+        if (from && from.activeTab[from.spaceId] === tabId && moving.size > 0) {
           const excluding = new Set<TabId>([...moving, ...shownElsewhere(state, fromWindowId)])
           from.activeTab[from.spaceId] = nextAfterClose(state, from.spaceId, tabId, excluding)
         }
       }
+      if (space) d.spaces[space.id] = space
       d.windows[win.id] = win
+      if (space && moves) {
+        const to: ContainerRef = { kind: 'today', spaceId: space.id }
+        removeItem(d, tabId)
+        insertItem(d, to, 0, tabId)
+        this.fixupTabs(d, [tabId], to)
+      }
       const t = d.tabs[tabId]
-      if (t) t.lastActiveAt = this.now()
+      if (t && moving.size > 0) t.lastActiveAt = this.now()
       dedupeDisplayed(d, win.id)
     })
+    if (moves) this.pushMoveUndo('Move to New Window', before, this.capture([tabId]))
+    else if (space) {
+      this.createTab({
+        url: tab.url,
+        title: tab.customTitle ?? tab.title,
+        favicon: tab.favicon,
+        spaceId: space.id,
+        windowId: win.id,
+        activate: true,
+      })
+    }
     const created = this.state.windows[win.id]
     if (created) this.ctx.windows.open(created)
     return win.id

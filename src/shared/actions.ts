@@ -399,6 +399,16 @@ export const ACTIONS: ActionDef[] = [
   },
   { id: 'mini.toggleAll', title: 'Show / Hide All Mini Windows', category: 'Window' },
   {
+    // A window with a sidebar of its own that starts empty (TB-17, NV-10): ⌃⌘N and the File menu on
+    // macOS; elsewhere the command bar only.
+    id: 'window.newBlank',
+    title: 'New Blank Window',
+    category: 'Window',
+    mac: ['Cmd+Ctrl+N'],
+    other: [],
+    keywords: ['empty', 'separate sidebar', 'throwaway'],
+  },
+  {
     id: 'window.newPrivate',
     title: 'New Private Window',
     category: 'Window',

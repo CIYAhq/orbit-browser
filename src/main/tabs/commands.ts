@@ -6,6 +6,7 @@ import {
   type WebContentsViewConstructorOptions,
 } from 'electron'
 import { sidebarUndoLabel } from '../../shared/actions'
+import { isBlankSpace } from '../../shared/blank'
 import { isFolderId, isTabId, newId } from '../../shared/ids'
 import { framesMayOpen, isLocalFileUrl, localFileBlockedMessage } from '../../shared/link-routing'
 import { isPrivateTab, privateTabMenu } from '../../shared/private'
@@ -28,6 +29,7 @@ import { KEEP_KEYBOARD } from '../keys/focus'
 import { TAB_MENU_KEYS, withKeyHints } from '../keys/menu-hints'
 import type { CallContext } from '../registry'
 import { tabSplitMenuItems } from '../split/menu'
+import { registerBlankWindows } from './blank'
 import { registerLinkDrop } from './link-drop'
 import { TabMaintenance } from './maintenance'
 import { folderMenu, type MenuOps, tabMenu } from './menus'
@@ -237,6 +239,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   const toastView = registerToastView(ctx)
   registerThemeUndo(ctx, ops.undo)
   registerLinkDrop(ctx)
+  registerBlankWindows(ctx, ops)
   /** What a row menu is about, for screen readers: the tab, the folder or the selection. */
   const menuLabelFor = (id: ItemId, selection: TabId[]): string => {
     const state = store.state
@@ -411,8 +414,9 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     // Keys lane: an item that a key also does shows the key (KS-18).
     const forTab = (tabId: TabId) => withKeyHints(tabMenu(state, tabId, selection, mo), TAB_MENU_KEYS)
     const all = isFolderId(id) ? folderMenu(state, id, mo) : isTabId(id) ? forTab(id) : []
-    // Private windows have no pinned tabs, Favorites, folders or other Spaces (NV-11, SB-25).
-    const items = isTabId(id) && isPrivateTab(state, id) ? privateTabMenu(all) : all
+    // Private and blank windows have no pinned tabs, Favorites, folders or other Spaces (NV-11, SB-25, TB-17).
+    const own = isTabId(id) && (isPrivateTab(state, id) || isBlankSpace(state, state.tabs[id]?.spaceId))
+    const items = own ? privateTabMenu(all) : all
     if (items.length === 0) return
     // Orbit's own menu in the overlay, in the Space's colours (TB-14, SP-16).
     rowMenus.show(windowId, items, { key: id, label: menuLabelFor(id, selection), at, sender: c.sender })

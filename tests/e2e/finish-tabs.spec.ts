@@ -3,6 +3,7 @@
  * the other lanes merged (lanes/finish-tabs.md).
  */
 import { expect, type Page, test } from '@playwright/test'
+import type { SearchResult } from '../../src/shared/commands/commandbar'
 import { DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
 import {
   type Fixtures,
@@ -16,11 +17,12 @@ import {
   tabView,
   viewPage,
 } from './helpers'
-import { pressInPage } from './nav-support'
+import { closeWindow, flushState, pressInPage, uiPageOf, windowList } from './nav-support'
 import { openSettings } from './settings-support'
 import {
   act,
   activeId,
+  closeOverlay,
   cmd,
   menuFor,
   newTab,
@@ -1016,4 +1018,174 @@ test('[NV-08][TB-02] a link dragged from a page onto the sidebar opens as a tab 
     })
     .toEqual([away])
   expect(Object.values((await state(app)).windows).map((w) => w.spaceId)).toEqual([sp.id])
+})
+
+// ---------- TB-17: the blank window ----------
+
+/** Window ids in the order they opened. */
+function windowIds(): Promise<string[]> {
+  return orbit.app.evaluate(() =>
+    (globalThis as unknown as { __orbit: { windowIds: () => string[] } }).__orbit.windowIds(),
+  )
+}
+
+/** The tabs (`tab`), Spaces or folders the command bar of window `w` offers for `query`. */
+async function barFinds(w: number, query: string, kind: 'tab' | 'space' | 'folder'): Promise<string[]> {
+  const { results } = await cmd<{ results: SearchResult[] }>(orbit.app, 'search.query', { query, mode: 'new-tab' }, w)
+  return results
+    .filter((r) => r.kind === kind)
+    .map((r) => (kind === 'tab' ? r.tabId : kind === 'space' ? r.spaceId : r.folderId) ?? '')
+}
+
+test('[TB-17][NV-10][KS-05] New Blank Window, from the command bar (⌃⌘N on macOS): a sidebar of its own that starts empty, a step down and right, with the command bar open; what opens there stays there', async () => {
+  const { app, shell } = orbit
+  const sp = (await space(app)).id
+  const pinned = await newTab(app, fx.url('/page/Pinned'), {
+    container: { kind: 'pinned', spaceId: sp },
+    activate: false,
+  })
+  const elsewhere = await cmd<string>(app, 'spaces.create', { name: 'Elsewhere', activate: false })
+  const mine = await newTab(app, fx.url('/page/Mine'))
+  await waitTab(app, mine, '/page/Mine')
+  const first = (await windowIds())[0] as string
+  // In the command bar everywhere: ⌃⌘N on macOS, no key elsewhere.
+  await act(app, 'tab.new')
+  const overlay = await viewPage(app, 'overlay')
+  const bar = overlay.getByTestId('command-bar')
+  await expect(bar.getByTestId('command-input')).toBeFocused()
+  await overlay.keyboard.type('new blank window')
+  const top = bar.getByTestId('command-result').first()
+  await expect(top).toHaveAttribute('data-kind', 'action')
+  await expect(top).toContainText('New Blank Window')
+  if (isMac) await expect(top.getByTestId('command-shortcut')).toHaveText('⌃⌘N')
+  else await expect(top.getByTestId('command-shortcut')).toHaveCount(0)
+  await overlay.keyboard.press('Enter')
+  await expect.poll(async () => (await windowIds()).length).toBe(2)
+  const id = (await windowIds())[1] as string
+  const s = await state(app)
+  const blank = s.windows[id]?.spaceId as string
+  expect(s.windows[id]?.kind).toBe('main')
+  expect(s.spaces[blank]?.blank).toBe(true)
+  expect(s.spaces[blank]?.profileId).toBe(s.spaces[sp]?.profileId)
+  // Its Space is no Space of the user's.
+  expect(s.spaceOrder).toEqual([sp, elsewhere])
+  const [a, b] = await windowList(app)
+  expect([b?.bounds?.x, b?.bounds?.y]).not.toEqual([a?.bounds?.x, a?.bounds?.y])
+
+  // A sidebar of its own, empty: no Spaces, pinned tabs or Favorites, none of the first window's tabs.
+  const side = await uiPageOf(app, 'shell', id)
+  await expect(side.getByTestId('sidebar')).toHaveAttribute('data-blank', 'true')
+  await expect(side.getByTestId('new-tab-button')).toBeVisible()
+  await expect(side.getByTestId('tab-row')).toHaveCount(0)
+  await expect(side.getByTestId('spacebar')).toHaveCount(0)
+  await expect(side.getByTestId('space-strip')).toHaveCount(0)
+  await expect(side.locator('[data-fav-id]')).toHaveCount(0)
+  // The command bar is open for a first tab, which opens there.
+  await expect.poll(async () => (await state(app)).windows[id]?.overlay.kind).toBe('commandbar')
+  const there = await uiPageOf(app, 'overlay', id)
+  const input = there.getByTestId('command-input')
+  await expect(input).toBeFocused()
+  await input.fill(fx.url('/page/Thrown'))
+  await expect(there.getByTestId('command-result').filter({ hasText: 'Thrown' }).first()).toBeVisible()
+  await input.press('Enter')
+  await expect
+    .poll(async () => {
+      const t = await state(app)
+      const shown = t.windows[id]?.activeTab[blank]
+      return shown ? t.tabs[shown]?.url : undefined
+    })
+    .toBe(fx.url('/page/Thrown'))
+  const thrown = (await state(app)).windows[id]?.activeTab[blank] as string
+  await expect(side.locator(`[data-testid="tab-row"][data-tab-id="${thrown}"]`)).toBeVisible()
+  const second = await cmd<string>(app, 'tabs.create', { url: fx.url('/page/Second') }, 1)
+  await waitTab(app, second, '/page/Second')
+  expect((await state(app)).spaces[blank]?.today).toEqual([second, thrown])
+
+  // The first window doesn't list its tabs, can't show them, and its command bar doesn't offer them.
+  await expect(shell.locator(`[data-tab-id="${thrown}"]`)).toHaveCount(0)
+  await cmd(app, 'tabs.activate', { tabId: thrown })
+  expect((await state(app)).windows[first]?.activeTab[sp]).toBe(mine)
+  expect(await barFinds(0, 'Thrown', 'tab')).toEqual([])
+  expect(await barFinds(0, 'Pinned', 'tab')).toEqual([pinned])
+  expect(await barFinds(0, 'Elsewhere', 'space')).toEqual([elsewhere])
+  // Its own command bar offers its tabs only, and no Space.
+  expect(await barFinds(1, 'Thrown', 'tab')).toEqual([thrown])
+  expect(await barFinds(1, 'Pinned', 'tab')).toEqual([])
+  expect(await barFinds(1, 'Elsewhere', 'space')).toEqual([])
+  await cmd(app, 'tabs.activate', { tabId: mine }, 1)
+  expect((await state(app)).windows[id]?.activeTab[blank]).toBe(second)
+
+  // Spaces, pinning and Favorites aren't there.
+  await act(app, 'tab.togglePin', 1)
+  await act(app, 'tab.favorite', 1)
+  await act(app, 'space.next', 1)
+  // Nor is a Space there to delete, or a folder to make.
+  await act(app, 'space.delete', 1)
+  await act(app, 'folder.new', 1)
+  const after = await state(app)
+  expect(after.spaces[blank]?.pinned).toEqual([])
+  expect(after.spaces[blank]?.today).toEqual([second, thrown])
+  expect(after.profiles[DEFAULT_PROFILE_ID]?.favorites).toEqual([])
+  expect(after.windows[id]?.spaceId).toBe(blank)
+  expect(after.windows[id]?.overlay.kind).toBe('none')
+  expect(Object.keys(after.folders)).toEqual([])
+  // Nor are they in its rows' menus.
+  await side.locator(`[data-testid="tab-row"][data-tab-id="${thrown}"]`).click({ button: 'right' })
+  const labels = await menuFor(app, thrown, 1)
+  expect(labels).toContain('Close Tab')
+  expect(labels.filter((l) => /^(Pin |Add to Favorites|Move to)/.test(l))).toEqual([])
+  await closeOverlay(app, 1)
+  // ⌘N there opens a normal window, on a Space of the user's.
+  await act(app, 'window.new', 1)
+  await expect.poll(async () => (await windowIds()).length).toBe(3)
+  const normal = (await windowIds())[2] as string
+  expect((await state(app)).windows[normal]?.spaceId).toBe(sp)
+  const third = await uiPageOf(app, 'shell', normal)
+  await expect(third.locator(`[data-testid="tab-row"][data-tab-id="${pinned}"]`)).toBeVisible()
+  await expect(third.locator(`[data-tab-id="${thrown}"]`)).toHaveCount(0)
+})
+
+test('[TB-17][TB-22][TB-07] a blank window open at quit comes back with its tabs after a relaunch; closed, it is gone and its tabs are in the Archive, not in Reopen Closed Tab', async () => {
+  const { app, userData } = orbit
+  const sp = (await space(app)).id
+  const kept = await newTab(app, fx.url('/page/Kept'))
+  await waitTab(app, kept, '/page/Kept')
+  await act(app, 'window.newBlank')
+  await expect.poll(async () => (await windowIds()).length).toBe(2)
+  const [first, id] = (await windowIds()) as [string, string]
+  const blank = (await state(app)).windows[id]?.spaceId as string
+  const away = await cmd<string>(app, 'tabs.create', { url: fx.url('/page/Away') }, 1)
+  const far = await cmd<string>(app, 'tabs.create', { url: fx.url('/page/Far') }, 1)
+  await waitTab(app, far, '/page/Far')
+  expect((await state(app)).spaces[blank]?.today).toEqual([far, away])
+  await flushState(app)
+  await app.close()
+
+  orbit = await launchOrbit({ userData })
+  const s = await state(orbit.app)
+  expect(Object.keys(s.windows).sort()).toEqual([first, id].sort())
+  expect(s.windows[id]?.spaceId).toBe(blank)
+  expect(s.spaces[blank]?.blank).toBe(true)
+  expect(s.spaces[blank]?.today).toEqual([far, away])
+  expect(s.spaceOrder).toEqual([sp])
+  const side = await uiPageOf(orbit.app, 'shell', id)
+  await expect(side.getByTestId('sidebar')).toHaveAttribute('data-blank', 'true')
+  await expect(side.getByTestId('tab-row')).toHaveCount(2)
+  const main = await uiPageOf(orbit.app, 'shell', first)
+  await expect(main.locator(`[data-testid="tab-row"][data-tab-id="${kept}"]`)).toBeVisible()
+  await expect(main.locator(`[data-tab-id="${far}"]`)).toHaveCount(0)
+
+  // Closed: its Space goes, and its tabs go to the Archive; Reopen Closed Tab doesn't bring them back.
+  await closeWindow(orbit.app, id)
+  await expect.poll(async () => (await state(orbit.app)).spaces[blank]).toBeUndefined()
+  const after = await state(orbit.app)
+  expect(Object.keys(after.windows)).toEqual([first])
+  expect(after.tabs[far]).toBeUndefined()
+  expect(after.tabs[away]).toBeUndefined()
+  expect(after.archive.map((e) => e.url)).toEqual(expect.arrayContaining([fx.url('/page/Away'), fx.url('/page/Far')]))
+  await act(orbit.app, 'tab.reopenClosed')
+  await main.waitForTimeout(300)
+  const urls = Object.values((await state(orbit.app)).tabs).map((t) => t.url)
+  expect(urls).not.toContain(fx.url('/page/Far'))
+  expect(urls).not.toContain(fx.url('/page/Away'))
 })

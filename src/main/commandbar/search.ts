@@ -1,4 +1,5 @@
 import { clipboard, net } from 'electron'
+import { isBlankSpace } from '../../shared/blank'
 import type { SearchQueryArgs, SearchResult } from '../../shared/commands/commandbar'
 import type { CommandName } from '../../shared/rpc'
 import type { OrbitState, WindowId } from '../../shared/state'
@@ -73,12 +74,22 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
     const visibleTo = (profileId: string | undefined) =>
       isPrivate ? profileId === profile?.id : !profileId || !privateProfiles.has(profileId)
     const spaceProfile = (spaceId: string | undefined) => (spaceId ? state.spaces[spaceId]?.profileId : undefined)
+    // A blank window (TB-17) finds only its own tabs and no Spaces or folders; no other window finds its tabs.
+    const blank = isBlankSpace(state, space?.id)
+    const anyBlank = Object.values(state.spaces).some((s) => s.blank)
+    const tabsHere = (tabs: typeof allTabs) =>
+      !anyBlank
+        ? tabs
+        : tabs.filter((t) => {
+            const tabSpace = state.tabs[t.id]?.spaceId
+            return blank ? tabSpace === space?.id : !isBlankSpace(state, tabSpace)
+          })
     const input: RankInput = {
       query: args.query,
       mode: args.mode,
       now: Date.now(),
       engine: { name: engine.name, search: engine.search },
-      tabs: privateProfiles.size ? allTabs.filter((t) => visibleTo(state.tabs[t.id]?.profileId)) : allTabs,
+      tabs: tabsHere(privateProfiles.size ? allTabs.filter((t) => visibleTo(state.tabs[t.id]?.profileId)) : allTabs),
       activeTabId,
       currentSpaceId: space?.id ?? '',
       spaceNames: sources.spaceNames(state),
@@ -88,8 +99,11 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
       history: hs?.entries() ?? [],
       hosts: hs?.hostList() ?? [],
       archive: profile && !isPrivate ? sources.archive(state, profile.id) : [],
-      spaces: isPrivate ? [] : sources.spaces(state).filter((sp) => visibleTo(spaceProfile(sp.id))),
-      folders: isPrivate ? [] : sources.folders(state).filter((f) => visibleTo(spaceProfile(f.spaceId))),
+      spaces: isPrivate || blank ? [] : sources.spaces(state).filter((sp) => visibleTo(spaceProfile(sp.id))),
+      folders:
+        isPrivate || blank
+          ? []
+          : sources.folders(state).filter((f) => visibleTo(spaceProfile(f.spaceId)) && !isBlankSpace(state, f.spaceId)),
       actions: sources.actions((id) => actions.has(id), process.platform),
       siteSearches,
       scope: args.siteSearchId ? siteSearches.find((s) => s.id === args.siteSearchId) : undefined,
