@@ -258,9 +258,23 @@ export function registerMiniWindow(ctx: MainContext): void {
     })
     windows.registerUi(win.webContents, id)
     windows.attachShortcuts(win.webContents)
+    windows.reloadUiOnCrash(win.webContents, 'mini')
     win.once('closed', () => {
       mounted.delete(id)
       outbox.delete(id)
+    })
+    // The UI loads again (a reload, or after a crash): what main sends waits until it is up, and
+    // what only the old UI showed goes: the bar over the page and the find field.
+    let loads = 0
+    win.webContents.on('render-process-gone', () => mounted.delete(id))
+    win.webContents.on('did-start-navigation', (details) => {
+      if (!details.isMainFrame || details.isSameDocument) return
+      mounted.delete(id)
+      const mini = loads++ > 0 ? minis.get(id) : undefined
+      if (mini) {
+        uncover(mini)
+        closeFind(mini, true)
+      }
     })
     // Orbit's own UI never navigates away or opens windows.
     win.webContents.on('will-navigate', (event, url) => {

@@ -1056,7 +1056,7 @@ export class WindowManager {
   }
 
   /** Orbit's own UI must never stay blank: reload a shell or overlay renderer that died (a few times). */
-  private reloadUiOnCrash(contents: WebContents, view: RendererView): void {
+  reloadUiOnCrash(contents: WebContents, view: RendererView): void {
     const crashes: number[] = []
     contents.on('render-process-gone', (_event, details) => {
       if (this.quitting || contents.isDestroyed() || details.reason === 'clean-exit') return

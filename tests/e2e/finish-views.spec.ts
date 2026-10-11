@@ -18,6 +18,7 @@ import {
 } from './helpers'
 import {
   cmd,
+  cmdIn,
   floatingInfo,
   floatingPage,
   pressInPage,
@@ -775,6 +776,87 @@ test('[CB-23][NV-05][MW-03] ⌘L and ⌘F that reach a new Mini Window before it
   await expect(field).toBeVisible()
   await expect(field).toHaveValue(first)
   await expect((await miniUi(findId)).getByTestId('mini-find-input')).toBeVisible()
+})
+
+test("[MW-03][CB-23][NV-05] a Mini Window's UI that reloads or crashes comes back: what main sent meanwhile reaches it, and its page shows again", async () => {
+  const { app } = orbit
+  const url = fx.url('/page/Reloading%20Mini')
+  const id = (await run(app, 'mini.open', { url })) as string
+  await expect.poll(async () => (await miniPage(id)).url).toBe(url)
+  const ui = await miniUi(id)
+  await expect(ui.getByTestId('mini-address')).toBeVisible()
+  type Hooks = { __orbit: OrbitGlobal['__orbit'] & { action: Action } }
+  /** In main: crashes the Mini Window's UI, or reloads it and runs `action` there once the reload has begun. */
+  const restart = (how: 'reload' | 'crash', action = '') =>
+    app.evaluate(
+      async ({ BrowserWindow }, [wid, what, then]) => {
+        const hooks = (globalThis as unknown as Hooks).__orbit
+        const contents = BrowserWindow.getAllWindows().find(
+          (b) => !b.isDestroyed() && hooks.ctx.windows.windowIdFor(b.webContents) === wid,
+        )?.webContents
+        if (!contents) throw new Error('no Mini Window UI')
+        if (what === 'crash') {
+          const gone = new Promise((resolve) => contents.once('render-process-gone', resolve))
+          contents.forcefullyCrashRenderer()
+          await gone
+          return
+        }
+        const started = new Promise((resolve) => contents.once('did-start-navigation', resolve))
+        contents.reload()
+        await started
+        if (then) await hooks.action(then, wid)
+      },
+      [id, how, action] as const,
+    )
+  const act = (action: string) =>
+    app.evaluate(async (_e, [wid, name]) => (globalThis as unknown as Hooks).__orbit.action(name, wid), [
+      id,
+      action,
+    ] as const)
+  /** Asks the Mini Window's UI whether `selector` is there (false while it is gone or loading). */
+  const uiHas = (selector: string) =>
+    app.evaluate(
+      ({ BrowserWindow }, [wid, sel]) => {
+        const hooks = (globalThis as unknown as Hooks).__orbit
+        const contents = BrowserWindow.getAllWindows().find(
+          (b) => !b.isDestroyed() && hooks.ctx.windows.windowIdFor(b.webContents) === wid,
+        )?.webContents
+        if (!contents || contents.isCrashed() || contents.isLoading()) return false
+        // A renderer that is just dying never answers: each probe has a deadline.
+        return Promise.race([
+          contents.executeJavaScript(`!!document.querySelector(${JSON.stringify(sel)})`),
+          new Promise<boolean>((r) => setTimeout(() => r(false), 500)),
+        ])
+      },
+      [id, selector] as const,
+    )
+  const back = () => expect.poll(() => uiHas('[data-testid="mini-address"]'), { timeout: 15_000 }).toBe(true)
+
+  // ⌘L comes in once a reload of the UI has begun: the bar opens once the UI is back.
+  await restart('reload', 'url.edit')
+  const field = ui.getByTestId('mini-address-input')
+  await expect(field).toBeVisible()
+  await expect(field).toHaveValue(url)
+  // The bar covers the page, whose view steps aside. The UI's renderer crashes: it comes back
+  // without the bar, the page shows again, and ⌘L opens the bar there.
+  await expect.poll(async () => (await miniPage(id)).visible).toBe(false)
+  await restart('crash')
+  await back()
+  await expect.poll(async () => (await miniPage(id)).visible).toBe(true)
+  expect(await uiHas('[data-testid="mini-address-input"]')).toBe(false)
+  await act('url.edit')
+  await expect.poll(() => uiHas('[data-testid="mini-address-input"]')).toBe(true)
+  // The find field was open on a search when the UI reloaded: ⌘G opens it again.
+  await act('url.edit')
+  await expect.poll(() => uiHas('[data-testid="mini-address-input"]')).toBe(false)
+  await act('page.find')
+  await cmdIn(app, id, 'mini.find', { query: 'Reloading' })
+  await expect.poll(() => uiHas('[data-testid="mini-find-input"]')).toBe(true)
+  await restart('reload')
+  await back()
+  expect(await uiHas('[data-testid="mini-find-input"]')).toBe(false)
+  await act('page.findNext')
+  await expect.poll(() => uiHas('[data-testid="mini-find-input"]')).toBe(true)
 })
 
 // ---- New splits from the "+" menu and the split button (SV-07) ----
