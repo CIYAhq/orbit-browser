@@ -628,6 +628,11 @@ export class WindowManager {
     viewContents(rec.overlay)?.send(`orbit:${channel}`, payload)
   }
 
+  /** Sends to the window's overlay only: what only it shows, such as a Peek's still (PK-06). */
+  sendToOverlay(windowId: WindowId, channel: string, payload: unknown): void {
+    viewContents(this.records.get(windowId)?.overlay)?.send(`orbit:${channel}`, payload)
+  }
+
   /** The corner radius a shown page was last given (SB-19), for tests. */
   cornerOf(tabId: TabId): number | undefined {
     const entry = this.attached.get(tabId)

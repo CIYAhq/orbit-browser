@@ -275,7 +275,7 @@ export function registerPeek(ctx: MainContext): void {
       const image = await contents.capturePage()
       if (sessions.get(s.windowId) !== s || s.phase !== 'open' || image.isEmpty()) return
       const url = `data:image/jpeg;base64,${image.toJPEG(85).toString('base64')}`
-      windows.sendToWindow(s.windowId, 'peek:still', { nonce: s.nonce, url })
+      windows.sendToOverlay(s.windowId, 'peek:still', { nonce: s.nonce, url })
     } catch {
       // The page went away: the card keeps the still it has, or its colour.
     }

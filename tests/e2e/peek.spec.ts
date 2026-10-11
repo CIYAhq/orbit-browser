@@ -429,6 +429,34 @@ test('[PK-09][PK-06] a Peek whose page goes away while it is open closes with it
   expect(orbit.takeUncaught()).toBe('')
 })
 
+/** In main, from now: the channels main sends the window's shell, in order. Returns a reader. */
+async function shellChannels(): Promise<() => Promise<string[]>> {
+  await orbit.app.evaluate(() => {
+    const g = globalThis as unknown as OrbitGlobal & { __shellSent?: string[] }
+    const ctx = g.__orbit.ctx
+    const shell = ctx.windows.get(ctx.windows.ids()[0] as string)?.webContents
+    if (!shell) throw new Error('no window')
+    const sent: string[] = []
+    g.__shellSent = sent
+    const send = shell.send.bind(shell)
+    shell.send = (channel: string, ...args: unknown[]) => {
+      sent.push(channel)
+      send(channel, ...args)
+    }
+  })
+  return () => orbit.app.evaluate(() => [...((globalThis as unknown as { __shellSent?: string[] }).__shellSent ?? [])])
+}
+
+test("[PK-06] the Peek's stills of its page go to the overlay, which shows them, and never to the window's shell", async () => {
+  const sent = await shellChannels()
+  await openPeekFromPinned()
+  await stillReady(await viewPage(orbit.app, 'overlay'))
+  const channels = await sent()
+  // The shell heard from main meanwhile (the store's changes), but no still.
+  expect(channels.length).toBeGreaterThan(0)
+  expect(channels.filter((c) => c.includes('peek:still'))).toEqual([])
+})
+
 test('[PK-10] ⌘Z right after closing, or ⌘⇧T, reopens the Peek at the same page', async () => {
   const { source, peekTab } = await openPeekFromPinned()
   // Navigate inside the Peek first: the reopened Peek comes back on that page, with its history.
