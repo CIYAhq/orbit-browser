@@ -792,3 +792,92 @@ test('[FL-21][FL-05] a press in the first frame after a row finishes growing in 
     `what a hit test found there: ${hits.join(', ')}`,
   ).toBe(true)
 })
+
+/** Key events as the keyboard sends them: to whichever contents has the keyboard (the page here). */
+function keyEvents(events: [type: 'keyDown' | 'keyUp', keyCode: string, modifiers: 'control'[]][]): Promise<void> {
+  return orbit.app.evaluate(({ webContents }, list) => {
+    for (const [type, keyCode, modifiers] of list)
+      webContents.getFocusedWebContents()?.sendInputEvent({ type, keyCode, modifiers })
+  }, events)
+}
+
+test('[FL-26][TB-05] holding ⌃, each Tab moves the highlight to the next recent tab in a frame and its page follows; letting go moves nothing', async () => {
+  const { app, shell } = orbit
+  const ids: string[] = []
+  for (const name of ['RecentA', 'RecentB', 'RecentC']) {
+    const id = await newTab(app, fx.url(`/page/${name}`))
+    await waitTab(app, id, `/page/${name}`)
+    ids.push(id)
+  }
+  const [a, b, c] = ids as [string, string, string]
+  // Most recent first: C, B, A. The page has the keyboard, as it does for someone reading it.
+  await cmd(app, 'tabs.focusPage', {})
+  await expect
+    .poll(() => app.evaluate(({ webContents }) => webContents.getFocusedWebContents()?.getURL() ?? ''))
+    .toContain('/page/RecentC')
+  await expect(row(shell, c)).toHaveClass(/is-active/)
+  await settled(shell)
+  const keys = await mainInputs(app)
+  const shownB = await viewShown(app, b)
+  const shownA = await viewShown(app, a)
+  const rec = await record(shell, { rows: { selector: TODAY_ROWS, key: 'data-tab-id', classes: true } })
+  await keyEvents([
+    ['keyDown', 'Control', ['control']],
+    ['keyDown', 'Tab', ['control']],
+    ['keyUp', 'Tab', ['control']],
+  ])
+  await expect.poll(() => activeId(app)).toBe(b)
+  await expect(row(shell, b)).toHaveClass(/is-active/)
+  await keyEvents([
+    ['keyDown', 'Tab', ['control']],
+    ['keyUp', 'Tab', ['control']],
+  ])
+  await expect.poll(() => activeId(app)).toBe(a)
+  await expect(row(shell, a)).toHaveClass(/is-active/)
+  await keyEvents([['keyUp', 'Control', []]])
+  // A few frames after letting go: nothing should change in them.
+  await shell.evaluate(() => new Promise((done) => setTimeout(done, 300)))
+  const r = await rec.stop()
+  const seen = await keys()
+  const tabs = seen.filter((k) => k.type === 'keyDown' && k.key === 'Tab')
+  const release = seen.find((k) => k.type === 'keyUp' && k.key === 'Control')
+  expect(tabs, 'both Tab presses reached main').toHaveLength(2)
+  if (!release) throw new Error('letting go of Control never reached main')
+  const lit = (tabId: string) => (f: (typeof r.frames)[number]) =>
+    !!f.lists.rows?.[tabId]?.classes?.includes('is-active')
+  const step = (press: { wall: number }, tabId: string) => {
+    const from = frameAfterWall(r, press.wall)
+    const frame = r.frames.find((f) => f.i >= from && lit(tabId)(f))
+    return { frames: frame ? frame.i - from + 1 : undefined, ms: frame ? frame.t - (press.wall - r.wall0) : undefined }
+  }
+  const first = step(tabs[0] as { wall: number }, b)
+  const second = step(tabs[1] as { wall: number }, a)
+  const pageB = (await shownB()).find((w) => w >= (tabs[0]?.wall ?? 0))
+  const pageA = (await shownA()).find((w) => w >= (tabs[1]?.wall ?? 0))
+  // After letting go: the highlight stays on A in every frame, and no other row lights.
+  const after = frameAfterWall(r, release.wall)
+  const changed = r.frames.filter((f) => f.i >= after && (!lit(a)(f) || [b, c].some((id) => lit(id)(f)))).length
+  note('FL-26', '⌃Tab → highlight on the previous tab (the sidebar row; no list yet)', first.ms, '1 frame (16.7 ms)')
+  note('FL-26', 'frames from ⌃Tab to the highlight', first.frames, '1', 'frames')
+  note('FL-26', 'second Tab → highlight on the next', second.ms, '1 frame (16.7 ms)')
+  note('FL-26', 'frames from the second Tab to the highlight', second.frames, '1', 'frames')
+  note(
+    'FL-26',
+    '⌃Tab → its page shown',
+    pageB === undefined ? undefined : pageB - (tabs[0]?.wall ?? 0),
+    'on release (TB-05)',
+  )
+  note(
+    'FL-26',
+    'second Tab → its page shown',
+    pageA === undefined ? undefined : pageA - (tabs[1]?.wall ?? 0),
+    'on release (TB-05)',
+  )
+  note('FL-26', 'letting go → frames that change the highlight', changed, '0', 'frames')
+  expect(first.frames, 'the first Tab moved the highlight').toBeDefined()
+  expect(second.frames, 'the second Tab moved the highlight').toBeDefined()
+  expect(first.ms ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(100 * FRAME_SLACK)
+  expect(second.ms ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(100 * FRAME_SLACK)
+  expect(changed, 'letting go changes no highlight').toBe(0)
+  expect(await activeId(app)).toBe(a)
+})
