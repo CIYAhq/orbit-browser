@@ -27,6 +27,11 @@ export interface TweakEditorState {
 export interface TweakHideState {
   /** The mode is on: what is under the pointer in the page is outlined, and a click picks it. */
   on: boolean
+  /**
+   * The mode was asked for while the page is still loading: it starts when the load ends (D89), and
+   * the page acts as usual until then. Done, Esc or another document cancels it.
+   */
+  starting: boolean
   /** The element the user clicked, waiting for "Hide this" or "Hide all similar"; null while none is. */
   pick: TweakHidePick | null
 }
@@ -48,7 +53,7 @@ export interface TweakHidePick {
 /** Which of a pick's selectors (BO-10): the element alone, or a level of "similar" (an index into `similar`). */
 export type TweakHideChoice = 'this' | number
 
-export const HIDE_OFF: TweakHideState = { on: false, pick: null }
+export const HIDE_OFF: TweakHideState = { on: false, starting: false, pick: null }
 
 /**
  * The editor panel's view (BO-02): the panel at the top-right corner of the page it edits, plus a

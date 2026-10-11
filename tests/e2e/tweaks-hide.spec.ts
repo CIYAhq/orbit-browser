@@ -1,6 +1,6 @@
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 import { launchOrbit, type Orbit, run, state } from './helpers'
-import { cmd } from './tabs-support'
+import { cmd, waitTab } from './tabs-support'
 import {
   editorInfo,
   editorPage,
@@ -303,4 +303,110 @@ test('[BO-10] each hidden element has a restore marker in the panel: hovered, th
   await hideMode(view)
   await pick(page, '#promo')
   await expect(view.getByTestId('tweak-hide-label')).toHaveText('Big promo')
+})
+
+/**
+ * Notes, in the panel's page, the frame of each click (in the capture phase, before the panel acts
+ * on it) and the first frame after one whose Hide area shows the mode starting (D89).
+ */
+const watchStarting = (view: Page) =>
+  view.evaluate(() => {
+    const w = window as unknown as { __frame: number; __clickedAt?: number; __startingAt?: number }
+    w.__frame = 0
+    w.__clickedAt = undefined
+    w.__startingAt = undefined
+    const tick = () => {
+      w.__frame++
+      const starting = document.querySelector('[data-testid="tweak-hide"][data-state="starting"]')
+      if (w.__clickedAt !== undefined && w.__startingAt === undefined && starting) w.__startingAt = w.__frame
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+    addEventListener(
+      'click',
+      () => {
+        w.__clickedAt ??= w.__frame
+      },
+      true,
+    )
+  })
+
+/** The frames from the click to the first that showed the mode starting (`watchStarting`). */
+const framesToStarting = (view: Page) =>
+  view.evaluate(() => {
+    const w = window as unknown as { __clickedAt?: number; __startingAt?: number }
+    return w.__clickedAt === undefined || w.__startingAt === undefined ? -1 : w.__startingAt - w.__clickedAt
+  })
+
+test('[BO-10] on a page still loading, a click on the lightning button shows the mode starting at once, the button pressed and the panel saying when, and the mode is on once the load ends; Esc or another document while it starts cancels it, and the picker never goes in', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const { tabId, page } = await openPage(app, '/held/Starting')
+  const { view } = await newTweak(app, tabId)
+  const button = view.getByTestId('tweak-hide-button')
+  const area = view.getByTestId('tweak-hide')
+
+  // A load its image holds until the test lets it end: the page is there, still loading.
+  const holding = async () => {
+    await mark(page)
+    await cmd(app, 'tabs.navigate', { tabId, url: fx.url('/held/Starting?hold=1') })
+    await newDocument(page)
+    expect(await page.evaluate(() => document.readyState)).toBe('interactive')
+    expect((await editorInfo(app)).open).toBe(true)
+  }
+  await holding()
+
+  // A click shows the mode starting within a couple of frames: the button pressed, and the line
+  // saying it starts when the page has loaded.
+  await watchStarting(view)
+  await button.click()
+  await expect(area).toHaveAttribute('data-state', 'starting')
+  // The frame that shows it may not have come yet.
+  await expect.poll(() => framesToStarting(view)).toBeGreaterThanOrEqual(0)
+  const frames = await framesToStarting(view)
+  console.log(`[BO-10] the panel showed the mode starting ${frames} frames after the click`)
+  expect(frames).toBeLessThanOrEqual(4)
+  await expect(button).toHaveAttribute('aria-pressed', 'true')
+  await expect(view.getByTestId('tweak-hide-starting')).toHaveText(
+    'Starts when the page has loaded. Until then, the page acts as usual.',
+  )
+  await expect(view.getByTestId('tweak-hide-hint')).toHaveCount(0)
+  // The load ends: the mode is on, and a click on the page picks.
+  fx.releaseHeld()
+  await expect(area).toHaveAttribute('data-state', 'on')
+  await expect(view.getByTestId('tweak-hide-hint')).toBeVisible()
+  await expect(button).toHaveAttribute('aria-pressed', 'true')
+  expect(await pickerInfo(app, tabId)).not.toBeNull()
+  await pick(page, '#title')
+  await expect(view.getByTestId('tweak-hide-label')).toHaveText('Starting')
+  await view.getByTestId('tweak-hide-done').click()
+  await expect(area).toHaveCount(0)
+
+  // Esc in the panel while the mode starts cancels it: once the load ends, it is still off and the
+  // page has no picker.
+  await holding()
+  await button.click()
+  await expect(area).toHaveAttribute('data-state', 'starting')
+  await view.keyboard.press('Escape')
+  await expect(area).toHaveCount(0)
+  await expect(button).toHaveAttribute('aria-pressed', 'false')
+  expect((await editorInfo(app)).open).toBe(true)
+  fx.releaseHeld()
+  await waitTab(app, tabId, '/held/Starting')
+  expect(await page.evaluate(() => document.readyState)).toBe('complete')
+  expect(await pickerInfo(app, tabId)).toBeNull()
+  await expect(area).toHaveCount(0)
+  await expect(button).toHaveAttribute('aria-pressed', 'false')
+
+  // Another document while it starts ends it too.
+  await holding()
+  await button.click()
+  await expect(area).toHaveAttribute('data-state', 'starting')
+  await mark(page)
+  await cmd(app, 'tabs.navigate', { tabId, url: fx.url('/held/Starting-next') })
+  await newDocument(page)
+  await expect(area).toHaveCount(0)
+  await expect(button).toHaveAttribute('aria-pressed', 'false')
+  await waitTab(app, tabId, '/held/Starting-next')
+  expect(await pickerInfo(app, tabId)).toBeNull()
 })

@@ -21,6 +21,8 @@ export interface TweakFixtures {
   slowHome: (ms: number) => void
   /** From now on the home page (`/`) drops the connection unanswered, as a site that doesn't load does (false: answers). */
   dropHome: (drop: boolean) => void
+  /** Sends the images a `/held/…?hold=1` page waits for: its load ends then. */
+  releaseHeld: () => void
   close: () => Promise<void>
 }
 
@@ -96,6 +98,8 @@ export async function startTweakFixtures(base = 3370): Promise<TweakFixtures> {
   const loads = new Map<string, number>()
   let homeMs = 0
   let homeDrops = false
+  /** Images held until `releaseHeld()`. */
+  const held = new Set<() => void>()
   const server: Server = createServer((req, res) => {
     const u = new URL(req.url ?? '/', 'http://localhost')
     seen.push(`${req.headers.host ?? ''} ${req.method} ${u.pathname}${u.search}`)
@@ -183,10 +187,11 @@ ${u.searchParams.get('hidden') === '1' ? '<article class="story" hidden><h2>Stor
       const n = loads.get(u.pathname) ?? 0
       loads.set(u.pathname, n + 1)
       const ms = Number(u.searchParams.get('ms') ?? 0)
+      const hold = u.searchParams.get('hold') === '1' ? '&amp;hold=1' : ''
       res.writeHead(200, ok)
       res.end(
         `${head(name, bg)}<body>${FIRST_FRAME}<h1 id="title">${name}</h1>
-<p><img id="held" alt="Held" width="40" height="40" src="/img/held.svg?ms=${ms}&amp;n=${n}"></p>
+<p><img id="held" alt="Held" width="40" height="40" src="/img/held.svg?ms=${ms}&amp;n=${n}${hold}"></p>
 <div style="height:2400px"></div></body></html>`,
       )
       return
@@ -196,6 +201,15 @@ ${u.searchParams.get('hidden') === '1' ? '<article class="story" hidden><h2>Stor
       const send = () => {
         res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'no-store' })
         res.end(PHOTO_SVG)
+      }
+      if (u.searchParams.get('hold') === '1') {
+        const release = () => {
+          held.delete(release)
+          send()
+        }
+        held.add(release)
+        res.on('close', () => held.delete(release))
+        return
       }
       if (ms <= 0) {
         send()
@@ -235,6 +249,9 @@ ${u.searchParams.get('hidden') === '1' ? '<article class="story" hidden><h2>Stor
     },
     dropHome: (drop) => {
       homeDrops = drop
+    },
+    releaseHeld: () => {
+      for (const release of [...held]) release()
     },
     close: () =>
       new Promise((resolve) => {

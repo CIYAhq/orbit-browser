@@ -6,7 +6,7 @@ import { invoke } from '../api'
 
 const preview = (choice: TweakHideChoice | null) => void invoke('tweaks.hidePreview', { choice })
 
-/** The button that turns Hide-element mode on and off (BO-10). */
+/** The button that turns Hide-element mode on and off (BO-10); pressed too while the mode is starting (D89). */
 export function HideButton({ on }: { on: boolean }) {
   return (
     <button
@@ -28,11 +28,12 @@ export function HideButton({ on }: { on: boolean }) {
  * and a click there picks it without the page acting on it. The panel then offers "Hide this" or
  * "Hide all similar", with a slider from narrow to broad and how many that hides (and how many of
  * those show on the page, where fewer do); outlined in the page as it moves. Done hiding, or Esc,
- * leaves the mode. Each hidden element has a restore marker here:
+ * leaves the mode. On a page still loading, the mode starts when the load ends: the area says so
+ * meanwhile, and Done or Esc cancels it (D89). Each hidden element has a restore marker here:
  * hovered, it shows the element again for a moment; clicked, it brings it back.
  */
 export function HideArea({ tweak, state }: { tweak: Tweak; state: TweakEditorState }) {
-  const { on, pick } = state.hide
+  const { on, starting, pick } = state.hide
   const [breadth, setBreadth] = useState(0)
   // Each pick starts at its narrowest "similar".
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new pick resets it
@@ -42,8 +43,14 @@ export function HideArea({ tweak, state }: { tweak: Tweak; state: TweakEditorSta
 
   return (
     <>
-      {on && (
-        <div className="tweak-hide" data-testid="tweak-hide" role="group" aria-label="Hide elements">
+      {(on || starting) && (
+        <div
+          className="tweak-hide"
+          data-testid="tweak-hide"
+          data-state={on ? 'on' : 'starting'}
+          role="group"
+          aria-label="Hide elements"
+        >
           {pick ? (
             <>
               <div className="tweak-hide__what" data-testid="tweak-hide-label" title={pick.label}>
@@ -105,9 +112,13 @@ export function HideArea({ tweak, state }: { tweak: Tweak; state: TweakEditorSta
                 </label>
               )}
             </>
-          ) : (
+          ) : on ? (
             <p className="tweak-hide__hint" data-testid="tweak-hide-hint">
               Click what to hide on the page. Its links and buttons don’t act until you’re done.
+            </p>
+          ) : (
+            <p className="tweak-hide__hint" data-testid="tweak-hide-starting">
+              Starts when the page has loaded. Until then, the page acts as usual.
             </p>
           )}
           <div className="tweak-hide__bar">

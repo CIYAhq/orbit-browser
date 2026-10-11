@@ -85,7 +85,7 @@ function TweakPanel({ state, tweak, intro }: { state: TweakEditorState; tweak: T
   }, [intro])
 
   // Esc anywhere in the panel steps back (BO-02, BO-10): a pick in Hide-element mode, then the
-  // mode, then the panel; unless a field used it (a rename it cancels, say).
+  // mode (or its start, D89), then the panel; unless a field used it (a rename it cancels, say).
   const hide = useRef(state.hide)
   hide.current = state.hide
   useEffect(() => {
@@ -93,7 +93,7 @@ function TweakPanel({ state, tweak, intro }: { state: TweakEditorState; tweak: T
       if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return
       e.preventDefault()
       if (hide.current.pick) void invoke('tweaks.hideCancel', {})
-      else if (hide.current.on) void invoke('tweaks.hideMode', { on: false })
+      else if (hide.current.on || hide.current.starting) void invoke('tweaks.hideMode', { on: false })
       else closeEditor()
     }
     window.addEventListener('keydown', onKey)
@@ -213,7 +213,7 @@ function Controls({
         <CaseControl tweak={tweak} />
       </Row>
       <div className="tweak-tools">
-        <HideButton on={state.hide.on} />
+        <HideButton on={state.hide.on || state.hide.starting} />
         <button
           type="button"
           className="tweak-color__tool tweak-tools__button"

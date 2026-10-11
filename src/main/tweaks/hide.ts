@@ -10,10 +10,13 @@ import { TWEAK_WORLD, type TweakPages } from './pages'
  * The picker (BO-10). It runs in the page's isolated world TWEAK_WORLD, never the page's own world,
  * so the page can't call it or read its state. It covers the page with a layer of its own: an
  * element under the page's root, which the page sees as an empty `<div>`, whose closed shadow root
- * draws the outlines. While the mode is on, its listeners on the window, first in the capture phase,
- * take every press and click (and the menu key's), so the page's links and buttons don't act, even
- * where the page covers or moves the layer. If the page takes the layer out, the picker puts it back;
- * if the page keeps taking it out, the mode ends, and main and the panel hear so.
+ * draws the outlines. While the mode is on, its listeners on the window, first in the capture phase
+ * except the page's own listeners on its window, take every press and click (and the menu key's), so
+ * the page's links and buttons don't act, even where the page covers or moves the layer. A capture
+ * listener the page added on its window before the mode started still hears them first; even so,
+ * their default actions are stopped, and nothing from the document inward hears them. If the page
+ * takes the layer out, the picker puts it back; if the page keeps taking it out, the mode ends, and
+ * main and the panel hear so.
  * It outlines what is under the pointer, and on a click describes that element: a selector for it
  * alone, and selectors for it and elements like it, narrow to broad, each with how many it matches
  * and how many of those have a box to outline. Main reads what happens with `__orbitHide.next()`; it
@@ -300,8 +303,10 @@ interface Session {
   tweakId: string
   contents: WebContents
   pick: TweakHidePick | null
+  /** The picker was sent to the page (at once, or once its load ended: D89). */
+  sent: boolean
   ended: boolean
-  /** Ends the wait for the page's next event, and stops watching the page. */
+  /** Ends the wait for the page's load or its next event, and stops watching the page. */
   release: () => void
 }
 
@@ -342,7 +347,8 @@ const hiddenId = () => `h-${Date.now().toString(36)}${(++hiddenCount).toString(3
 /**
  * Hide-element mode (BO-10): main puts the picker in the editor's page, reads what the user picks
  * there, shows it in the panel, and saves what the user hides as plain CSS selectors in the Tweak
- * (its sheet hides them, before first paint on every later load). The mode ends with Done or Esc,
+ * (its sheet hides them, before first paint on every later load). On a page still loading, the mode
+ * starts when the load ends, and the panel says so at once (D89). The mode ends with Done or Esc,
  * when the panel leaves the page, and when the page loads another document.
  */
 export function registerTweakHide(ctx: MainContext, editor: TweakEditor, pages: TweakPages): TweakHide {
@@ -353,7 +359,7 @@ export function registerTweakHide(ctx: MainContext, editor: TweakEditor, pages: 
     contents.executeJavaScriptInIsolatedWorld(TWEAK_WORLD, [{ code }])
 
   const show = (s: Session) => {
-    const state: TweakHideState = { on: true, pick: s.pick }
+    const state: TweakHideState = { on: true, starting: false, pick: s.pick }
     editor.setHide(s.windowId, state)
   }
 
@@ -363,7 +369,9 @@ export function registerTweakHide(ctx: MainContext, editor: TweakEditor, pages: 
     sessions.delete(windowId)
     s.ended = true
     s.release()
-    if (!s.contents.isDestroyed()) run(s.contents, 'window.__orbitHide && window.__orbitHide.stop()').catch(() => {})
+    if (s.sent && !s.contents.isDestroyed()) {
+      run(s.contents, 'window.__orbitHide && window.__orbitHide.stop()').catch(() => {})
+    }
     pages.setShowHidden(s.tabId, undefined)
     editor.setHide(windowId, HIDE_OFF)
   }
@@ -414,6 +422,10 @@ export function registerTweakHide(ctx: MainContext, editor: TweakEditor, pages: 
       if (details.isMainFrame && !details.isSameDocument) end(windowId)
     }
     const onGone = () => end(windowId)
+    let onLoaded = () => {}
+    const loaded = new Promise<void>((resolve) => {
+      onLoaded = resolve
+    })
     contents.on('did-start-navigation', onNavigate)
     contents.on('render-process-gone', onGone)
     contents.once('destroyed', onGone)
@@ -423,15 +435,27 @@ export function registerTweakHide(ctx: MainContext, editor: TweakEditor, pages: 
       tweakId: at.tweakId,
       contents,
       pick: null,
+      sent: false,
       ended: false,
       release: () => {
         contents.off('did-start-navigation', onNavigate)
         contents.off('render-process-gone', onGone)
         contents.off('destroyed', onGone)
+        contents.off('did-stop-loading', onLoaded)
         wake()
       },
     }
     sessions.set(windowId, s)
+    // A page still loading takes the picker only once its load ends: Electron holds main's calls in
+    // an isolated world until then (D89). The panel shows the mode starting meanwhile, the page acting
+    // as usual; Done, Esc or another document cancels it, and the picker never goes in.
+    if (contents.isLoadingMainFrame()) {
+      contents.once('did-stop-loading', onLoaded)
+      editor.setHide(windowId, { on: false, starting: true, pick: null })
+      await Promise.race([loaded, ended])
+      if (s.ended) return false
+    }
+    s.sent = true
     try {
       await run(contents, PICKER)
     } catch {
