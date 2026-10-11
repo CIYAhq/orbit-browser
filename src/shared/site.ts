@@ -199,6 +199,35 @@ export const PAGE_CHANNEL = {
    */
   escape: 'orbit-page:escape',
   /**
+   * send(url): the page's main frame is about to send a form (POST) to `url`, from the Navigation
+   * API's `navigate` event. It may be a large upload, so Orbit's time limit for a server's answer
+   * leaves that navigation alone (NV-13; main side: src/main/pages/screens.ts). Main reads it only
+   * from a tab's or a pop-up's main frame.
+   */
+  formSent: 'orbit-page:form-sent',
+  /**
+   * sendSync(kind, message, value): the page called `alert`, `confirm` or `prompt` (NV-24). Main
+   * shows Orbit's dialog over that page, answers only a tab's or a pop-up's main frame, and replies
+   * when the user does: the page waits meanwhile, as it would for the engine's dialog
+   * (src/main/pages/dialogs.ts).
+   */
+  dialog: 'orbit-page:dialog',
+  /**
+   * sendSync(): the page called `window.print()` (NV-07). Main shows Orbit's print dialog over that
+   * page, for a tab's or a pop-up's main frame only, and replies at once whether the page has one
+   * open now (src/main/pages/print.ts). While it does, the page's `window.close()` and the
+   * navigations it starts wait (src/preload/page.ts).
+   */
+  print: 'orbit-page:print',
+  /** Main → page: the page's print dialog closed (NV-07); what waited on it goes on. */
+  printClosed: 'orbit-page:print-closed',
+  /**
+   * send('move', direction, travel) and send('end', direction, commit): a two-finger swipe over the
+   * page that the page doesn't take (NV-02, src/preload/swipe.ts). Main shows the arrow and goes back
+   * or forward, for a main frame of a page in a window's page card only (src/main/pages/swipe.ts).
+   */
+  swipe: 'orbit-page:swipe',
+  /**
    * send(count): how many of the page's shared-screen tracks are live, on each change (D69; MD-11,
    * TB-15; main side: src/main/media/index.ts). Read only from a tab's main frame, clamped, and
    * only for that tab's sharing indicators.

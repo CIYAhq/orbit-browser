@@ -5,6 +5,7 @@ import type { TabId, WindowId } from '../../shared/state'
 import { cleanUrl, markdownLink } from '../../shared/tabs'
 import { fallbackTitle } from '../../shared/url'
 import { runDevtoolsAction } from '../devtools/control'
+import { printPage, savePage, viewSource } from '../pages/entry'
 
 /** Zooms a page one step in (1) or out (-1), or back to 100% (0), and returns its new zoom factor. */
 export type PageZoom = (contents: WebContents, direction: 1 | -1 | 0) => number
@@ -70,8 +71,17 @@ export function runPageAction(id: string, contents: WebContents, toast: (message
       toast(`Zoom ${zoomPercent(factor)}%`)
       return true
     }
+    // Orbit's print dialog over the page (pages lane, NV-07).
     case 'page.print':
-      contents.print()
+      printPage(contents)
+      return true
+    // Its own page, where the save dialog says (pages lane, NV-21).
+    case 'page.save':
+      savePage(contents)
+      return true
+    // Its own page's source, in a new tab (pages lane, DT-04).
+    case 'page.viewSource':
+      viewSource(contents)
       return true
     // DevTools dock inside the page's own view, as for a tab (DT-01).
     case 'devtools.toggle':

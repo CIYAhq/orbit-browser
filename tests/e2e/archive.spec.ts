@@ -16,6 +16,7 @@ import {
   state,
   tabPage,
 } from './helpers'
+import { focusedUrl } from './nav-support'
 import { overlayOf, pressInTab, viewInfo } from './peek-helpers'
 import { activeId, newTab, space, waitTab } from './tabs-support'
 
@@ -137,12 +138,24 @@ test('[AR-02][SB-09] the Library button opens the Library over the page, above t
   await expect(button).toHaveAttribute('aria-pressed', 'false')
   expect((await state(app)).tabs[t]).toBeDefined()
   await expect.poll(async () => (await info(orbit)).visible).toBe(false)
-  const page = await tabPage(app, '/page/Under')
-  await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true)
-  // Esc closes it too…
+  // Where the keys are, as main sees it (the page's own document.hasFocus() stays true while
+  // another view of the window has them).
+  const under = fx.url('/page/Under')
+  await expect.poll(() => focusedUrl(app)).toBe(under)
+  // Esc closes it too, from the Archive and from History, and the page has the keys again (keys
+  // review F11)…
   await openLibrary(orbit)
+  expect(await focusedUrl(app)).toContain('view=library')
   await lib.keyboard.press('Escape')
   await expect.poll(async () => (await info(orbit)).open).toBe(false)
+  await expect.poll(() => focusedUrl(app)).toBe(under)
+  await run(app, 'library.open', { section: 'history' })
+  await expect(lib.getByTestId('library')).toHaveAttribute('data-open', 'true')
+  await expect(lib.getByTestId('library-section')).toHaveAttribute('data-section-id', 'history')
+  await expect.poll(() => focusedUrl(app)).toContain('view=library')
+  await lib.keyboard.press('Escape')
+  await expect.poll(async () => (await info(orbit)).open).toBe(false)
+  await expect.poll(() => focusedUrl(app)).toBe(under)
   // …and the button, pressed again.
   await openLibrary(orbit)
   await button.click()
@@ -671,11 +684,11 @@ test('[AR-07] Delete, from a row’s menu or for a selection, offers Undo in a t
   await expect.poll(() => countOf(lib)).toBe(3)
 })
 
-/** View History (AR-10): ⌘Y on macOS, Ctrl+H elsewhere. */
-const HISTORY_KEY = process.platform === 'darwin' ? 'Meta+Y' : 'Control+H'
+/** The Library's History section (AR-10). ⌘Y / Ctrl+H shows History as a page in a tab (pages-history.spec.ts). */
+const openHistory = () => run(orbit.app, 'library.open', { section: 'history' })
 
-test('[AR-10] ⌘Y / Ctrl+H lists the profile’s visits newest first in the Library, with search; a row opens its page, its menu or × removes it', async () => {
-  const { app, shell } = orbit
+test('[AR-10] the Library’s History section lists the profile’s visits newest first, with search; a row opens its page, its menu or × removes it', async () => {
+  const { app } = orbit
   const t = await newTab(app, fx.url('/page/HistOne'))
   await waitTab(app, t, '/page/HistOne')
   await (await tabPage(app, '/page/HistOne')).click('#next')
@@ -687,7 +700,7 @@ test('[AR-10] ⌘Y / Ctrl+H lists the profile’s visits newest first in the Lib
       .map((v) => v.title)
       .filter((title) => title.startsWith('Hist'))
   await expect.poll(visited).toEqual(['HistTwo', 'HistOne-next', 'HistOne'])
-  await shell.keyboard.press(HISTORY_KEY)
+  await openHistory()
   const lib = await libraryPage(app)
   await expect(lib.getByTestId('library-section')).toHaveAttribute('data-section-id', 'history')
   await expect.poll(async () => (await info(orbit)).focused).toBe(true)
@@ -709,8 +722,8 @@ test('[AR-10] ⌘Y / Ctrl+H lists the profile’s visits newest first in the Lib
   expect(opened).toBeDefined()
   await expect.poll(() => activeId(app)).toBe(opened)
   await waitTab(app, opened as string, '/page/HistOne-next')
-  // From the command bar, with the search cleared. The row menu removes a page from history.
-  await openViaCommandBar(orbit, 'View History')
+  // Opened again, with the search cleared. The row menu removes a page from history.
+  await openHistory()
   await expect(lib.getByTestId('history-search')).toHaveValue('')
   const row = (title: string) => lib.getByTestId('history-row').filter({ hasText: title })
   await row('HistTwo').click({ button: 'right' })
@@ -730,7 +743,7 @@ test('[AR-10] ⌘Y / Ctrl+H lists the profile’s visits newest first in the Lib
   const w = (await run(app, 'spaces.create', { name: 'Workspace', profileId: work, activate: false })) as string
   await run(app, 'spaces.switch', { spaceId: w })
   await expect.poll(async () => (await info(orbit)).open).toBe(false)
-  await shell.keyboard.press(HISTORY_KEY)
+  await openHistory()
   await expect(lib.getByTestId('history-empty')).toContainText('No history yet')
   await expect(lib.getByTestId('history-row')).toHaveCount(0)
 })

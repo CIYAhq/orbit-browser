@@ -149,7 +149,12 @@ export function registerSpaces(ctx: MainContext): void {
 
   let lastDeleted: { deleted: DeletedSpace; histories: Map<TabId, SavedHistory> } | undefined
 
-  commands.register('spaces.delete', ({ spaceId }, c) => {
+  commands.register('spaces.delete', async ({ spaceId }, c) => {
+    const asked = store.state.spaces[spaceId]
+    if (!asked || store.state.spaceOrder.length <= 1) return false
+    // Each page that warns before it goes asks first, over itself (NV-24): Cancel keeps the Space.
+    const pages = [...asked.pinned, ...asked.today].flatMap((id) => tabsInItem(store.state, id))
+    if (ctx.tabs.letGo && !(await ctx.tabs.letGo(pages))) return false
     const state = store.state
     const space = state.spaces[spaceId]
     if (!space || state.spaceOrder.length <= 1) return false

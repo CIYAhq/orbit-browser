@@ -1,0 +1,62 @@
+/* The arrow a two-finger swipe over a page slides in (NV-02): a small transparent view main moves
+   with the fingers and cuts at the page's edge, so the arrow keeps to the side it comes from. */
+html[data-view="swipe"] body {
+  background: transparent;
+  overflow: hidden;
+}
+
+.swipe-arrow {
+  position: fixed;
+  top: 0;
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.swipe-arrow.is-back {
+  right: 0;
+}
+
+.swipe-arrow.is-forward {
+  left: 0;
+}
+
+.swipe-arrow__circle {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  color: var(--text, #222);
+  background: var(--surface, #fff);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
+  transition:
+    background-color var(--motion-quick) var(--ease-quick),
+    color var(--motion-quick) var(--ease-quick),
+    transform var(--motion-quick) var(--ease-quick);
+}
+
+/* Fully in: letting go goes. */
+.swipe-arrow.is-armed .swipe-arrow__circle {
+  color: #fff;
+  background: var(--accent, #6b7cff);
+  transform: scale(1.08);
+}
+
+/* The swipe ended: the arrow fades (main takes the view away after HISTORY_SWIPE.fadeMs). */
+.swipe-arrow.is-done {
+  opacity: 0;
+  transition: opacity var(--motion-quick) var(--ease-quick);
+}
+
+/* Reduced motion (FL-28): the OS setting or Orbit's own, as the root's class (motion/reduced.ts). */
+.reduce-motion .swipe-arrow__circle,
+.reduce-motion .swipe-arrow.is-done {
+  transition: none;
+}
+
+.reduce-motion .swipe-arrow.is-armed .swipe-arrow__circle {
+  transform: none;
+}

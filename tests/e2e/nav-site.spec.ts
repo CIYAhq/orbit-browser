@@ -651,6 +651,46 @@ test('[NV-15] the window’s first prompt over a page leaves the keyboard with t
   expect(await focusedUrl(app)).toBe(page('Typing'))
 })
 
+test('[NV-15] a prompt whose view crashed leaves the window, and the keyboard with the page, until its page is back; then it shows again (chrome fix check 4, N4)', async () => {
+  const { app } = orbit
+  const { id, p } = await open(app, page('Crashy'))
+  await action(app, 'sidebar.toggle')
+  await expect.poll(async () => (await windowState(app)).sidebar.visible).toBe(false)
+  await settledPage(app, id)
+  await ask(p, 'notifications')
+  await expect.poll(async () => (await promptView(app)).placed).toBe(true)
+  await expect((await promptPage(app)).getByTestId('permission-prompt')).toContainText('Show notifications')
+  // The prompt has the keyboard; its page crashes.
+  const after = await app.evaluate(async ({ webContents }) => {
+    const nav = (globalThis as unknown as { __orbitNav: { prompt: () => { placed: boolean } } }).__orbitNav
+    const contents = webContents.getAllWebContents().find((c) => c.getURL().includes('view=prompt'))
+    if (!contents) throw new Error('no prompt view')
+    contents.focus()
+    const gone = new Promise<boolean>((resolve) =>
+      contents.once('render-process-gone', () => resolve(nav.prompt().placed)),
+    )
+    contents.forcefullyCrashRenderer()
+    return { placed: await gone }
+  })
+  // Right after: out of the window, and the page has the keyboard.
+  expect(after).toEqual({ placed: false })
+  await expect.poll(() => focusedUrl(app)).toBe(page('Crashy'))
+  // Back once its page has loaded again, still asking (read from its new page: the test's handle on
+  // the old one went with the crash).
+  await expect.poll(async () => (await promptView(app)).placed, { timeout: 15_000 }).toBe(true)
+  await expect
+    .poll(() =>
+      app.evaluate(({ webContents }) =>
+        webContents
+          .getAllWebContents()
+          .find((c) => c.getURL().includes('view=prompt'))
+          ?.executeJavaScript(`document.querySelector('[data-testid="permission-prompt"]')?.textContent ?? ''`),
+      ),
+    )
+    .toContain('Show notifications')
+  expect(await answerOf(p, 'notifications')).toBeNull()
+})
+
 test('[NV-15] a prompt takes no clicks as it shows, nor while they keep coming; a click after a pause answers', async () => {
   const { app } = orbit
   const { id, p } = await open(app, page('Quick'))

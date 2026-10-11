@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { expect, type Page, test } from '@playwright/test'
+import { FOCUS_IS_EDITABLE } from '../../src/main/nav/focus'
 import { switcherOf } from '../../src/shared/tab-switcher'
 import { action, isMac, launchOrbit, MOD, type Orbit, run, state, tabPage, viewPage } from './helpers'
 import {
@@ -435,6 +436,50 @@ test('[KS-16][NV-01] in a page text field, ⌘[ / Alt+← goes back only when th
   await b.focus('#box')
   await pressInPage(app, '/page/FieldB', key, [...mods])
   await expect.poll(async () => (await state(app)).tabs[id]?.url).toBe(fx.url('/page/FieldA'))
+})
+
+test('[KS-16][NV-01] a web component’s text field counts as one: ⌘[ / Alt+← there goes back only when the page leaves the key alone, and ⌘← / ⌘→ stay its own (keys fix check K1)', async () => {
+  const { app } = orbit
+  const [key, mods] = isMac ? (['[', ['meta']] as const) : (['Left', ['alt']] as const)
+  const id = await openTab(app, fx.url('/page/ShadowA'))
+  await visit(app, id, fx.url('/page/ShadowB'))
+  await visit(app, id, fx.url('/page/ShadowC'))
+  const c = await tabPage(app, '/page/ShadowC')
+  // A field inside a web component (an open shadow root), whose editor outdents with the key.
+  await c.evaluate(() => {
+    customElements.define(
+      'x-editor',
+      class extends HTMLElement {
+        constructor() {
+          super()
+          const field = document.createElement('input')
+          field.id = 'inner'
+          this.attachShadow({ mode: 'open' }).append(field)
+        }
+      },
+    )
+    const editor = document.createElement('x-editor')
+    document.body.append(editor)
+    addEventListener('keydown', (e) => {
+      const inField = editor.shadowRoot?.activeElement?.id === 'inner'
+      if (inField && (e.code === 'BracketLeft' || e.code === 'ArrowLeft')) e.preventDefault()
+    })
+  })
+  await c.locator('#inner').focus()
+  await focusKnown('/page/ShadowC', 'main', 'field')
+  // What ⌘← / ⌘→ ask before they go back or forward (macOS): a text field, so they don't.
+  expect(await c.evaluate(FOCUS_IS_EDITABLE)).toBe(true)
+  await pressInPage(app, '/page/ShadowC', key, [...mods])
+  await expect
+    .poll(() => c.evaluate(() => (window as unknown as { __keys: string[] }).__keys))
+    .toContain(isMac ? '[' : 'ArrowLeft')
+  // Outside the field the key is Orbit's: one page back. Had the first press gone back too, this
+  // would land on A.
+  await c.locator('#inner').blur()
+  await focusKnown('/page/ShadowC', 'main', 'page')
+  expect(await c.evaluate(FOCUS_IS_EDITABLE)).toBe(false)
+  await pressInPage(app, '/page/ShadowC', key, [...mods])
+  await expect.poll(async () => (await state(app)).tabs[id]?.url).toBe(fx.url('/page/ShadowB'))
 })
 
 test('[KS-02][KS-16] while a page is on its way, Orbit takes its keys at once: ⌘S / Ctrl+S toggles the sidebar, and ⌘[ / Alt+← in a text field goes back', async () => {
@@ -1452,11 +1497,15 @@ test('[KS-20][KS-10][OB-12] in a Mini Window keys act on its page: ⌘L edits it
   expect(await typeAnywhere(['z'])).toEqual([fx.url(path)])
   const inMini = await tabPage(app, path)
   await expect.poll(() => inMini.evaluate(() => (window as unknown as { __keys: string[] }).__keys)).toContain('z')
-  // ⌘Y / Ctrl+H shows History in the browser window behind.
+  // ⌘Y / Ctrl+H shows History in a tab of the browser window behind (AR-10).
   await pressInPage(app, path, isMac ? 'Y' : 'H', PRIMARY_MOD)
-  await expect.poll(() => cmdIn(app, main.id, 'library.status')).toMatchObject({ open: true, section: 'history' })
-  await cmdIn(app, main.id, 'library.close')
-  await expect.poll(() => cmdIn(app, main.id, 'library.status')).toMatchObject({ open: false })
+  await expect
+    .poll(async () => {
+      const now = await state(app)
+      const w = now.windows[main.id]
+      return w ? now.tabs[w.activeTab[w.spaceId] ?? '']?.url : undefined
+    })
+    .toBe('orbit://history/')
   // Help → Keyboard Shortcuts asked with the Mini Window in front opens over the browser window.
   await actionIn(mini.id, 'help.shortcuts')
   await expect
@@ -1477,8 +1526,8 @@ test('[KS-20][KS-06] in full screen with the sidebar hidden, ⌘1–9 and ⌘⌥
   const b = await openTab(app, fx.url('/page/FsSecond'))
   const a = await openTab(app, fx.url('/page/FsFirst'))
   expect((await state(app)).spaces[spaceId]?.today).toEqual([a, b, c])
+  // Full screen hides the sidebar by itself (NV-20).
   await setNativeFullScreen(app, true)
-  await action(app, 'sidebar.toggle')
   await expect.poll(async () => (await windowState(app)).sidebar.visible).toBe(false)
   await selectPage(a, fx.url('/page/FsFirst'))
   const mod: Mod = isMac ? 'meta' : 'control'

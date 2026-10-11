@@ -4,9 +4,9 @@ import { bindingProblem, canonicalAccelerator, type KeyInput } from '../../src/s
 
 /**
  * The default keymap against the shortcut tables of the spec (KS-03 audit): every row Orbit binds,
- * on macOS and on Windows/Linux. Rows for features no lane has built yet (top toolbar, save page,
- * full screen keys, reader mode, developer mode, notes, canvases, extensions) are left out; so are
- * keys that belong to an open overlay (KS-04's Esc, Tab, arrows).
+ * on macOS and on Windows/Linux. Rows for features no lane has built yet (top toolbar, reader mode,
+ * developer mode, notes, canvases, extensions) are left out; so are keys that belong to an open
+ * overlay (KS-04's Esc, Tab, arrows).
  */
 const TABLE: [id: string, mac: string[], other: string[]][] = [
   // KS-04
@@ -70,7 +70,11 @@ const TABLE: [id: string, mac: string[], other: string[]][] = [
   ['page.zoomOut', ['Cmd+-'], ['Ctrl+-']],
   ['page.zoomReset', ['Cmd+0'], ['Ctrl+0']],
   ['page.print', ['Cmd+P'], ['Ctrl+P']],
+  ['page.save', ['Cmd+Shift+S'], ['Ctrl+Shift+S']],
   ['page.viewSource', ['Cmd+Alt+U'], ['Ctrl+U']],
+  // fn+F is the system's own key on macOS; Esc leaving full screen is no binding (NV-20).
+  ['window.toggleFullScreen', ['Cmd+Ctrl+F'], ['F11', 'Alt+Shift+F']],
+  ['window.exitFullScreen', [], []],
   ['site.controls', [], []],
   // KS-09
   ['split.add', ['Ctrl+Shift+='], ['Ctrl+Shift+=']],

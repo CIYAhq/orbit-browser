@@ -26,6 +26,7 @@ import { engineForWindow, parseInput } from '../../shared/url'
 import type { MainContext } from '../context'
 import { KEEP_KEYBOARD } from '../keys/focus'
 import { TAB_MENU_KEYS, withKeyHints } from '../keys/menu-hints'
+import { printPage, savePage, viewSource } from '../pages/entry'
 import type { CallContext } from '../registry'
 import { registerSpaceOrderUndo } from '../spaces/order-undo'
 import { tabSplitMenuItems } from '../split/menu'
@@ -750,17 +751,12 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
       const contents = tabs.contents(tabId)
       if (contents) fn(contents)
     })
-  actions.register(
-    'page.print',
-    onContents((w) => w.print()),
-  )
-  actions.register(
-    'page.viewSource',
-    withActive((tabId, windowId) => {
-      const url = store.state.tabs[tabId]?.url
-      if (url) ops.createTab({ url: `view-source:${url}`, windowId })
-    }),
-  )
+  // Orbit's print dialog over the page (pages lane, NV-07).
+  actions.register('page.print', onContents(printPage))
+  // The OS save dialog, then the page saved there (pages lane, NV-21).
+  actions.register('page.save', onContents(savePage))
+  // The page's source in a new tab (pages lane, DT-04).
+  actions.register('page.viewSource', onContents(viewSource))
   // DevTools keys (devtools.*) are registered by src/main/devtools.
 
   // Favicons in state are small data URLs on tabs only (lane review MF-2, F13): remote URLs (which
