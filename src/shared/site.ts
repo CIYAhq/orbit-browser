@@ -204,7 +204,19 @@ export const PAGE_CHANNEL = {
    * only for that tab's sharing indicators.
    */
   screenShare: 'orbit-page:screen-share',
+  /**
+   * sendSync(): the stylesheets of the Tweaks for this page (BO-18; D40), as CSS texts, inserted
+   * before first paint. Main answers only a main frame showing a website, from the frame's own URL
+   * (src/main/tweaks/pages.ts); the message carries nothing.
+   */
+  tweakSheets: 'orbit-page:tweak-sheets',
 } as const
+
+/**
+ * The media list of the Tweak stylesheets the page preload inserts (BO-18): all media, plus a media
+ * type nothing else uses, by which main finds those sheets to take them out (src/main/tweaks/pages.ts).
+ */
+export const TWEAK_SHEET_MEDIA = 'all, orbit-tweaks'
 
 /** A tab comes forward for its notifications' clicks at most this often (a flood can't stall the shell). */
 export const NOTIFICATION_CLICK_GAP_MS = 500

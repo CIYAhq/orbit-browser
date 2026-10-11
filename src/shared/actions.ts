@@ -15,6 +15,7 @@
 import { IMPORT_ACTIONS } from './commands/import'
 import type { ShortcutPriority } from './commands/keys'
 import { SETTINGS_ACTIONS, SETTINGS_LANE_ACTIONS } from './commands/settings'
+import { TWEAK_ACTIONS } from './commands/tweaks'
 import {
   acceleratorFromInput,
   type CustomBindings,
@@ -557,6 +558,8 @@ export const ACTIONS: ActionDef[] = [
   ...SETTINGS_ACTIONS,
   ...SETTINGS_LANE_ACTIONS,
   ...IMPORT_ACTIONS,
+  // Tweaks (BO-21): none bound by default
+  ...TWEAK_ACTIONS,
 ]
 
 export const ACTIONS_BY_ID: Record<string, ActionDef> = Object.fromEntries(ACTIONS.map((a) => [a.id, a]))

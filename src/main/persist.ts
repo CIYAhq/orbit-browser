@@ -18,6 +18,7 @@ import { withoutPrivate } from '../shared/private'
 import type { ItemId, OrbitState, ProfileId, SpaceId, SplitLayout, TabId } from '../shared/state'
 import { STATE_SCHEMA } from '../shared/state'
 import { normalizeSpaceTheme } from '../shared/theme'
+import { normalizeTweakSettings, normalizeTweaks } from '../shared/tweaks'
 import { fallbackTitle } from '../shared/url'
 import { normalizeKeySettings } from './keys/bindings'
 import { normalizeSettingsPrefs } from './settings/normalize'
@@ -103,10 +104,11 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
     archive: Array.isArray(input.archive) ? input.archive.filter(isRecord) : [],
     settings: { ...DEFAULT_SETTINGS, ...(isRecord(input.settings) ? input.settings : {}) },
     downloads: record(input.downloads),
-    tweaks: record(input.tweaks),
+    tweaks: normalizeTweaks(input.tweaks),
   }
   if (!['system', 'light', 'dark'].includes(state.settings.appearance)) state.settings.appearance = 'system'
   normalizeMediaSettings(state.settings, Date.now())
+  normalizeTweakSettings(state.settings)
   seedAppearanceFromOldThemes(state)
   normalizeEntities(state, base)
   // Site searches (CB-11): keep well-formed http(s) entries; a missing list gets the defaults.

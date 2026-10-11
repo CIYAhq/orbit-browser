@@ -42,6 +42,35 @@ const screenShared = (count: number) => {
 }
 
 /**
+ * Tweaks (BO-18, D40): the stylesheets of the site's Tweaks go into the page before its first paint.
+ * Main answers from the frame's own URL, for a website's main frame only. The sheets are adopted
+ * from this world, so nothing is added to the page's globals, and they carry a media type of their
+ * own, by which main takes them out once its own copies are in (src/main/tweaks/pages.ts). A PDF
+ * shows in the engine's viewer, which no Tweak changes (BO-01).
+ */
+function applyTweakSheets(): void {
+  if (window.top !== window || !/^https?:$/.test(location.protocol) || document.contentType === 'application/pdf') return
+  let sheets: unknown
+  try {
+    sheets = ipcRenderer.sendSync(PAGE_CHANNEL.tweakSheets)
+  } catch {
+    return
+  }
+  if (!Array.isArray(sheets) || sheets.length === 0) return
+  const adopted: CSSStyleSheet[] = []
+  for (const css of sheets) {
+    if (typeof css !== 'string') continue
+    // TWEAK_SHEET_MEDIA (src/shared/site.ts)
+    const sheet = new CSSStyleSheet({ media: 'all, orbit-tweaks' })
+    sheet.replaceSync(css)
+    adopted.push(sheet)
+  }
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, ...adopted]
+}
+
+applyTweakSheets()
+
+/**
  * Runs in the page's own world before its scripts (serialized: it may use only its arguments and
  * the page's globals). Built-ins are taken up front, so a page that replaces them later can't reach
  * Orbit's functions through them.
