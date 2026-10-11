@@ -9,8 +9,9 @@ import { clearSelection, useDrag } from '../sidebar/ui-state'
 import { focusedPaneOf, lastFocusedPane, paneOrderKey } from './selectors'
 
 /**
- * A Favorite that is a split view (SV-23): one tile with the panes' favicons side by side,
- * behaving like the Favorites grid's tab tiles (press selects, drags like a tile, pops in).
+ * A Favorite that is a split view (SV-23): one tile with the panes' favicons side by side (or
+ * its icon, SV-21), behaving like the Favorites grid's tab tiles (press selects, drags like a
+ * tile, pops in).
  * Pressing it shows the split with the pane focused last.
  */
 export const SplitFavoriteTile = memo(function SplitFavoriteTile({ splitId }: { splitId: string }) {
@@ -27,6 +28,7 @@ export const SplitFavoriteTile = memo(function SplitFavoriteTile({ splitId }: { 
         .join(' | ')
     )
   })
+  const icon = useOrbit((s) => s.splits[splitId]?.icon ?? '')
   const hidden = useDrag((s) => !!s.hidden[splitId])
   // Tiles that arrive by drag appear at once under the ghost; others pop in (FL-20).
   const [instant] = useState(() => hidden)
@@ -62,11 +64,18 @@ export const SplitFavoriteTile = memo(function SplitFavoriteTile({ splitId }: { 
         void invoke('split.contextMenu', { splitId })
       }}
     >
-      <span className="split-favorite__icons">
-        {panes.map((id) => (
-          <TileIcon key={id} tabId={id} />
-        ))}
-      </span>
+      {icon ? (
+        // Its icon replaces the panes' favicons (SV-21, TB-12).
+        <span className="favorite__emoji" data-testid="split-icon">
+          {icon}
+        </span>
+      ) : (
+        <span className="split-favorite__icons">
+          {panes.map((id) => (
+            <TileIcon key={id} tabId={id} />
+          ))}
+        </span>
+      )}
     </motion.button>
   )
 })

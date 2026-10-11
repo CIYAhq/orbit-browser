@@ -163,6 +163,84 @@ describe('ranking', () => {
     expect(r.results[0]?.splitFavicons).toHaveLength(2)
   })
 
+  it("[SV-21][CB-06] an open split is one result with every pane's favicon, for its best-matching pane", () => {
+    const split = {
+      splitId: 'v-1',
+      splitTitle: 'Mail | Docs',
+      splitFavicons: ['https://mail.example/f.ico', 'https://docs.example/f.ico'],
+    }
+    const tabs = [
+      tab('t-1', 'Mail', 'https://mail.example/', { ...split, lastActiveAt: NOW - 1_000 }),
+      tab('t-2', 'Docs', 'https://docs.example/', { ...split, lastActiveAt: NOW - 2_000 }),
+      tab('t-3', 'Docs elsewhere', 'https://docs.example/other'),
+    ]
+    // Both panes match: one row, labelled as a split, that shows the pane that matched best.
+    const docs = rank(input('docs', { tabs })).results.filter((r) => r.kind === 'tab')
+    expect(docs.map((r) => r.id)).toEqual(['split:v-1', 'tab:t-3'])
+    expect(docs[0]).toMatchObject({ title: 'Mail | Docs', hint: 'Switch to split', label: 'Split', tabId: 't-2' })
+    expect(docs[0]?.splitFavicons).toHaveLength(2)
+    // A title both panes share: the pane used last.
+    const both = rank(input('example', { tabs })).results.filter((r) => r.splitId === 'v-1')
+    expect(both).toHaveLength(1)
+    expect(both[0]?.tabId).toBe('t-1')
+    // The empty state lists it once too.
+    const recent = rank(input('', { tabs, mode: 'search-tabs' })).results
+    expect(recent.map((r) => r.id)).toEqual(['split:v-1', 'tab:t-3'])
+    // While one of its panes is the current tab, the split isn't offered, like the current tab.
+    const inSplit = rank(input('docs', { tabs, activeTabId: 't-1' })).results.filter((r) => r.kind === 'tab')
+    expect(inSplit.map((r) => r.id)).toEqual(['tab:t-3'])
+    // Its pane's exact URL as the top row: still the split, and only once.
+    const typed = rank(input('https://docs.example/', { tabs })).results
+    expect(typed[0]).toMatchObject({ id: 'split:v-1', tabId: 't-2' })
+    expect(typed.filter((r) => r.splitId === 'v-1')).toHaveLength(1)
+  })
+
+  it("[SV-21] a split's pages aren't offered again from history or the Archive", () => {
+    const split = { splitId: 'v-1', splitTitle: 'Mail | Docs', splitFavicons: [null, null] }
+    const tabs = [
+      tab('t-1', 'Mail', 'https://mail.example/', split),
+      tab('t-2', 'Docs', 'https://docs.example/', split),
+      tab('t-3', 'Elsewhere', 'https://else.example/'),
+    ]
+    const h = historyOf([
+      ['https://mail.example/', 'Mail inbox'],
+      ['https://docs.example/', 'Docs'],
+    ])
+    const archive: ArchiveDoc[] = [
+      {
+        id: 'a-1',
+        title: 'Mail',
+        url: 'https://mail.example/',
+        spaceId: 's-a',
+        archivedAt: NOW - 1000,
+        titleLower: 'mail',
+        urlKey: 'mail.example/',
+      },
+    ]
+    const rows = (q: string, activeTabId?: string) =>
+      rank(input(q, { tabs, archive, history: h.entries(), hosts: h.hostList(), activeTabId })).results
+    const pages = (q: string, activeTabId?: string) =>
+      rows(q, activeTabId).filter((r) => r.kind === 'history' || r.kind === 'archived')
+    // Listed as one row: neither pane's page is listed again.
+    expect(rows('example').filter((r) => r.splitId === 'v-1')).toHaveLength(1)
+    expect(pages('example')).toEqual([])
+    // On screen as the current split: neither is offered.
+    expect(pages('example', 't-1')).toEqual([])
+    // A split that isn't listed (no pane matches "inbox") hides nothing.
+    expect(pages('inbox').map((r) => r.url)).toEqual(['https://mail.example/'])
+  })
+
+  it('[SV-21][SV-22] a named split shows and matches its name', () => {
+    const split = { splitId: 'v-2', splitTitle: 'Research', splitNameLower: 'research', splitFavicons: [null, null] }
+    const tabs = [
+      tab('t-1', 'Paper', 'https://papers.example/', split),
+      tab('t-2', 'Notes', 'https://notes.example/', split),
+    ]
+    const r = rank(input('resea', { tabs })).results.filter((x) => x.kind === 'tab')
+    expect(r).toHaveLength(1)
+    expect(r[0]).toMatchObject({ id: 'split:v-2', title: 'Research', hint: 'Switch to split' })
+  })
+
   it('[CB-13] runs actions by name with their shortcut; "pin" puts Pin Tab on top', () => {
     const r = rank(input('pin', { activeTabId: 't-1', tabs: [tab('t-1', 'Current', 'https://cur.example/')] }))
     expect(r.results[0]).toMatchObject({ kind: 'action', actionId: 'tab.togglePin', shortcut: '⌘D' })
@@ -456,6 +534,51 @@ describe('sources', () => {
     } finally {
       releaseImportTabs([unshown, reached])
     }
+  })
+})
+
+describe('sources: splits (SV-21)', () => {
+  it('each pane carries its split, its name or pane titles in reading order, and every favicon', () => {
+    const state = createInitialState(0)
+    const spaceId = state.spaceOrder[0] as string
+    const space = state.spaces[spaceId] as (typeof state.spaces)[string]
+    const add = (url: string, title: string) => {
+      const tab = makeTab({ spaceId, profileId: space.profileId, url }, NOW)
+      tab.title = title
+      tab.favicon = `${url}favicon.ico`
+      state.tabs[tab.id] = tab
+      return tab.id
+    }
+    const a = add('https://a.example/', 'Alpha')
+    const b = add('https://b.example/', 'Bravo')
+    // Bravo is the left pane: titles follow the panes on screen, not the order the tabs were opened.
+    state.splits['v-x'] = {
+      id: 'v-x',
+      layout: {
+        type: 'row',
+        sizes: [0.5, 0.5],
+        children: [
+          { type: 'leaf', tabId: b },
+          { type: 'leaf', tabId: a },
+        ],
+      },
+      createdAt: NOW,
+    }
+    space.today.push('v-x')
+    const cache = new SourceCache()
+    const doc = (id: string) => cache.tabs(state).find((d) => d.id === id)
+    expect(doc(a)).toMatchObject({
+      splitId: 'v-x',
+      splitTitle: 'Bravo | Alpha',
+      splitFavicons: ['https://b.example/favicon.ico', 'https://a.example/favicon.ico'],
+    })
+    expect(doc(a)?.splitNameLower).toBeUndefined()
+    // Renamed: the name, which it also matches on.
+    state.splits = {
+      ...state.splits,
+      'v-x': { ...(state.splits['v-x'] as (typeof state.splits)[string]), name: 'Pair' },
+    }
+    expect(doc(b)).toMatchObject({ splitTitle: 'Pair', splitNameLower: 'pair' })
   })
 })
 

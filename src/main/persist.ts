@@ -316,6 +316,7 @@ function normalizeEntities(state: OrbitState, base: OrbitState): void {
       split.id = id
       split.layout = layout
       split.createdAt = time(split.createdAt)
+      if (typeof split.icon !== 'string' || !split.icon) delete split.icon
     }
   }
   for (const [id, t] of Object.entries(state.tabs)) {

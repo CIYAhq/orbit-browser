@@ -5,19 +5,22 @@ import { sectionOf } from '../../../../shared/tree'
 import { invoke } from '../../api'
 import { getOrbitState, useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
+import { CaptureIndicator } from '../media/CaptureIndicator'
 import { focusedPaneOf, lastFocusedPane, paneOrderKey } from '../split/selectors'
 import { pressItem } from './drag'
 import { clearSelection } from './ui-state'
 
 /**
  * A split view as one sidebar row (SV-21): one favicon + title segment per pane, in reading
- * order. Clicking a segment shows the split with that pane focused; the row's × closes the
- * whole split (SV-19); ⌥/Alt-click separates it (SV-18); right-click opens the split menu (SV-22).
+ * order, or its name and icon when it has them. Clicking a segment shows the split with that pane
+ * focused; the row's × closes the whole split (SV-19); ⌥/Alt-click separates it (SV-18);
+ * right-click opens the split menu (SV-22).
  */
 export function SplitRow({ splitId, depth }: { splitId: string; depth: number }) {
   const order = useOrbit((s) => paneOrderKey(s, splitId))
   const focused = useOrbit((s) => focusedPaneOf(s, splitId))
   const name = useOrbit((s) => s.splits[splitId]?.name ?? '')
+  const icon = useOrbit((s) => s.splits[splitId]?.icon ?? '')
   // Pinned and Favorite splits unload instead of closing (SV-19).
   const closeLabel = useOrbit((s) => (sectionOf(s, splitId) === 'today' ? 'Close split' : 'Unload split'))
   const [renaming, setRenaming] = useState(false)
@@ -72,14 +75,22 @@ export function SplitRow({ splitId, depth }: { splitId: string; depth: number })
     >
       {renaming ? (
         <RenameField initial={name} onDone={commitName} />
-      ) : name ? (
+      ) : name || icon ? (
+        // A name or an icon replaces the segments (SV-21): the icon stands for the panes' favicons.
         <span className="split-row__named" data-testid="split-name">
           <span className="split-row__icons">
-            {panes.map((tabId) => (
-              <PaneIcon key={tabId} tabId={tabId} />
-            ))}
+            {icon ? (
+              <span className="tab-row__emoji" data-testid="split-icon">
+                {icon}
+              </span>
+            ) : (
+              panes.map((tabId) => <PaneIcon key={tabId} tabId={tabId} />)
+            )}
           </span>
-          <span className="split-row__name">{name}</span>
+          <span className="split-row__name">{name || <PaneTitles panes={panes} />}</span>
+          {panes.map((tabId) => (
+            <PaneMedia key={tabId} tabId={tabId} />
+          ))}
         </span>
       ) : (
         <span className="split-row__segments">
@@ -131,6 +142,16 @@ function RenameField({ initial, onDone }: { initial: string; onDone: (value: str
   )
 }
 
+/** The panes' titles in one line, for a split with an icon but no name. */
+function PaneTitles({ panes }: { panes: string[] }) {
+  const titles = useOrbit((s) =>
+    panes
+      .map((id) => (isPendingPane(s, id) ? 'New pane' : (s.tabs[id]?.customTitle ?? s.tabs[id]?.title ?? '')))
+      .join(' | '),
+  )
+  return <>{titles}</>
+}
+
 const PaneIcon = memo(function PaneIcon({ tabId }: { tabId: string }) {
   const favicon = useOrbit((s) => s.tabs[tabId]?.favicon)
   return (
@@ -156,17 +177,31 @@ const Segment = memo(function Segment({ tabId, focused }: { tabId: string; focus
         <Favicon src={tab.favicon} size={14} />
       </span>
       <span className="split-segment__title">{title}</span>
-      {(tab.audible || tab.muted) && (
+      <PaneMedia tabId={tabId} />
+    </span>
+  )
+})
+
+/** A pane's recording and audio indicators (TB-15, MD-11): on its segment, or after the split's name. */
+const PaneMedia = memo(function PaneMedia({ tabId }: { tabId: string }) {
+  const media = useOrbit((s) => s.tabs[tabId]?.media)
+  const audible = useOrbit((s) => !!s.tabs[tabId]?.audible)
+  const muted = useOrbit((s) => !!s.tabs[tabId]?.muted)
+  return (
+    <>
+      <CaptureIndicator media={media} />
+      {(audible || muted) && (
         <button
           type="button"
           className="split-segment__audio"
-          aria-label={tab.muted ? 'Unmute pane' : 'Mute pane'}
+          aria-label={muted ? 'Unmute pane' : 'Mute pane'}
+          data-testid="split-pane-audio"
           onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => void invoke('tabs.setMuted', { tabId, muted: !tab.muted })}
+          onClick={() => void invoke('tabs.setMuted', { tabId, muted: !muted })}
         >
-          {tab.muted ? <VolumeX size={12} /> : <Volume2 size={12} />}
+          {muted ? <VolumeX size={12} /> : <Volume2 size={12} />}
         </button>
       )}
-    </span>
+    </>
   )
 })

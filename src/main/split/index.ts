@@ -567,6 +567,17 @@ export function registerSplit(ctx: MainContext): void {
     })
   })
 
+  commands.register('split.setIcon', ({ splitId, icon }) => {
+    // One emoji (a single grapheme, skin tone and all), as the icon picker gives.
+    const first = icon ? [...new Intl.Segmenter().segment(icon.trim())][0]?.segment : undefined
+    store.update((d) => {
+      const split = d.splits[splitId]
+      if (!split) return
+      if (first) split.icon = first
+      else delete split.icon
+    })
+  })
+
   commands.register('split.addPane', ({ side = 'right' }, c) => addPane(windowOf(c), side))
 
   commands.register('split.move', ({ splitId, to, index }, c) =>
@@ -660,6 +671,11 @@ export function registerSplit(ctx: MainContext): void {
       {
         label: 'Rename…',
         click: () => windowId && windows.sendToWindow(windowId, 'sidebar:rename', { id: splitId }),
+      },
+      // The sidebar's icon picker, as for a tab (TB-12); it can remove the icon too.
+      {
+        label: 'Change Icon…',
+        click: () => windowId && windows.sendToWindow(windowId, 'sidebar:icon', { id: splitId }),
       },
       ...(split.name
         ? [{ label: 'Show Pane Titles', click: () => void commands.run('split.rename', { splitId, name: null }) }]

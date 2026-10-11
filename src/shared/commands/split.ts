@@ -51,6 +51,8 @@ export interface SplitCommands {
   'split.move': { args: { splitId: SplitId; to: ContainerRef; index?: number }; result: boolean }
   /** Names a split (null or blank clears it, showing the pane titles again) (SV-22). */
   'split.rename': { args: { splitId: SplitId; name: string | null }; result: void }
+  /** Gives a split an emoji icon in place of its panes' favicons; null removes it (SV-21, SV-22). */
+  'split.setIcon': { args: { splitId: SplitId; icon: string | null }; result: void }
   /** Right-click menu of a split row (SV-22). */
   'split.contextMenu': { args: { splitId: SplitId }; result: void }
   /** The split-controls menu of a pane (SV-12). */

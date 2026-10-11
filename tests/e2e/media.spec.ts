@@ -1392,6 +1392,26 @@ test('[MD-11][TB-15] in a split, the split row menu mutes one pane on its own: o
   expect(await audioMuted(app, two.id)).toBe(false)
 })
 
+test("[SV-21][TB-15] a pane on a call shows the recording indicator on its own segment, and after the split's name", async () => {
+  orbit = await launchWithFakeDevices()
+  const { app, shell } = orbit
+  await allowCamera(app)
+  const c = await openPlaying(app, '/media/call/Team%20Call', 'in-call')
+  await expect.poll(async () => (await media(app, c.id))?.camera).toBe(true)
+  const notes = await newTab(app, fx.url('/page/Notes/Quiet'))
+  await waitTab(app, notes, '/page/Notes')
+  const splitId = await cmd<string | null>(app, 'split.create', { tabIds: [c.id, notes] })
+  expect(splitId).toBeTruthy()
+  const row = shell.getByTestId('split-row')
+  const segment = (id: string) => row.locator(`[data-testid="split-segment"][data-tab-id="${id}"]`)
+  await expect(segment(c.id).getByTestId('tab-capture')).toBeVisible()
+  await expect(segment(notes).getByTestId('tab-capture')).toHaveCount(0)
+  // A name replaces the segments; the row still says a pane is recording.
+  await cmd(app, 'split.rename', { splitId, name: 'Standup' })
+  await expect(row.getByTestId('split-name')).toContainText('Standup')
+  await expect(row.getByTestId('tab-capture')).toHaveCount(1)
+})
+
 test('[MD-01][MD-16] a video in a split pane floats only when the split is left, from its place in the pane, and goes back into it', async () => {
   orbit = await launchOrbit()
   const { app, shell } = orbit

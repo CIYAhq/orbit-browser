@@ -190,6 +190,13 @@
 }
 
 /* Sharing a screen or window: blue, so it reads apart from the camera and microphone. */
+/* On a split row's pane segment (SV-21), a size smaller to fit its pill. */
+.split-row .capture-indicator {
+  width: 16px;
+  height: 16px;
+  margin: 0 0 0 2px;
+}
+
 .capture-indicator.is-screen {
   background: #2f6fed;
   animation-name: share-pulse;

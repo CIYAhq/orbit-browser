@@ -171,6 +171,8 @@ export interface Split {
   createdAt: number
   /** User-chosen name; when set, the sidebar row shows it instead of the pane titles (SV-21, SV-22). */
   name?: string
+  /** User-chosen emoji that replaces the panes' favicons on its row and Favorites tile (SV-21, SV-22, TB-12). */
+  icon?: string
   /** The pane focused last: selecting the split returns to it (SV-14). */
   focus?: TabId
   /** A pane still waiting for its first page while the command bar is open for it (SV-02). */

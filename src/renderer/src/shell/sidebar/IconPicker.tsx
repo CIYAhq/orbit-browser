@@ -1,6 +1,6 @@
 import { motion } from 'motion/react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { isFolderId } from '../../../../shared/ids'
+import { isFolderId, isSplitId } from '../../../../shared/ids'
 import { invoke } from '../../api'
 import { useIconPicker } from './ui-state'
 
@@ -56,7 +56,7 @@ const EMOJI: [string, string][] = [
   ['🌙', 'moon night'],
 ]
 
-/** Emoji picker for a tab or folder icon (TB-12, FD-07). Removing the icon restores the favicon. */
+/** Emoji picker for a tab, folder or split icon (TB-12, FD-07, SV-22). Removing the icon restores the favicon. */
 export function IconPicker() {
   const id = useIconPicker((s) => s.id)
   const [query, setQuery] = useState('')
@@ -86,6 +86,7 @@ export function IconPicker() {
   if (!id) return null
   const set = (icon: string | null) => {
     if (isFolderId(id)) void invoke('folders.setIcon', { folderId: id, icon })
+    else if (isSplitId(id)) void invoke('split.setIcon', { splitId: id, icon })
     else void invoke('tabs.setIcon', { tabId: id, icon })
     useIconPicker.setState({ id: null })
   }
