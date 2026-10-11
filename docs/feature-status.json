@@ -172,7 +172,7 @@
   "SP-19": {"built": "yes", "note": "OKLab blend driven by the swipe or switch spring, no neutral frame"},
   "SP-20": {"built": "yes", "note": "per-Space pinned and Today containers (tab behaviour in the tabs lane)"},
   "SP-21": {"built": "yes", "note": "drop on a switcher target moves the tab (tabs lane drag); edge dwell slides the strip and measures once it settles"},
-  "SP-22": {"built": "partial", "note": "New Space, Rename Space, Edit Theme, Change Space Icon and Delete Space actions; Move to/Pin to [Space] not yet"},
+  "SP-22": {"built": "partial", "note": "typing a Space's name shows it and Enter switches (CB-05); New Space, Rename Space, Edit Theme, Change Space Icon, Delete Space, Move to / Pin to [Space] (CB-13), Next and Previous Space (found as Select Next / Previous Space too), New Blank Window (TB-17); the bar stays open across a Space switch and its results follow the new Space and profile (CB-19), in the Space's theme (SP-16); Manage Spaces / View Spaces wait for the Spaces overview (SP-13)"},
   "SP-23": {"built": "yes", "note": "each window keeps its own Space; all windows share Spaces"},
   "SP-24": {"built": "yes", "note": "Cmd/Ctrl+N: same Space, sidebar shown, cascaded, command bar open, full screen follows"},
   "SP-26": {"scope": "out", "note": "it needs an online service, so the spec leaves it out of milestone 1 (D41)"},

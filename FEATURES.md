@@ -143,7 +143,7 @@ Spec: `spec/spaces.md`
 | SP-19 | Theme transition between Spaces | P1 | ✅ | ✅ e2e+unit | – | OKLab blend driven by the swipe or switch spring, no neutral frame |
 | SP-20 | Per-Space pinned and Today sections | P0 | ✅ | ✅ e2e | – | per-Space pinned and Today containers (tab behaviour in the tabs lane) |
 | SP-21 | Move tabs between Spaces | P0 | ✅ | ✅ e2e | – | drop on a switcher target moves the tab (tabs lane drag); edge dwell slides the strip and measures once it settles |
-| SP-22 | Spaces in the command bar | P1 | 🟡 partial | ✅ e2e+unit | – | New Space, Rename Space, Edit Theme, Change Space Icon and Delete Space actions; Move to/Pin to [Space] not yet |
+| SP-22 | Spaces in the command bar | P1 | 🟡 partial | ✅ e2e+unit | – | typing a Space's name shows it and Enter switches (CB-05); New Space, Rename Space, Edit Theme, Change Space Icon, Delete Space, Move to / Pin to [Space] (CB-13), Next and Previous Space (found as Select Next / Previous Space too), New Blank Window (TB-17); the bar stays open across a Space switch and its results follow the new Space and profile (CB-19), in the Space's theme (SP-16); Manage Spaces / View Spaces wait for the Spaces overview (SP-13) |
 | SP-23 | Spaces across windows | P0 | ✅ | ✅ e2e+unit | – | each window keeps its own Space; all windows share Spaces |
 | SP-24 | What a new window shows | P0 | ✅ | ✅ e2e | – | Cmd/Ctrl+N: same Space, sidebar shown, cascaded, command bar open, full screen follows |
 | SP-25 | Spaces menu in the app menu | P2 | – | – | – |  |
