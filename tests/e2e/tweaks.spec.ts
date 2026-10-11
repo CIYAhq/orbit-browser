@@ -6,7 +6,7 @@ import { TWEAK_EDITOR } from '../../src/shared/commands/tweaks'
 import { isMac, launchOrbit, MOD, type Orbit, run, state, tabPage, tabView, viewPage } from './helpers'
 import { clickInPage, focusedUrl, pressInPage } from './nav-support'
 import { remoteRequests } from './settings-support'
-import { act, cmd, newTab, tabsHook, waitTab } from './tabs-support'
+import { act, activeId, cmd, newTab, tabsHook, waitTab } from './tabs-support'
 import {
   bgOf,
   edited,
@@ -222,6 +222,72 @@ test('[BO-01][KS-18] an internal page takes no Tweak: the entry points are greye
   await overlay.keyboard.press('Escape')
   // A Tweak made for the site never reaches the internal page (D40).
   expect(await pageTweaks(app, history)).toBeNull()
+})
+
+test('[BO-01][BO-21] a Mini Window’s page takes no Tweak: the Tweak actions there say why in the browser window and make nothing, View Tweaks opens the Library there, and a Tweak’s Edit never takes the Mini Window’s page', async () => {
+  orbit = await launchOrbit()
+  const { app, shell } = orbit
+  // A Tweak for the site, made in the browser window, which then shows another site.
+  const alpha = await openPage(app, '/page/Alpha')
+  await run(app, 'tweaks.dismissIntro', {})
+  const kept = (await run(app, 'tweaks.create', { tabId: alpha.tabId })) as string
+  await waitEditor(app, true)
+  await run(app, 'tweaks.update', { id: kept, patch: { name: 'Kept', css: 'body { background: #202020 }' } })
+  await run(app, 'tweaks.closeEditor', {})
+  await waitEditor(app, false)
+  await openPage(app, '/page/Other', '127.0.0.1')
+
+  // A Mini Window on the site: its page has the Tweak, as every page of the site does.
+  const mini = (await run(app, 'mini.open', { url: fx.url('/page/Mini') })) as string
+  const miniPage = await tabPage(app, '/page/Mini')
+  await expect.poll(() => bgOf(miniPage)).toBe('rgb(32, 32, 32)')
+  const shownInMini = async () => {
+    const s = await state(app)
+    const w = s.windows[mini]
+    return w ? (w.activeTab[w.spaceId] ?? null) : null
+  }
+  const miniTab = (await shownInMini()) as string
+  expect((await state(app)).tabs[miniTab]?.floating).toBe('mini')
+  const actInMini = (id: string) =>
+    app.evaluate(
+      async (_e, [actionId, windowId]) => {
+        const g = globalThis as unknown as { __orbit: { action: (id: string, w?: string) => Promise<void> } }
+        await g.__orbit.action(actionId, windowId)
+      },
+      [id, mini] as const,
+    )
+
+  // New Tweak…, Edit Tweak and the site's switch there (by keys the user gave them): the browser
+  // window says why, as a Mini Window shows no notes; nothing is made or changed, no editor opens.
+  const why = shell.getByTestId('toast').filter({ hasText: 'Move the Mini Window’s page into a Space to tweak it' })
+  // The newest such note (notes count up), 0 for none.
+  const lastWhy = async () =>
+    Math.max(0, ...(await why.evaluateAll((els) => els.map((e) => Number((e as HTMLElement).dataset.toastId)))))
+  for (const id of ['tweak.new', 'tweak.edit', 'tweak.siteOff']) {
+    const before = await lastWhy()
+    await actInMini(id)
+    await expect.poll(lastWhy, { message: id }).toBeGreaterThan(before)
+  }
+  expect(await tweakList(app)).toMatchObject([{ id: kept, enabled: true }])
+  expect((await editorInfo(app)).open).toBe(false)
+  // The command with the Mini Window's tab makes nothing either.
+  expect(await run(app, 'tweaks.create', { tabId: miniTab })).toBeNull()
+  expect((await tweakList(app)).map((t) => t.id)).toEqual([kept])
+  expect((await editorInfo(app)).open).toBe(false)
+
+  // View Tweaks there opens the Library's Tweaks in the browser window.
+  await actInMini('tweak.view')
+  await expect.poll(async () => run(app, 'library.status', {})).toMatchObject({ open: true, section: 'tweaks' })
+  await run(app, 'library.close', {})
+
+  // The Library's Edit, with the Mini Window's page the site's page used last: the browser window's
+  // own tab of the site comes forward, and the Mini Window keeps its page.
+  expect(await run(app, 'tweaks.open', { id: kept, edit: true })).toBe(true)
+  await waitEditor(app, true)
+  expect(await editorInfo(app)).toMatchObject({ tweakId: kept, tabId: alpha.tabId })
+  expect(await activeId(app)).toBe(alpha.tabId)
+  expect(await shownInMini()).toBe(miniTab)
+  expect((await state(app)).tabs[miniTab]?.floating).toBe('mini')
 })
 
 test('[BO-02][KS-19] the editor is a small view of its own over the page’s top-right corner, sized to the panel; the page stays live; Esc, ✕ and Done close it, the page gets the keyboard back, and it reopens as it was', async () => {

@@ -24,6 +24,7 @@ export const TWEAK_MESSAGES = {
   web: 'Tweaks work on websites only',
   off: 'Tweaks are turned off in Settings',
   peek: 'Open the page in a tab to tweak it',
+  mini: 'Move the Mini Window’s page into a Space to tweak it',
   none: 'This site has no Tweaks',
 } as const
 
@@ -64,8 +65,23 @@ export function registerTweaks(ctx: MainContext): void {
     tabs.contents(tabId) ? pages.hostOf(tabId) : tweakHostOf(store.state.tabs[tabId]?.url)
 
   /**
+   * Shows a note for a window: in it, or for a Mini Window (which shows none) in the browser window
+   * focused, else the last one opened.
+   */
+  const say = (windowId: WindowId, message: string) => {
+    const shows = (id: WindowId | undefined): id is WindowId => {
+      const kind = id ? store.state.windows[id]?.kind : undefined
+      return kind === 'main' || kind === 'private'
+    }
+    const focused = windows.focusedWindowId()
+    const to = shows(windowId) ? windowId : shows(focused) ? focused : windows.ids().filter(shows).pop()
+    if (to) ctx.toast(to, message)
+  }
+
+  /**
    * The tab an entry point acts on, shown in its window so the panel can go over it; null (with a
-   * note in the window saying why) where Tweaks can't open.
+   * note saying why) where Tweaks can't open: the panel goes over a page in a browser window only,
+   * never a Peek's or a Mini Window's.
    */
   const target = async (
     asked: TabId | undefined,
@@ -77,16 +93,21 @@ export function registerTweaks(ctx: MainContext): void {
     const tabId = asked ?? activeTabOf(state, windowId)
     if (!tabId || !state.tabs[tabId]) return null
     if (!state.settings.tweaksEnabled) {
-      ctx.toast(windowId, TWEAK_MESSAGES.off)
+      say(windowId, TWEAK_MESSAGES.off)
       return null
     }
-    if (peekShown(state, windowId)) {
-      ctx.toast(windowId, TWEAK_MESSAGES.peek)
+    const floating = state.tabs[tabId]?.floating
+    if (floating === 'mini' || state.windows[windowId]?.kind === 'mini') {
+      say(windowId, TWEAK_MESSAGES.mini)
+      return null
+    }
+    if (floating === 'peek' || peekShown(state, windowId)) {
+      say(windowId, TWEAK_MESSAGES.peek)
       return null
     }
     const host = hostOf(tabId)
     if (!host) {
-      ctx.toast(windowId, TWEAK_MESSAGES.web)
+      say(windowId, TWEAK_MESSAGES.web)
       return null
     }
     // The tab menu's tab may be another one: it is shown first, as the panel goes over its page.
@@ -187,14 +208,17 @@ export function registerTweaks(ctx: MainContext): void {
     })
   })
 
-  /** A tab of the window's Space on a Tweak's site: one shown, else the one used last. */
+  /**
+   * A tab of the window's Space on a Tweak's site: one shown, else the one used last. Never a Peek's
+   * or a Mini Window's page, which the window can't show.
+   */
   const siteTab = (windowId: WindowId, tweak: Tweak): TabId | null => {
     const state = store.state
     const spaceId = state.windows[windowId]?.spaceId
     const shown = shownTabs(state, windowId)
     let last: Tab | undefined
     for (const tab of Object.values(state.tabs)) {
-      if (tab.spaceId !== spaceId || tab.error || !tweakAppliesTo(tweak, tweakHostOf(tab.url))) continue
+      if (tab.spaceId !== spaceId || tab.floating || tab.error || !tweakAppliesTo(tweak, tweakHostOf(tab.url))) continue
       if (shown.has(tab.id)) return tab.id
       if (!last || tab.lastActiveAt > last.lastActiveAt) last = tab
     }
