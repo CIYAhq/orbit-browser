@@ -142,7 +142,7 @@ test('[FL-13] at the first Space a swipe of one sidebar width moves the pages ab
     'FL-13',
     'rubber band: last event → back at rest',
     rest !== undefined && last ? rest - last.t : undefined,
-    '≤ 350 ms + 90 ms',
+    '≈ 480 ms on FL-13’s own spring (FL-29’s 350 ms is for swipes that land on a Space, D70)',
   )
   expect(furthest).toBeGreaterThan(0)
   expect(furthest / width).toBeLessThanOrEqual(0.36)
