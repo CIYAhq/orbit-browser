@@ -10,6 +10,7 @@ import { registerHistoryPage } from './history'
 import { type LeaveInfo, registerLeave } from './leave'
 import { findSystemApp, findTestApp, launchInApp, registerOtherApps } from './other-apps'
 import { deliverPrint, type PrintInfo, type PrintRecord, registerPrint, systemPrinters, testPrinters } from './print'
+import { registerSavePage } from './save-page'
 import { LOAD_TIMEOUT_MS, type PageScreenInfo, registerScreens } from './screens'
 import { registerSwipe, type SwipeInfo } from './swipe'
 import { registerViewSource } from './view-source'
@@ -42,7 +43,8 @@ export interface PagesTestHooks {
  * crash screens (NV-13, NV-14): what the page's area shows when its page couldn't load, crashed or
  * stopped responding. Links that open other apps (NV-19): asked about over the page. Window full
  * screen (NV-20): the sidebar hidden, and Esc in the page. Print (NV-07): Orbit's print dialog over
- * the page. View source (DT-04): the page's source in a new tab. Two-finger swipe (NV-02): back and
+ * the page. View source (DT-04): the page's source in a new tab. Save Page As… (NV-21): the page
+ * saved where the save dialog says. Two-finger swipe (NV-02): back and
  * forward over the page, with its arrow. History (AR-10): the profile's visits as a page in a tab.
  */
 export function registerPages(ctx: MainContext, ops: TabOps): void {
@@ -88,6 +90,7 @@ export function registerPages(ctx: MainContext, ops: TabOps): void {
   )
 
   registerViewSource(ctx)
+  registerSavePage(ctx)
   const swipe = registerSwipe(ctx)
   registerHistoryPage(ctx)
 

@@ -40,6 +40,7 @@ export const PAGE_MENU_KEYS: KeyHints = [
   ['Back', 'nav.back'],
   ['Forward', 'nav.forward'],
   ['Reload', 'nav.reload'],
+  ['Save Page As…', 'page.save'],
   ['Print…', 'page.print'],
   ['View Page Source', 'page.viewSource'],
 ]

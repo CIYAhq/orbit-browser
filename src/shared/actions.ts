@@ -292,6 +292,15 @@ export const ACTIONS: ActionDef[] = [
   { id: 'page.zoomOut', title: 'Zoom Out', category: 'Page', mac: ['Cmd+-'], other: ['Ctrl+-'] },
   { id: 'page.zoomReset', title: 'Actual Size', category: 'Page', mac: ['Cmd+0'], other: ['Ctrl+0'] },
   { id: 'page.print', title: 'Print…', category: 'Page', mac: ['Cmd+P'], other: ['Ctrl+P'] },
+  // Pages lane (NV-21): ⌘S (Ctrl+S) is the sidebar's (SB-11), so ⇧⌘S everywhere.
+  {
+    id: 'page.save',
+    title: 'Save Page As…',
+    category: 'Page',
+    mac: ['Cmd+Shift+S'],
+    other: ['Ctrl+Shift+S'],
+    keywords: ['download', 'html', 'mhtml', 'web archive'],
+  },
   // Media (media lane, MD-02, MD-08)
   {
     id: 'media.togglePip',

@@ -1,11 +1,10 @@
-import { join } from 'node:path'
-import { app, type ContextMenuParams, dialog, type MenuItemConstructorOptions, type WebContents } from 'electron'
+import type { ContextMenuParams, MenuItemConstructorOptions, WebContents } from 'electron'
 import { framesMayOpen } from '../../shared/link-routing'
 import { type PageReferrer, referrerPolicyName } from '../../shared/nav'
 import { isPrivateTab } from '../../shared/private'
 import type { TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
-import { printPage, viewSource } from '../pages/entry'
+import { printPage, savePage, viewSource } from '../pages/entry'
 import type { TabPage } from '../tabs/ops'
 import { NAV_WORLD } from './focus'
 
@@ -134,17 +133,6 @@ export function writingDirectionItem(contents: WebContents): MenuItemConstructor
   }
 }
 
-/** A file name from a page title, without characters file systems refuse. */
-function fileName(title: string): string {
-  const printable = Array.from(title, (c) => (c.charCodeAt(0) < 32 ? ' ' : c)).join('')
-  const clean = printable
-    .replace(/[\\/:*?"<>|]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 120)
-  return clean || 'Page'
-}
-
 /** Any local file's address: what a complete save would read for a frame, asked of `framesMayOpen`. */
 const LOCAL_FILE = 'file:///'
 
@@ -168,30 +156,11 @@ export function saveFormat(complete: boolean, filePath: string): 'HTMLComplete' 
   return /\.html?$/i.test(filePath) ? 'HTMLOnly' : 'MHTML'
 }
 
-/** Save Page As… (complete for a local page, else a single file; NV-21), Print… and View Page Source. */
-export function pageItems(ctx: MainContext, tabId: TabId, contents: WebContents): MenuItemConstructorOptions[] {
+/** Save Page As… (NV-21), Print… and View Page Source: the pages lane's, as their keys are. */
+export function pageItems(contents: WebContents): MenuItemConstructorOptions[] {
   return [
-    {
-      label: 'Save Page As…',
-      click: () => {
-        const win = ctx.windows.get(ctx.windows.windowOfTab(tabId) ?? '')
-        const complete = savesComplete(contents)
-        const name = join(app.getPath('downloads'), fileName(contents.getTitle()))
-        const single = { name: 'Web Page, Single File', extensions: ['mhtml'] }
-        const html = { name: complete ? 'Web Page, Complete' : 'Web Page, HTML Only', extensions: ['html', 'htm'] }
-        const options = complete
-          ? { defaultPath: `${name}.html`, filters: [html, single] }
-          : { defaultPath: `${name}.mhtml`, filters: [single, html] }
-        void (win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options)).then(
-          ({ canceled, filePath }) => {
-            if (canceled || !filePath || contents.isDestroyed()) return
-            // Asked again: the page may have changed while the dialog was open.
-            const format = saveFormat(complete && savesComplete(contents), filePath)
-            contents.savePage(filePath, format).catch((err) => console.error('[nav] save page', err))
-          },
-        )
-      },
-    },
+    // Complete for a local page, else a single file (pages lane, src/main/pages/save-page.ts).
+    { label: 'Save Page As…', click: () => savePage(contents) },
     // Orbit's print dialog over the page (pages lane, NV-07).
     { label: 'Print…', click: () => printPage(contents) },
     { type: 'separator' },

@@ -82,6 +82,8 @@ export function installMenu(ctx: MainContext): void {
         // Anti-lock-in (import lane, IM-17).
         item('app.exportPinned', 'Export Pinned Items as Bookmarks…'),
         { type: 'separator' },
+        // The page saved where the save dialog says (pages lane, NV-21).
+        item('page.save', 'Save As…'),
         item('page.print'),
       ],
     },
