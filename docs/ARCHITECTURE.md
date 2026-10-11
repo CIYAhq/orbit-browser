@@ -148,6 +148,8 @@ Sandboxed, context-isolated renderers everywhere. No Node in pages. Pages get on
 
 Main also runs scripts in pages, as media, Peek and nav do: the keys lane's page watcher in isolated world 1020, and its focus mirror in the page's own world (`src/main/keys/page-focus.ts`), which leaves nothing behind in the page. What they say is the page's own word: main checks each answer's shape, and an answer can only change what that page's own keys do.
 
+Media in frames (embedded players, MD-01, MD-09; D67's trade-off): a frame that has media elements, in a tab that plays media, gets media's script (`src/main/media/agent.ts`) in the frame's own world, through `webFrameMain` (Electron runs scripts in a frame only there). It sits on a hidden, read-only property with a name drawn at random for each run. The frame's page can reach it, so its reports are the page's own word: main checks them (`parseSnapshot`) and they can only change that tab's media: what its controller shows and which of its videos floats.
+
 The UI's `orbit:*` IPC accepts registered Orbit UI senders only. UI renderers can't navigate or open windows. Permission prompts are per origin. Tweak JS (user-authored, per site) is injected only through `webFrame.executeJavaScript` in an isolated world, never with Node. Extensions use Electron's built-in extension support plus Orbit's own (MIT) API shims (D3: no GPL dependency).
 
 ## 11. Packaging and updates
