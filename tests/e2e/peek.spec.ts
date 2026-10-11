@@ -795,24 +795,31 @@ test('[PK-06] a two-finger swipe down beside the card follows the fingers; a lon
   if (!rest || !area) throw new Error('no card')
   // Record the card's centre on every frame (overlay coordinates).
   await orbit.app.evaluate(() => {
-    const g = globalThis as unknown as OrbitGlobal & { __swipe: number[] }
+    const g = globalThis as unknown as OrbitGlobal & { __swipe: number[]; __swipeAt: number }
     g.__swipe = []
-    g.__orbit.ctx.events.on('peek.frame', ({ rect }) => g.__swipe.push(rect.y + rect.height / 2))
+    g.__swipeAt = 0
+    g.__orbit.ctx.events.on('peek.frame', ({ rect }) => {
+      g.__swipe.push(rect.y + rect.height / 2)
+      g.__swipeAt = Date.now()
+    })
   })
   // Over the dimmed page, left of the card.
   await overlay.mouse.move(8, Math.round(area.height / 2))
   // Fingers moving down scroll content up (a negative delta): the card goes down with them.
   await overlay.mouse.wheel(0, -60)
-  // A short swipe springs back once the fingers stop.
+  // A short swipe springs back once the fingers stop; the spring is at rest once it stops drawing.
   await expect
     .poll(async () => {
       const b = await peekBounds(peekTab)
-      const frames = await orbit.app.evaluate(() => (globalThis as unknown as { __swipe: number[] }).__swipe.length)
-      return frames > 2 && !!b && Math.abs(b.y - rest.y) <= 1 && Math.abs(b.width - rest.width) <= 1
+      const { frames, quiet } = await orbit.app.evaluate(() => {
+        const g = globalThis as unknown as { __swipe: number[]; __swipeAt: number }
+        return { frames: g.__swipe.length, quiet: Date.now() - g.__swipeAt }
+      })
+      return frames > 2 && quiet >= 200 && !!b && Math.abs(b.y - rest.y) <= 1 && Math.abs(b.width - rest.width) <= 1
     })
     .toBe(true)
   const centres = await orbit.app.evaluate(() => (globalThis as unknown as { __swipe: number[] }).__swipe.splice(0))
-  // It followed the 60 px swipe, then came back to rest (its last frame); frames are whole pixels.
+  // It followed the 60 px swipe, then came back to rest (its last frame).
   expect(Math.abs(Math.max(...centres) - (centres[centres.length - 1] ?? 0) - 60)).toBeLessThanOrEqual(1)
   expect((await overlayOf(orbit.app)).kind).toBe('peek')
   // A long swipe dismisses it.
