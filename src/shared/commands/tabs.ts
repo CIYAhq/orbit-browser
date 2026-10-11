@@ -15,7 +15,10 @@ export interface TabCommands {
   'tabs.reopenClosed': { args: { tabId?: TabId }; result: TabId | null }
   /** The remembered icon (a small data URL) for a page's origin: archive, history, lists (MF-2). */
   'tabs.favicon': { args: { url: string }; result: string | null }
-  /** Recently closed tabs, newest first (for command bar results, TB-07). */
+  /**
+   * Recently closed tabs, newest first (for command bar results, TB-07): those the calling window
+   * may reopen (`mayReopenIn`); called with no window, those a normal window may.
+   */
   'tabs.recentlyClosed': {
     args: Record<string, never>
     result: {

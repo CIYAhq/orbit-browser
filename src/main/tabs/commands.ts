@@ -35,7 +35,7 @@ import { registerBlankWindows } from './blank'
 import { registerLinkDrop } from './link-drop'
 import { TabMaintenance } from './maintenance'
 import { folderMenu, type MenuOps, tabMenu } from './menus'
-import { makeTab, numberedTarget, steppedTarget, todayInsertIndex } from './model'
+import { closedFor, makeTab, numberedTarget, steppedTarget, todayInsertIndex } from './model'
 import { TabOps, type TabPage } from './ops'
 import { type MemoryInfo, type ResourceInfo, ResourceWatch } from './resources'
 import { type RowMenuInfo, registerRowMenus } from './row-menu'
@@ -280,19 +280,17 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   commands.register('tabs.battery', ({ level, charging }, c) => {
     if (typeof level === 'number' && Number.isFinite(level)) resources.battery(level, charging === true, windowOf(c))
   })
-  commands.register('tabs.recentlyClosed', () =>
-    [...ops.recentlyClosed]
-      .reverse()
-      .filter((r) => !store.state.tabs[r.tab.id])
-      .map((r) => ({
-        tabId: r.tab.id,
-        url: r.tab.url,
-        title: r.tab.customTitle || r.tab.title,
-        favicon: r.tab.favicon,
-        spaceId: r.tab.spaceId,
-        profileId: r.tab.profileId,
-        closedAt: r.closedAt ?? 0,
-      })),
+  // Only what the calling window may bring back: a private window's closed tabs stay its own.
+  commands.register('tabs.recentlyClosed', (_args, c) =>
+    closedFor(store.state, ops.recentlyClosed, c.windowId).map((r) => ({
+      tabId: r.tab.id,
+      url: r.tab.url,
+      title: r.tab.customTitle || r.tab.title,
+      favicon: r.tab.favicon,
+      spaceId: r.tab.spaceId,
+      profileId: r.tab.profileId,
+      closedAt: r.closedAt ?? 0,
+    })),
   )
   commands.register('tabs.undo', () => ops.undo.undo() ?? null)
   commands.register('tabs.redo', () => ops.undo.redo() ?? null)

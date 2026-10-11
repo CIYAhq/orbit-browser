@@ -4,7 +4,7 @@
 import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
 import { isMediaBusy } from '../../shared/media'
-import { windowMayShow } from '../../shared/private'
+import { mayReopenIn, windowMayShow } from '../../shared/private'
 import { noteSplitFocus, removePane } from '../../shared/split'
 import type { ItemId, OrbitState, Space, SpaceId, Tab, TabId, WindowId } from '../../shared/state'
 import {
@@ -314,6 +314,19 @@ export function sleepCandidates(
     if (now - tab.lastActiveAt >= limit) out.push(id)
   }
   return out
+}
+
+/**
+ * The closed tabs a window may bring back, newest first (TB-07): Reopen Closed Tab's own rule
+ * (`mayReopenIn`), so no list ever offers one window another's private or blank-window tabs. With
+ * no window (the macOS app menu, made for every window), what a normal window may bring back.
+ */
+export function closedFor<T extends { tab: Pick<Tab, 'id' | 'profileId' | 'spaceId'> }>(
+  state: OrbitState,
+  closed: readonly T[],
+  windowId: WindowId | undefined,
+): T[] {
+  return [...closed].reverse().filter((r) => !state.tabs[r.tab.id] && mayReopenIn(state, r.tab, windowId))
 }
 
 /** The tab ⌘N jumps to (TB-04, FV-10). `n` is 1–9. */
