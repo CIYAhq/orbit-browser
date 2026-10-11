@@ -17,6 +17,7 @@ import {
   DEVICE_NAME,
   PERMISSION_NAME,
   type PermissionKind,
+  permissionOrigin,
   SITE_PANEL,
   type SiteControlsInfo,
   type SitePermissionRow,
@@ -342,6 +343,21 @@ export function SiteControls({ overlay, dark = false }: { overlay: PanelOverlay;
                   onClick={() => setConfirmClear(true)}
                 >
                   Clear cookies and site data…
+                </button>
+              )}
+              {!info.private && !confirmClear && (
+                <button
+                  type="button"
+                  className="site-panel__link"
+                  data-testid="site-controls-settings"
+                  onClick={() => {
+                    // All of this site's settings, and every other site's, in Settings (ST-13).
+                    const site = permissionOrigin(info.url)
+                    void invoke('settings.open', { section: 'site-settings', ...(site ? { site } : {}) })
+                    void close()
+                  }}
+                >
+                  Site settings…
                 </button>
               )}
               {info.private && (

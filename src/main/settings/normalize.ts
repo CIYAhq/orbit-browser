@@ -1,6 +1,7 @@
 import { SECURE_DNS_CHOICES } from '../../shared/commands/settings'
 import { DEFAULT_SETTINGS } from '../../shared/defaults'
 import { chosenApps, isOnboardingStep } from '../../shared/onboarding'
+import { cleanSiteDefaults } from '../../shared/site-settings'
 import type { ColorMode, OrbitState, Settings } from '../../shared/state'
 import { normalizeSpaceTheme } from '../../shared/theme'
 import { cleanVersion, feedUrlProblem } from '../../shared/updates'
@@ -42,6 +43,10 @@ export function normalizeSettingsPrefs(state: OrbitState): void {
   // profile's choice). Runs after the site searches are cleaned up.
   if (!isBuiltInEngine(s.searchEngine)) s.searchEngine = DEFAULT_SETTINGS.searchEngine
   for (const profile of Object.values(state.profiles)) {
+    // Site settings' defaults (ST-13): only categories that can change, with a value they take.
+    const siteDefaults = cleanSiteDefaults(profile.siteDefaults)
+    if (siteDefaults) profile.siteDefaults = siteDefaults
+    else delete profile.siteDefaults
     const engine: unknown = profile.searchEngine
     if (engine === undefined) continue
     if (typeof engine !== 'string' || !engineById(state, engine)) delete profile.searchEngine

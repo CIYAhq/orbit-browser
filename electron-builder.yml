@@ -36,6 +36,14 @@ mac:
     NSMicrophoneUsageDescription: Websites you visit can ask to use your microphone.
 dmg:
   sign: false
+win:
+  # Orbit can open the computer's PDF files (DL-13, ST-03): the installer registers it for .pdf under
+  # the class Orbit.PDF, and Settings → General sends the user to Windows' Default apps to choose it
+  # (src/main/settings/pdf-app.ts). Unverified: no Windows build is tested.
+  fileAssociations:
+    - ext: pdf
+      name: Orbit.PDF
+      description: PDF document
 linux:
   target: [dir]
   category: Network

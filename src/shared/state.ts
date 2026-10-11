@@ -8,6 +8,7 @@
  */
 
 import type { PermissionPrompt } from './site'
+import type { SiteCategory, SiteDefault } from './site-settings'
 import type { UpdateStatus, WhatsNew } from './updates'
 
 export type TabId = string
@@ -237,6 +238,11 @@ export interface Profile {
   downloadAsk?: boolean
   /** Where that dialog opens: the folder the last download it asked about went to (DL-07). */
   downloadAskFolder?: string
+  /**
+   * Settings → Site settings' defaults (ST-13): what each category does for a site with no choice
+   * of its own, where the user changed it (`siteDefaultFor` in src/shared/site-settings.ts).
+   */
+  siteDefaults?: Partial<Record<SiteCategory, SiteDefault>>
 }
 
 export type CommandBarMode = 'new-tab' | 'edit-url' | 'search-tabs'

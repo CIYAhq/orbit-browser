@@ -8,6 +8,7 @@ import type { TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import { escapeThenStop } from '../keys/escape'
 import type { CallContext } from '../registry'
+import { registerSiteSettings } from '../settings/site-settings'
 import type { TabOps, TabPage } from '../tabs/ops'
 import { type LinkPillInfo, registerLinkPill } from './link-pill'
 import { type LinksTestHooks, registerLinks } from './links'
@@ -344,6 +345,8 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
   // Permission prompts and the site controls panel (NV-15, NV-16).
   const permissions = registerPermissions(ctx, prefs)
   registerSiteControls(ctx, prefs, permissions)
+  // Settings → Site settings shows and changes the same choices (ST-13, settings lane).
+  registerSiteSettings(ctx, prefs, permissions)
   // The web page preload: permission states as Chromium reads them, notification clicks (NV-15).
   registerPageBridge(ctx, permissions)
 

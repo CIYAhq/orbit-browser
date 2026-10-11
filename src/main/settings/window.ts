@@ -1,6 +1,7 @@
 import { app, BrowserWindow, nativeTheme, type Rectangle, screen } from 'electron'
 import type { SettingsContext, SettingsReveal, SettingsTarget } from '../../shared/commands/settings'
 import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
+import { siteOrigin } from '../../shared/site-settings'
 import type { WindowId } from '../../shared/state'
 import { NEUTRAL_THEME, paletteFor } from '../../shared/theme'
 import type { MainContext } from '../context'
@@ -92,6 +93,9 @@ export class SettingsWindow {
       ...(section ? { section } : {}),
       ...(target.item && SECTION_ID_RE.test(target.item) ? { item: target.item } : {}),
       ...(target.profileId && state.profiles[target.profileId] ? { profileId: target.profileId } : {}),
+      ...(typeof target.site === 'string' && siteOrigin(target.site)
+        ? { site: siteOrigin(target.site) as string }
+        : {}),
     }
     this.nonce++
     if (section && state.settings.settingsSection !== section) {

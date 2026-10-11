@@ -938,3 +938,82 @@ html.reduce-motion[data-theme-fade] .settings * {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+
+/* Site settings (ST-13): the category and site pages open inside the section, with a Back button. */
+.st-sites__bar {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin: -6px 0 18px;
+}
+
+.st-sites__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 8px 3px 4px;
+  margin-left: -4px;
+  border-radius: 7px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.st-sites__back:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.st-sites__back:focus-visible,
+.st-sites__open:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 60%, transparent);
+  outline: none;
+}
+
+.st-sites__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.st-sites__open {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 4px 0 8px;
+  border-radius: 7px;
+  color: var(--text-muted);
+}
+
+.st-sites__open:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.st-sites__count {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.st-sites__fixed {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.st-sites__add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.st-sites__add .st-field {
+  flex: 1 1 220px;
+}

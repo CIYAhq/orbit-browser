@@ -10,8 +10,10 @@ import { creditsUrl } from './credits'
 import { stubDefaultBrowser, systemDefaultBrowser } from './default-browser'
 import { registerLinkSettings } from './links'
 import { registerOnboarding } from './onboarding'
+import { stubPdfApp, systemPdfApp } from './pdf-app'
 import { registerProfileSettings } from './profiles'
 import { registerSearchSettings } from './search'
+import { registerSessionRestore } from './session-restore'
 import { registerSystemSettings } from './system'
 import { applySettingsPatch } from './validate'
 import { SETTINGS_WINDOW_ID, SettingsWindow } from './window'
@@ -43,6 +45,8 @@ export function registerSettings(ctx: MainContext): void {
   registerLinkSettings(ctx)
   registerSystemSettings(ctx)
   registerOnboarding(ctx)
+  // Each tab's back/forward list and scroll position, from one launch to the next (ST-16).
+  registerSessionRestore(ctx)
 
   // A page opens in a new tab of the browser window it was asked from; from Settings, onboarding or
   // a Mini Window, in the one Settings belongs to (or the last used, or a new one).
@@ -68,6 +72,10 @@ export function registerSettings(ctx: MainContext): void {
   const defaultBrowser = ctx.e2e ? stubDefaultBrowser() : systemDefaultBrowser()
   commands.register('settings.defaultBrowser', () => defaultBrowser.status())
   commands.register('settings.setDefaultBrowser', () => defaultBrowser.set())
+  // Orbit for the computer's PDF files, on Windows (DL-13). Test runs stand in for Windows when asked.
+  const pdfApp = ctx.e2e ? stubPdfApp(process.env.ORBIT_E2E_PDF_APP === '1') : systemPdfApp()
+  commands.register('settings.pdfApp', () => pdfApp.status())
+  commands.register('settings.setPdfApp', () => pdfApp.set())
 
   // Import (IM-01) is the import lane's: offered when it registers `import.open`.
   commands.register('settings.capabilities', () => ({ importer: commands.has('import.open') }))

@@ -215,6 +215,26 @@ export class SitePrefs {
     this.changed(profileId)
   }
 
+  /**
+   * Every per-site choice of a profile, for Settings → Site settings (ST-13): permission choices
+   * and devices by origin, and the hosts allowed pop-ups.
+   */
+  sitesOf(profileId: string): {
+    permissions: Record<string, SitePermissions>
+    popups: string[]
+    devices: Record<string, DeviceGrant[]>
+  } {
+    const choices = this.choices(profileId)
+    const permissions: Record<string, SitePermissions> = {}
+    for (const [origin, kinds] of Object.entries(choices.permissions[profileId] ?? {}))
+      permissions[origin] = { ...kinds }
+    const devices: Record<string, DeviceGrant[]> = {}
+    for (const [origin, grants] of Object.entries(choices.devices[profileId] ?? {})) {
+      devices[origin] = grants.map((g) => ({ ...g }))
+    }
+    return { permissions, popups: Object.keys(choices.popups[profileId] ?? {}), devices }
+  }
+
   /** Forgets every choice made in private windows (the last one closed). */
   forgetPrivate(): void {
     this.ephemeral = emptyChoices()

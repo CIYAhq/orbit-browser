@@ -1,5 +1,6 @@
 import type { ActionDef } from '../actions'
 import type { OnboardingInfo, OnboardingStep } from '../onboarding'
+import type { SiteCategory, SiteChoice, SiteDefault, SiteSettingsSite } from '../site-settings'
 import type {
   ColorMode,
   LinkRule,
@@ -36,6 +37,8 @@ export interface SettingsTarget {
   item?: string
   /** The profile the Profiles section shows (ST-04); the opener's by default. */
   profileId?: ProfileId
+  /** A site whose page Site settings opens at (ST-13): its origin, e.g. "https://example.com". */
+  site?: string
 }
 
 /** An action that opens Settings at a section or at one setting (ST-02). */
@@ -123,6 +126,23 @@ export const SETTINGS_ACTIONS: SettingsActionDef[] = [
     other: ['Ctrl+Shift+Delete'],
     settings: { section: 'privacy', item: 'clear-data' },
     keywords: ['delete history', 'clear history', 'clear cookies', 'clear cache'],
+  },
+  {
+    id: 'settings.siteSettings',
+    title: 'Site Settings',
+    category: 'App',
+    settings: { section: 'site-settings' },
+    keywords: [
+      'permissions',
+      'camera',
+      'microphone',
+      'location',
+      'notifications',
+      'pop-ups',
+      'javascript',
+      'images',
+      'sound',
+    ],
   },
   {
     id: 'settings.advanced',
@@ -263,10 +283,17 @@ export const SECURE_DNS_CHOICES: readonly SecureDnsChoice[] = ['automatic', 'off
 /** "Put inactive tabs to sleep after" choices (TB-16): 30 minutes is the default; 0 is Never. */
 export const SLEEP_AFTER_CHOICES: readonly number[] = [15 * 60_000, 30 * 60_000, HOUR, 2 * HOUR, 0]
 
-/** What is cleared by Clear browsing data (ST-12). */
-export type ClearDataKind = 'history' | 'siteData' | 'cache'
+/**
+ * What is cleared by Clear browsing data (ST-12): browsing history, cookies and other site data,
+ * cached files, download history (the list; the files stay, DL-08) and site settings (permissions
+ * and the other choices made for sites, ST-13).
+ */
+export type ClearDataKind = 'history' | 'siteData' | 'cache' | 'downloads' | 'siteSettings'
 
-/** Clear browsing data's time ranges (ST-12). Site data and the cache only clear for all time. */
+/**
+ * Clear browsing data's time ranges (ST-12). Only browsing history clears for a range: the rest
+ * always clears from all time.
+ */
 export type ClearDataRange = 'hour' | 'day' | 'week' | 'month' | 'all'
 
 export interface ClearDataRequest {
@@ -287,6 +314,17 @@ export interface SystemStatus {
 export interface DefaultBrowserStatus {
   isDefault: boolean
   /** Whether Orbit can ask to become it (installed builds). */
+  canSet: boolean
+  /** Why it can't, when it can't. */
+  note?: string
+}
+
+/** Whether Orbit opens the computer's PDF files (DL-13, ST-03): offered on Windows only. */
+export interface PdfAppStatus {
+  /** Whether this system offers it (Windows); elsewhere Settings has no such row. */
+  available: boolean
+  isDefault: boolean
+  /** Whether Orbit can send the user to choose it (installed builds). */
   canSet: boolean
   /** Why it can't, when it can't. */
   note?: string
@@ -330,8 +368,11 @@ export interface SettingsCommands {
   'settings.buildInfo': { args: Record<string, never>; result: BuildInfo }
   /** Copies the build info for a bug report (ST-17) and returns the text copied. */
   'settings.copyBuildInfo': { args: Record<string, never>; result: string }
-  /** A profile's default search engine (ST-06): a built-in id or "site:<site search id>". */
-  'settings.setSearchEngine': { args: { profileId: ProfileId; engine: string }; result: void }
+  /**
+   * A profile's default search engine (ST-06): a built-in id or "site:<site search id>", or null for
+   * a profile other than Default to follow the Default profile's (ST-20).
+   */
+  'settings.setSearchEngine': { args: { profileId: ProfileId; engine: string | null }; result: void }
   /** Adds a custom search engine, or changes one (ST-06, CB-11). */
   'settings.saveSiteSearch': { args: SiteSearchDraft; result: SiteSearchSaved }
   'settings.removeSiteSearch': { args: { id: string }; result: void }
@@ -345,8 +386,31 @@ export interface SettingsCommands {
    * that is gone are dropped; a malformed list changes nothing.
    */
   'settings.setLinkRules': { args: { rules: LinkRule[] }; result: void }
-  /** Clears a profile's browsing data (ST-12): history for the range, site data and cache for all time. */
+  /** Clears a profile's browsing data (ST-12): history for the range, the rest for all time. */
   'settings.clearData': { args: ClearDataRequest; result: void }
+  /** Every site of a profile with a choice of its own (ST-13), sorted by host. */
+  'siteSettings.list': { args: { profileId: ProfileId }; result: SiteSettingsSite[] }
+  /** What a category does for sites of a profile with no choice of their own (ST-13): one of its `defaults`. */
+  'siteSettings.setDefault': {
+    args: { profileId: ProfileId; category: SiteCategory; value: SiteDefault }
+    result: void
+  }
+  /**
+   * A site's own choice in a category (ST-13), or null to remove it. A site gets a device only from
+   * its chooser: a device category's choice can only be removed.
+   */
+  'siteSettings.set': {
+    args: { profileId: ProfileId; origin: string; category: SiteCategory; choice: SiteChoice | null }
+    result: void
+  }
+  /** Takes back a device a site may use (ST-13). */
+  'siteSettings.revokeDevice': { args: { profileId: ProfileId; origin: string; key: string }; result: void }
+  /** Forgets every choice made for a site: it asks again (ST-13). */
+  'siteSettings.resetSite': { args: { profileId: ProfileId; origin: string }; result: void }
+  /** Deletes a site's cookies, stored data and cached files in a profile (ST-12, ST-13). */
+  'siteSettings.clearSite': { args: { profileId: ProfileId; origin: string }; result: void }
+  /** Forgets every per-site choice of a profile (Clear browsing data, ST-12); the defaults stay. */
+  'siteSettings.clear': { args: { profileId: ProfileId }; result: void }
   'settings.systemStatus': { args: Record<string, never>; result: SystemStatus }
   /** Restarts Orbit (to apply graphics acceleration); refused in test runs. */
   'settings.relaunch': { args: Record<string, never>; result: boolean }
@@ -354,6 +418,10 @@ export interface SettingsCommands {
   'settings.defaultBrowser': { args: Record<string, never>; result: DefaultBrowserStatus }
   /** Asks the OS to make Orbit the default browser (ST-03, OB-07). */
   'settings.setDefaultBrowser': { args: Record<string, never>; result: DefaultBrowserStatus }
+  /** Whether Orbit opens PDF files on this computer (Windows, DL-13). */
+  'settings.pdfApp': { args: Record<string, never>; result: PdfAppStatus }
+  /** Opens Windows' Default apps settings, where only the user can choose Orbit for PDF files (DL-13). */
+  'settings.setPdfApp': { args: Record<string, never>; result: PdfAppStatus }
   'settings.capabilities': { args: Record<string, never>; result: SettingsCapabilities }
   /** Opens the import flow (IM-01) in the browser window Settings belongs to, when the import lane provides it. */
   'settings.openImport': { args: Record<string, never>; result: boolean }

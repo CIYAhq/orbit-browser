@@ -1,8 +1,9 @@
 import { Search } from 'lucide-react'
 import { useState } from 'react'
 import { ENGINE_ORDER, type SiteSearchDraft } from '../../../../shared/commands/settings'
+import { DEFAULT_PROFILE_ID } from '../../../../shared/defaults'
 import type { ProfileId, SiteSearchEngine } from '../../../../shared/state'
-import { engineFor, SEARCH_ENGINES, siteEngineId } from '../../../../shared/url'
+import { engineById, engineFor, SEARCH_ENGINES, siteEngineId } from '../../../../shared/url'
 import { invoke } from '../../api'
 import { useOrbit } from '../../store'
 import { useSettingsContext } from '../context'
@@ -10,20 +11,35 @@ import { Button, type Option, RowMenu, Select, SettingGroup, SettingRow, Switch,
 import { useProfileName, useProfiles } from '../profiles'
 import type { SettingsSection } from '../registry'
 
-/** A profile's default search engine (ST-06): built-in engines, plus its custom one when it uses one. */
+/** The select's "Same as Default (…)" choice: a profile without an engine of its own (ST-20). */
+const SAME_AS_DEFAULT = ''
+
+/**
+ * A profile's default search engine (ST-06): built-in engines, plus its custom one when it uses one.
+ * Another profile than Default may follow the Default profile's: "Same as Default (Google)" (ST-20).
+ */
 export function SearchEngineSelect({ profileId, testId }: { profileId: ProfileId; testId?: string }) {
   // Strings only: a custom engine's choice is a new object on every call.
   const currentId = useOrbit((s) => engineFor(s, profileId).id)
   const currentName = useOrbit((s) => engineFor(s, profileId).name)
+  const inherits = useOrbit(
+    (s) => profileId !== DEFAULT_PROFILE_ID && !engineById(s, s.profiles[profileId]?.searchEngine),
+  )
+  const defaultName = useOrbit((s) => engineFor(s, DEFAULT_PROFILE_ID).name)
   const options: Option<string>[] = ENGINE_ORDER.map((id) => ({ value: id, label: SEARCH_ENGINES[id].name }))
-  if (!options.some((o) => o.value === currentId)) options.push({ value: currentId, label: currentName })
+  if (!inherits && !options.some((o) => o.value === currentId)) options.push({ value: currentId, label: currentName })
+  if (profileId !== DEFAULT_PROFILE_ID) {
+    options.unshift({ value: SAME_AS_DEFAULT, label: `Same as Default (${defaultName})` })
+  }
   return (
     <Select
       label="Default search engine"
-      value={currentId}
+      value={inherits ? SAME_AS_DEFAULT : currentId}
       options={options}
       testId={testId}
-      onChange={(engine) => void invoke('settings.setSearchEngine', { profileId, engine })}
+      onChange={(engine) =>
+        void invoke('settings.setSearchEngine', { profileId, engine: engine === SAME_AS_DEFAULT ? null : engine })
+      }
     />
   )
 }

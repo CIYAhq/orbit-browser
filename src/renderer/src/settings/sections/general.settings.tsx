@@ -1,6 +1,6 @@
 import { CircleCheck, SlidersHorizontal } from 'lucide-react'
 import { useState } from 'react'
-import type { DefaultBrowserStatus, SettingsCapabilities } from '../../../../shared/commands/settings'
+import type { DefaultBrowserStatus, PdfAppStatus, SettingsCapabilities } from '../../../../shared/commands/settings'
 import { invoke, isMac } from '../../api'
 import { useOrbit } from '../../store'
 import { Button, Checkbox, type Option, Select, SettingGroup, SettingRow, Switch } from '../controls'
@@ -80,6 +80,45 @@ function DefaultBrowserRow() {
   )
 }
 
+const readPdfApp = () => invoke('settings.pdfApp', {})
+
+/**
+ * Orbit for the computer's PDF files (DL-13, ST-03): on Windows, where the installer registers Orbit
+ * for .pdf and only the user can choose it, in Windows' Default apps settings. Elsewhere, no row.
+ */
+function PdfAppRow() {
+  const [status, setStatus] = useMainValue<PdfAppStatus>(readPdfApp)
+  const [asking, setAsking] = useState(false)
+  if (!status?.available) return null
+  const description = status.isDefault
+    ? 'PDF files on this computer open in Orbit.'
+    : (status.note ?? 'Windows asks you to choose: in Default apps, find .pdf and pick Orbit.')
+  return (
+    <SettingRow id="pdf-app" label="Open PDFs with Orbit" description={description}>
+      {status.isDefault ? (
+        <span className="st-status" data-testid="pdf-app-status">
+          <CircleCheck size={16} aria-hidden="true" />
+          Orbit opens PDF files
+        </span>
+      ) : (
+        <Button
+          testId="pdf-app-set"
+          disabled={!status.canSet || asking}
+          title={status.note}
+          onClick={() => {
+            setAsking(true)
+            void invoke('settings.setPdfApp', {})
+              .then(setStatus)
+              .finally(() => setAsking(false))
+          }}
+        >
+          Choose in Windows…
+        </Button>
+      )}
+    </SettingRow>
+  )
+}
+
 /** The Mini Window button in the menu bar or tray (MW-13). */
 const TRAY_LABEL = isMac ? 'Show the Mini Window button in the menu bar' : 'Show the Mini Window button in the tray'
 
@@ -91,6 +130,7 @@ function GeneralPage() {
     <>
       <SettingGroup title="Default browser">
         <DefaultBrowserRow />
+        <PdfAppRow />
       </SettingGroup>
       {/* Updates (ST-03, UP-01, UP-03, UP-10). */}
       <SettingGroup title="Updates">
@@ -150,6 +190,7 @@ export default {
   component: GeneralPage,
   keywords: [
     'default browser',
+    'pdf',
     'updates',
     'check for updates',
     'update feed',

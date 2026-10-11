@@ -49,7 +49,7 @@ const SITE_DATA: NonNullable<Electron.ClearDataOptions['dataTypes']> = [
   'webSQL',
   'backgroundFetch',
 ]
-const CLEAR_KINDS: readonly ClearDataKind[] = ['history', 'siteData', 'cache']
+const CLEAR_KINDS: readonly ClearDataKind[] = ['history', 'siteData', 'cache', 'downloads', 'siteSettings']
 
 /** Graphics acceleration, Secure DNS and Clear browsing data (ST-12); restarting Orbit. */
 export function registerSystemSettings(ctx: MainContext): void {
@@ -90,6 +90,14 @@ export function registerSystemSettings(ctx: MainContext): void {
     // The engine clears site data and its cache for all time only.
     if (wanted.has('siteData')) jobs.push(ses.clearData({ dataTypes: SITE_DATA }))
     if (wanted.has('cache')) jobs.push(ses.clearCache(), ses.clearData({ dataTypes: ['cache'] }))
+    // The downloads list (DL-08): finished downloads go, their files stay; running ones stay.
+    if (wanted.has('downloads') && commands.has('downloads.clear')) {
+      jobs.push(commands.run('downloads.clear', { profileId: profile.id }, c))
+    }
+    // Permissions and the other choices made for single sites (ST-13); each category's default stays.
+    if (wanted.has('siteSettings') && commands.has('siteSettings.clear')) {
+      jobs.push(commands.run('siteSettings.clear', { profileId: profile.id }, c))
+    }
     await Promise.all(jobs)
   })
 }

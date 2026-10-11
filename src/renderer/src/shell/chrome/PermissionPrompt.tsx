@@ -1,10 +1,12 @@
 import {
   AppWindow,
   Bell,
+  Braces,
   Cable,
   ClipboardPaste,
   Gamepad2,
   Hourglass,
+  ImageIcon,
   type LucideIcon,
   MapPin,
   Mic,
@@ -14,6 +16,7 @@ import {
   Type,
   Usb,
   Video,
+  Volume2,
   X,
 } from 'lucide-react'
 import {
@@ -53,6 +56,9 @@ export const PERMISSION_ICON: Record<PermissionKind, LucideIcon> = {
   fonts: Type,
   network: Network,
   popups: SquareArrowOutUpRight,
+  sound: Volume2,
+  javascript: Braces,
+  images: ImageIcon,
 }
 
 export const DEVICE_ICON: Record<DeviceKind, LucideIcon> = { serial: Cable, usb: Usb, hid: Gamepad2 }

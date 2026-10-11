@@ -5,7 +5,11 @@
 import type { Connection } from './nav'
 import type { TabId } from './state'
 
-/** Permissions a site asks for. Camera and microphone are separate choices, as in Chromium. */
+/**
+ * Permissions a site asks for. Camera and microphone are separate choices, as in Chromium. Sound,
+ * JavaScript and images are never asked for: they are allowed unless the user blocks them for a
+ * site or a profile in Settings → Site settings (ST-13; src/main/settings/site-settings.ts).
+ */
 export type PermissionKind =
   | 'camera'
   | 'microphone'
@@ -18,6 +22,9 @@ export type PermissionKind =
   | 'fonts'
   | 'network'
   | 'popups'
+  | 'sound'
+  | 'javascript'
+  | 'images'
 
 /** The user's lasting choice for a permission on a site. */
 export type PermissionChoice = 'allow' | 'block'
@@ -38,6 +45,9 @@ export const PERMISSION_ORDER: readonly PermissionKind[] = [
   'fonts',
   'network',
   'popups',
+  'sound',
+  'javascript',
+  'images',
 ]
 
 /** The prompt's line for each permission: "<site> wants to" … (NV-15). */
@@ -53,6 +63,9 @@ export const PERMISSION_ASK: Record<PermissionKind, string> = {
   fonts: 'Use the fonts on your computer',
   network: 'Look for and connect to any device on your local network',
   popups: 'Open pop-ups',
+  sound: 'Play sound',
+  javascript: 'Use JavaScript',
+  images: 'Show images',
 }
 
 /** The site controls panel's name for each permission (NV-16). */
@@ -68,6 +81,9 @@ export const PERMISSION_NAME: Record<PermissionKind, string> = {
   fonts: 'Fonts',
   network: 'Local network access',
   popups: 'Pop-ups',
+  sound: 'Sound',
+  javascript: 'JavaScript',
+  images: 'Images',
 }
 
 /** What a device chooser asks: "<site> wants to" … */

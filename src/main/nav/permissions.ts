@@ -27,6 +27,7 @@ import {
   siteLabel,
   sortKinds,
 } from '../../shared/site'
+import { siteDefaultFor } from '../../shared/site-settings'
 import type { ProfileId, TabId, WindowId } from '../../shared/state'
 import { locate, splitOfTab } from '../../shared/tree'
 import type { MainContext } from '../context'
@@ -206,6 +207,12 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
   /** Whether a permission is granted right now: allowed, or allowed this time. */
   const allowedNow = (profileId: ProfileId, origin: string, kind: PermissionKind) =>
     prefs.permission(profileId, origin, kind) === 'allow' || hasOnce(profileId, origin, kind)
+
+  /** Whether a permission is refused without asking: blocked for the site, or for every site with no choice (ST-13). */
+  const blocked = (profileId: ProfileId, origin: string, kind: PermissionKind) => {
+    const choice = prefs.permission(profileId, origin, kind)
+    return choice === 'block' || (choice === undefined && siteDefaultFor(store.state, profileId, kind) === 'block')
+  }
 
   /**
    * The site a request belongs to: the top page's, as in Chromium (a frame uses what its page was
@@ -451,7 +458,7 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
       const ownSite = details.isMainFrame || permissionOrigin(details.requestingUrl) === origin
       if (permission === 'notifications' && !ownSite) return callback(false)
       noteAsked(profileId, origin, kinds)
-      if (kinds.some((k) => prefs.permission(profileId, origin, k) === 'block')) return callback(false)
+      if (kinds.some((k) => blocked(profileId, origin, k))) return callback(false)
       const undecided = sortKinds(kinds.filter((k) => !allowedNow(profileId, origin, k)))
       if (undecided.length === 0) return callback(true)
       const tabId = tabs.tabIdFor(contents)
@@ -463,7 +470,7 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
       const site = permissionOrigin(origin)
       if (!kinds || !site) return undefined
       const choices = kinds.map((k) => prefs.permission(profileId, site, k))
-      if (choices.some((c) => c === 'block')) return false
+      if (kinds.some((k) => blocked(profileId, site, k))) return false
       return choices.every((c) => c === 'allow') ? true : undefined
     },
     decide: (profileId, origin, permission, allowed) => {
@@ -487,7 +494,8 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
   ): Pending | undefined => {
     const tabId = contents ? tabs.tabIdFor(contents) : undefined
     const origin = contents && !contents.isDestroyed() ? permissionOrigin(contents.getURL()) : null
-    if (!origin || !promptable(tabId)) {
+    // A device type turned off in Site settings (ST-13) refuses without a chooser.
+    if (!origin || !promptable(tabId) || siteDefaultFor(store.state, profileId, type) === 'block') {
       choose(undefined)
       return undefined
     }
@@ -752,7 +760,8 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
       kinds.delete('popups')
       return sortKinds(kinds).map((kind) => {
         const choice = choices[kind]
-        const state = choice ?? (hasOnce(profileId, origin, kind) ? 'once' : 'ask')
+        const fallback = siteDefaultFor(store.state, profileId, kind) === 'block' ? 'block' : 'ask'
+        const state = choice ?? (hasOnce(profileId, origin, kind) ? 'once' : fallback)
         return { kind, state }
       })
     },
@@ -769,7 +778,7 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
       for (const grant of prefs.devicesFor(profileId, origin)) prefs.revokeDevice(profileId, origin, grant.key)
     },
     pageState: (profileId, origin, kinds) => {
-      if (kinds.some((k) => prefs.permission(profileId, origin, k) === 'block')) return 'denied'
+      if (kinds.some((k) => blocked(profileId, origin, k))) return 'denied'
       return kinds.every((k) => allowedNow(profileId, origin, k)) ? 'granted' : 'prompt'
     },
     info: (windowId) => {

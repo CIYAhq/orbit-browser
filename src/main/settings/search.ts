@@ -63,6 +63,13 @@ export function registerSearchSettings(ctx: MainContext): void {
   commands.register('settings.setSearchEngine', ({ profileId, engine }) => {
     const state = store.state
     if (typeof profileId !== 'string' || !isPersistentProfile(state, profileId)) return
+    // Another profile than Default may follow the Default profile's engine again (ST-20).
+    if (engine === null && profileId !== DEFAULT_PROFILE_ID) {
+      store.update((d) => {
+        delete d.profiles[profileId]?.searchEngine
+      })
+      return
+    }
     if (typeof engine !== 'string' || !engineById(state, engine)) return
     store.update((d) => {
       const profile = d.profiles[profileId]
