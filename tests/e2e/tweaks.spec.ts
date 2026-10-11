@@ -798,9 +798,11 @@ test('[BO-18][BO-02] a key a busy page’s renderer gives back late never takes 
   }
   await expect.poll(span, { timeout: 10_000 }).toBeGreaterThanOrEqual(2500)
   const seen = await frames()
-  const lost = seen.filter(([, bg]) => bg !== NAVY).map(([at, bg]) => [Math.round(at - (seen[0] as Frame)[0]), bg])
+  const start = (seen[0] as Frame)[0]
+  const lost = seen.filter(([, bg]) => bg !== NAVY)
+  const firstLost = lost[0] ? `${Math.round(lost[0][0] - start)} ms after its first frame, ${lost[0][1]}` : null
   console.log(`[BO-18] the page that came back: ${seen.length} frames over ${Math.round(await span())} ms`)
-  expect(lost, JSON.stringify(lost.slice(0, 5))).toEqual([])
+  expect(firstLost, `${lost.length} of ${seen.length} frames lost the Tweak; the first`).toBeNull()
   expect(await bgOf(page)).toBe(NAVY)
   expect((await pageTweaks(app, tabId))?.parts).toEqual([`t:${kept}`])
 })
