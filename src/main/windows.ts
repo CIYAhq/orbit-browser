@@ -49,6 +49,8 @@ interface WindowRecord {
   overlayWarming?: boolean
   /** Hides the overlay if its renderer never says it is warm. */
   overlayWarmTimer?: ReturnType<typeof setTimeout>
+  /** Warms the hidden overlay again at the window's new size once a resize has ended (CB-22). */
+  overlayRewarmTimer?: ReturnType<typeof setTimeout>
   /** Pending hide after the overlay's exit animation. */
   overlayHideTimer?: ReturnType<typeof setTimeout>
   /** The overlay closed while the window was in the background: give the page focus when it returns. */
@@ -131,6 +133,8 @@ interface Attachment {
 const OVERLAY_EXIT_MS = 110
 /** The longest the overlay waits, shown outside the window, for its renderer to warm up (CB-22). */
 const OVERLAY_WARM_MAX_MS = 3000
+/** A resize has ended once the window has kept its size this long: the hidden overlay warms again (CB-22). */
+const OVERLAY_REWARM_MS = 300
 /** The longest a view coming back into a window stays out of sight, waiting for its page to draw (holdArrivals). */
 const HOLD_MS = 250
 /** The page tools' renderer starts this long after the window shows (NV-05: ⌘F finds the bar ready). */
@@ -500,6 +504,8 @@ export class WindowManager {
     })
     win.on('resize', () => {
       if (rec.overlayShown || rec.overlayWarming) this.fitOverlay(rec)
+      clearTimeout(rec.overlayRewarmTimer)
+      rec.overlayRewarmTimer = setTimeout(() => this.rewarmOverlay(rec), OVERLAY_REWARM_MS)
       if (rec.floatingShown) this.fitFloating(rec)
       if (rec.htmlFullscreen) this.applyPanes(id, rec.panes, rec.radius)
     })
@@ -533,6 +539,7 @@ export class WindowManager {
     win.on('closed', () => {
       clearTimeout(rec.overlayHideTimer)
       clearTimeout(rec.overlayWarmTimer)
+      clearTimeout(rec.overlayRewarmTimer)
       clearTimeout(rec.floatingTimer)
       clearTimeout(rec.floatingPrewarm)
       clearTimeout(rec.floatingDispose)
@@ -1714,6 +1721,31 @@ export class WindowManager {
     if (rec.overlayShown) return
     rec.overlay?.setVisible(false)
     this.fitOverlay(rec)
+  }
+
+  /**
+   * A resize has ended: the hidden overlay, still at the size it had, warms again (CB-22). It shows
+   * at the window's new size with all but its corner pixel outside the window, where its renderer
+   * lays out at that size, so the next ⌘T doesn't; it hides once its renderer has drawn there
+   * (`search.warm`, overlayWarm), or after OVERLAY_WARM_MAX_MS.
+   */
+  private rewarmOverlay(rec: WindowRecord): void {
+    rec.overlayRewarmTimer = undefined
+    const overlay = rec.overlay
+    if (!overlay || !viewContents(overlay) || rec.overlayShown || rec.overlayWarming || rec.win.isDestroyed()) return
+    // Still playing its exit (OVERLAY_EXIT_MS): after that.
+    if (overlay.getVisible()) {
+      rec.overlayRewarmTimer = setTimeout(() => this.rewarmOverlay(rec), OVERLAY_REWARM_MS)
+      return
+    }
+    const [width = 0, height = 0] = rec.win.getContentSize()
+    const laidOut = overlay.getBounds()
+    if (laidOut.width === width && laidOut.height === height) return
+    rec.overlayWarming = true
+    clearTimeout(rec.overlayWarmTimer)
+    rec.overlayWarmTimer = setTimeout(() => this.overlayWarm(rec.id), OVERLAY_WARM_MAX_MS)
+    this.fitOverlay(rec)
+    overlay.setVisible(true)
   }
 
   private showOverlay(rec: WindowRecord): void {

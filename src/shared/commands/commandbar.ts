@@ -123,7 +123,8 @@ export interface CommandBarCommands {
   'search.siteSearches': { args: Record<string, never>; result: SiteSearchInfo[] }
   /**
    * A window's overlay has run the bar once out of sight (CB-22): main warms its own part of the
-   * first open the same way, the keymap a shortcut is looked up in.
+   * first open the same way, the keymap a shortcut is looked up in. Also sent once the overlay,
+   * warmed again out of sight after a resize, has drawn at the window's new size: it hides again.
    */
   'search.warm': { args: Record<string, never>; result: void }
 }

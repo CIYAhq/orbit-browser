@@ -1,6 +1,6 @@
 import { applyPatches } from 'immer'
 import { AnimatePresence, domAnimation, LazyMotion } from 'motion/react'
-import { type CSSProperties, useEffect, useState } from 'react'
+import { type CSSProperties, useEffect, useRef, useState } from 'react'
 import { DOWNLOADS_FLYOUT_PANEL } from '../../../shared/commands/downloads'
 import { SHORTCUT_SHEET } from '../../../shared/commands/keys'
 import type { CommandBarMode } from '../../../shared/state'
@@ -69,6 +69,31 @@ function useWarmUp(open: boolean): { mode: CommandBarMode | undefined; key: numb
 }
 
 /**
+ * After a resize, main shows the idle overlay out of sight at the window's new size (CB-22); once it
+ * has drawn there, it says so (search.warm) and main hides it again.
+ */
+function useRewarm(warm: boolean, idle: boolean): void {
+  const idleRef = useRef(idle)
+  idleRef.current = idle
+  useEffect(() => {
+    if (!warm) return
+    let frame = 0
+    const onResize = () => {
+      if (!idleRef.current) return
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(() => void invoke('search.warm', {}))
+      })
+    }
+    window.addEventListener('resize', onResize)
+    return () => {
+      window.removeEventListener('resize', onResize)
+      cancelAnimationFrame(frame)
+    }
+  }, [warm])
+}
+
+/**
  * Transparent full-window layer above the tab views. It is only visible while
  * something is open (command bar, Peek chrome, menus); clicking the backdrop closes it.
  * Children animate out (AnimatePresence) while main keeps the view up briefly.
@@ -79,6 +104,7 @@ export function OverlayApp() {
   const overlay = win?.overlay
   const kind = overlay?.kind ?? 'none'
   const warm = useWarmUp(kind !== 'none')
+  useRewarm(warm.done, kind === 'none')
   return (
     <LazyMotion features={domAnimation} strict>
       <OrbitMotionConfig>

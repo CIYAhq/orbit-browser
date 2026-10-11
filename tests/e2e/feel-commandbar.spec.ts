@@ -296,6 +296,39 @@ test('[CB-22][FL-16][FL-29] ⌘T and ⌘L: the bar shows in the first frame, foc
   expect(t.best.duration).toBeLessThanOrEqual(ENTRANCE)
 })
 
+test('[CB-22] once a resize of the window ends, the hidden overlay is laid out at its new size out of sight, and ⌘T opens the bar with no resize', async () => {
+  const { app } = orbit
+  const overlay = await viewPage(app, 'overlay')
+  // The warm-up is over: the overlay is hidden, at the window's size.
+  await overlayGone(app)
+  const opens = await timeOpens(overlay)
+  const inner = () => overlay.evaluate(() => [window.innerWidth, window.innerHeight])
+  const before = await inner()
+  // The window is resized, as by dragging its corner: three steps.
+  const content = await app.evaluate(async () => {
+    const g = globalThis as unknown as {
+      __orbit: { ctx: { windows: { get(id: string): Electron.BrowserWindow | undefined; ids(): string[] } } }
+    }
+    const win = g.__orbit.ctx.windows.get(g.__orbit.ctx.windows.ids()[0] as string)
+    if (!win) throw new Error('no window')
+    const [width = 0, height = 0] = win.getSize()
+    for (const step of [1, 2, 3]) {
+      win.setSize(width - 40 * step, height - 30 * step)
+      await new Promise((r) => setTimeout(r, 30))
+    }
+    return win.getContentSize()
+  })
+  expect(content).not.toEqual(before)
+  // Once it has ended, the overlay has been laid out at the window's new size, and hidden again.
+  await expect.poll(inner).toEqual(content)
+  await overlayGone(app)
+  const e = await openMeasured(app, overlay, 'T', opens)
+  console.info(
+    `[feel] CB-22 after a resize: overlay ${before.join('×')} → ${content.join('×')}; ⌘T visible ${e.visible.toFixed(1)} ms${e.resized ? ', resized the overlay' : ''}`,
+  )
+  expect(e.resized, 'the overlay was resized while the bar opened').toBe(false)
+})
+
 test('[FL-16] ⌘T then "abc" at once: the field shows "abc", each key echoed in its frame', async () => {
   const { app } = orbit
   const overlay = await viewPage(app, 'overlay')
