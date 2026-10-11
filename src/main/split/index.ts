@@ -51,6 +51,7 @@ import {
   swapIntoPaneInDraft,
   windowsShowing,
 } from './model'
+import { installPaneStills } from './stills'
 import { PaneStrip } from './strip'
 
 /**
@@ -104,6 +105,7 @@ export function registerSplit(ctx: MainContext): void {
   const sessions = new Map<WindowId, PaneSession>()
   const strip = new PaneStrip(ctx)
   installLinkDrop(ctx)
+  installPaneStills(ctx)
   // An empty pane whose command bar was open when Orbit quit has nothing to show.
   store.update((d) => {
     dropBlankPanes(d)
