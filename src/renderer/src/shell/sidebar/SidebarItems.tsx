@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, ChevronDown, Plus } from 'lucide-react'
-import { AnimatePresence, motion } from 'motion/react'
+import { AnimatePresence, cubicBezier, motion } from 'motion/react'
 import {
   memo,
   type DragEvent as ReactDragEvent,
@@ -19,7 +19,7 @@ import { engineForSpace, parseInput } from '../../../../shared/url'
 import { invoke, isMac, runAction } from '../../api'
 import { importDroppedFile, importPastedLinks, revealInSidebar } from '../../import/sidebar'
 import { useShortcutLabel } from '../../keys/live'
-import { OrbitMotionConfig, reducedMotion } from '../../motion'
+import { EASE, OrbitMotionConfig, reducedMotion } from '../../motion'
 import { activeTabId } from '../../selectors'
 import { getOrbitState, useOrbit } from '../../store'
 import { DragGhost } from './DragGhost'
@@ -83,7 +83,7 @@ export const SidebarItems = memo(function SidebarItems({
   }, [active])
   const scrollTop = useScrollMemory(scrollRef, spaceId)
   const rows = useRowWindow(scrollRef, scrollTop)
-  const reveal = useAutoReveal(scrollRef, active)
+  const reveal = useAutoReveal(scrollRef, active, rows)
   const onKeyDown = useKeyboardNav(scrollRef)
   if (!space) return null
 
@@ -409,10 +409,52 @@ function useScrollMemory(scrollRef: React.RefObject<HTMLDivElement | null>, spac
 }
 
 /**
- * Scrolls a newly selected tab into view and, while the selected tab is scrolled out of
- * sight, shows a small pill pointing to it (SB-23).
+ * FL-05: a newly selected row out of sight scrolls into view with an ease-out of 200–250 ms, and at
+ * once when it is more than two screens away, or with reduced motion (FL-28). The curve is the
+ * instant token's, CSS's ease-out: it moves until its end, so the scroll shows its whole 225 ms
+ * (the snappy curve covers 95 % of the way in half that and then barely moves).
  */
-function useAutoReveal(scrollRef: React.RefObject<HTMLDivElement | null>, selected: string | null) {
+const REVEAL_MS = 225
+const REVEAL_EASE = cubicBezier(...EASE.instant)
+const REVEAL_JUMP_SCREENS = 2
+
+/**
+ * Scrolls the list so `el` shows, where `scrollIntoView({ block: 'nearest' })` would put it, on
+ * FL-05's ease-out or at once; returns the cancel. Run in a frame callback (`now` is its time): the
+ * first step is drawn in this frame, and each step draws the rows it brings on screen before the
+ * frame (FL-21), where a scroll set in a frame callback would show them only in the next.
+ */
+function revealRow(scroll: HTMLElement, el: HTMLElement, rows: RowWindow, now: number): () => void {
+  const view = scroll.getBoundingClientRect()
+  const r = el.getBoundingClientRect()
+  const by = r.top < view.top ? r.top - view.top : r.bottom > view.bottom ? r.bottom - view.bottom : 0
+  const from = scroll.scrollTop
+  const to = Math.min(Math.max(0, from + by), scroll.scrollHeight - scroll.clientHeight)
+  const none = () => {}
+  if (view.height === 0 || Math.abs(to - from) < 1) return none
+  if (reducedMotion() || Math.abs(to - from) > REVEAL_JUMP_SCREENS * scroll.clientHeight) {
+    scroll.scrollTop = to
+    rows.update(true)
+    return none
+  }
+  // One frame along, so the frame drawn now already moves (as ONE_FRAME_S does for entrances).
+  const start = now - 1000 / 60
+  let raf = 0
+  const step = (t: number) => {
+    const p = Math.min(1, (t - start) / REVEAL_MS)
+    scroll.scrollTop = from + (to - from) * REVEAL_EASE(p)
+    rows.update(true)
+    if (p < 1) raf = requestAnimationFrame(step)
+  }
+  step(now)
+  return () => cancelAnimationFrame(raf)
+}
+
+/**
+ * Scrolls a newly selected tab into view (FL-05, SB-23) and, while the selected tab is scrolled out
+ * of sight, shows a small pill pointing to it (SB-23).
+ */
+function useAutoReveal(scrollRef: React.RefObject<HTMLDivElement | null>, selected: string | null, rows: RowWindow) {
   const [side, setSide] = useState<'above' | 'below' | null>(null)
   // The row that stands for the selected tab: its split view's row; none for a Favorite.
   const active = useOrbit((s) =>
@@ -429,9 +471,12 @@ function useAutoReveal(scrollRef: React.RefObject<HTMLDivElement | null>, select
       const s = scroll.getBoundingClientRect()
       return r.top < s.top || r.bottom > s.bottom ? el : null
     }
-    const raf = requestAnimationFrame(() =>
-      outside()?.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' }),
-    )
+    let stop = () => {}
+    const raf = requestAnimationFrame((now) => {
+      const el = outside()
+      const scroll = scrollRef.current
+      if (el && scroll) stop = revealRow(scroll, el, rows, now)
+    })
     // Rows that were still growing in may have moved the target: settle on the final position,
     // unless the user has started scrolling in the meantime (never fight the user), or the row has
     // since moved to another section, e.g. pinned out of sight (FL-07: the list does not scroll).
@@ -441,15 +486,19 @@ function useAutoReveal(scrollRef: React.RefObject<HTMLDivElement | null>, select
       if (el && (home === undefined || el.dataset.container === home)) el.scrollIntoView({ block: 'nearest' })
     }, 450)
     const scroll = scrollRef.current
-    const userScroll = () => clearTimeout(settle)
+    const userScroll = () => {
+      clearTimeout(settle)
+      stop()
+    }
     const inputs = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const
     for (const type of inputs) scroll?.addEventListener(type, userScroll, { passive: true })
     return () => {
       cancelAnimationFrame(raf)
+      stop()
       clearTimeout(settle)
       for (const type of inputs) scroll?.removeEventListener(type, userScroll)
     }
-  }, [active, scrollRef])
+  }, [active, scrollRef, rows])
   useEffect(() => {
     const scroll = scrollRef.current
     if (!scroll || !active) {

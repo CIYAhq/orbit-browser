@@ -4,6 +4,7 @@
  */
 import { expect, type Page, test } from '@playwright/test'
 import {
+  bestOf,
   type Frame,
   firstFrame,
   frameAfterWall,
@@ -14,8 +15,19 @@ import {
   pacing,
   record,
   series,
+  steps,
 } from './frames'
-import { type Fixtures, FRAME_SLACK, isMac, launchOrbit, type Orbit, run, startFixtures, state } from './helpers'
+import {
+  action,
+  type Fixtures,
+  FRAME_SLACK,
+  isMac,
+  launchOrbit,
+  type Orbit,
+  run,
+  startFixtures,
+  state,
+} from './helpers'
 import { floatingInfo, floatingPage, pageMouse, pressInPage } from './nav-support'
 import { newTab, row, settled, waitTab } from './tabs-support'
 
@@ -496,6 +508,164 @@ test('[FL-21] 200 tabs: every row in the accessibility tree tells its place in i
     expect(i.level, `${i.tab}: level`).toBe('2')
   }
   expect(folderRows).toEqual([{ tab: null, folder: true, level: '1', pos: '1', size: '1' }])
+})
+
+/** The list's scroll to a newly selected row out of sight (FL-05), read from that row's slot. */
+interface Reveal {
+  /** How far the list scrolled (px). */
+  travel: number
+  /** Frames in which it moved. */
+  frames: number
+  /** From the frame before its first move to its last (ms). */
+  ms: number
+  /** The first moving frame's share of the way. */
+  first: number
+  /** Which moving frame was the fastest (0: the first). */
+  fastest: number
+  /** The last moving frame's speed, against the fastest. */
+  tail: number
+  /** Frames from the frame that shows the row selected to the first move (0: that frame). */
+  delay: number
+  /** The row lies inside the list at the end. */
+  inView: boolean
+}
+
+/** Selects `tabId` as the command bar's tab search does, and reads how the list scrolls to it. */
+async function reveal(tabId: string): Promise<Reveal> {
+  const { app, shell } = orbit
+  const rec = await record(shell, {
+    slot: `[data-slot][data-key="${tabId}"]`,
+    row: { selector: `[data-testid="tab-row"][data-tab-id="${tabId}"]`, classes: true },
+    list: '[data-testid="sidebar-scroll"]',
+  })
+  await run(app, 'tabs.activate', { tabId })
+  const r = await rec.until(900)
+  const y = series(r, 'slot', (b) => b.y)
+  const moves = steps(y).filter((s) => Math.abs(s.dv) > 0.5)
+  const firstMove = moves[0]
+  const lastMove = moves.at(-1)
+  const real = y.filter((p) => !Number.isNaN(p.v))
+  const travel = Math.abs((real.at(-1)?.v ?? 0) - (real[0]?.v ?? 0))
+  const top = Math.max(0, ...moves.map((s) => s.speed))
+  const selected = r.frames.find((f) => f.els.row?.classes?.includes('is-active'))
+  const movedAt = firstMove ? r.frames.findIndex((f) => f.t === firstMove.t) : -1
+  const end = r.frames.at(-1)
+  const slot = end?.els.slot
+  const list = end?.els.list
+  return {
+    travel,
+    frames: moves.length,
+    ms: firstMove && lastMove ? lastMove.t - (firstMove.t - firstMove.dt) : 0,
+    first: firstMove && travel > 0 ? Math.abs(firstMove.dv) / travel : 0,
+    fastest: moves.findIndex((s) => s.speed === top),
+    tail: lastMove && top > 0 ? lastMove.speed / top : 0,
+    delay: selected && movedAt >= 0 ? movedAt - selected.i : Number.POSITIVE_INFINITY,
+    inView: !!slot && !!list && slot.y >= list.y - 0.5 && slot.y + slot.height <= list.y + list.height + 0.5,
+  }
+}
+
+test('[FL-05][SB-23][FL-21] a selected row out of sight scrolls in with a 200–250 ms ease-out, at once from more than two screens away or with reduced motion; no row on screen is blank', async () => {
+  const { app, shell } = orbit
+  test.setTimeout(180_000)
+  await manyTabs(300)
+  await expect(shell.getByTestId('today-list').locator(':scope > [data-slot]')).toHaveCount(300, { timeout: 30_000 })
+  await settled(shell, 30_000)
+  const spaceId = (await state(app)).spaceOrder[0] as string
+  const ids = (await state(app)).spaces[spaceId]?.today ?? []
+  const scroller = shell.getByTestId('sidebar-scroll')
+  const height = await scroller.evaluate((el) => el.clientHeight)
+  /** With the list at its top and its first row selected: the first Today row at least `px` below the list's bottom edge. */
+  const below = async (px: number): Promise<string> => {
+    await scroller.evaluate((el) => {
+      el.scrollTop = 0
+    })
+    await run(app, 'tabs.activate', { tabId: ids[0] })
+    // Past the reveal's settle (450 ms), which would otherwise scroll on after the next reset.
+    await shell.waitForTimeout(500)
+    return scroller.evaluate((el, px) => {
+      const edge = el.getBoundingClientRect().bottom
+      const slots = [...el.querySelectorAll<HTMLElement>('[data-testid="today-list"] > [data-slot]')]
+      return slots.find((s) => s.getBoundingClientRect().top >= edge + px)?.dataset.key ?? ''
+    }, px)
+  }
+  const watch = await watchBlankRows(shell)
+  // Near: a row just below the edge, and one more than a screen away (still within two).
+  const eased = (x: Reveal) =>
+    x.inView &&
+    x.ms >= 200 &&
+    x.ms <= 250 * FRAME_SLACK &&
+    x.fastest <= 1 &&
+    x.tail <= 0.35 &&
+    x.first >= 0.08 &&
+    x.delay <= 1
+  const show = (name: string, all: Reveal[]) => {
+    for (const [k, x] of all.entries())
+      console.log(
+        `[feel] FL-05 ${name} round ${k + 1}: ${Math.round(x.travel)} px in ${Math.round(x.ms)} ms over ${x.frames} frames; first frame ${Math.round(x.first * 100)} % of the way, fastest frame ${x.fastest + 1}, last frame at ${Math.round(x.tail * 100)} % of the top speed, ${x.delay} frames after the highlight`,
+      )
+  }
+  await watch.phase('near')
+  const near = await bestOf(async () => reveal(await below(100)), eased)
+  show('near', near.all)
+  await watch.phase('a screen away')
+  const screen = await bestOf(async () => reveal(await below(1.2 * height)), eased)
+  show('a screen away', screen.all)
+  // Far: more than two screens away, it jumps there in one frame.
+  await watch.phase('far')
+  const far = await reveal(await below(3 * height))
+  show('far', [far])
+  // Reduced motion (FL-28): the near row comes in at once too.
+  await action(app, 'app.toggleReduceMotion')
+  await expect(shell.locator('html.reduce-motion')).toBeAttached()
+  await watch.phase('reduced')
+  const reduced = await reveal(await below(100))
+  show('reduced motion', [reduced])
+  const seen = await watch.stop()
+  note('FL-05', 'a row 100 px below the edge: scroll', near.best.ms, '200–250 ms')
+  note(
+    'FL-05',
+    'a row 100 px below the edge: share of the way in its first frame',
+    near.best.first,
+    'ease-out: the most',
+    '×',
+  )
+  note('FL-05', `a row ${Math.round(screen.best.travel)} px away: scroll`, screen.best.ms, '200–250 ms')
+  note(
+    'FL-05',
+    `a row ${Math.round(far.travel)} px away (${(far.travel / height).toFixed(1)} screens): frames moving`,
+    far.frames,
+    '1 (at once)',
+    'frames',
+  )
+  note('FL-05', 'reduced motion: frames moving', reduced.frames, '1 (at once)', 'frames')
+  note(
+    'FL-21',
+    'FL-05 scrolls: rows on screen drawing nothing, worst frame',
+    seen.blank,
+    `0 (${seen.frames} frames)`,
+    'rows',
+  )
+  for (const [name, x] of [
+    ['near', near.best],
+    ['a screen away', screen.best],
+  ] as const) {
+    expect(x.inView, `${name}: the row ends in view`).toBe(true)
+    expect(x.ms, `${name}: the scroll's length`).toBeGreaterThanOrEqual(200)
+    expect(x.ms, `${name}: the scroll's length`).toBeLessThanOrEqual(250 * FRAME_SLACK)
+    // Ease-out: fastest at once, slowing to a stop.
+    expect(x.fastest, `${name}: the fastest frame`).toBeLessThanOrEqual(1)
+    expect(x.first, `${name}: the first frame's share of the way`).toBeGreaterThanOrEqual(0.08)
+    expect(x.tail, `${name}: the last frame's speed against the top`).toBeLessThanOrEqual(0.35)
+    expect(x.delay, `${name}: frames from the highlight to the first move`).toBeLessThanOrEqual(1)
+  }
+  expect(screen.best.travel).toBeGreaterThan(height)
+  expect(screen.best.travel).toBeLessThan(2 * height)
+  expect(far.travel).toBeGreaterThan(2 * height)
+  expect(far.inView).toBe(true)
+  expect(far.frames, 'more than two screens away: at once').toBe(1)
+  expect(reduced.inView).toBe(true)
+  expect(reduced.frames, 'reduced motion: at once').toBe(1)
+  expect(seen.blank, `worst frame: ${seen.worst}`).toBe(0)
 })
 
 test('[FL-21][FL-29] the first showing of a 200-tab Space that is not next door paints within budget', async () => {
