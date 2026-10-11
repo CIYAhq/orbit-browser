@@ -12,7 +12,8 @@
  * server starts looking for a free port, up to 9 above it, so a capture stays inside its own range.
  *
  * Scenarios live in scripts/capture/scenarios/<name>.mjs and export
- * `default async function (t)`; see helpers in `makeToolkit` below.
+ * `default async function (t)`; see helpers in `makeToolkit` below. A scenario may also export `env`:
+ * more environment for Orbit's launch (fixture paths, say), as an object or a function of `{ fx }`.
  */
 import { execFile, spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, renameSync, rmSync } from 'node:fs'
@@ -63,7 +64,8 @@ async function startFixtures() {
   const accents = ['#e5484d', '#3e63dd', '#30a46c', '#f76b15', '#8e4ec6', '#12a594', '#d6409f', '#ffb224']
   const esc = (t) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
   const server = createServer((req, res) => {
-    const raw = (req.url ?? '/').split('/').pop() || 'Home'
+    const at = new URL(req.url ?? '/', 'http://127.0.0.1')
+    const raw = at.pathname.split('/').pop() || 'Home'
     let name = raw
     try {
       name = decodeURIComponent(raw)
@@ -78,8 +80,9 @@ async function startFixtures() {
           `<div class="card"><div class="dot" style="opacity:${0.35 + (i % 3) * 0.2}"></div><h3>${c}</h3><p>Local demo content for ${esc(name)}. Nothing here comes from the network.</p></div>`,
       )
       .join('')
-    res.writeHead(200, { 'content-type': 'text/html' })
-    res.end(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(name)}</title>
+    // ?wait=<ms>: the page comes that much later (at most 30 s), for a load still under way.
+    const wait = Math.min(Number(at.searchParams.get('wait')) || 0, 30_000)
+    const page = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(name)}</title>
 <link rel="icon" href="data:image/svg+xml,${encodeURIComponent(icon)}">
 <style>
 :root{color-scheme:light}body{font:16px/1.55 system-ui,sans-serif;margin:0;background:#fafafa;color:#1d1d1f}
@@ -91,7 +94,11 @@ main{padding:40px;max-width:1100px}h1{font-size:40px;margin:8px 0 6px;letter-spa
 .card{background:#fff;border:1px solid #eee;border-radius:14px;padding:18px}.card h3{margin:10px 0 4px;font-size:16px}
 .card p{margin:0;color:#666;font-size:14px}.dot{width:36px;height:36px;border-radius:10px;background:${accent}}
 </style></head><body><header><div class="logo"></div><b>${esc(name)}</b><nav><span>Home</span><span>Library</span><span>Settings</span></nav></header>
-<main><h1>${esc(name)}</h1><p class="lead">A local demo page for Orbit screen captures, served from 127.0.0.1.</p><div class="grid">${cards}</div></main></body></html>`)
+<main><h1>${esc(name)}</h1><p class="lead">A local demo page for Orbit screen captures, served from 127.0.0.1.</p><div class="grid">${cards}</div></main></body></html>`
+    setTimeout(() => {
+      res.writeHead(200, { 'content-type': 'text/html' })
+      res.end(page)
+    }, wait)
   })
   let port = PORT
   await new Promise((ok, fail) => {
@@ -278,6 +285,10 @@ let app
 let rec
 let saved = false
 try {
+  const scenarioFile = scenario.endsWith('.mjs')
+    ? resolve(scenario)
+    : resolve(import.meta.dirname, 'scenarios', `${scenario}.mjs`)
+  const { default: play, setup, env = {} } = await import(pathToFileURL(scenarioFile).href)
   log('launching Orbit')
   app = await electron.launch({
     args: [
@@ -286,7 +297,14 @@ try {
       NO_LOOKUPS,
       main,
     ],
-    env: { ...process.env, ORBIT_E2E: '1', ORBIT_USER_DATA: userData },
+    env: {
+      ...process.env,
+      ORBIT_E2E: '1',
+      ORBIT_USER_DATA: userData,
+      // Import searches no browser on this computer: a scenario that imports names its made-up ones.
+      ORBIT_IMPORT_PLACES: '[]',
+      ...(typeof env === 'function' ? await env({ fx }) : env),
+    },
   })
   let shell
   for (let i = 0; i < 200 && !shell; i++) {
@@ -317,10 +335,6 @@ try {
     throw new Error(`not recording: requests would reach the network (${proxies.join(', ')})`)
   }
 
-  const scenarioFile = scenario.endsWith('.mjs')
-    ? resolve(scenario)
-    : resolve(import.meta.dirname, 'scenarios', `${scenario}.mjs`)
-  const { default: play, setup } = await import(pathToFileURL(scenarioFile).href)
   const toolkit = makeToolkit(app, shell, fx)
   // Optional unrecorded preparation (Spaces, tabs, history), so the clip starts on the demo itself.
   if (setup) {
