@@ -35,6 +35,14 @@ const head = (title: string, bg: string) => `<!doctype html>
 <style>body{font:16px system-ui;background:${bg};margin:0;padding:32px}#block{width:240px;height:120px}
 #count{font:inherit;padding:6px 12px}</style></head>`
 
+/**
+ * The `/look` page's photo: one solid colour, so its pixels say whether it kept its colours. A dark
+ * blue: its negative is light. (A mid-tone such as orange is nearly its own negative once inverted
+ * and turned back, so it can't tell.)
+ */
+export const PHOTO = '#20406a'
+const PHOTO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><rect width="120" height="120" fill="${PHOTO}"/></svg>`
+
 /** The serial number of each load of a page, by path: a `/slow` page's block changes colour with it. */
 const BLOCK_COLORS = ['#1f5fd6', '#18a058', '#c2410c', '#7c3aed']
 
@@ -46,6 +54,13 @@ const BLOCK_COLORS = ['#1f5fd6', '#18a058', '#c2410c', '#7c3aed']
  * - `/slow/<name>?bg=…&ms=…`: sends its heading and a coloured block (`#block`, a new colour on each
  *   load) at once, and the rest of the page `ms` later (600 by default): it paints before the
  *   document is ready, as a page from a slow server does.
+ * - `/look/<name>`: text (`#text`), an icon (`#icon`), code (`#code`), a photo (`#photo`, a solid
+ *   PHOTO square) and a field (`#field`): what the colour, font and case controls change or keep.
+ * - `/cards/<name>`: a counting button (`#count`); a sidebar (`aside.sidebar`) with a widget
+ *   (`#weather`) and two small stories; a feed (`main.feed`) with a promo link (`#promo`) and four
+ *   stories (`article.story`); three links (`li.story`). Stories are padded: a point just inside one's
+ *   corner is the story itself. `window.__first` is what its first frame showed:
+ *   whether the promo and the widget were displayed, and how many stories.
  */
 export async function startTweakFixtures(base = 3370): Promise<TweakFixtures> {
   const seen: string[] = []
@@ -73,6 +88,43 @@ export async function startTweakFixtures(base = 3370): Promise<TweakFixtures> {
       res.end(
         `${head(name, bg)}<body>${FIRST_FRAME}<h1 id="title">${name}</h1>
 <iframe id="inner" title="Inner" src="${(u.searchParams.get('other') ?? '').replace(/"/g, '&quot;')}" style="width:400px;height:200px"></iframe>
+</body></html>`,
+      )
+      return
+    }
+    if (u.pathname.startsWith('/look/')) {
+      res.writeHead(200, ok)
+      res.end(
+        `${head(name, bg)}<body>${FIRST_FRAME}<h1 id="title">${name}</h1>
+<p id="text">The quick brown fox jumps over the lazy dog.</p>
+<p><i class="icon" id="icon" style="font-family: monospace">*</i> <code id="code">let x = 1</code></p>
+<p><img id="photo" alt="Photo" width="120" height="120" src="data:image/svg+xml,${encodeURIComponent(PHOTO_SVG)}"></p>
+<p><input id="field" aria-label="Field" value="Mixed Case Text"></p>
+<div style="height:1600px"></div></body></html>`,
+      )
+      return
+    }
+    if (u.pathname.startsWith('/cards/')) {
+      const story = (n: string) => `<article class="story"><h2>Story ${n}</h2><p>About ${n}</p></article>`
+      res.writeHead(200, ok)
+      res.end(
+        `${head(name, bg)}<body><style>.story { padding: 10px 14px; margin: 8px 0 }</style><h1 id="title">${name}</h1>
+<p><button id="count" onclick="window.__clicks = (window.__clicks || 0) + 1">Count</button></p>
+<div class="layout" style="display:flex;gap:24px;align-items:flex-start">
+<aside class="sidebar" style="width:220px">
+<section class="widget" id="weather" aria-label="Weather" style="padding:8px;background:#dbeafe"><h3>Weather</h3><p>Sunny</p></section>
+<article class="story mini"><h3>Mini one</h3></article><article class="story mini"><h3>Mini two</h3></article>
+</aside>
+<main class="feed" style="flex:1">
+<a id="promo" class="promo" href="/page/Away" style="display:block;padding:12px;background:#ffe9a8">Big promo</a>
+${['one', 'two', 'three', 'four'].map(story).join('\n')}
+</main></div>
+<ul class="links"><li class="story">Link one</li><li class="story">Link two</li><li class="story">Link three</li></ul>
+<script>requestAnimationFrame(() => {
+  const shown = (el) => !!el && getComputedStyle(el).display !== 'none'
+  window.__first = { promo: shown(document.getElementById('promo')), weather: shown(document.getElementById('weather')),
+    stories: [...document.querySelectorAll('.story')].filter(shown).length }
+})</script>
 </body></html>`,
       )
       return
@@ -264,6 +316,35 @@ export const zoomOf = (page: Page): Promise<string> =>
 /** The page body's background colour now. */
 export const bgOf = (page: Page): Promise<string> =>
   page.evaluate(() => getComputedStyle(document.body).backgroundColor).catch(() => '')
+
+/** The colour of one pixel of a tab's page as painted (`#rrggbb`), at a point in the page's CSS pixels. */
+export function pixelAt(app: ElectronApplication, tabId: string, x: number, y: number): Promise<string> {
+  return app.evaluate(
+    async (_e, [id, px, py]) => {
+      type G = { __orbit: { ctx: { tabs: { contents: (id: string) => Electron.WebContents | undefined } } } }
+      const contents = (globalThis as unknown as G).__orbit.ctx.tabs.contents(id)
+      if (!contents) throw new Error('no page')
+      const image = await contents.capturePage({ x: Math.round(px), y: Math.round(py), width: 1, height: 1 })
+      const bitmap = image.toBitmap()
+      const hex = (n: number | undefined) => (n ?? 0).toString(16).padStart(2, '0')
+      // BGRA
+      return `#${hex(bitmap[2])}${hex(bitmap[1])}${hex(bitmap[0])}`
+    },
+    [tabId, x, y] as const,
+  )
+}
+
+/** A `#rrggbb` colour as numbers. */
+export const rgbOf = (hex: string): [number, number, number] => [
+  Number.parseInt(hex.slice(1, 3), 16),
+  Number.parseInt(hex.slice(3, 5), 16),
+  Number.parseInt(hex.slice(5, 7), 16),
+]
+
+/** What Hide-element mode's picker in a tab's page says (BO-10), or null where there is none. */
+export function pickerInfo(app: ElectronApplication, tabId: string): ReturnType<TweakTestHooks['picker']> {
+  return app.evaluate((_e, id) => (globalThis as unknown as Hooks).__orbitTweaks.picker(id), tabId)
+}
 
 /** Marks a page's document, to tell whether it was replaced (a reload or a navigation). */
 export const mark = (page: Page): Promise<unknown> => page.evaluate(() => Object.assign(window, { __mark: 1 }))

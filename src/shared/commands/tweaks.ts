@@ -19,7 +19,32 @@ export interface TweakEditorState {
   nonce: number
   /** The page is in a private window (BO-17: JavaScript Tweaks run there only if allowed). */
   private: boolean
+  /** Hide-element mode (BO-10). */
+  hide: TweakHideState
 }
+
+/** Hide-element mode in a window's editor panel (BO-10). */
+export interface TweakHideState {
+  /** The mode is on: what is under the pointer in the page is outlined, and a click picks it. */
+  on: boolean
+  /** The element the user clicked, waiting for "Hide this" or "Hide all similar"; null while none is. */
+  pick: TweakHidePick | null
+}
+
+/** An element picked in Hide-element mode (BO-10), as the page's picker described it. */
+export interface TweakHidePick {
+  /** What it is, in words (its name, text or kind), for its restore marker. */
+  label: string
+  /** "Hide this": a selector for that element alone. */
+  exact: string
+  /** "Hide all similar", narrow to broad: selectors for it and elements like it, each with how many it matches now. */
+  similar: { selector: string; count: number }[]
+}
+
+/** Which of a pick's selectors (BO-10): the element alone, or a level of "similar" (an index into `similar`). */
+export type TweakHideChoice = 'this' | number
+
+export const HIDE_OFF: TweakHideState = { on: false, pick: null }
 
 /**
  * The editor panel's view (BO-02): the panel at the top-right corner of the page it edits, plus a
@@ -58,6 +83,29 @@ export interface TweakCommands {
    * allowed there). False where it didn't run.
    */
   'tweaks.runNow': { args: { id: string; tabId: TabId }; result: boolean }
+  /**
+   * Clears every edit of a Tweak (BO-12's "Reset all edits"): colours, font, size, case, hidden
+   * elements and code. Its name, switch and scope stay.
+   */
+  'tweaks.reset': { args: { id: string }; result: void }
+  /**
+   * Hide-element mode on or off in the calling window's editor panel (BO-10). Main puts the picker in
+   * the page (an isolated world, never the page's own); false where it can't start.
+   */
+  'tweaks.hideMode': { args: { on: boolean }; result: boolean }
+  /**
+   * Outlines in the page what a choice would hide (BO-10): the picked element, or a level of similar
+   * ones; null outlines the picked element again. The number of elements outlined.
+   */
+  'tweaks.hidePreview': { args: { choice: TweakHideChoice | null }; result: number }
+  /** Hides what a choice picks (BO-10), as plain CSS in the edited Tweak; the mode goes on. False if nothing was. */
+  'tweaks.hide': { args: { choice: TweakHideChoice }; result: boolean }
+  /** Drops the picked element without hiding anything (BO-10); the mode goes on. */
+  'tweaks.hideCancel': { args: Record<string, never>; result: void }
+  /** Shows one hidden element of the edited page again while its restore marker is hovered (BO-10), or none. */
+  'tweaks.showHidden': { args: { hiddenId: string | null }; result: void }
+  /** Brings a hidden element back for good (BO-10's restore marker). */
+  'tweaks.unhide': { args: { id: string; hiddenId: string }; result: void }
   /** Turns a Tweak on or off (BO-14, BO-15). */
   'tweaks.setEnabled': { args: { id: string; enabled: boolean }; result: void }
   /** Deletes a Tweak (BO-15): its styles leave open pages at once. */

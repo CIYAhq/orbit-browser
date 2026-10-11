@@ -319,6 +319,68 @@ export function isEmptyTweak(tweak: Tweak): boolean {
   )
 }
 
+/**
+ * Clears every edit of a Tweak (BO-12's "Reset all edits"): colours, font, size, case, hidden
+ * elements and code. Its name, switch and scope stay. True when something changed.
+ */
+export function clearTweak(tweak: Tweak, now: number): boolean {
+  if (isEmptyTweak(tweak)) return false
+  tweak.style = { ...DEFAULT_TWEAK_STYLE, hidden: [] }
+  tweak.css = ''
+  tweak.js = ''
+  tweak.updatedAt = now
+  return true
+}
+
+/**
+ * Adds a hidden element to a Tweak (BO-10): a selector that can't reach outside its own rule, not one
+ * the Tweak hides already, while there is room. True when added.
+ */
+export function addHidden(tweak: Tweak, hidden: TweakHidden, now: number): boolean {
+  const list = tweak.style.hidden
+  const selector = hidden.selector.trim()
+  if (!isSafeSelector(selector) || list.length >= TWEAK_LIMITS.hidden) return false
+  if (list.some((h) => h.id === hidden.id || h.selector === selector)) return false
+  list.push({ id: hidden.id.slice(0, 64), selector, label: hidden.label.slice(0, TWEAK_LIMITS.label) })
+  tweak.updatedAt = now
+  return true
+}
+
+/** Brings a hidden element back (BO-10's restore marker). True when it was hidden. */
+export function removeHidden(tweak: Tweak, hiddenId: string, now: number): boolean {
+  const i = tweak.style.hidden.findIndex((h) => h.id === hiddenId)
+  if (i < 0) return false
+  tweak.style.hidden.splice(i, 1)
+  tweak.updatedAt = now
+  return true
+}
+
+/** Hue steps between a shuffled tint and its accent: neighbours, thirds and opposites (BO-13). */
+const ACCENT_STEPS = [30, 60, 120, 150, 180, 210, 240, 300]
+
+/**
+ * A random look that holds together (BO-13): a tint of any hue with an accent a pleasing step away,
+ * sometimes inverted, one of the fonts, the site's size or a little larger, and mostly the site's own
+ * case. Hidden elements and code are never part of it.
+ */
+export function shuffleStyle(random: () => number = Math.random): Partial<Omit<TweakStyle, 'hidden'>> {
+  const pick = <T>(list: readonly T[]): T => list[Math.min(list.length - 1, Math.floor(random() * list.length))] as T
+  const hue = Math.floor(random() * 360)
+  const cases: TweakStyle['textCase'][] = ['lower', 'upper', 'capitalize']
+  return {
+    hue,
+    intensity: round(0.35 + random() * 0.5, 2),
+    accent: wrapHue(hue + pick(ACCENT_STEPS)),
+    invert: random() < 0.3,
+    contrast: 100,
+    brightness: 100,
+    saturation: 100,
+    font: pick(FONT_PRESETS).id,
+    size: pick([100, 100, 110]),
+    textCase: random() < 0.8 ? 'none' : pick(cases),
+  }
+}
+
 // ---- Matching (BO-17) -------------------------------------------------------
 
 const indexes = new WeakMap<Record<string, Tweak>, Map<string, Tweak[]>>()

@@ -3,7 +3,9 @@ import { normalizeState } from '../../src/main/persist'
 import { createInitialState, DEFAULT_SETTINGS } from '../../src/shared/defaults'
 import type { OrbitState, Tweak } from '../../src/shared/state'
 import {
+  addHidden,
   applyTweakPatch,
+  clearTweak,
   colorChain,
   colorCss,
   composeChain,
@@ -17,7 +19,9 @@ import {
   newTweak,
   normalizeTweak,
   normalizeTweaks,
+  removeHidden,
   runChain,
+  shuffleStyle,
   subdomainsPossible,
   tweakAppliesTo,
   tweakHostOf,
@@ -246,6 +250,88 @@ describe('[BO-10] what Hide-element mode saves', () => {
       expect(isSafeSelector(ok), ok).toBe(true)
     for (const bad of ['a{', 'a;b', 'a /* x', 'a[', 'a:not(b', '"x', 'a\\', 'a ]', 'a\nb', '', '[title="a\nb"]'])
       expect(isSafeSelector(bad), bad).toBe(false)
+  })
+
+  it('adds each selector once, while there is room, and takes it back by its id', () => {
+    const t = tweak('t1', 'news.test')
+    expect(addHidden(t, { id: 'h1', selector: ' #promo ', label: 'Big promo' }, 5)).toBe(true)
+    expect(t.style.hidden).toEqual([{ id: 'h1', selector: '#promo', label: 'Big promo' }])
+    expect(t.updatedAt).toBe(5)
+    // The same selector, the same id, or one that could reach outside its rule: nothing changes.
+    expect(addHidden(t, { id: 'h2', selector: '#promo', label: '' }, 6)).toBe(false)
+    expect(addHidden(t, { id: 'h1', selector: '.ad', label: '' }, 6)).toBe(false)
+    expect(addHidden(t, { id: 'h3', selector: 'a{} body', label: '' }, 6)).toBe(false)
+    expect(addHidden(t, { id: 'h4', selector: '.ad', label: 'x'.repeat(500) }, 7)).toBe(true)
+    expect(t.style.hidden[1]?.label).toHaveLength(120)
+    expect(t.updatedAt).toBe(7)
+    for (let i = t.style.hidden.length; i < 400; i++) addHidden(t, { id: `n${i}`, selector: `.n${i}`, label: '' }, 8)
+    expect(addHidden(t, { id: 'over', selector: '.over', label: '' }, 9)).toBe(false)
+    expect(t.style.hidden).toHaveLength(400)
+    expect(removeHidden(t, 'h1', 10)).toBe(true)
+    expect(removeHidden(t, 'h1', 11)).toBe(false)
+    expect(t.style.hidden.some((h) => h.selector === '#promo')).toBe(false)
+    expect(t.updatedAt).toBe(10)
+  })
+})
+
+describe('[BO-12][BO-13] the title menu', () => {
+  it('resets every edit and keeps the name, the switch and the scope', () => {
+    const t = tweak('t1', 'news.test', { name: 'Calm news', enabled: false, subdomains: true, css: 'a{}', js: 'x()' })
+    t.style = { ...t.style, hue: 40, intensity: 0.6, font: 'serif', size: 120, textCase: 'upper' }
+    addHidden(t, { id: 'h1', selector: '#promo', label: '' }, 2)
+    expect(clearTweak(t, 9)).toBe(true)
+    expect(isEmptyTweak(t)).toBe(true)
+    expect(t.style).toEqual({ ...DEFAULT_TWEAK_STYLE, hidden: [] })
+    expect([t.name, t.enabled, t.subdomains, t.updatedAt]).toEqual(['Calm news', false, true, 9])
+    // Nothing to reset: nothing changes, not even the time.
+    expect(clearTweak(t, 10)).toBe(false)
+    expect(t.updatedAt).toBe(9)
+  })
+
+  it('shuffles a look that holds together, and never hidden elements or code', () => {
+    let seed = 7
+    const random = () => {
+      seed = (seed * 16807) % 2147483647
+      return (seed - 1) / 2147483646
+    }
+    const fonts = new Set<string>()
+    let inverted = 0
+    for (let i = 0; i < 400; i++) {
+      const look = shuffleStyle(random)
+      expect(Object.keys(look).sort()).toEqual(
+        [
+          'accent',
+          'brightness',
+          'contrast',
+          'font',
+          'hue',
+          'intensity',
+          'invert',
+          'saturation',
+          'size',
+          'textCase',
+        ].sort(),
+      )
+      expect(look.hue).toBeGreaterThanOrEqual(0)
+      expect(look.hue).toBeLessThan(360)
+      expect(look.intensity).toBeGreaterThanOrEqual(0.35)
+      expect(look.intensity).toBeLessThanOrEqual(0.85)
+      const step = ((look.accent as number) - (look.hue as number) + 360) % 360
+      expect([30, 60, 120, 150, 180, 210, 240, 300]).toContain(step)
+      expect([look.contrast, look.brightness, look.saturation]).toEqual([100, 100, 100])
+      expect([100, 110]).toContain(look.size)
+      fonts.add(look.font as string)
+      if (look.invert) inverted++
+      // What it makes is a valid style as it is.
+      const t = tweak('t', 'a.test')
+      applyTweakPatch(t, { style: look }, 1)
+      expect(t.style).toMatchObject(look)
+    }
+    expect(fonts.size).toBe(FONT_PRESETS.length)
+    expect(inverted).toBeGreaterThan(60)
+    expect(inverted).toBeLessThan(180)
+    // Always the same look from the same numbers.
+    expect(shuffleStyle(() => 0.5)).toEqual(shuffleStyle(() => 0.5))
   })
 })
 

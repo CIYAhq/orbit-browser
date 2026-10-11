@@ -184,7 +184,9 @@ test('[BO-02][KS-19] the editor is a small view of its own over the page’s top
   // As tall as the panel: no more of the page is covered than the panel needs.
   const panelHeight = await view.getByTestId('tweak-panel').evaluate((el) => el.getBoundingClientRect().height)
   expect(Math.abs(info.bounds.height - (panelHeight + 2 * margin))).toBeLessThanOrEqual(2)
-  expect(info.bounds.height).toBeLessThan(pageRect.height / 2)
+  // Inside the page, and a narrow column of it: most of the page shows beside the panel.
+  expect(info.bounds.y + info.bounds.height).toBeLessThanOrEqual(pageRect.y + pageRect.height)
+  expect(info.bounds.width).toBeLessThan(pageRect.width / 2)
   await expect.poll(async () => (await editorInfo(app)).focused).toBe(true)
 
   // Every change shows at once, and is saved as it is made.

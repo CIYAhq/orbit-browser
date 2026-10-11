@@ -1,5 +1,5 @@
 import type { WebContentsView } from 'electron'
-import { TWEAK_EDITOR, type TweakEditorState } from '../../shared/commands/tweaks'
+import { HIDE_OFF, TWEAK_EDITOR, type TweakEditorState, type TweakHideState } from '../../shared/commands/tweaks'
 import { peekShown } from '../../shared/nav'
 import { isPrivateTab } from '../../shared/private'
 import type { Rect } from '../../shared/rpc'
@@ -52,12 +52,23 @@ export interface TweakEditor {
   windowEditing(tweakId: string): WindowId | undefined
   /** The Tweak a window's panel shows, and the tab, while it is open. */
   editing(windowId: WindowId): { tabId: TabId; tweakId: string } | null
+  /** What the panel shows of Hide-element mode (BO-10). */
+  setHide(windowId: WindowId, hide: TweakHideState): void
+  /** Called as a window's panel leaves its Tweak and page: it closes, or opens on another. */
+  onLeave(listener: (windowId: WindowId) => void): void
   layout(windowId: WindowId, size: { width: number; height: number }): void
   drag(windowId: WindowId, phase: 'start' | 'move' | 'end', x: number, y: number): void
   info(windowId: WindowId): TweakEditorInfo
 }
 
-const CLOSED: Omit<TweakEditorState, 'nonce'> = { open: false, tabId: null, tweakId: null, host: null, private: false }
+const CLOSED: Omit<TweakEditorState, 'nonce'> = {
+  open: false,
+  tabId: null,
+  tweakId: null,
+  host: null,
+  private: false,
+  hide: HIDE_OFF,
+}
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), Math.max(min, max))
 
@@ -72,7 +83,12 @@ const clamp = (value: number, min: number, max: number) => Math.min(Math.max(val
 export function registerTweakEditor(ctx: MainContext): TweakEditor {
   const { store, windows } = ctx
   const editors = new Map<WindowId, Editor>()
+  const leaving: ((windowId: WindowId) => void)[] = []
   let nonce = 0
+
+  const leave = (windowId: WindowId) => {
+    for (const listener of leaving) listener(windowId)
+  }
 
   const live = (view: WebContentsView | undefined): view is WebContentsView => !!viewContents(view)
 
@@ -93,6 +109,7 @@ export function registerTweakEditor(ctx: MainContext): TweakEditor {
     const record = e
     win.once('closed', () => {
       // The window's panel goes with it: a Tweak it made and left empty goes too.
+      if (record.state.open) leave(windowId)
       editors.delete(windowId)
       if (record.state.open) dropIfEmpty(record, record.state.tweakId)
     })
@@ -184,6 +201,7 @@ export function registerTweakEditor(ctx: MainContext): TweakEditor {
     const e = editors.get(windowId)
     if (!e?.state.open) return
     const left = e.state.tweakId
+    leave(windowId)
     e.drag = undefined
     e.focusPending = false
     e.state = { ...CLOSED, nonce: e.state.nonce }
@@ -198,6 +216,7 @@ export function registerTweakEditor(ctx: MainContext): TweakEditor {
     const tweak = store.state.tweaks[tweakId]
     if (!e || !tweak) return
     const left = e.state.open ? e.state.tweakId : null
+    if (e.state.open) leave(windowId)
     if (created) e.created.add(tweakId)
     nonce++
     // Reopened over the same page, it stays where the user dragged it.
@@ -209,6 +228,7 @@ export function registerTweakEditor(ctx: MainContext): TweakEditor {
       host: tweakHostOf(store.state.tabs[tabId]?.url) ?? tweak.host,
       nonce,
       private: isPrivateTab(store.state, tabId),
+      hide: HIDE_OFF,
     }
     e.focusPending = true
     viewFor(windowId, e)
@@ -260,6 +280,15 @@ export function registerTweakEditor(ctx: MainContext): TweakEditor {
     editing: (windowId) => {
       const s = editors.get(windowId)?.state
       return s?.open && s.tabId && s.tweakId ? { tabId: s.tabId, tweakId: s.tweakId } : null
+    },
+    setHide: (windowId, hide) => {
+      const e = editors.get(windowId)
+      if (!e?.state.open || e.state.hide === hide) return
+      e.state = { ...e.state, hide }
+      push(e)
+    },
+    onLeave: (listener) => {
+      leaving.push(listener)
     },
     layout: (windowId, size) => {
       const e = editors.get(windowId)

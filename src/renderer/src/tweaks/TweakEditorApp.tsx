@@ -7,9 +7,14 @@ import { invoke } from '../api'
 import { useOrbit, useWindow } from '../store'
 import { paletteVars, usePalette } from '../theme'
 import { CodeArea } from './CodeArea'
+import { ColorArea } from './ColorArea'
 import { flushTweakEdits, updateTweak } from './edit'
+import { HideArea, HideButton } from './HideArea'
 import { SizeControl } from './SizeControl'
+import { TitleMenu } from './TitleMenu'
+import { CaseControl, FontPresets } from './TypeControls'
 import './code.css'
+import './controls.css'
 import './tweaks.css'
 
 /**
@@ -79,12 +84,17 @@ function TweakPanel({ state, tweak, intro }: { state: TweakEditorState; tweak: T
     panel.current?.focus({ preventScroll: true })
   }, [intro])
 
-  // Esc anywhere in the panel closes it (BO-02), unless a field used it (a rename it cancels, say).
+  // Esc anywhere in the panel steps back (BO-02, BO-10): a pick in Hide-element mode, then the
+  // mode, then the panel; unless a field used it (a rename it cancels, say).
+  const hide = useRef(state.hide)
+  hide.current = state.hide
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return
       e.preventDefault()
-      closeEditor()
+      if (hide.current.pick) void invoke('tweaks.hideCancel', {})
+      else if (hide.current.on) void invoke('tweaks.hideMode', { on: false })
+      else closeEditor()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -107,12 +117,7 @@ function TweakPanel({ state, tweak, intro }: { state: TweakEditorState; tweak: T
         <span className="tweak-panel__badge" aria-hidden>
           <Paintbrush size={14} />
         </span>
-        <div className="tweak-panel__title">
-          <span className="tweak-panel__name" data-testid="tweak-name">
-            {tweak.name}
-          </span>
-          {tweak.name !== state.host && <span className="tweak-panel__host">{state.host}</span>}
-        </div>
+        <TitleMenu tweak={tweak} host={state.host} intro={intro} />
         <button
           type="button"
           className="tweak-panel__icon"
@@ -130,7 +135,7 @@ function TweakPanel({ state, tweak, intro }: { state: TweakEditorState; tweak: T
             <Intro host={state.host ?? tweak.host} />
           ) : (
             <>
-              <Controls tweak={tweak} code={code} onCode={() => setCode(!code)} />
+              <Controls tweak={tweak} state={state} code={code} onCode={() => setCode(!code)} />
               {code && <CodeArea tweak={tweak} state={state} />}
             </>
           )}
@@ -183,25 +188,45 @@ function closeEditor(): void {
   void invoke('tweaks.closeEditor', {})
 }
 
-function Controls({ tweak, code, onCode }: { tweak: Tweak; code: boolean; onCode: () => void }) {
+/** The controls, top to bottom as BO-02 lists them: colours, font, size, case, hiding and code. */
+function Controls({
+  tweak,
+  state,
+  code,
+  onCode,
+}: {
+  tweak: Tweak
+  state: TweakEditorState
+  code: boolean
+  onCode: () => void
+}) {
   return (
     <>
+      <ColorArea tweak={tweak} />
+      <Row label="Font">
+        <FontPresets tweak={tweak} />
+      </Row>
       <Row label="Size">
         <SizeControl tweak={tweak} />
       </Row>
-      <Row label="Code">
+      <Row label="Text case">
+        <CaseControl tweak={tweak} />
+      </Row>
+      <div className="tweak-tools">
+        <HideButton on={state.hide.on} />
         <button
           type="button"
-          className="tweak-tool"
+          className="tweak-color__tool tweak-tools__button"
           data-testid="tweak-code-button"
           aria-pressed={code}
-          aria-label="CSS and JavaScript"
           title={code ? 'Hide the code' : 'CSS and JavaScript'}
           onClick={onCode}
         >
-          <Braces size={15} />
+          <Braces size={15} aria-hidden />
+          Code
         </button>
-      </Row>
+      </div>
+      <HideArea tweak={tweak} state={state} />
     </>
   )
 }
@@ -239,30 +264,59 @@ export function Row({ label, children }: { label: string; children: ReactNode })
   )
 }
 
+/** How far the pointer moves on the name before the press is a drag, not a click on its menu. */
+const DRAG_SLOP = 4
+
 /**
  * Dragging the panel by its title (BO-02): main moves the view, so positions go as screen points
- * (the view moves under the pointer; the screen doesn't).
+ * (the view moves under the pointer; the screen doesn't). The name drags too once the pointer
+ * moves; pressed and let go where it was, it opens its menu. Other controls never drag.
  */
 function useDrag() {
-  const dragging = useRef(false)
-  const send = (phase: 'start' | 'move' | 'end', e: React.PointerEvent<HTMLElement>) =>
-    window.orbit.send('tweaks.editorDrag', { phase, x: e.screenX, y: e.screenY })
+  const press = useRef<{ x: number; y: number; dragging: boolean } | null>(null)
+  const dragged = useRef(false)
+  const send = (phase: 'start' | 'move' | 'end', at: { screenX: number; screenY: number }) =>
+    window.orbit.send('tweaks.editorDrag', { phase, x: at.screenX, y: at.screenY })
+  const begin = () => {
+    const p = press.current
+    if (!p || p.dragging) return
+    p.dragging = true
+    send('start', { screenX: p.x, screenY: p.y })
+  }
   const end = (e: React.PointerEvent<HTMLElement>) => {
-    if (!dragging.current) return
-    dragging.current = false
+    const p = press.current
+    press.current = null
+    if (!p?.dragging) return
+    dragged.current = true
     send('end', e)
   }
   return {
     onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
-      if (e.button !== 0 || (e.target as HTMLElement).closest('button, input, select, textarea')) return
-      dragging.current = true
-      e.currentTarget.setPointerCapture(e.pointerId)
-      send('start', e)
+      if (e.button !== 0) return
+      const control = (e.target as HTMLElement).closest('button, input, select, textarea')
+      if (control && !control.matches('.tweak-panel__name:not(:disabled)')) return
+      dragged.current = false
+      press.current = { x: e.screenX, y: e.screenY, dragging: false }
+      // The pointer stays with what it pressed, wherever it goes: the title, or the name, which
+      // keeps its own click.
+      ;(control ?? e.currentTarget).setPointerCapture(e.pointerId)
+      if (!control) begin()
     },
     onPointerMove: (e: React.PointerEvent<HTMLElement>) => {
-      if (dragging.current) send('move', e)
+      const p = press.current
+      if (!p) return
+      if (!p.dragging && Math.hypot(e.screenX - p.x, e.screenY - p.y) < DRAG_SLOP) return
+      begin()
+      send('move', e)
     },
     onPointerUp: end,
     onPointerCancel: end,
+    // A drag that started on the name doesn't open its menu as it ends.
+    onClickCapture: (e: React.MouseEvent<HTMLElement>) => {
+      if (!dragged.current) return
+      dragged.current = false
+      e.stopPropagation()
+      e.preventDefault()
+    },
   }
 }

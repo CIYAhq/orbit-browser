@@ -1,11 +1,21 @@
 import { newId } from '../../shared/ids'
 import { peekShown } from '../../shared/nav'
 import type { TabId, WindowId } from '../../shared/state'
-import { applyTweakPatch, isEmptyTweak, newTweak, tweakAppliesTo, tweakHostOf, tweaksFor } from '../../shared/tweaks'
+import {
+  applyTweakPatch,
+  clearTweak,
+  isEmptyTweak,
+  newTweak,
+  removeHidden,
+  tweakAppliesTo,
+  tweakHostOf,
+  tweaksFor,
+} from '../../shared/tweaks'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
 import { activeTabOf, shownTabs } from '../windows'
 import { registerTweakEditor, type TweakEditorInfo } from './editor'
+import { type PickerInfo, registerTweakHide } from './hide'
 import { registerTweakPages, type TweakPages } from './pages'
 
 /** What a window says when Tweaks can't go where they were asked to (BO-01, BO-16). */
@@ -20,6 +30,8 @@ export const TWEAK_MESSAGES = {
 export interface TweakTestHooks {
   editor: (windowId?: WindowId) => TweakEditorInfo
   page: (tabId: TabId) => ReturnType<TweakPages['info']>
+  /** What Hide-element mode's picker in a tab's page says (BO-10); null where there is none. */
+  picker: (tabId: TabId) => Promise<PickerInfo | null>
 }
 
 /**
@@ -31,6 +43,12 @@ export function registerTweaks(ctx: MainContext): void {
   const { store, commands, events, actions, windows, tabs } = ctx
   const pages = registerTweakPages(ctx)
   const editor = registerTweakEditor(ctx)
+  const hiding = registerTweakHide(ctx, editor, pages)
+  // A hidden element shown while its restore marker was hovered hides again as the panel leaves.
+  editor.onLeave((windowId) => {
+    const at = editor.editing(windowId)
+    if (at) pages.setShowHidden(at.tabId, undefined)
+  })
 
   const windowOf = (c: CallContext): WindowId | undefined => c.windowId ?? windows.focusedWindowId()
 
@@ -114,6 +132,43 @@ export function registerTweaks(ctx: MainContext): void {
 
   commands.register('tweaks.runNow', ({ id, tabId }) => pages.runNow(tabId, id))
 
+  commands.register('tweaks.reset', ({ id }) => {
+    store.update((draft) => {
+      const tweak = draft.tweaks[id]
+      if (tweak) clearTweak(tweak, Date.now())
+    })
+  })
+
+  // ---- Hide-element mode (BO-10): in the calling window's editor ----
+
+  commands.register('tweaks.hideMode', async ({ on }, c) => {
+    const windowId = windowOf(c)
+    return windowId ? hiding.setMode(windowId, on === true) : false
+  })
+  commands.register('tweaks.hidePreview', async ({ choice }, c) => {
+    const windowId = windowOf(c)
+    return windowId ? hiding.preview(windowId, choice) : 0
+  })
+  commands.register('tweaks.hide', ({ choice }, c) => {
+    const windowId = windowOf(c)
+    return windowId ? hiding.hide(windowId, choice) : false
+  })
+  commands.register('tweaks.hideCancel', (_args, c) => {
+    const windowId = windowOf(c)
+    if (windowId) hiding.cancel(windowId)
+  })
+  commands.register('tweaks.showHidden', ({ hiddenId }, c) => {
+    const windowId = windowOf(c)
+    const at = windowId ? editor.editing(windowId) : null
+    if (at) pages.setShowHidden(at.tabId, typeof hiddenId === 'string' ? hiddenId : undefined)
+  })
+  commands.register('tweaks.unhide', ({ id, hiddenId }) => {
+    store.update((draft) => {
+      const tweak = draft.tweaks[id]
+      if (tweak) removeHidden(tweak, hiddenId, Date.now())
+    })
+  })
+
   commands.register('tweaks.setEnabled', ({ id, enabled }) => {
     if (typeof enabled !== 'boolean') return
     store.update((draft) => {
@@ -187,6 +242,7 @@ export function registerTweaks(ctx: MainContext): void {
     const hooks: TweakTestHooks = {
       editor: (windowId) => editor.info(windowId ?? windows.ids()[0] ?? ''),
       page: (tabId) => pages.info(tabId),
+      picker: (tabId) => hiding.info(tabId),
     }
     ;(globalThis as unknown as { __orbitTweaks: TweakTestHooks }).__orbitTweaks = hooks
   }

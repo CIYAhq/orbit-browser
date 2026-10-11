@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 280 built (80 partial) · 374 tested · 74 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 290 built (80 partial) · 376 tested · 74 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 152 | 173 |
-| P1 | 219 | 111 | 176 |
-| P2 | 79 | 17 | 25 |
+| P1 | 219 | 118 | 177 |
+| P2 | 79 | 20 | 26 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -437,18 +437,18 @@ Spec: `spec/boosts.md`
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
 | BO-01 | Create a site customization for the current site | P1 | ✅ | ✅ e2e+unit | – | New Tweak… from the command bar (also "customize", "customization", "site style"), the sidebar's + menu, the site controls panel, a paintbrush in the address field (shown on hover, in the accent colour once the site has a Tweak on) and the tab's menu (Tweak this Site…); none bound to a key. Opens the editor over the page with a new Tweak named after the host; a second one adds a second Tweak. A one-screen intro the first time only. Internal pages, error pages and a Peek take none: the entries are greyed or gone, or say why. Nothing reloads |
-| BO-02 | Editor panel: layout, live preview, close | P1 | 🟡 partial | ✅ e2e | – | a small view of its own over the page's top-right corner, sized to the panel, draggable by its title and kept inside the page; the page around it stays live. Every change shows at once and is saved; Esc, the close button and Done close it and give the page the keyboard back; the site controls' › and Edit Tweak reopen it as it was. Another page of the site keeps it open; another site or tab closes it; it steps aside for a Peek or full screen. No request names the site. Controls so far: size (BO-08), the code area (BO-11, which widens the panel to the left) and "Also apply to subdomains" (BO-17); the rest come with their rows |
-| BO-03 | Colour wheel (theme tint) | P1 | – | ✅ unit | – |  |
-| BO-04 | Invert lightness ("make this site dark") | P1 | – | ✅ unit | – |  |
-| BO-05 | Advanced colour sliders | P2 | – | ✅ unit | – |  |
-| BO-06 | Reset colours | P1 | – | ✅ unit | – |  |
-| BO-07 | Font override presets | P1 | – | ✅ unit | – |  |
-| BO-08 | Page size (zoom) control | P1 | – | ✅ e2e+unit | – |  |
-| BO-09 | Text case control | P2 | – | ✅ unit | – |  |
-| BO-10 | Hide-element mode | P1 | – | ✅ unit | – |  |
+| BO-02 | Editor panel: layout, live preview, close | P1 | ✅ | ✅ e2e | – | a small view of its own over the page's top-right corner, sized to the panel, draggable by its title and kept inside the page; the page around it stays live. Every change shows at once and is saved; Esc, the close button and Done close it and give the page the keyboard back; the site controls' › and Edit Tweak reopen it as it was. Another page of the site keeps it open; another site or tab closes it; it steps aside for a Peek or full screen. No request names the site. Top to bottom: the name and its ▾ menu (BO-12), the colour area (BO-03 to BO-06), fonts (BO-07), size (BO-08), text case (BO-09), Hide elements (BO-10), the code area (BO-11, which widens the panel to the left), "Also apply to subdomains" (BO-17) and Done. Dragging the wheel recolours the page as fast as the page could itself (BO-03 has the numbers) |
+| BO-03 | Colour wheel (theme tint) | P1 | ✅ | ✅ e2e+unit | – | a wheel with two linked handles: the big one anywhere inside (its angle the hue, its distance how strong), the small one on the rim (the accent: it turns the page's own colours by its distance from the main hue, and turns with the big one). One filter on the page root tints it: white becomes a light tint of the hue, black stays black, text keeps its contrast; images and video keep their colours (an inverse filter), the top layer is tinted too. Arrow keys move the focused handle (⇧ further). Measured with the frame sampler against the page changing the same colours itself, one a frame: the drag keeps up, every move shown. Under a virtual display with no GPU, 60 a second at 1024×768 (slowest frame 17 ms); at 1440×900 the page itself manages only about 35 a second there, and the drag matches it |
+| BO-04 | Invert lightness ("make this site dark") | P1 | ✅ | ✅ e2e+unit | – | the lightbulb next to the wheel inverts lightness and keeps hues (white page dark, text light), with the tint on the inverted result; photos and video keep their own look; again restores it |
+| BO-05 | Advanced colour sliders | P2 | ✅ | ✅ e2e+unit | – | the sliders button opens Contrast, Brightness and Original saturation, live as they move; each has a marked neutral middle (100%) that changes nothing, and a double-click puts it back there |
+| BO-06 | Reset colours | P1 | ✅ | ✅ e2e+unit | – | the circle-with-a-cross button puts the wheel, invert and sliders back to neutral, so the page shows its own colours; fonts, size, case, hidden elements and code stay |
+| BO-07 | Font override presets | P1 | 🟡 partial | ✅ e2e+unit | – | eight "Aa" presets, each in its own typeface: Sans, Serif, Classic, Humanist, Rounded, Mono, Typewriter and Hand. One applies to all the site's text but icon fonts, glyphs hidden from screen readers, code and math; the active one again gives the site its fonts back. The presets are font stacks of what the system has, so nothing is bundled and their look varies by system (Rounded and Hand fall back on Linux); shipping freely licensed fonts is open |
+| BO-08 | Page size (zoom) control | P1 | ✅ | ✅ e2e+unit | – | − and + step the page through 90, 100, 110, 125 and 150%, saved with the Tweak, so every visit gets it; it multiplies with the tab's own zoom (⌘+ / ⌘−) and leaves that alone |
+| BO-09 | Text case control | P2 | ✅ | ✅ e2e+unit | – | one button cycles As written, lowercase, UPPERCASE, Capitalized Words and back; fields, editable text and code keep their own case |
+| BO-10 | Hide-element mode | P1 | ✅ | ✅ e2e+unit | – | the lightning button: the element under the pointer gets an outline with its kind and size, and the page's links and buttons don't act; a click picks it. The panel then offers Hide this, or Hide all similar with a slider from narrow to broad, counting and outlining in the page what it would hide. Gone at once and saved as plain CSS selectors, so hidden from the first frame on every page of the site where it matches. Done or Esc leaves the mode (Esc drops a pick first); another document ends it. The picker runs in an isolated world, never the page's own. Each hide has a restore marker in the panel (not over the page's corner): hovered it shows the element again, clicked it brings it back |
 | BO-11 | Code editor: custom CSS and JavaScript per site | P1 | ✅ | ✅ e2e+unit | – | the { } button opens a code area with CSS and JavaScript tabs, empty to start. CSS applies as it is typed (about 90 ms from the keystroke to the page's frame, measured) and is saved as typed, sent before the panel closes; a reload keeps it. JavaScript runs in the page's own world once per load at document ready, from main; Run now runs it at once, Reload page loads the page again. The editor: monospace, syntax colouring (text only, never markup), line numbers, the platform's undo (⌘Z / Ctrl+Z through Orbit's key handling), Tab and ⇧Tab indent and outdent, Enter keeps the indentation. Errors, thrown or syntax, go to the page's console; no dialog, nothing in main. JavaScript from elsewhere stays off until Allow on this device, and editing it doesn't allow it. A JS badge in the site controls list and the code tab (the Library's list comes with BO-15) |
-| BO-12 | Name, rename and reset all edits | P1 | – | – | – |  |
-| BO-13 | Shuffle (random style) | P2 | – | – | – |  |
+| BO-12 | Name, rename and reset all edits | P1 | ✅ | ✅ e2e+unit | – | the title is the Tweak's name with a ▾ menu: Rename… edits it in place (Enter keeps, Esc cancels), Reset all edits… asks first, then clears colours, font, size, case, hidden elements and code; the name and switches stay. The menu works from the keyboard; Esc closes it, not the panel |
+| BO-13 | Shuffle (random style) | P2 | ✅ | ✅ e2e+unit | – | Shuffle in the name ▾ menu applies a random look live: any hue at a moderate strength, an accent a pleasing step away, sometimes inverted, one of the fonts, the site's size or a little larger, mostly the site's case. The menu stays open to shuffle again; hidden elements and code are never touched |
 | BO-14 | Enable / disable a customization (per site) | P1 | ✅ | ✅ e2e+unit | – | the site controls panel lists the site's Tweaks by name with a paintbrush, coloured when on and grey when off; the name turns one off or on at once, without a reload, each on its own, keeping all its settings; the › opens it in the editor. The address field's paintbrush shows in the accent colour while one is on and grey when all are off, and turns them all off or on |
 | BO-15 | Manage all customizations (list view in the Library) | P1 | – | – | – |  |
 | BO-16 | Global on/off switch for all customizations | P1 | – | ✅ unit | – |  |
