@@ -48,6 +48,7 @@ import {
 } from '../../shared/tree'
 import { noteArchiveHistory, provideSidebarUndo } from '../archive/inbox'
 import type { MainContext } from '../context'
+import { isUnplacedImportTab } from '../import/unplaced'
 import {
   addPaneInDraft,
   favoritesFull,
@@ -151,6 +152,8 @@ export class TabOps {
    * to sleep it now.
    */
   sleepGuard?: (tabId: TabId) => boolean
+  /** Off only in the test that stands for a route main doesn't guard (D65 (2)): see `hiddenByImport`. */
+  guardImports = true
 
   constructor(
     private ctx: MainContext,
@@ -165,6 +168,16 @@ export class TabOps {
   }
 
   // ---- Queries ----
+
+  /**
+   * A tab an unfinished import made out of sight that no section holds (D65 (1)): main shows and
+   * places it for nobody, whatever id a window sends (D66 (1)). One the user placed anyway is theirs
+   * (D65 (2)).
+   */
+  hiddenByImport(id: ItemId | undefined): boolean {
+    if (!id || !this.guardImports || !isTabId(id) || !isUnplacedImportTab(id)) return false
+    return !locate(this.state, id) && !splitOfTab(this.state, id)
+  }
 
   spaceOfWindow(windowId: WindowId | undefined): SpaceId {
     return (windowId && this.state.windows[windowId]?.spaceId) || (this.state.spaceOrder[0] as string)
@@ -261,7 +274,7 @@ export class TabOps {
   }
 
   activate(windowId: WindowId, tabId: TabId): void {
-    if (!this.state.tabs[tabId]) return
+    if (!this.state.tabs[tabId] || this.hiddenByImport(tabId)) return
     this.ctx.store.update((d) => activateInDraft(d, windowId, tabId, this.now()))
   }
 
@@ -1010,6 +1023,7 @@ export class TabOps {
     const state = this.state
     const anchor = splitAnchor(state, target, side)
     if (!anchor || anchor === tabId || !state.tabs[tabId]) return null
+    if (this.hiddenByImport(tabId) || this.hiddenByImport(anchor)) return null
     const fromRow = splitOfTab(state, tabId) ? undefined : locate(state, tabId)
     const joined = splitOfTab(state, anchor)
     const anchorRow = joined ? undefined : locate(state, anchor)
@@ -1100,7 +1114,7 @@ export class TabOps {
   toNewWindow(tabId: TabId, fromWindowId: WindowId | undefined, at?: { x: number; y: number }): WindowId | null {
     const state = this.state
     const tab = state.tabs[tabId]
-    if (!tab) return null
+    if (!tab || this.hiddenByImport(tabId)) return null
     const fromSpace = fromWindowId ? this.spaceOfWindow(fromWindowId) : tab.spaceId
     const isPrivate = isPrivateSpace(state, fromSpace)
     // A tab of a split stays in it: its page opens in the new window, as a pinned tab's does.

@@ -24,6 +24,7 @@ type Hooks = {
     toastView: (windowId?: string) => ToastViewInfo
     undo: () => string | undefined
     resources: (memory?: { total: number; available: number } | null) => ResourceInfo
+    importGuard: (on: boolean) => void
   }
 }
 

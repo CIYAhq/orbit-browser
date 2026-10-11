@@ -60,6 +60,11 @@ export interface TabTestHooks {
   recentlyClosed: () => string[]
   /** Runs a pass of the background limits now (TB-16); `memory` stands in for the system's (null: the real one). */
   resources: (memory?: MemoryInfo | null) => ResourceInfo
+  /**
+   * Off: commands reach a tab an unfinished import hasn't shown, as a route main doesn't guard would
+   * (D65 (2)'s test); on again after (D66 (1)).
+   */
+  importGuard: (on: boolean) => void
 }
 
 /** ⌘Z pressed in a page only undoes sidebar changes this recent (lane review FU-4). */
@@ -268,8 +273,10 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     if (windowId) ops.activate(windowId, tabId)
   })
 
+  // A tab an unfinished import hasn't shown isn't there for a window: it goes to no Archive, no
+  // menu, no copy and no selection (D66 (1); `ops.hiddenByImport`, also in activate and splitWith).
   commands.register('tabs.close', ({ tabId, tabIds }) => {
-    const ids = [...(tabIds ?? []), ...(tabId ? [tabId] : [])]
+    const ids = [...(tabIds ?? []), ...(tabId ? [tabId] : [])].filter((id) => !ops.hiddenByImport(id))
     ops.closeTabs(ids, 'closed')
   })
 
@@ -342,14 +349,16 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   })
   commands.register('tabs.rename', ({ tabId, title }) => ops.rename(tabId, title))
   commands.register('tabs.setIcon', ({ tabId, icon }) => ops.setIcon(tabId, icon))
-  commands.register('tabs.delete', ({ id }) => ops.deleteItem(id))
+  commands.register('tabs.delete', ({ id }) => {
+    if (!ops.hiddenByImport(id)) ops.deleteItem(id)
+  })
   commands.register('tabs.archiveBelow', ({ tabId }) => ops.archiveBelow(tabId))
   commands.register('tabs.copyLinks', ({ tabIds, markdown = false }, c) => copyLinks(windowOf(c), tabIds, markdown))
 
   commands.register('tabs.duplicate', ({ tabId, to, index, activate }, c) => {
     const state = store.state
     const tab = state.tabs[tabId]
-    if (!tab) throw new Error('No such tab')
+    if (!tab || ops.hiddenByImport(tabId)) throw new Error('No such tab')
     const item = splitOfTab(state, tabId) ?? tabId
     const loc = locate(state, item)
     const pinned = !to && !!tab.pinnedUrl && sectionOf(state, tabId) !== 'today'
@@ -404,6 +413,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   commands.register('tabs.setSelection', ({ tabIds }, c) => {
     const windowId = windowOf(c)
     if (!windowId) return
+    tabIds = tabIds.filter((id) => !ops.hiddenByImport(id))
     if (tabIds.length > 0) selections.set(windowId, tabIds)
     else selections.delete(windowId)
   })
@@ -417,6 +427,8 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   })
 
   commands.register('tabs.contextMenu', ({ id, selection = [], at }, c) => {
+    if (ops.hiddenByImport(id)) return
+    selection = selection.filter((s) => !ops.hiddenByImport(s))
     const windowId = windowOf(c)
     const state = store.state
     const mo = menuOps(windowId)
@@ -801,6 +813,9 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
       resources: (memory) => {
         if (memory !== undefined) resources.memory = memory
         return resources.pass()
+      },
+      importGuard: (on) => {
+        ops.guardImports = on
       },
     }
     ;(globalThis as unknown as { __orbitTabs: TabTestHooks }).__orbitTabs = hooks
