@@ -37,8 +37,12 @@ export interface TweakHidePick {
   label: string
   /** "Hide this": a selector for that element alone. */
   exact: string
-  /** "Hide all similar", narrow to broad: selectors for it and elements like it, each with how many it matches now. */
-  similar: { selector: string; count: number }[]
+  /**
+   * "Hide all similar", narrow to broad: selectors for it and elements like it, each with how many it
+   * matches now (`count`, what it hides), and how many of those have a box the page outlines (`shown`:
+   * the rest are hidden already, or have no size).
+   */
+  similar: { selector: string; count: number; shown: number }[]
 }
 
 /** Which of a pick's selectors (BO-10): the element alone, or a level of "similar" (an index into `similar`). */

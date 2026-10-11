@@ -8,6 +8,7 @@ import { clickInPage, focusedUrl, pressInPage } from './nav-support'
 import { remoteRequests } from './settings-support'
 import { act, cmd, newTab, tabsHook, waitTab } from './tabs-support'
 import {
+  bgOf,
   edited,
   editorInfo,
   editorPage,
@@ -19,6 +20,7 @@ import {
   openFixture,
   pageTweaks,
   recordFrames,
+  rgbOf,
   SLOW_BLOCKS,
   startTweakFixtures,
   type TweakFixtures,
@@ -46,6 +48,64 @@ test.afterEach(async () => {
 
 /** A tab on fixture page `path` (on `host`), loaded. */
 const openPage = (app: ElectronApplication, path: string, host?: string) => openFixture(app, fx, path, host)
+
+type Points = { x: number; y: number }[]
+
+/**
+ * Where to look in a `/slow` page's frames: its background below everything, and the block that
+ * changes colour with each load (it tells the new document's frames from the old one's).
+ */
+const slowPoints = (page: Page): Promise<Points> =>
+  page.evaluate(() => {
+    const r = (document.getElementById('block') as HTMLElement).getBoundingClientRect()
+    return [
+      { x: 0.5, y: 0.85 },
+      { x: (r.x + r.width / 2) / innerWidth, y: (r.y + r.height / 2) / innerHeight },
+    ]
+  })
+
+/**
+ * Records what a `/slow` page paints, at `points` (`slowPoints`), while `action` loads it again, as
+ * its `load`-th load: the new document must paint while it is still loading, and every frame of it
+ * must have the Tweak's background (`bg`), never the page's own.
+ */
+async function everyFrameTweaked(
+  app: ElectronApplication,
+  page: Page,
+  tabId: string,
+  points: Points,
+  load: number,
+  action: () => Promise<unknown>,
+  bg = '#202020',
+): Promise<void> {
+  const recording = await recordFrames(app, tabId, points)
+  await action()
+  await expect
+    .poll(() => page.evaluate(() => document.getElementById('block')?.dataset.load).catch(() => null))
+    .toBe(String(load))
+  await expect.poll(() => page.evaluate(() => !!document.getElementById('end')).catch(() => false)).toBe(true)
+  const frames = await recording.stop()
+  const fresh = frames.filter((f) => near(f.colors[1] as string, SLOW_BLOCKS[load] as string))
+  const whileLoading = fresh.filter((f) => f.t < frames[frames.length - 1]!.t)
+  // The new document painted while it was still loading…
+  expect(fresh.length, JSON.stringify(frames)).toBeGreaterThan(0)
+  expect(whileLoading.length, JSON.stringify(frames)).toBeGreaterThan(0)
+  // …and every frame of it has the Tweak's background, never the page's own.
+  expect(
+    fresh.filter((f) => !near(f.colors[0] as string, bg)),
+    JSON.stringify(frames),
+  ).toEqual([])
+  const [r, g, b] = rgbOf(bg)
+  expect((await firstFrame(page))?.bg).toBe(`rgb(${r}, ${g}, ${b})`)
+}
+
+/** Every sheet a `/slow` page could read: from its `<head>` (`when: 'head'`), or now. */
+type Readable = { media: string; rules: string }[]
+const readable = (page: Page, when: 'head' | 'now'): Promise<Readable> =>
+  page.evaluate((w) => {
+    const g = window as unknown as { __readable: Readable; __read: () => Readable }
+    return w === 'head' ? g.__readable : g.__read()
+  }, when)
 
 test('[BO-01][BO-21] every entry point makes a Tweak for the shown site and opens the editor on it, named after the site; the intro shows once; nothing reloads', async () => {
   orbit = await launchOrbit()
@@ -313,44 +373,111 @@ test('[BO-18] a Tweak is in the page from its first frame: a hard reload and a f
   await run(app, 'tweaks.closeEditor', {})
   await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(32, 32, 32)')
 
-  // Where to look: the page's background below everything, and the block that changes colour with
-  // each load (it tells the new document's frames from the old one's).
-  const points = await page.evaluate(() => {
-    const r = (document.getElementById('block') as HTMLElement).getBoundingClientRect()
-    return [
-      { x: 0.5, y: 0.85 },
-      { x: (r.x + r.width / 2) / innerWidth, y: (r.y + r.height / 2) / innerHeight },
-    ]
-  })
-  const check = async (load: number, action: () => Promise<void>) => {
-    const recording = await recordFrames(app, tabId, points)
-    await action()
-    await expect
-      .poll(() => page.evaluate(() => document.getElementById('block')?.dataset.load).catch(() => null))
-      .toBe(String(load))
-    await expect.poll(() => page.evaluate(() => !!document.getElementById('end')).catch(() => false)).toBe(true)
-    const frames = await recording.stop()
-    const fresh = frames.filter((f) => near(f.colors[1] as string, SLOW_BLOCKS[load] as string))
-    const whileLoading = fresh.filter((f) => f.t < frames[frames.length - 1]!.t)
-    // The new document painted while it was still loading…
-    expect(fresh.length, JSON.stringify(frames)).toBeGreaterThan(0)
-    expect(whileLoading.length, JSON.stringify(frames)).toBeGreaterThan(0)
-    // …and every frame of it has the Tweak's background, never the page's own white.
-    expect(
-      fresh.filter((f) => !near(f.colors[0] as string, '#202020')),
-      JSON.stringify(frames),
-    ).toEqual([])
-    expect((await firstFrame(page))?.bg).toBe('rgb(32, 32, 32)')
-  }
+  const points = await slowPoints(page)
   // A hard reload, as the spec's own check does.
-  await check(1, () => cmd(app, 'tabs.reload', { tabId, ignoreCache: true }))
+  await everyFrameTweaked(app, page, tabId, points, 1, () => cmd(app, 'tabs.reload', { tabId, ignoreCache: true }))
   // A first visit from another site (a new renderer process).
   await cmd(app, 'tabs.navigate', { tabId, url: fx.url('/page/Before', '127.0.0.1') })
   await waitTab(app, tabId, '/page/Before')
-  await check(2, () => cmd(app, 'tabs.navigate', { tabId, url: fx.url(slow) }))
+  await everyFrameTweaked(app, page, tabId, points, 2, () => cmd(app, 'tabs.navigate', { tabId, url: fx.url(slow) }))
   // Main's own copy replaced the page preload's once the document was ready.
-  await expect.poll(async () => (await pageTweaks(app, tabId))?.adopted).toBe(false)
+  await expect.poll(async () => (await pageTweaks(app, tabId))?.preloaded).toBe(false)
   expect(await page.evaluate(() => document.adoptedStyleSheets.length)).toBe(0)
+})
+
+test('[BO-18] the page can’t read, drop or outrank the sheets that come before its first paint: its <head> finds no Tweak, and a page that sets its own adopted sheets, or a layered !important background, shows no frame without the Tweak', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  // A page whose <head> sets its adopted sheets to one of its own, as some sites do.
+  const own = '/slow/Own?bg=%23ffffff&ms=900&adopt=1'
+  const { tabId, page } = await openPage(app, own)
+  await expect.poll(() => page.evaluate(() => !!document.getElementById('end'))).toBe(true)
+  const id = (await run(app, 'tweaks.create', { tabId })) as string
+  const css = 'body { background: #202020 }\n#title::after { content: " (a private note)" }'
+  await run(app, 'tweaks.update', { id, patch: { css } })
+  await run(app, 'tweaks.closeEditor', {})
+  await expect.poll(() => bgOf(page)).toBe('rgb(32, 32, 32)')
+  const points = await slowPoints(page)
+  await everyFrameTweaked(app, page, tabId, points, 1, () => cmd(app, 'tabs.reload', { tabId, ignoreCache: true }))
+
+  // What the page could read, from its <head> and now: only its own sheets, nothing of the Tweak.
+  const tweakIn = (sheets: Readable) =>
+    sheets.filter((s) => /orbit|private note|32, 32, 32|#202020/i.test(s.media + s.rules))
+  const head = await readable(page, 'head')
+  expect(tweakIn(head), JSON.stringify(head)).toEqual([])
+  expect(head.map((s) => s.media)).toEqual([''])
+  const now = await readable(page, 'now')
+  expect(tweakIn(now), JSON.stringify(now)).toEqual([])
+  expect(now.map((s) => s.rules.includes('letter-spacing'))).toEqual([false, true])
+
+  // A page whose background is also set in a cascade layer of its own, !important, as CSS from a
+  // framework can be: the Tweak's still wins, from the first frame.
+  await cmd(app, 'tabs.navigate', { tabId, url: fx.url('/slow/Layer?bg=%23ffffff&ms=900&layer=1') })
+  await waitTab(app, tabId, '/slow/Layer')
+  const layered = await tabPage(app, '/slow/Layer')
+  await expect.poll(() => bgOf(layered)).toBe('rgb(32, 32, 32)')
+  await everyFrameTweaked(app, layered, tabId, points, 1, () => cmd(app, 'tabs.reload', { tabId, ignoreCache: true }))
+  expect(tweakIn(await readable(layered, 'head'))).toEqual([])
+})
+
+test('[BO-02][BO-14][BO-16] while the page is still loading, a Tweak turned off or on, an edit and the switch for all of them show within a few frames', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const { tabId, page } = await openPage(app, '/held/Busy')
+  const id = (await run(app, 'tweaks.create', { tabId })) as string
+  await run(app, 'tweaks.update', { id, patch: { css: 'body { background: #202020 }' } })
+  await run(app, 'tweaks.closeEditor', {})
+  await expect.poll(() => bgOf(page)).toBe('rgb(32, 32, 32)')
+
+  // A load that its image holds for 8 s: the page is ready, and has its Tweak, long before it ends.
+  await mark(page)
+  await cmd(app, 'tabs.navigate', { tabId, url: fx.url('/held/Busy?ms=8000') })
+  await newDocument(page)
+  expect(await firstFrame(page)).toMatchObject({ bg: 'rgb(32, 32, 32)' })
+  // Main's own copy is in.
+  await expect.poll(async () => (await pageTweaks(app, tabId))?.parts.length).toBeGreaterThan(0)
+  // The page notes, in each of its frames, its background and whether it is still loading.
+  await page.evaluate(() => {
+    const log: [number, string, string][] = []
+    Object.assign(window, { __frames: log })
+    const tick = () => {
+      log.push([
+        performance.timeOrigin + performance.now(),
+        getComputedStyle(document.body).backgroundColor,
+        document.readyState,
+      ])
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  })
+  type Frame = [number, string, string]
+  const framesSince = (t0: number) =>
+    page.evaluate((t) => (window as unknown as { __frames: Frame[] }).__frames.filter(([at]) => at >= t), t0)
+  /** The frames the page painted between a change and the first that shows it; that frame's state. */
+  const change = async (what: () => Promise<unknown>, bg: string) => {
+    const t0 = await page.evaluate(() => performance.timeOrigin + performance.now())
+    await what()
+    await expect.poll(async () => (await framesSince(t0)).some(([, b]) => b === bg), { timeout: 4000 }).toBe(true)
+    const after = await framesSince(t0)
+    const shown = after.findIndex(([, b]) => b === bg)
+    return { frames: shown, loading: after[shown]?.[2], ms: Math.round((after[shown]?.[0] ?? Number.NaN) - t0) }
+  }
+  const results = {
+    off: await change(() => run(app, 'tweaks.setEnabled', { id, enabled: false }), 'rgb(255, 255, 255)'),
+    on: await change(() => run(app, 'tweaks.setEnabled', { id, enabled: true }), 'rgb(32, 32, 32)'),
+    edit: await change(
+      () => run(app, 'tweaks.update', { id, patch: { css: 'body { background: #303030 }' } }),
+      'rgb(48, 48, 48)',
+    ),
+    all: await change(() => run(app, 'tweaks.setGlobal', { enabled: false }), 'rgb(255, 255, 255)'),
+  }
+  const report = JSON.stringify(results)
+  for (const r of Object.values(results)) {
+    expect(r.loading, report).toBe('interactive')
+    expect(r.frames, report).toBeGreaterThanOrEqual(0)
+    expect(r.frames, report).toBeLessThanOrEqual(12)
+  }
+  console.log(`[BO-14] changes while loading: ${report}`)
 })
 
 test('[BO-18][BO-01] a Tweak survives reloads, other pages of its site, back and forward, a closed tab reopened, a sleeping tab woken and a restart', async () => {

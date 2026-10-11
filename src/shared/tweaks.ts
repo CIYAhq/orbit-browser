@@ -7,21 +7,20 @@
  * - The stylesheets (BO-18): what a page gets, as several sheets (`tweakSheets`): the colours (the
  *   wheel, invert and sliders: a filter on the root, and its inverse on images and video), the type
  *   (fonts, size, case), and each Tweak's hidden elements and own CSS. All sit in the cascade layer
- *   `orbit-tweaks`, every declaration `!important`: a layered important declaration beats the
- *   page's own important ones, wherever the sheet sits in the cascade.
+ *   `orbit-tweaks`, every declaration `!important`. They go into the page as injected author sheets
+ *   (D85), which come before the page's own sheets: that layer is the first one declared, so its
+ *   important declarations beat the page's own important ones, in a layer or not.
  * - The Space colours (BO-19): `var(--orbit-theme-…)` in a Tweak's CSS is replaced by the colour
  *   itself, so the variables exist only inside Tweaks and never on the page.
  * - JavaScript (BO-11): the code main runs in the page, with errors going to the page's console.
  */
-import { TWEAK_SHEET_MEDIA } from './site'
 import type { Settings, Tweak, TweakHidden, TweakStyle } from './state'
 import { hexToHsl } from './theme'
 
 // ---- Model ----------------------------------------------------------------
 
-/** The cascade layer every Tweak rule is in; also the media type that marks the preload's sheets. */
+/** The cascade layer every Tweak rule is in. */
 export const TWEAK_LAYER = 'orbit-tweaks'
-export { TWEAK_SHEET_MEDIA }
 
 /** Page size steps (BO-08), in percent. The −/+ buttons move between them. */
 export const TWEAK_SIZES = [90, 100, 110, 125, 150] as const
@@ -1140,13 +1139,29 @@ export function tweakSheets(tweaks: readonly Tweak[], opts: SheetOptions = {}): 
 // ---- JavaScript (BO-11, BO-18) ------------------------------------------------
 
 /**
- * The code main runs in the page for a Tweak: its JavaScript in a function of its own, called with
- * the window as `this`. An error it throws goes to the page's console under the Tweak's name; one it
- * can't even start with (a syntax error) the engine reports there itself.
+ * The code main runs in the page for a Tweak: its JavaScript in a function of its own, with the window
+ * as `this`. An error it throws goes to the page's console under the Tweak's name; one it can't even
+ * start with (a syntax error) the engine reports there itself.
+ *
+ * It runs only if the frame shows the Tweak's host, or a subdomain of it with "Also apply to
+ * subdomains", as the code starts (BO-17, BO-18): main checked the page at document ready, but the
+ * frame may show another document by the time the code gets there. The check reads
+ * `location.hostname`, which a page can't replace, and compares it a character at a time, calling
+ * no method a page could have replaced.
  */
-export function tweakScript(tweak: Pick<Tweak, 'name' | 'js'>): string {
+export function tweakScript(tweak: Pick<Tweak, 'name' | 'js' | 'host' | 'subdomains'>): string {
   const label = JSON.stringify(`[Tweak “${tweak.name}”]`)
-  return `void (function () {\ntry {\n${tweak.js}\n} catch (error) {\nconsole.error(${label}, error)\n}\n}).call(window)`
+  const host = JSON.stringify(tweak.host)
+  const guard = `var h = location.hostname, n = h.length, own = ${host}, k = own.length, i, ok
+if (n > 0 && h[n - 1] === '.') n--
+ok = n === k
+for (i = 0; ok && i < k; i++) ok = h[i] === own[i]
+if (!ok && ${tweak.subdomains ? 'true' : 'false'} && n > k + 1 && h[n - k - 1] === '.') {
+  ok = true
+  for (i = 0; ok && i < k; i++) ok = h[n - k + i] === own[i]
+}
+if (ok) run()`
+  return `void (function (run) {\n${guard}\n})(function () {\ntry {\n${tweak.js}\n} catch (error) {\nconsole.error(${label}, error)\n}\n})`
 }
 
 /** Colour helpers for the editor's wheel: a hue and intensity as a CSS colour. */

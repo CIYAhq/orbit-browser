@@ -45,6 +45,23 @@ const head = (title: string, bg: string) => `<!doctype html>
 export const PHOTO = '#20406a'
 const PHOTO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><rect width="120" height="120" fill="${PHOTO}"/></svg>`
 
+/**
+ * A page's `<head>` script: every sheet the page can read (`document.styleSheets` and its adopted
+ * sheets), with its media and rules, now (`window.__readable`) and later (`window.__read()`).
+ */
+const READ_SHEETS = `<script>(() => {
+  const rules = (sheet) => { try { return Array.from(sheet.cssRules, (r) => r.cssText).join('\\n') } catch (e) { return '(unreadable)' } }
+  window.__read = () => [...document.styleSheets, ...document.adoptedStyleSheets].map((sheet) => ({ media: sheet.media.mediaText, rules: rules(sheet) }))
+  window.__readable = window.__read()
+})()</script>`
+
+/** A page's `<head>` script that sets its adopted sheets to one of its own, as some sites do. */
+const ADOPT_OWN = `<script>(() => {
+  const own = new CSSStyleSheet()
+  own.replaceSync('#title { letter-spacing: 0.5px }')
+  document.adoptedStyleSheets = [own]
+})()</script>`
+
 /** The serial number of each load of a page, by path: a `/slow` page's block changes colour with it. */
 const BLOCK_COLORS = ['#1f5fd6', '#18a058', '#c2410c', '#7c3aed']
 
@@ -55,7 +72,12 @@ const BLOCK_COLORS = ['#1f5fd6', '#18a058', '#c2410c', '#7c3aed']
  * - `/framed/<name>?other=<url>`: a page with a frame (`#inner`) showing another address.
  * - `/slow/<name>?bg=…&ms=…`: sends its heading and a coloured block (`#block`, a new colour on each
  *   load) at once, and the rest of the page `ms` later (600 by default): it paints before the
- *   document is ready, as a page from a slow server does.
+ *   document is ready, as a page from a slow server does. Its `<head>` script notes every sheet it
+ *   can read, with its media and rules (`window.__readable`, and `window.__read()` for later); with
+ *   `adopt=1` it then sets its adopted sheets to one of its own, dropping any others; with `layer=1`
+ *   its background is also set in a cascade layer of its own, `!important`.
+ * - `/held/<name>?bg=…&ms=…`: a whole page, ready at once, whose image (`#held`) comes `ms` late
+ *   (0 by default): the page is still loading until then.
  * - `/look/<name>`: text (`#text`), an icon (`#icon`), code (`#code`), a photo (`#photo`, a solid
  *   PHOTO square) and a field (`#field`): what the colour, font and case controls change or keep.
  * - `/`: a home page (`#title` "Home"), where the Library's Open Site goes (BO-15); `slowHome` makes
@@ -64,7 +86,8 @@ const BLOCK_COLORS = ['#1f5fd6', '#18a058', '#c2410c', '#7c3aed']
  *   (`#weather`) and two small stories; a feed (`main.feed`) with a promo link (`#promo`) and four
  *   stories (`article.story`); three links (`li.story`). Stories are padded: a point just inside one's
  *   corner is the story itself. `window.__first` is what its first frame showed:
- *   whether the promo and the widget were displayed, and how many stories.
+ *   whether the promo and the widget were displayed, and how many stories. With `hidden=1` the feed
+ *   has a fifth story the page itself hides (`hidden`).
  */
 export async function startTweakFixtures(base = 3370): Promise<TweakFixtures> {
   const seen: string[] = []
@@ -123,6 +146,7 @@ export async function startTweakFixtures(base = 3370): Promise<TweakFixtures> {
 <main class="feed" style="flex:1">
 <a id="promo" class="promo" href="/page/Away" style="display:block;padding:12px;background:#ffe9a8">Big promo</a>
 ${['one', 'two', 'three', 'four'].map(story).join('\n')}
+${u.searchParams.get('hidden') === '1' ? '<article class="story" hidden><h2>Story five</h2></article>' : ''}
 </main></div>
 <ul class="links"><li class="story">Link one</li><li class="story">Link two</li><li class="story">Link three</li></ul>
 <script>requestAnimationFrame(() => {
@@ -138,13 +162,43 @@ ${['one', 'two', 'three', 'four'].map(story).join('\n')}
       const n = loads.get(u.pathname) ?? 0
       loads.set(u.pathname, n + 1)
       const ms = Number(u.searchParams.get('ms') ?? 600)
+      const layer =
+        u.searchParams.get('layer') === '1'
+          ? `<style>@layer base { body { background: ${bg} !important } }</style>`
+          : ''
       res.writeHead(200, ok)
       res.write(
-        `${head(name, bg)}<body>${FIRST_FRAME}<h1 id="title">${name}</h1>
+        `${head(name, bg).replace('</head>', `${layer}${READ_SHEETS}${u.searchParams.get('adopt') === '1' ? ADOPT_OWN : ''}</head>`)}<body>${FIRST_FRAME}<h1 id="title">${name}</h1>
 <div id="block" data-load="${n}" style="background:${BLOCK_COLORS[n % BLOCK_COLORS.length]}"></div>
 <div style="height:2400px"></div>`,
       )
       const timer = setTimeout(() => res.end('<p id="end">The end</p></body></html>'), ms)
+      res.on('close', () => clearTimeout(timer))
+      return
+    }
+    if (u.pathname.startsWith('/held/')) {
+      const n = loads.get(u.pathname) ?? 0
+      loads.set(u.pathname, n + 1)
+      const ms = Number(u.searchParams.get('ms') ?? 0)
+      res.writeHead(200, ok)
+      res.end(
+        `${head(name, bg)}<body>${FIRST_FRAME}<h1 id="title">${name}</h1>
+<p><img id="held" alt="Held" width="40" height="40" src="/img/held.svg?ms=${ms}&amp;n=${n}"></p>
+<div style="height:2400px"></div></body></html>`,
+      )
+      return
+    }
+    if (u.pathname.startsWith('/img/')) {
+      const ms = Number(u.searchParams.get('ms') ?? 0)
+      const send = () => {
+        res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'no-store' })
+        res.end(PHOTO_SVG)
+      }
+      if (ms <= 0) {
+        send()
+        return
+      }
+      const timer = setTimeout(send, ms)
       res.on('close', () => clearTimeout(timer))
       return
     }

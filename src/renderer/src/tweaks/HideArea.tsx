@@ -26,8 +26,9 @@ export function HideButton({ on }: { on: boolean }) {
 /**
  * Hide-element mode (BO-10). The button above turns it on: the page outlines what is under the pointer,
  * and a click there picks it without the page acting on it. The panel then offers "Hide this" or
- * "Hide all similar", with a slider from narrow to broad and how many that hides; outlined in the
- * page as it moves. Done hiding, or Esc, leaves the mode. Each hidden element has a restore marker here:
+ * "Hide all similar", with a slider from narrow to broad and how many that hides (and how many of
+ * those show on the page, where fewer do); outlined in the page as it moves. Done hiding, or Esc,
+ * leaves the mode. Each hidden element has a restore marker here:
  * hovered, it shows the element again for a moment; clicked, it brings it back.
  */
 export function HideArea({ tweak, state }: { tweak: Tweak; state: TweakEditorState }) {
@@ -70,8 +71,16 @@ export function HideArea({ tweak, state }: { tweak: Tweak; state: TweakEditorSta
                   onClick={() => void invoke('tweaks.hide', { choice: breadth })}
                 >
                   Hide all similar
-                  <span className="tweak-hide__count" data-testid="tweak-hide-count">
-                    {level?.count ?? 0}
+                  <span
+                    className="tweak-hide__count"
+                    data-testid="tweak-hide-count"
+                    title={
+                      level && level.shown < level.count
+                        ? `Hides ${level.count}, of which ${level.shown} show on the page now, outlined there`
+                        : undefined
+                    }
+                  >
+                    {!level ? 0 : level.shown < level.count ? `${level.count} (${level.shown} shown)` : level.count}
                   </span>
                 </button>
               </div>

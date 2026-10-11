@@ -507,13 +507,73 @@ describe('[BO-07][BO-08][BO-09][BO-14] a page’s stylesheets', () => {
 
 describe('[BO-11] JavaScript', () => {
   it('runs in a function of its own whose errors go to the page’s console, named', () => {
-    const script = tweakScript({ name: 'My "best" </script>', js: 'throw new Error("x") // last line' })
+    const script = tweakScript({
+      name: 'My "best" </script>',
+      js: 'throw new Error("x") // last line',
+      host: 'example.com',
+      subdomains: false,
+    })
     expect(() => new Function(script)).not.toThrow()
     expect(script).toContain(JSON.stringify('[Tweak “My "best" </script>”]'))
     const logged: unknown[][] = []
-    const run = new Function('window', 'console', script)
-    run({}, { error: (...args: unknown[]) => logged.push(args) })
+    const run = new Function('location', 'console', script)
+    run({ hostname: 'example.com' }, { error: (...args: unknown[]) => logged.push(args) })
     expect(logged).toHaveLength(1)
     expect(String(logged[0]?.[1])).toContain('Error: x')
+  })
+
+  it('[BO-18] runs only where the frame shows the Tweak’s host as it starts, or a subdomain with the box ticked', () => {
+    /** The hostnames, of those given, at which the Tweak's code ran. */
+    const ranAt = (tweak: { host: string; subdomains: boolean }, hostnames: string[]) =>
+      hostnames.filter((hostname) => {
+        const seen: string[] = []
+        const script = tweakScript({ name: 'T', js: 'globalThis.__ran(location.hostname)', ...tweak })
+        Object.assign(globalThis, { __ran: (h: string) => seen.push(h) })
+        try {
+          new Function('location', script)({ hostname })
+        } finally {
+          Reflect.deleteProperty(globalThis, '__ran')
+        }
+        return seen.length > 0
+      })
+    const hosts = [
+      'example.com',
+      'example.com.',
+      'other.test',
+      'www.example.com',
+      'a.b.example.com',
+      'www.example.com.',
+      'badexample.com',
+      'example.com.evil.test',
+      'xample.com',
+      'com',
+      '',
+    ]
+    expect(ranAt({ host: 'example.com', subdomains: false }, hosts)).toEqual(['example.com', 'example.com.'])
+    expect(ranAt({ host: 'example.com', subdomains: true }, hosts)).toEqual([
+      'example.com',
+      'example.com.',
+      'www.example.com',
+      'a.b.example.com',
+      'www.example.com.',
+    ])
+    expect(ranAt({ host: '127.0.0.1', subdomains: false }, ['127.0.0.1', 'localhost', '127.0.0.10'])).toEqual([
+      '127.0.0.1',
+    ])
+    expect(ranAt({ host: '[::1]', subdomains: false }, ['[::1]', '[::2]'])).toEqual(['[::1]'])
+  })
+
+  it('[BO-18] checks the host without a method the page could have replaced', () => {
+    const script = tweakScript({ name: 'T', js: 'globalThis.__ran = true', host: 'example.com', subdomains: true })
+    const proto = String.prototype as unknown as Record<string, unknown>
+    const saved = ['endsWith', 'toLowerCase', 'slice', 'replace', 'indexOf'].map((m) => [m, proto[m]] as const)
+    try {
+      // A page that makes every string method say "yes, example.com".
+      for (const [m] of saved) proto[m] = () => (m === 'endsWith' ? true : m === 'indexOf' ? 0 : 'example.com')
+      new Function('location', script)({ hostname: 'other.test' })
+    } finally {
+      for (const [m, f] of saved) proto[m] = f
+    }
+    expect((globalThis as { __ran?: boolean }).__ran).toBeUndefined()
   })
 })

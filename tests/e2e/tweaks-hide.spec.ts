@@ -133,38 +133,44 @@ test('[BO-10] Hide-element mode outlines what is under the pointer and picks it 
   expect(await firstShown(page)).toEqual({ promo: false, weather: true, stories: 9 })
 })
 
-test('[BO-10] "Hide all similar" hides the picked element and those like it, narrow to broad on a slider that counts them and outlines them in the page; Esc in the page drops the pick, then leaves the mode; Esc in the panel does the same, then closes the editor', async () => {
+test('[BO-10] "Hide all similar" hides the picked element and those like it, narrow to broad on a slider that counts them (and those the page shows, where fewer) and outlines them in the page; Esc in the page drops the pick, then leaves the mode; Esc in the panel does the same, then closes the editor', async () => {
   orbit = await launchOrbit()
   const { app } = orbit
-  const { tabId, page } = await openPage(app, '/cards/Similar')
+  // The feed has a fifth story the page itself hides.
+  const { tabId, page } = await openPage(app, '/cards/Similar?hidden=1')
   const { id, view } = await newTweak(app, tabId)
   await hideMode(view)
   await pick(page, 'main.feed article.story')
   await expect(view.getByTestId('tweak-hide-label')).toHaveText('Story one About one')
 
-  // Narrowest first: the feed's four stories; then every story card, six; then all nine stories.
+  // Narrowest first: the feed's five stories, four shown; then every story card, seven, six shown;
+  // then all ten stories, nine shown. Only those shown have an outline.
   const count = view.getByTestId('tweak-hide-count')
   const breadth = view.getByTestId('tweak-hide-breadth')
   const outlined = async () => (await pickerInfo(app, tabId))?.outlined
-  await expect(count).toHaveText('4')
+  await expect(count).toHaveText('5 (4 shown)')
   await expect(breadth).toHaveAttribute('max', '2')
   await view.getByTestId('tweak-hide-similar').hover()
   await expect.poll(outlined).toBe(4)
   for (const [level, n] of [
-    ['1', 6],
-    ['2', 9],
-    ['1', 6],
+    ['1', 7],
+    ['2', 10],
+    ['1', 7],
   ] as const) {
     await breadth.fill(level)
-    await expect(count).toHaveText(String(n))
-    await expect.poll(outlined).toBe(n)
+    await expect(count).toHaveText(`${n} (${n - 1} shown)`)
+    await expect.poll(outlined).toBe(n - 1)
   }
   await view.getByTestId('tweak-hide-similar').click()
   await expect.poll(() => shown(page, 'article.story')).toBe(0)
   expect(await shown(page, 'li.story, #promo, #weather')).toBe(5)
   expect(await hiddenOf(app, id)).toEqual([
-    { id: expect.any(String), selector: 'article.story', label: 'Story one About one and similar (6)' },
+    { id: expect.any(String), selector: 'article.story', label: 'Story one About one and similar (7)' },
   ])
+  // Where every match shows, the count is just the number.
+  await pick(page, 'li.story')
+  await expect(view.getByTestId('tweak-hide-label')).toHaveText('Link one')
+  await expect(count).toHaveText('3')
 
   // Esc in the page: the pick goes first, then the mode.
   await pick(page, '#weather')
@@ -191,6 +197,67 @@ test('[BO-10] "Hide all similar" hides the picked element and those like it, nar
   await view.keyboard.press('Escape')
   await waitEditor(app, false)
   expect(await hiddenOf(app, id)).toHaveLength(1)
+})
+
+test('[BO-10] the page can’t take Hide-element mode away: a layer it removes comes back, and its links don’t act even under a cover of its own; a page that keeps removing it ends the mode, and the panel says so', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const { tabId, page } = await openPage(app, '/cards/Layer')
+  const { view } = await newTweak(app, tabId)
+  const url = page.url()
+  await mark(page)
+  await hideMode(view)
+  const extras = () =>
+    page.evaluate(
+      () => [...document.documentElement.children].filter((el) => el !== document.head && el !== document.body).length,
+    )
+  expect(await extras()).toBe(1)
+
+  // The page takes out what it finds under its root beside its head and body: the picker's layer.
+  // A click on the promo link then picks it, and the link doesn't go; the layer is back.
+  await page.evaluate(() => {
+    for (const el of [...document.documentElement.children])
+      if (el !== document.head && el !== document.body) el.remove()
+  })
+  await pick(page, '#promo')
+  await expect(view.getByTestId('tweak-hide-label')).toHaveText('Big promo')
+  expect([page.url(), await marked(page)]).toEqual([url, true])
+  expect(await extras()).toBe(1)
+
+  // The page covers everything with a link of its own, over the layer: a click on it doesn't go,
+  // nor does the button under it count, nor does Enter on the focused promo link go.
+  await page.evaluate(() => {
+    const cover = document.createElement('a')
+    cover.id = 'cover'
+    cover.title = 'Cover'
+    cover.href = '/page/Covered'
+    cover.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,0.01)'
+    document.documentElement.append(cover)
+  })
+  const at = await corner(page, '#count')
+  await page.mouse.click(at.x, at.y)
+  await expect(view.getByTestId('tweak-hide-label')).toHaveText('Cover')
+  await page.evaluate(() => document.getElementById('promo')?.focus())
+  await page.keyboard.press('Enter')
+  await page.evaluate(() => document.getElementById('cover')?.remove())
+  expect([page.url(), await marked(page), await clicks(page)]).toEqual([url, true, undefined])
+
+  // A page that takes the layer out every time it comes back ends the mode: the panel shows it
+  // off, the picker is gone, and the page acts on clicks again.
+  await page.evaluate(() => {
+    const strip = () => {
+      for (const el of [...document.documentElement.children])
+        if (el !== document.head && el !== document.body) el.remove()
+    }
+    new MutationObserver(strip).observe(document.documentElement, { childList: true })
+    strip()
+  })
+  await expect(view.getByTestId('tweak-hide-button')).toHaveAttribute('aria-pressed', 'false')
+  await expect(view.getByTestId('tweak-hide')).toHaveCount(0)
+  await expect.poll(() => pickerInfo(app, tabId)).toBeNull()
+  const button = await corner(page, '#count')
+  await page.mouse.click(button.x, button.y)
+  await expect.poll(() => clicks(page)).toBe(1)
 })
 
 test('[BO-10] each hidden element has a restore marker in the panel: hovered, the element shows for the moment; clicked, it is back for good; another of the site’s pages ends the mode, the panel staying open', async () => {

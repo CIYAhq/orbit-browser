@@ -1,6 +1,6 @@
 import { type IpcMainEvent, ipcMain, type Session, type WebContents } from 'electron'
 import { isPrivateProfileId } from '../../shared/private'
-import { PAGE_CHANNEL } from '../../shared/site'
+import { PAGE_CHANNEL, type TweakSheetsAnswer } from '../../shared/site'
 import type { OrbitState, ProfileId, TabId, Tweak } from '../../shared/state'
 import {
   enabledTweaksFor,
@@ -18,16 +18,6 @@ export const TWEAK_WORLD = 1040
 /** Chromium's net::ERR_ABORTED: a navigation stopped or replaced, which leaves the page as it was. */
 const ERR_ABORTED = -3
 
-/**
- * Takes the page preload's Tweak sheets out of the page (they carry the marker media type).
- * Runs in TWEAK_WORLD: the page's own adopted sheets stay as they are.
- */
-const RETIRE_PRELOAD_SHEETS = `(() => {
-  const list = document.adoptedStyleSheets
-  const kept = list.filter((sheet) => !Array.from(sheet.media).includes('orbit-tweaks'))
-  if (kept.length !== list.length) document.adoptedStyleSheets = kept
-})()`
-
 /** What main knows of a page that may have Tweaks: one per web contents whose preload asked. */
 interface PageRecord {
   contents: WebContents
@@ -35,10 +25,10 @@ interface PageRecord {
   url: string
   /** Its host; null once it shows something Tweaks don't reach. */
   host: string | null
-  /** Bumped by each new document. */
+  /** Bumped by each new document's read: the number its answer carries (`TweakSheetsAnswer.doc`). */
   doc: number
-  /** The preload's sheets are in the page, not yet replaced by main's own. */
-  adopted: boolean
+  /** The preload's first-paint sheets are in the page, not yet replaced by main's own. */
+  preloaded: boolean
   /** Main's sheets in the page, by part (`SheetPart.key`). */
   inserted: Map<string, { key: string; css: string }>
   /** The JavaScript of this document's Tweaks has run (once per load, BO-18). */
@@ -62,18 +52,24 @@ export interface TweakPages {
   /** Shows one hidden element again for now, or none (BO-10's restore marker preview). */
   setShowHidden(tabId: TabId, hiddenId: string | undefined): void
   /** Test view: the sheets main has in a tab's page, and whether the preload's are still there. */
-  info(tabId: TabId): { host: string | null; adopted: boolean; parts: string[]; scripted: boolean } | null
+  info(tabId: TabId): { host: string | null; preloaded: boolean; parts: string[]; scripted: boolean } | null
 }
 
 /**
- * Applies Tweaks to pages (BO-18, D40):
+ * Applies Tweaks to pages (BO-18; D40, D85):
  * - before first paint, the page preload asks main for its sheets (`PAGE_CHANNEL.tweakSheets`, a
- *   sync message that carries nothing): main answers from the frame's own URL, for a main frame;
- * - at document ready, main puts its own copies in (`insertCSS`, which the page can't see or
- *   remove), takes the preload's out, and runs the JavaScript Tweaks allowed here in the page's
- *   main world (`executeJavaScript` on its main frame, never through the preload);
+ *   sync message that carries nothing): main answers from the frame's own URL, for a main frame,
+ *   with the sheets and a number for this document's read; the preload inserts them as injected
+ *   author sheets, which the page can't see or remove;
+ * - at document ready, or at the first change before it, main puts its own copies in (`insertCSS`)
+ *   and tells the preload to take its sheets out (`PAGE_CHANNEL.tweakRetire`, with that number):
+ *   a message to the page's main frame that main never waits for. At document ready main also runs
+ *   the JavaScript Tweaks allowed here in the page's main world (`executeJavaScript` on its main
+ *   frame, never through the preload);
  * - while the page is open, each change to its Tweaks replaces only the sheets that changed:
- *   the new one goes in before the old one comes out, so nothing flashes.
+ *   the new one goes in before the old one comes out, so nothing flashes. A change waits only on
+ *   `insertCSS`, never on a script in the page or an isolated world, so it shows while the page is
+ *   still loading.
  */
 export function registerTweakPages(ctx: MainContext): TweakPages {
   const { store, sessions, tabs } = ctx
@@ -119,6 +115,18 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
     if (old) remove(contents, old.key)
   }
 
+  /**
+   * The preload takes out its first-paint sheets (D85): a message to the page's main frame that
+   * carries only the number of the document's read, and that main never waits for.
+   */
+  const retire = (record: PageRecord, doc: number) => {
+    try {
+      record.contents.mainFrame.send(PAGE_CHANNEL.tweakRetire, doc)
+    } catch {
+      // The frame went, and the document's sheets with it.
+    }
+  }
+
   /** Brings a page's sheets in line with its Tweaks now. */
   const syncOnce = async (record: PageRecord): Promise<void> => {
     if (!current(record)) return
@@ -132,12 +140,10 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
       record.inserted.delete(part)
       remove(record.contents, have.key)
     }
-    if (record.adopted) {
-      // Main's own sheets are in: the preload's go.
-      record.adopted = false
-      await record.contents
-        .executeJavaScriptInIsolatedWorld(TWEAK_WORLD, [{ code: RETIRE_PRELOAD_SHEETS }])
-        .catch(() => {})
+    // Main's own sheets are all in: the preload's go.
+    if (record.preloaded && want.every((p) => record.inserted.get(p.key)?.css === p.css)) {
+      record.preloaded = false
+      retire(record, doc)
     }
   }
 
@@ -185,7 +191,7 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
       url: '',
       host: null,
       doc: 0,
-      adopted: false,
+      preloaded: false,
       inserted: new Map(),
       scripted: false,
       busy: false,
@@ -215,7 +221,7 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
   }
 
   ipcMain.on(PAGE_CHANNEL.tweakSheets, (event: IpcMainEvent) => {
-    let sheets: string[] = []
+    let sheets: TweakSheetsAnswer | null = null
     try {
       sheets = answer(event)
     } catch (err) {
@@ -224,27 +230,31 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
     event.returnValue = sheets
   })
 
-  /** The page preload's ask, before the page's first paint: the sheets, from the frame's own URL. */
-  const answer = (event: IpcMainEvent): string[] => {
+  /**
+   * The page preload's ask, before the page's first paint: the sheets, from the frame's own URL, and
+   * the number of this document's read; null where none apply.
+   */
+  const answer = (event: IpcMainEvent): TweakSheetsAnswer | null => {
     const contents = event.sender
     const frame = event.senderFrame
     const main = contents.mainFrame
-    if (!frame || frame.detached || frame.processId !== main.processId || frame.routingId !== main.routingId) return []
+    if (!frame || frame.detached || frame.processId !== main.processId || frame.routingId !== main.routingId)
+      return null
     // Only pages of a profile's session: never Orbit's own views.
-    if (!profiles.has(contents.session)) return []
+    if (!profiles.has(contents.session)) return null
     const url = frame.url
     const host = tweakHostOf(url)
     let record = records.get(contents.id)
-    if (!host && !record) return []
+    if (!host && !record) return null
     record ??= track(contents)
     record.doc++
     record.url = url
     record.host = host
     record.inserted.clear()
-    record.adopted = false
+    record.preloaded = false
     record.scripted = false
     record.showHidden = undefined
-    if (!host) return []
+    if (!host) return null
     // After the answer: the page paints first.
     if (waiting.size > 0) {
       setImmediate(() => {
@@ -252,8 +262,9 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
       })
     }
     const parts = partsFor(store.state, record)
-    record.adopted = parts.length > 0
-    return parts.map((p) => p.css)
+    if (parts.length === 0) return null
+    record.preloaded = true
+    return { doc: record.doc, sheets: parts.map((p) => p.css) }
   }
 
   // A change to the Tweaks, or the switch for all of them (BO-14, BO-16): open pages follow at once.
@@ -314,7 +325,7 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
       if (!record) return null
       return {
         host: current(record) ? record.host : null,
-        adopted: record.adopted,
+        preloaded: record.preloaded,
         parts: [...record.inserted.keys()],
         scripted: record.scripted,
       }

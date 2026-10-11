@@ -8,11 +8,16 @@ import { TWEAK_WORLD, type TweakPages } from './pages'
 
 /**
  * The picker (BO-10). It runs in the page's isolated world TWEAK_WORLD, never the page's own world,
- * so the page can neither see nor call it. It covers the page with a layer of its own (a closed
- * shadow root) that takes the pointer, so the page's links and buttons don't act; it outlines what
- * is under the pointer, and on a click describes that element: a selector for it alone, and
- * selectors for it and elements like it, narrow to broad, each with how many it matches. Main reads
- * what happens with `__orbitHide.next()`; it lives in one document, and goes with it.
+ * so the page can't call it or read its state. It covers the page with a layer of its own: an
+ * element under the page's root, which the page sees as an empty `<div>`, whose closed shadow root
+ * draws the outlines. While the mode is on, its listeners on the window, first in the capture phase,
+ * take every press and click (and the menu key's), so the page's links and buttons don't act, even
+ * where the page covers or moves the layer. If the page takes the layer out, the picker puts it back;
+ * if the page keeps taking it out, the mode ends, and main and the panel hear so.
+ * It outlines what is under the pointer, and on a click describes that element: a selector for it
+ * alone, and selectors for it and elements like it, narrow to broad, each with how many it matches
+ * and how many of those have a box to outline. Main reads what happens with `__orbitHide.next()`; it
+ * lives in one document, and goes with it.
  */
 const PICKER = String.raw`(() => {
   if (window.__orbitHide) return true
@@ -71,6 +76,11 @@ const PICKER = String.raw`(() => {
     const c = classes(el)[0]
     return el.localName + (c ? '.' + c : '')
   }
+  // Whether an element has a box to outline: displayed, with a size.
+  const boxed = (el) => {
+    const r = el.getBoundingClientRect()
+    return r.width !== 0 || r.height !== 0
+  }
   const words = (s) => (s || '').replace(/\s+/g, ' ').trim()
   const labelOf = (el) =>
     (words(el.getAttribute('aria-label') || el.getAttribute('alt') || el.getAttribute('title')) ||
@@ -100,7 +110,7 @@ const PICKER = String.raw`(() => {
       const found = all(selector)
       if (found.length < 2 || found.length > MAX || !found.includes(el)) continue
       if (found.some((f) => f === doc.body || f === root || (f !== el && f.contains(el)))) continue
-      out.push({ selector, count: found.length })
+      out.push({ selector, count: found.length, shown: found.filter(boxed).length })
     }
     out.sort((a, b) => a.count - b.count)
     return out.filter((c, i) => i === 0 || c.count !== out[i - 1].count)
@@ -136,7 +146,7 @@ const PICKER = String.raw`(() => {
   }
   const box = (el, cls, text) => {
     const r = el.getBoundingClientRect()
-    if (r.width === 0 && r.height === 0) return
+    if (!boxed(el)) return
     // The page's size (BO-08) zooms this layer too: its own pixels are that much larger.
     const z = host.currentCSSZoom || 1
     const b = doc.createElement('div')
@@ -171,9 +181,10 @@ const PICKER = String.raw`(() => {
   const redraw = () => {
     if (!frame) frame = requestAnimationFrame(draw)
   }
-  const stop = (e) => {
+  // Neither the page nor its default actions get these while the mode is on.
+  const block = (e) => {
     e.preventDefault()
-    e.stopPropagation()
+    e.stopImmediatePropagation()
   }
   const onMove = (e) => {
     if (!e.isTrusted) return
@@ -182,8 +193,9 @@ const PICKER = String.raw`(() => {
     redraw()
   }
   const onClick = (e) => {
-    stop(e)
-    if (!e.isTrusted || e.button !== 0) return
+    block(e)
+    // A pointer's click picks; one the keyboard makes (detail 0) only doesn't reach the page.
+    if (!e.isTrusted || e.button !== 0 || e.detail === 0) return
     const el = under(e.clientX, e.clientY)
     if (!el) return
     picked = el
@@ -197,15 +209,52 @@ const PICKER = String.raw`(() => {
     e.stopImmediatePropagation()
     emit({ type: 'escape' })
   }
-  host.addEventListener('pointermove', onMove)
-  host.addEventListener('click', onClick)
-  for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'dblclick', 'auxclick', 'contextmenu']) {
-    host.addEventListener(type, stop)
+  const BLOCKED = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'dblclick', 'auxclick', 'contextmenu']
+  const listeners = [
+    ['pointermove', onMove, true],
+    ['click', onClick, true],
+    ...BLOCKED.map((type) => [type, block, true]),
+    ['keydown', onKey, true],
+    ['scroll', redraw, true],
+    ['resize', redraw, false],
+  ]
+  for (const [type, fn, capture] of listeners) addEventListener(type, fn, capture)
+
+  // The page took the layer out, or moved it, or marked it: it goes back as it was. A page that
+  // keeps taking it out (more than 20 times a second), or replaces its root, ends the mode: main
+  // hears it from next().
+  let restored = 0
+  let since = 0
+  const keep = () => {
+    const now = performance.now()
+    if (now - since > 1000) {
+      since = now
+      restored = 0
+    }
+    if (doc.documentElement !== root || ++restored > 20) {
+      stop()
+      return
+    }
+    for (const name of host.getAttributeNames()) host.removeAttribute(name)
+    if (host.parentNode !== root) root.append(host)
   }
-  addEventListener('keydown', onKey, true)
-  addEventListener('scroll', redraw, true)
-  addEventListener('resize', redraw)
+  const watcher = new MutationObserver(() => {
+    if (doc.documentElement !== root || host.parentNode !== root || host.attributes.length > 0) keep()
+  })
+  watcher.observe(doc, { childList: true })
+  watcher.observe(root, { childList: true })
+  watcher.observe(host, { attributes: true })
   root.append(host)
+
+  const stop = () => {
+    watcher.disconnect()
+    for (const [type, fn, capture] of listeners) removeEventListener(type, fn, capture)
+    if (frame) cancelAnimationFrame(frame)
+    host.remove()
+    window.__orbitHide = undefined
+    for (const wake of waiting.splice(0)) wake({ type: 'stopped' })
+    return true
+  }
 
   window.__orbitHide = {
     next: () =>
@@ -216,23 +265,14 @@ const PICKER = String.raw`(() => {
     outline: (selector) => {
       many = selector || null
       redraw()
-      return many ? Math.min(all(many).length, MAX) : picked ? 1 : 0
+      return many ? all(many).slice(0, MAX).filter(boxed).length : picked ? 1 : 0
     },
     clear: () => {
       picked = null
       many = null
       redraw()
     },
-    stop: () => {
-      removeEventListener('keydown', onKey, true)
-      removeEventListener('scroll', redraw, true)
-      removeEventListener('resize', redraw)
-      if (frame) cancelAnimationFrame(frame)
-      host.remove()
-      window.__orbitHide = undefined
-      for (const wake of waiting.splice(0)) wake({ type: 'stopped' })
-      return true
-    },
+    stop,
     info: () => ({
       hovered: hovered && !picked ? path(hovered) : null,
       picked: picked ? path(picked) : null,
@@ -289,8 +329,9 @@ function checkPick(ev: Record<string, unknown>): TweakHidePick | null {
   if (!isSafeSelector(exact)) return null
   const similar = (Array.isArray(ev.similar) ? ev.similar : [])
     .filter(isRecord)
-    .map((c) => ({ selector: text(c.selector, 2_000), count: Number(c.count) }))
+    .map((c) => ({ selector: text(c.selector, 2_000), count: Number(c.count), shown: Number(c.shown) }))
     .filter((c) => isSafeSelector(c.selector) && Number.isInteger(c.count) && c.count >= 2)
+    .map((c) => ({ ...c, shown: Number.isInteger(c.shown) ? Math.min(Math.max(c.shown, 0), c.count) : c.count }))
     .slice(0, 12)
   return { label: text(ev.label, 60) || text(ev.kind, 60) || 'Element', exact, similar }
 }
