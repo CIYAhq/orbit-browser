@@ -218,23 +218,11 @@ class PeekAnimator {
       chrome: 1,
       page: true,
     }
-    // Main takes the layer away once what is left of the card and the dim is under 0.1 %, which no
-    // one can see (the curve's last tenth): the page behind takes clicks again sooner (FL-19: within
-    // 200 ms of Escape).
-    const done = this.settler()
-    let told = false
-    const settled = () => {
-      if (told) return
-      told = true
-      done()
-    }
+    const settled = this.settler()
     if (reducedMotion()) {
       this.tween(
         FADE_MS,
-        (t) => {
-          this.draw({ rect: start.rect, radius: start.radius, dim: start.dim * (1 - t), chrome: 0, page: false })
-          if (t >= 0.999) settled()
-        },
+        (t) => this.draw({ rect: start.rect, radius: start.radius, dim: start.dim * (1 - t), chrome: 0, page: false }),
         settled,
       )
       return
@@ -245,16 +233,14 @@ class PeekAnimator {
     if (dragged) to.y += Math.min(this.area().height, Math.max(40, (Math.max(0, velocity) * PEEK_CLOSE_MS) / 3000))
     this.tween(
       PEEK_CLOSE_MS,
-      (e) => {
+      (e) =>
         this.draw({
           rect: lerpBox(start.rect, to, e),
           radius: start.radius,
           dim: start.dim * (1 - e),
           chrome: start.chrome * (1 - e),
           page: e < 0.45,
-        })
-        if (e >= 0.999) settled()
-      },
+        }),
       settled,
     )
   }

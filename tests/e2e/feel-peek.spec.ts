@@ -272,7 +272,8 @@ test('[FL-19] Escape shrinks the card to about 0.96 as it fades in 150–180 ms,
   note('FL-19', 'close: Escape → no layer over the page (main)', m.layer, '≤ 200 ms')
   console.info(`[feel] FL-19 close rounds: ${all.map((x) => `layer ${Math.round(x.layer)} ms`).join(', ')}`)
   expect(m.starts).toBeLessThanOrEqual(3 * slack)
-  // The curve runs 160 ms; its last tenth is under 0.1 % and is not drawn.
+  // The curve runs 160 ms; its last tenth moves the card by under 0.1 %, which the fade's last
+  // frame leaves out.
   expect(m.fade, 'a fade, not a cut').toBeGreaterThanOrEqual(100)
   expect(m.fade).toBeLessThanOrEqual((180 + 2 * FRAME) * slack)
   expect(m.smallest).toBeGreaterThan(0.94)
