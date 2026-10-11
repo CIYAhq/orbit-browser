@@ -91,11 +91,14 @@ export interface PageLeave {
  * - **Closing a tab, a window or a Space** closes each page through the engine (D73): every frame's
  *   `beforeunload` runs, as when Chromium closes a tab, and a page that warns stays. Orbit shows its
  *   tab and asks there; Leave closes it, Cancel keeps that tab (or the window, or the Space). A page
- *   without a user gesture in its document closes at once: it can't warn (the engine itself would
- *   let its main frame warn on a close). Quitting doesn't ask.
+ *   whose document no user gesture has reached, in any of its frames (`gestures.ts`, D77), closes at
+ *   once: it can't warn (the engine itself would let its main frame warn on a close, which is why
+ *   ⌘W, Orbit's own key, is no gesture). A busy page that may warn holds its close until the engine
+ *   answers, up to the engine's own limit (D77). Quitting doesn't ask.
  * - **A pop-up's window.** Closing it runs the page's `beforeunload` as a navigation does.
  * - **Auto-archive and sleep** let a page go the same way (D73), and keep it, without asking, when
- *   the engine says it warned; they leave it until it navigates or gets a new user gesture.
+ *   the engine says it warned; they leave it until it navigates or gets a new user gesture. The
+ *   engine's close leaves a page it keeps with a user activation (D77).
  *
  * Orbit runs no page's `beforeunload` of its own: only the engine does, once a close, an archive or
  * a sleep has started. A page's own alert, confirm or prompt goes as soon as Orbit navigates the
@@ -123,8 +126,8 @@ export function registerLeave(ctx: MainContext, ops: TabOps, dialogs: PageDialog
   const gesturesIn = (page: WebContents, p: LeavePage | undefined): number => (p ? gestureCount(page) - p.since : 0)
 
   /**
-   * Whether a page could warn now: Chromium's warning needs a user gesture in the page first, and a
-   * page waiting on its own alert, confirm or prompt goes with it.
+   * Whether a page could warn now: Chromium's warning needs a user gesture in one of the page's
+   * frames first, and a page waiting on its own alert, confirm or prompt goes with it.
    */
   const mayWarn = (page: WebContents | undefined): page is WebContents =>
     !!page && !page.isDestroyed() && gesturesIn(page, pages.get(page.id)) > 0 && !dialogs.pending(page, 'script')
