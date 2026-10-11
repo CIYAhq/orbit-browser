@@ -377,6 +377,8 @@ export class PaneEngine {
     }
     for (const { tabId, rect } of targets) {
       let anim = this.anims.get(tabId)
+      // A drop zone already shown moves to its new half at once (FL-18); the panes making room glide.
+      const zoneMoves = tabId === DROP_PANE && !!anim
       if (!anim) {
         const from = animate ? this.entryRect(tabId, rect, targets, previous) : rect
         anim = {
@@ -396,7 +398,7 @@ export class PaneEngine {
         [anim.h, rect.height],
       ]
       for (const [value, to] of values) {
-        if (animate || value.animating) value.to(to, now, params)
+        if (!zoneMoves && (animate || value.animating)) value.to(to, now, params)
         else value.jump(to)
       }
     }
