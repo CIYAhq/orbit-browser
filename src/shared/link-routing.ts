@@ -75,6 +75,35 @@ export function pageMayOpen(from: string | undefined, url: string): boolean {
   return true
 }
 
+/** Links Orbit opens itself: web and file pages (not script, data or blob URLs). */
+export function isOpenableLink(url: string | undefined): url is string {
+  return !!url && /^(https?|file):/i.test(url)
+}
+
+/** What an ⌥-click found at the press (NV-08): a link, or a frame Orbit can't look into. */
+export interface AltClickFound {
+  href?: string
+  frame?: boolean
+}
+
+/**
+ * What an ⌥-click opens beside the page at `page` (NV-08, SV-08), or null: the link at the press, as
+ * the page may open it, at once; for a press on a frame, the link the page last hovered (`hovered`),
+ * once the engine's download of it says that was the one (`split`). A frame counts as a web page
+ * whatever the page is, so no frame opens a local file (D49, round 2 fix check F2).
+ */
+export function altClickOpens(
+  page: string,
+  found: AltClickFound | null,
+  hovered: string | undefined,
+): { url: string; split: boolean } | null {
+  if (found?.href) {
+    return isOpenableLink(found.href) && pageMayOpen(page, found.href) ? { url: found.href, split: false } : null
+  }
+  if (found?.frame && isOpenableLink(hovered) && pageMayOpen(undefined, hovered)) return { url: hovered, split: true }
+  return null
+}
+
 /** A page as the main process sees it: every frame in it, the top one too, each with its origin. */
 export interface PageFrames {
   readonly mainFrame: { readonly framesInSubtree: readonly { readonly origin: string }[] }

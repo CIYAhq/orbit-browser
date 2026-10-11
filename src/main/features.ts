@@ -13,6 +13,7 @@ import { registerMedia } from './media'
 import { registerMiniWindow } from './miniwindow'
 import { registerMotion } from './motion'
 import { registerNav } from './nav'
+import { registerPages } from './pages'
 import { registerPeek } from './peek'
 import { registerSettings } from './settings'
 import { registerSpaces } from './spaces/commands'
@@ -29,6 +30,7 @@ export function registerFeatures(ctx: MainContext): void {
   registerMotion(ctx)
   const { ops } = registerTabs(ctx)
   registerNav(ctx, ops)
+  registerPages(ctx, ops)
   // Before Peek and Mini Windows: a DevTools key held down is ignored before they act on it.
   registerDevtools(ctx)
   registerSpaces(ctx)

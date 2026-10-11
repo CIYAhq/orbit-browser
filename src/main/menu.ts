@@ -82,6 +82,8 @@ export function installMenu(ctx: MainContext): void {
         // Anti-lock-in (import lane, IM-17).
         item('app.exportPinned', 'Export Pinned Items as Bookmarks…'),
         { type: 'separator' },
+        // The page saved where the save dialog says (pages lane, NV-21).
+        item('page.save', 'Save As…'),
         item('page.print'),
       ],
     },
@@ -125,7 +127,8 @@ export function installMenu(ctx: MainContext): void {
         item('page.zoomIn'),
         item('page.zoomOut'),
         { type: 'separator' },
-        { role: 'togglefullscreen' },
+        // Orbit's own (NV-20), so the menu shows its keys as the user set them.
+        item('window.toggleFullScreen'),
         { type: 'separator' },
         // View → Developer (DT-01, DT-02, DT-04).
         {

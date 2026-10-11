@@ -119,9 +119,37 @@ function unarchive(d: OrbitState, tabId: TabId, archiveId: string | undefined): 
   }
 }
 
+/** How `closeTabs` closes. */
+export interface CloseTabsOptions {
+  remove?: boolean
+  reselect?: 'neighbor' | 'pinned'
+  undoLabel?: string | false
+  /** The user was asked already: no `closeGuard`. */
+  confirmed?: boolean
+  /** Auto-archive of idle tabs: a page that warns before it goes stays, and nothing asks (NV-24). */
+  idle?: boolean
+}
+
 export class TabOps {
   readonly recentlyClosed: ClosedTab[] = []
   readonly undo = new UndoStack()
+  /**
+   * Asks before closing a page that warns before it goes (NV-24, pages lane): returns true when it
+   * takes the close over (it closes the tabs itself once the user answers, `confirmed`), false to
+   * close now.
+   */
+  closeGuard?: (tabIds: TabId[], reason: ArchivedTab['reason'], opts: CloseTabsOptions) => boolean
+  /**
+   * Whether auto-archive and sleep may try to let a live tab's page go (NV-24, pages lane): not one
+   * that waits on the user, or that warned when they last tried.
+   */
+  mayDiscard?: (tabId: TabId) => boolean
+  /**
+   * Puts an idle tab to sleep through the engine when its page may warn before it goes (NV-24,
+   * pages lane): returns true when it takes the sleep over (a page that warns stays awake), false
+   * to sleep it now.
+   */
+  sleepGuard?: (tabId: TabId) => boolean
 
   constructor(
     private ctx: MainContext,
@@ -289,11 +317,8 @@ export class TabOps {
    * and Favorites stay and unload, resetting to their pinned URL (PN-06, FV-06).
    * `remove` also removes pinned tabs (delete from sidebar).
    */
-  closeTabs(
-    tabIds: TabId[],
-    reason: ArchivedTab['reason'],
-    opts: { remove?: boolean; reselect?: 'neighbor' | 'pinned'; undoLabel?: string | false } = {},
-  ): void {
+  closeTabs(tabIds: TabId[], reason: ArchivedTab['reason'], opts: CloseTabsOptions = {}): void {
+    if (!opts.confirmed && this.closeGuard?.(tabIds, reason, opts)) return
     const state = this.state
     const removing: TabId[] = []
     const unloading: TabId[] = []

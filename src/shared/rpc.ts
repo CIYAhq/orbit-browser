@@ -19,6 +19,7 @@ import type { ImportCommands } from './commands/import'
 import type { KeyCommands } from './commands/keys'
 import type { MediaCommands, MediaEvents } from './commands/media'
 import type { NavCommands } from './commands/nav'
+import type { PagesCommands } from './commands/pages'
 import type { PeekCommands, PeekEvents } from './commands/peek'
 import type { SettingsCommands } from './commands/settings'
 import type { SpaceCommands } from './commands/spaces'
@@ -43,7 +44,8 @@ export interface OrbitCommands
     ImportCommands,
     NavCommands,
     MediaCommands,
-    KeyCommands {}
+    KeyCommands,
+    PagesCommands {}
 
 export interface OrbitEvents extends CoreEvents, PeekEvents, MediaEvents {}
 
@@ -89,6 +91,14 @@ export type RendererView =
   | 'import'
   /** Downloads lane: an internal page, `orbit://<page>/` in a tab (DT-13). */
   | 'internal'
+  /** Pages lane: a page's dialog over its page (alert, confirm, prompt, leave-page, sign-in; NV-24). */
+  | 'dialog'
+  /** Pages lane: what a page's area shows when its page couldn't load or crashed (NV-13, NV-14). */
+  | 'screen'
+  /** Pages lane: the print dialog over a page (NV-07). */
+  | 'print'
+  /** Pages lane: the arrow a two-finger swipe over a page slides in (NV-02). */
+  | 'swipe'
 
 /** The API the preload exposes on `window.orbit` to Orbit's own UI renderers. */
 export interface OrbitBridge {

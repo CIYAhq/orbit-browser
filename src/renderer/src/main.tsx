@@ -30,6 +30,64 @@ async function boot(): Promise<void> {
     )
     return
   }
+  // A page's dialog over that page (pages lane, NV-24): alert, confirm, prompt, leave-page, sign-in.
+  if (view === 'dialog') {
+    const app = import('./pages/DialogApp')
+    await initStore()
+    installShortcutFallback()
+    document.documentElement.dataset.view = view
+    document.documentElement.dataset.platform = window.orbit.platform
+    const { DialogApp } = await app
+    createRoot(document.getElementById('root') as HTMLElement).render(
+      <StrictMode>
+        <DialogApp />
+      </StrictMode>,
+    )
+    return
+  }
+  // What a page's area shows when its page couldn't load or crashed (pages lane, NV-13, NV-14).
+  if (view === 'screen') {
+    const app = import('./pages/ScreenApp')
+    await initStore()
+    installShortcutFallback()
+    document.documentElement.dataset.view = view
+    document.documentElement.dataset.platform = window.orbit.platform
+    const { ScreenApp } = await app
+    createRoot(document.getElementById('root') as HTMLElement).render(
+      <StrictMode>
+        <ScreenApp />
+      </StrictMode>,
+    )
+    return
+  }
+  // The print dialog over a page (pages lane, NV-07).
+  if (view === 'print') {
+    const app = import('./pages/PrintApp')
+    await initStore()
+    installShortcutFallback()
+    document.documentElement.dataset.view = view
+    document.documentElement.dataset.platform = window.orbit.platform
+    const { PrintApp } = await app
+    createRoot(document.getElementById('root') as HTMLElement).render(
+      <StrictMode>
+        <PrintApp />
+      </StrictMode>,
+    )
+    return
+  }
+  // The arrow a two-finger swipe over a page slides in (pages lane, NV-02).
+  if (view === 'swipe') {
+    const app = import('./pages/SwipeApp')
+    await initStore()
+    document.documentElement.dataset.view = view
+    const { SwipeApp } = await app
+    createRoot(document.getElementById('root') as HTMLElement).render(
+      <StrictMode>
+        <SwipeApp />
+      </StrictMode>,
+    )
+    return
+  }
   // An internal page (DT-13): Orbit's UI in a normal tab. Keys go to it as to any page.
   if (view === 'internal') {
     const app = import('./internal/InternalApp')

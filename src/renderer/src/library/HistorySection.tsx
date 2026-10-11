@@ -12,6 +12,8 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react'
+import type { LibraryHistoryQuery } from '../../../shared/commands/archive'
+import type { HistoryVisit } from '../../../shared/commands/history'
 import { displayHost } from '../../../shared/url'
 import { invoke } from '../api'
 import { useOrbit, useWindow } from '../store'
@@ -20,6 +22,26 @@ import { dayLabel, HEAD_H, type ListItem, listGeometry, ROW_H, rowRange, rowTop,
 import { HistoryListModel, type HistoryRow, historyKey } from './history-model'
 import { libraryToast } from './LibraryToasts'
 import type { LibrarySectionProps } from './sections'
+
+/**
+ * What the list asks of main: the Library's commands, or the History page's (AR-10, pages lane),
+ * which are about its own tab's profile only. `profileId` is the profile shown, '' if not known yet.
+ */
+export interface HistoryCalls {
+  visits: (q: LibraryHistoryQuery) => Promise<HistoryVisit[]>
+  open: (url: string, background: boolean) => Promise<unknown>
+  remove: (url: string, profileId: string) => Promise<unknown>
+  menu: (url: string, profileId: string, x: number, y: number) => Promise<unknown>
+}
+
+const profileArg = (profileId: string) => (profileId ? { profileId } : {})
+
+const LIBRARY_CALLS: HistoryCalls = {
+  visits: (q) => invoke('library.history', q),
+  open: (url, background) => invoke('tabs.create', { url, activate: !background }),
+  remove: (url, profileId) => invoke('history.delete', { ...profileArg(profileId), url }),
+  menu: (url, profileId, x, y) => invoke('library.historyMenu', { ...profileArg(profileId), url, x, y }),
+}
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
 /** Typing settles this long before the history is searched (a search reads every visit). */
@@ -97,9 +119,10 @@ function DayHeading({ item, now }: { item: Extract<ListItem, { kind: 'day' }>; n
  * The History section of the Library (AR-10): every page visit of the current profile, newest
  * first, by day, with search, in a virtualised list. A row opens its page in a new tab (⌘-click or
  * the middle button: behind the Library); its × or its menu removes the page from history. The
- * Archive is separate: it lists the tabs that left the sidebar.
+ * Archive is separate: it lists the tabs that left the sidebar. The History page (`orbit://history/`)
+ * shows it too, with its own `calls`.
  */
-export function HistorySection({ show }: LibrarySectionProps) {
+export function HistorySection({ show, calls = LIBRARY_CALLS }: LibrarySectionProps & { calls?: HistoryCalls }) {
   const win = useWindow()
   const spaceId = win?.spaceId
   const profileId = useOrbit((s) => (spaceId ? s.spaces[spaceId]?.profileId : undefined)) ?? ''
@@ -115,7 +138,7 @@ export function HistorySection({ show }: LibrarySectionProps) {
     return () => clearTimeout(timer)
   }, [text, search])
 
-  const model = useMemo(() => new HistoryListModel((q) => invoke('library.history', q)), [])
+  const model = useMemo(() => new HistoryListModel((q) => calls.visits(q)), [calls])
   const data = useSyncExternalStore(model.subscribe, model.getSnapshot)
   useEffect(() => {
     if (profileId) model.setSearch(profileId, search)
@@ -214,33 +237,30 @@ export function HistorySection({ show }: LibrarySectionProps) {
   )
 
   // ---- Open and remove ----
-  const shownProfile = useMemo(() => (profileId ? { profileId } : {}), [profileId])
-  const onOpen = useCallback((row: HistoryRow, background: boolean) => {
-    // Shown: the Library makes way for the new tab. Behind: the Library stays for more.
-    void invoke('tabs.create', { url: row.url, activate: !background }).then(() => {
-      if (background) libraryToast('Opened in a new tab')
-    })
-  }, [])
+  const onOpen = useCallback(
+    (row: HistoryRow, background: boolean) => {
+      // Shown: the Library makes way for the new tab. Behind: the Library stays for more.
+      void calls.open(row.url, background).then(() => {
+        if (background) libraryToast('Opened in a new tab')
+      })
+    },
+    [calls],
+  )
   const onRemove = useCallback(
     (row: HistoryRow) => {
       // Main deletes before it answers the next page the list may ask for.
-      void invoke('history.delete', { ...shownProfile, url: row.url })
+      void calls.remove(row.url, profileId)
       model.remove(row.url)
     },
-    [model, shownProfile],
+    [calls, model, profileId],
   )
   const onMenu = useCallback(
     (offset: number, row: HistoryRow, e: MouseEvent) => {
       e.preventDefault()
       setHighlight(offset)
-      void invoke('library.historyMenu', {
-        ...shownProfile,
-        url: row.url,
-        x: Math.round(e.clientX),
-        y: Math.round(e.clientY),
-      })
+      void calls.menu(row.url, profileId, Math.round(e.clientX), Math.round(e.clientY))
     },
-    [shownProfile],
+    [calls, profileId],
   )
   // The row menu's Remove from History (main removed the page).
   useEffect(
