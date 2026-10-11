@@ -289,10 +289,12 @@ const agentScript = (handle: string, define: string) => `(() => {
     )
   }
 
-  // A finished video leaves picture-in-picture and doesn't replay (MD-07).
+  // A finished video leaves picture-in-picture and doesn't replay (MD-07). Only the engine's own
+  // events count: a page can dispatch a fake one, but it can't make it trusted (D71).
   document.addEventListener(
     'ended',
     (e) => {
+      if (!e.isTrusted) return
       if (e.target === document.pictureInPictureElement && !e.target.loop) exitPip()
       // Orbit's player closes first (main hides the window, then puts the video back).
       if (lift && e.target === lift.v && !lift.v.loop) endPip('ended')
@@ -308,9 +310,11 @@ const agentScript = (handle: string, define: string) => `(() => {
   // How the engine's own picture-in-picture ended (MD-07). Its × pauses a file-backed video right
   // after leaving and its "Back to tab" doesn't, which tells the two apart. × keeps the media
   // playing as audio (it then shows in the sidebar). A live stream can't tell them apart: treated as ×.
+  // A page's own fake leave is ignored: "back" would select its tab and raise the window (D71).
   document.addEventListener(
     'leavepictureinpicture',
     (e) => {
+      if (!e.isTrusted) return
       const v = e.target
       if (orbitExit) {
         orbitExit = false

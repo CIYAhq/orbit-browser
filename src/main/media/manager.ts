@@ -39,6 +39,7 @@ import {
 } from '../../shared/media'
 import type { Rect } from '../../shared/rpc'
 import type { OrbitState, TabId, TabMedia, WindowId } from '../../shared/state'
+import { sectionOf } from '../../shared/tree'
 import type { MainContext } from '../context'
 import { displayedTabs } from '../tabs/model'
 import { AGENT_SOURCE, frameAgentSource, MEDIA_WORLD } from './agent'
@@ -57,6 +58,11 @@ interface Agent {
   snap?: AgentSnapshot
   /** The last picture-in-picture ending already handled (reports repeat it). */
   pipEndSeen: number
+  /**
+   * Orbit opened the engine's picture-in-picture in this document (the controller, the page menu):
+   * the next ending reported is that one's, and may bring the tab's window forward (D71).
+   */
+  orbitPip?: boolean
   /** A long-poll is running for this document. */
   looping: boolean
   /** Settles once the document is gone: a call into a frame that went away never answers. */
@@ -620,10 +626,33 @@ export class MediaManager {
     const chain = this.chains.get(tabId)
     if ((reason === 'ended' || reason === 'gone') && (!chain || chain.agents.includes(agent)))
       this.player.closeFor(tabId, reason)
+    // Any ending uses up Orbit's own picture-in-picture in this document: one raise at most (D71).
+    const ours = agent.orbitPip === true
+    agent.orbitPip = false
     if (reason !== 'back') return
     // The engine window's "Back to tab": select the source tab in its window (and Space).
     const windowId = this.ctx.windows.windowOfTab(tabId) ?? this.ctx.windows.focusedWindowId()
-    if (windowId) this.focusTab(tabId, windowId)
+    if (!windowId) return
+    // A frame's script runs in the frame's own world, so its report may be the page's own words
+    // (D67): unless Orbit opened that picture-in-picture, it only selects the tab where that
+    // brings no window forward and switches no Space (D71).
+    if (agent.frame && !ours) this.selectInFocused(tabId, windowId)
+    else this.focusTab(tabId, windowId)
+  }
+
+  /** Selects a tab only in a window that already has focus, and only in the Space it shows (D71). */
+  private selectInFocused(tabId: TabId, windowId: WindowId): void {
+    const win = this.ctx.windows.get(windowId)
+    if (!win || win.isDestroyed() || !win.isFocused()) return
+    const state = this.ctx.store.state
+    const tab = state.tabs[tabId]
+    const spaceId = state.windows[windowId]?.spaceId
+    if (!tab || !spaceId) return
+    // Favorites show in every Space of their profile (activateInDraft keeps the Space for them).
+    const shown =
+      tab.spaceId === spaceId ||
+      (sectionOf(state, tabId) === 'favorite' && state.spaces[spaceId]?.profileId === tab.profileId)
+    if (shown) void this.ctx.commands.run('tabs.activate', { tabId }, { windowId })
   }
 
   /** The documents to try for picture-in-picture, most likely first (reports may lag: all of them, last). */
@@ -653,6 +682,7 @@ export class MediaManager {
     const t = this.tabs.get(tabId)
     for (const agent of t ? this.pipOrder(t, false) : []) {
       if ((await this.exec<boolean>(agent, 'pip', [true, false], true)) !== true) continue
+      agent.orbitPip = true
       this.markPip(tabId, true)
       return true
     }
@@ -688,7 +718,8 @@ export class MediaManager {
           px -= box?.x ?? 0
           py -= box?.y ?? 0
         }
-        await this.exec(agent, 'pipAt', [on, px, py], true)
+        // Orbit's own menu opened it: its "Back to tab" may bring the window forward, once (D71).
+        if ((await this.exec(agent, 'pipAt', [on, px, py], true)) === true && on) agent.orbitPip = true
       }
     }
     // The page scripts follow picture-in-picture from now on (tray, return to the tab).

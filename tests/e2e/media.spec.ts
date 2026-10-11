@@ -146,6 +146,29 @@ Promise.all([record(c.captureStream(25), types[0]), record(dest.stream, types[1]
 })
 </script>`
 
+/**
+ * A page that gets hold of Orbit's media script's own listener as it installs (in a frame the
+ * script runs in the page's own world, D67), and calls it with a made-up event that claims to be
+ * the engine's (D71). Goes before the page's media.
+ */
+const FORGE = `
+<script>
+(() => {
+  const leaves = []
+  const add = EventTarget.prototype.addEventListener
+  EventTarget.prototype.addEventListener = function (type, fn, options) {
+    if (this === document && type === 'leavepictureinpicture') leaves.push(fn)
+    return add.call(this, type, fn, options)
+  }
+  window.forged = () => leaves.length
+  window.forgeBack = () => {
+    const target = document.getElementById('v')
+    for (const fn of leaves) fn.call(document, { type: 'leavepictureinpicture', isTrusted: true, target, currentTarget: document })
+    return leaves.length
+  }
+})()
+</script>`
+
 /** With `art`, the Media Session names artwork (two sizes, as music sites give). */
 const AUDIO = (session: boolean, art = false) => `
 <audio id="a" src="/media/tone.wav?s=30&f=440" loop></audio>
@@ -256,7 +279,7 @@ async function startMediaFixtures(): Promise<Fixtures> {
     if (parts[0] === 'media' && parts[1] === 'video') return html(STREAM_VIDEO)
     if (parts[0] === 'media' && parts[1] === 'file-video') return html(FILE_VIDEO(u.searchParams.has('once')))
     if (parts[0] === 'media' && parts[1] === 'long-video')
-      return html(LONG_VIDEO(Number(u.searchParams.get('s') ?? 60)))
+      return html((u.searchParams.has('forge') ? FORGE : '') + LONG_VIDEO(Number(u.searchParams.get('s') ?? 60)))
     if (parts[0] === 'media' && parts[1] === 'call') return html(CALL(u.searchParams.has('participant')))
     if (parts[0] === 'media' && parts[1] === 'share') return html(SHARE)
     // A page whose own !important rule (with an id) sizes its video to fill its box.
@@ -1974,6 +1997,161 @@ test('[MD-02] right-clicking a video in a frame from another site offers Picture
   expect(await choosePageMenu(app, 'Picture in Picture')).toBe(true)
   await expect.poll(() => enginePip(v.frame)).toBe(false)
   await expect.poll(async () => (await media(app, v.id))?.pip).toBe(false)
+})
+
+// ---- A page's own word about picture-in-picture (D71) ----
+
+type Raises = WindowHooks & { __raises?: number }
+
+/** From now on, counts the calls that bring Orbit's first window forward: focus, restore, show, moveTop. */
+function countRaises(app: ElectronApplication): Promise<void> {
+  return app.evaluate(() => {
+    const g = globalThis as unknown as Raises
+    const win = g.__orbit.ctx.windows.get(g.__orbit.windowIds()[0] as string) as unknown as Record<
+      string,
+      (...args: unknown[]) => unknown
+    >
+    g.__raises = 0
+    for (const name of ['focus', 'restore', 'show', 'moveTop']) {
+      const real = win[name] as (...args: unknown[]) => unknown
+      win[name] = function (this: unknown, ...args: unknown[]) {
+        g.__raises = (g.__raises ?? 0) + 1
+        return real.apply(this, args)
+      }
+    }
+  })
+}
+
+const raises = (app: ElectronApplication) => app.evaluate(() => (globalThis as unknown as Raises).__raises ?? -1)
+
+/** The first window says it has focus, or doesn't (Xvfb has no window manager to decide). */
+function haveFocus(app: ElectronApplication, on: boolean): Promise<void> {
+  return app.evaluate((_e, value) => {
+    const g = globalThis as unknown as Raises
+    const win = g.__orbit.ctx.windows.get(g.__orbit.windowIds()[0] as string)
+    if (win) win.isFocused = () => value
+  }, on)
+}
+
+test("[MD-07] a page, or a frame from another site, that fakes its video's picture-in-picture events moves no selection, raises no window and closes no player (D71)", async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  // Automatic picture-in-picture off: the two tabs play on in the background (the reviewer's case).
+  await act(app, 'media.toggleAutoPip')
+  expect((await state(app)).settings.autoPip).toBe(false)
+  const page = await openPlaying(app, '/media/long-video/Liar')
+  const framed = await openFramePlaying(app, 'Framed%20Liar', '/media/long-video/Film', true)
+  for (const id of [page.id, framed.id]) await expect.poll(async () => (await media(app, id))?.video).toBe(true)
+  const quiet = await leave(app)
+  await countRaises(app)
+  // Every 2 s each dispatches the engine's "left picture-in-picture" on its playing video. Half a
+  // second later (past the page script's wait to tell Back to tab from ×) it changes the video's
+  // speed: once main has that, it has seen whatever the event led to.
+  const lie = (where: Page | Frame) =>
+    where.evaluate(() => {
+      const v = document.getElementById('v') as HTMLVideoElement
+      let round = 0
+      ;(window as unknown as { lies: number }).lies = window.setInterval(() => {
+        v.dispatchEvent(new Event('leavepictureinpicture'))
+        const r = ++round
+        setTimeout(() => {
+          v.playbackRate = 1 + r / 8
+        }, 500)
+      }, 2000)
+    })
+  await lie(page.page)
+  await lie(framed.frame)
+  for (const round of [1, 2, 3]) {
+    for (const id of [page.id, framed.id])
+      await expect
+        .poll(async () => (await media(app, id))?.rate ?? 0, { timeout: 10_000 })
+        .toBeGreaterThanOrEqual(1 + round / 8)
+    expect(await activeId(app)).toBe(quiet)
+    expect(await raises(app)).toBe(0)
+  }
+  await page.page.evaluate(() => clearInterval((window as unknown as { lies: number }).lies))
+
+  // A made-up "ended" doesn't close Orbit's player.
+  await act(app, 'media.toggleAutoPip')
+  await cmd(app, 'tabs.activate', { tabId: page.id })
+  await cmd(app, 'tabs.activate', { tabId: quiet })
+  await expectPlayer(app, page.id)
+  await page.page.evaluate(() => {
+    const v = document.getElementById('v') as HTMLVideoElement
+    v.dispatchEvent(new Event('ended'))
+    setTimeout(() => {
+      v.playbackRate = 2
+    }, 100)
+  })
+  await expect.poll(async () => (await media(app, page.id))?.rate).toBe(2)
+  expect((await player(app)).tabId).toBe(page.id)
+  expect(await paused(page.page, '#v')).toBe(false)
+})
+
+test("[MD-02][MD-07] a frame that calls Orbit's script with a forged Back to tab only selects its tab in a focused window, in its Space; Orbit's own picture-in-picture brings the window back once (D71)", async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  await act(app, 'media.toggleAutoPip')
+  const s = await state(app)
+  const windowId = Object.keys(s.windows)[0] as string
+  const home = s.windows[windowId]?.spaceId as string
+  const elsewhere = (await cmd(app, 'spaces.create', { name: 'Elsewhere', activate: false })) as string
+  const v = await openFramePlaying(app, 'Forger', '/media/long-video/Film?forge', true)
+  await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
+  type Forger = { forged: () => number; forgeBack: () => number }
+  // The frame got hold of the media script's listener as the script installed.
+  await expect.poll(() => v.frame.evaluate(() => (window as unknown as Forger).forged())).toBeGreaterThan(0)
+  await countRaises(app)
+  let mark = 0
+  /** A forged Back to tab; then, past the script's wait, a speed change main must have seen. */
+  const forge = async () => {
+    const rate = 1 + ++mark / 8
+    await v.frame.evaluate((r) => {
+      ;(window as unknown as Forger).forgeBack()
+      setTimeout(() => {
+        ;(document.getElementById('v') as HTMLVideoElement).playbackRate = r
+      }, 500)
+    }, rate)
+    await expect.poll(async () => (await media(app, v.id))?.rate).toBe(rate)
+  }
+  const space = async () => (await state(app)).windows[windowId]?.spaceId
+
+  // The window shows another Space: it stays there, even with focus.
+  await cmd(app, 'spaces.switch', { spaceId: elsewhere })
+  await expect.poll(space).toBe(elsewhere)
+  await haveFocus(app, true)
+  let before = await raises(app)
+  await forge()
+  expect(await space()).toBe(elsewhere)
+  expect(await raises(app)).toBe(before)
+
+  // Its own Space, another tab selected: a window without focus keeps its selection.
+  await cmd(app, 'spaces.switch', { spaceId: home })
+  const quiet = await leave(app)
+  await haveFocus(app, false)
+  before = await raises(app)
+  await forge()
+  expect(await activeId(app)).toBe(quiet)
+  expect(await raises(app)).toBe(before)
+  // With focus, the tab is selected, and nothing comes forward (D71's known limit).
+  await haveFocus(app, true)
+  await forge()
+  expect(await activeId(app)).toBe(v.id)
+  expect(await raises(app)).toBe(before)
+
+  // Orbit's own picture-in-picture (the Picture in Picture action): its Back to tab brings the
+  // window forward, once.
+  await act(app, 'media.togglePip')
+  await expect.poll(() => enginePip(v.frame)).toBe(true)
+  const opened = await raises(app)
+  await v.frame.evaluate(() => document.exitPictureInPicture())
+  await expect.poll(() => enginePip(v.frame)).toBe(false)
+  await expect.poll(() => raises(app)).toBe(opened + 1)
+  expect(await activeId(app)).toBe(v.id)
+  expect(await paused(v.frame, '#v')).toBe(false)
+  // A forged one after it gets no more.
+  await forge()
+  expect(await raises(app)).toBe(opened + 1)
 })
 
 // ---- The switches in other panels (MD-08: site controls NV-16, Settings › Advanced ST-10) ----
