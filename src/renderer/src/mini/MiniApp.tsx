@@ -124,6 +124,10 @@ export function MiniApp() {
   useEffect(() => {
     if (!tab) setFinding(null)
   }, [tab])
+  // Listening now (the effects above ran first): main sends what it held, such as an early ⌘L.
+  useEffect(() => {
+    window.orbit.send('mini.mounted', {})
+  }, [])
 
   return (
     <div

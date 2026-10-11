@@ -68,4 +68,6 @@ export interface PeekEvents {
    * the grow takes `ms`.
    */
   'mini.growReady': { ms: number }
+  /** A Mini Window's UI is up and listening: what main held for it until now is sent. */
+  'mini.mounted': Record<string, never>
 }

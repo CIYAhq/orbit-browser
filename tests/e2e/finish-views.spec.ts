@@ -751,6 +751,32 @@ test("[CB-23][KS-19][MW-03] the bar over a Mini Window's page takes its keys fir
     .toBe('commandbar')
 })
 
+test('[CB-23][NV-05][MW-03] ⌘L and ⌘F that reach a new Mini Window before its UI is up open the bar and the find field once it is', async () => {
+  const { app } = orbit
+  const first = fx.url('/page/Early%20Bar')
+  const second = fx.url('/page/Early%20Find')
+  // Two new windows (no spare is ready under the harness), each given its key straight away,
+  // before its UI can be up.
+  const [barId, findId] = await app.evaluate(
+    async (_e, [a, b]) => {
+      type Run = (name: string, args: unknown, windowId?: string) => Promise<unknown>
+      const hooks = (globalThis as unknown as { __orbit: { run: Run; action: Action; windowIds: () => string[] } })
+        .__orbit
+      const main = hooks.windowIds()[0]
+      const one = (await hooks.run('mini.open', { url: a }, main)) as string
+      await hooks.action('url.edit', one)
+      const two = (await hooks.run('mini.open', { url: b }, main)) as string
+      await hooks.action('page.find', two)
+      return [one, two]
+    },
+    [first, second] as const,
+  )
+  const field = (await miniUi(barId)).getByTestId('mini-address-input')
+  await expect(field).toBeVisible()
+  await expect(field).toHaveValue(first)
+  await expect((await miniUi(findId)).getByTestId('mini-find-input')).toBeVisible()
+})
+
 // ---- New splits from the "+" menu and the split button (SV-07) ----
 
 /** The split showing `tabId`, as its panes in reading order and its layout's direction. */

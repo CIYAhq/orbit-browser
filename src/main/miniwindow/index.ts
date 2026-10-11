@@ -190,8 +190,18 @@ export function registerMiniWindow(ctx: MainContext): void {
   windows.addFloatingOwner((tabId) => miniOfTab(tabId)?.id)
   keepFloatingPagesOutOfTabClose(ctx)
 
+  /** Windows whose UI is up and listening (`mini.mounted`). */
+  const mounted = new Set<WindowId>()
+  /** What main sent a UI before it was up, in order: a key can reach a new window's page first. */
+  const outbox = new Map<WindowId, [string, unknown][]>()
   const send = (mini: Mini, channel: string, payload: unknown = {}) => {
-    if (!mini.win.isDestroyed()) mini.win.webContents.send(`orbit:${channel}`, payload)
+    if (mini.win.isDestroyed()) return
+    // The open grow is heard from the moment the UI's code loads (grow.ts); the rest waits for it.
+    if (channel !== 'mini:grow' && !mounted.has(mini.id)) {
+      outbox.set(mini.id, [...(outbox.get(mini.id) ?? []), [channel, payload]])
+      return
+    }
+    mini.win.webContents.send(`orbit:${channel}`, payload)
   }
 
   // ---- Profiles and Spaces ----
@@ -248,6 +258,10 @@ export function registerMiniWindow(ctx: MainContext): void {
     })
     windows.registerUi(win.webContents, id)
     windows.attachShortcuts(win.webContents)
+    win.once('closed', () => {
+      mounted.delete(id)
+      outbox.delete(id)
+    })
     // Orbit's own UI never navigates away or opens windows.
     win.webContents.on('will-navigate', (event, url) => {
       const entry = rendererEntry()
@@ -902,6 +916,15 @@ export function registerMiniWindow(ctx: MainContext): void {
     mini.rect = rect
     const view = mini.tabId ? tabs.get(mini.tabId) : undefined
     if (view && !mini.fullscreen) view.setBounds(roundRect(rect))
+  })
+  // The UI is up: what was sent before goes now (a spare's UI is up before it becomes a Mini Window).
+  ctx.events.on('mini.mounted', (_args, { windowId }) => {
+    if (!windowId) return
+    mounted.add(windowId)
+    const held = outbox.get(windowId) ?? []
+    outbox.delete(windowId)
+    const mini = minis.get(windowId)
+    if (mini) for (const [channel, payload] of held) send(mini, channel, payload)
   })
   // The UI took the grow's starting size: the window shows and grows (MW-04).
   ctx.events.on('mini.growReady', ({ ms }, { windowId }) => {
