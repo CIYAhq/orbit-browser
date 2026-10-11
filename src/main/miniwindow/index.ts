@@ -684,15 +684,28 @@ export function registerMiniWindow(ctx: MainContext): void {
   /**
    * The window keeps its bar as it was while it goes (MW-15), and its card shows a still of the
    * page, under the page's view: resolves once the UI has drawn it, or a moment later without it.
+   * A capture that takes longer than STILL_WAIT_MS, or never ends, is not waited for: the window
+   * goes without a still. (Only where windows fade, macOS and Windows: fadesOut.)
    */
   const leaveWithStill = async (mini: Mini): Promise<void> => {
     const contents = mini.tabId ? tabs.contents(mini.tabId) : undefined
     let still: string | undefined
+    let late: ReturnType<typeof setTimeout> | undefined
     try {
-      const image = contents && !contents.isDestroyed() && !mini.fullscreen ? await contents.capturePage() : undefined
+      const capture = contents && !contents.isDestroyed() && !mini.fullscreen ? contents.capturePage() : undefined
+      const image = capture
+        ? await Promise.race([
+            capture,
+            new Promise<undefined>((done) => {
+              late = setTimeout(() => done(undefined), STILL_WAIT_MS)
+            }),
+          ])
+        : undefined
       if (image && !image.isEmpty()) still = `data:image/jpeg;base64,${image.toJPEG(85).toString('base64')}`
     } catch {
       // The page went: the window goes without a still.
+    } finally {
+      clearTimeout(late)
     }
     if (mini.win.isDestroyed()) return
     await new Promise<void>((done) => {
