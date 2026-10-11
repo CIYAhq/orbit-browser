@@ -1,5 +1,6 @@
 import type { BuildInfo } from '../../shared/commands/settings'
 import { ISSUES_URL } from '../../shared/project'
+import { cleanVersion } from '../../shared/updates'
 
 // Set by electron.vite.config.ts; unit tests have neither.
 declare const __ORBIT_VERSION__: string | undefined
@@ -12,6 +13,15 @@ declare const __ORBIT_BUILD_DATE__: string | undefined
 export const BUILT_VERSION = typeof __ORBIT_VERSION__ === 'string' ? __ORBIT_VERSION__ : undefined
 /** The day of the build, "2026-10-10" (UP-07). */
 export const BUILD_DATE = typeof __ORBIT_BUILD_DATE__ === 'string' ? __ORBIT_BUILD_DATE__ : undefined
+
+/**
+ * The version this run is (UP-03, UP-06): the built one, else `fallback` (app.getVersion()). A test
+ * run (ORBIT_E2E=1) may stand in another with ORBIT_E2E_VERSION, to start "after an update" (UP-05).
+ */
+export function runningVersion(fallback: string): string {
+  const test = process.env.ORBIT_E2E === '1' ? process.env.ORBIT_E2E_VERSION : undefined
+  return (test && cleanVersion(test) === test ? test : undefined) ?? BUILT_VERSION ?? fallback
+}
 
 /** The text "Copy build info" puts on the clipboard (ST-17, UP-07). */
 export function buildInfoText(info: BuildInfo): string {

@@ -453,6 +453,16 @@ export interface SettingsCommands {
    * One check at a time: a second call while one runs gets that one's result.
    */
   'updates.check': { args: Record<string, never>; result: UpdateStatus }
+  /**
+   * Downloads the newer version's file in the background and readies it (UP-01, UP-03): Settings'
+   * Download, when automatic checks are off. Resolves once it is ready, or has failed.
+   */
+  'updates.download': { args: Record<string, never>; result: void }
+  /**
+   * Relaunches into the downloaded update (UP-02, UP-05). Pages with unsaved changes and downloads in
+   * progress ask first; false when nothing is ready or the user kept Orbit open.
+   */
+  'updates.relaunch': { args: Record<string, never>; result: boolean }
   /** Sets the update feed address (UP-01); returns why it can't be used, or '' once set. */
   'updates.setFeed': { args: { url: string }; result: string }
   /** Opens the newer release's page in a tab of the window it came from (UP-10). */

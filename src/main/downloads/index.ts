@@ -460,7 +460,7 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
   })
 
   // Quitting with downloads in progress asks first (DL-01).
-  guardQuit({
+  const quitGuard = guardQuit({
     active: () => (ctx.e2e && !hooks.quitAnswer ? 0 : manager.activeCount()),
     ask: (count: number, parent: BrowserWindow | undefined) => {
       if (!ctx.e2e) return askToQuit(count, parent)
@@ -469,6 +469,11 @@ export function registerDownloads(ctx: MainContext): DownloadManager {
     },
     onQuit: () => manager.quit(),
     lastWindowQuits: process.platform !== 'darwin',
+  })
+  commands.register('downloads.confirmQuit', ({ withdraw }) => {
+    if (!withdraw) return quitGuard.confirm()
+    quitGuard.withdraw()
+    return true
   })
   if (ctx.e2e) (globalThis as unknown as { __orbitDownloads: DownloadTestHooks }).__orbitDownloads = hooks
   return manager

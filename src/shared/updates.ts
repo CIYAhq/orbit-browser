@@ -9,7 +9,31 @@
  * - a GitHub release as GitHub's REST API returns it (…/releases/latest), or a list of them
  *   (…/releases): `tag_name` is the version and `html_url` the page a click opens. Drafts and
  *   pre-releases are skipped, and "[security]" in a release's name or notes marks a security release.
+ *
+ * A release can also carry the file that updates Orbit on each system (UP-01, UP-05): in Orbit's
+ * feed, `"files": { "linux-x64": { "url": "https://…/orbit-1.2.0-linux-x64.tar.gz", "sha256": "…",
+ * "size": 123 } }`; in a GitHub release, an asset named `…-linux-x64.tar.gz` with its SHA-256
+ * digest. Linux takes a .tar.gz of the app's folder, macOS a .zip of Orbit.app and Windows the
+ * installer (.exe). Without one for this system, a newer version opens its page instead (UP-10).
  */
+
+/** The file that updates this copy of Orbit to a release, on this system (UP-01, UP-05). */
+export interface UpdatePackage {
+  url: string
+  /** Its SHA-256, in hex: a download that doesn't match is thrown away. */
+  sha256: string
+  /** Its size in bytes. */
+  size: number
+}
+
+/** The largest update file Orbit downloads. */
+export const MAX_PACKAGE_BYTES = 1024 ** 3
+
+/** The key a release lists a system's file under: "linux-x64", "darwin-arm64", "win32-x64"… */
+export const systemKey = (platform: string, arch: string): string => `${platform}-${arch}`
+
+/** The kind of file each system updates from. */
+const PACKAGE_EXT: Record<string, string> = { linux: '.tar.gz', darwin: '.zip', win32: '.exe' }
 
 /** A release newer than this build, as the banner and Settings show it. */
 export interface ReleaseInfo {
@@ -21,16 +45,34 @@ export interface ReleaseInfo {
   summary?: string
   /** It fixes a critical security issue: the banner says "Important security update" (UP-12). */
   security: boolean
+  /** The file that updates Orbit to it on this system, when the feed has one. */
+  package?: UpdatePackage
 }
 
-/** What the last check found, or that one is running. `idle`: none yet, or checks are off. */
-export type UpdateCheckState = 'idle' | 'checking' | 'current' | 'available' | 'failed'
+/**
+ * What the last check found, or that one is running. `idle`: none yet, or checks are off.
+ * `downloading`: the newer version's file is coming in the background; `ready`: it has come, matches
+ * its SHA-256 and waits for a relaunch (UP-02, UP-05).
+ */
+export type UpdateCheckState = 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'ready' | 'failed'
 
 /** Update status (`state.updates`): runtime only, never saved (src/main/persist.ts). */
 export interface UpdateStatus {
   state: UpdateCheckState
   /** The newest release found that is newer than this build; kept when a later check fails. */
   latest?: ReleaseInfo
+  /**
+   * Whether Orbit installs `latest` itself: it has a file for this system, and this copy can replace
+   * itself (an installed build). Otherwise a click opens the release's page (UP-10).
+   */
+  installable?: boolean
+  /** While downloading: how much has come, from 0 to 1. */
+  progress?: number
+  /**
+   * Why the last download of `latest` failed, in words (UP-01): Settings shows it with Download to
+   * try again; the next check tries again by itself. Nothing else shows it.
+   */
+  downloadError?: string
   /** When the last check finished. */
   checkedAt?: number
   /** Why the last check failed, in words. Background failures are silent: only Settings shows it. */
@@ -44,6 +86,17 @@ export interface WhatsNew {
   version: string
   /** When this version first ran. */
   since: number
+  /** The release's one line, when Orbit updated itself to it. */
+  summary?: string
+  /** Its page, when Orbit updated itself to it. */
+  url?: string
+}
+
+/** The update a relaunch installs (UP-05): the next start shows its What's new (UP-06). */
+export interface PendingUpdate {
+  version: string
+  summary?: string
+  url?: string
 }
 
 const VERSION_RE =
@@ -169,7 +222,31 @@ function firstLine(notes: string, version: string): string | undefined {
 
 const SECURITY_MARK = /\[security\]/i
 
-function githubRelease(r: Record<string, unknown>): ReleaseInfo | undefined {
+/** A system's update file, if it is one Orbit can take: https (or this computer), its kind, a SHA-256 and a size. */
+function updatePackage(url: unknown, sha256: unknown, size: unknown, system: string): UpdatePackage | undefined {
+  const href = pageUrl(url)
+  const ext = PACKAGE_EXT[system.split('-')[0] ?? '']
+  if (!href || !ext || !new URL(href).pathname.toLowerCase().endsWith(ext)) return undefined
+  const hash = typeof sha256 === 'string' ? sha256.trim().toLowerCase() : ''
+  if (!/^[0-9a-f]{64}$/.test(hash)) return undefined
+  if (typeof size !== 'number' || !Number.isSafeInteger(size) || size <= 0 || size > MAX_PACKAGE_BYTES) return undefined
+  return { url: href, sha256: hash, size }
+}
+
+/** A GitHub release's asset for this system: named `…-<system><ext>`, with GitHub's SHA-256 digest. */
+function githubPackage(assets: unknown, system: string): UpdatePackage | undefined {
+  if (!Array.isArray(assets)) return undefined
+  const ending = `-${system}${PACKAGE_EXT[system.split('-')[0] ?? ''] ?? ''}`.toLowerCase()
+  for (const asset of assets.slice(0, 100)) {
+    if (!isRecord(asset) || typeof asset.name !== 'string' || !asset.name.toLowerCase().endsWith(ending)) continue
+    const digest = typeof asset.digest === 'string' ? asset.digest.replace(/^sha256:/i, '') : undefined
+    const found = updatePackage(asset.browser_download_url, digest, asset.size, system)
+    if (found) return found
+  }
+  return undefined
+}
+
+function githubRelease(r: Record<string, unknown>, system?: string): ReleaseInfo | undefined {
   if (r.draft === true || r.prerelease === true) return undefined
   const version = cleanVersion(r.tag_name)
   const url = pageUrl(r.html_url)
@@ -178,33 +255,44 @@ function githubRelease(r: Record<string, unknown>): ReleaseInfo | undefined {
   const body = typeof r.body === 'string' ? r.body.slice(0, 20_000) : ''
   const titled = name.replace(SECURITY_MARK, '').trim()
   const summary = titled && cleanVersion(titled) !== version ? clip(titled) : firstLine(body, version)
+  const pkg = system ? githubPackage(r.assets, system) : undefined
   return {
     version,
     url,
     ...(summary ? { summary } : {}),
     security: SECURITY_MARK.test(name) || SECURITY_MARK.test(body),
+    ...(pkg ? { package: pkg } : {}),
   }
 }
 
-function ownRelease(r: Record<string, unknown>): ReleaseInfo | undefined {
+function ownRelease(r: Record<string, unknown>, system?: string): ReleaseInfo | undefined {
   const version = cleanVersion(r.version)
   const url = pageUrl(r.url)
   if (!version || !url) return undefined
   const summary = typeof r.summary === 'string' && r.summary.trim() ? clip(r.summary) : undefined
-  return { version, url, ...(summary ? { summary } : {}), security: r.security === true }
+  const file = system && isRecord(r.files) ? r.files[system] : undefined
+  const pkg = isRecord(file) ? updatePackage(file.url, file.sha256, file.size, system as string) : undefined
+  return {
+    version,
+    url,
+    ...(summary ? { summary } : {}),
+    security: r.security === true,
+    ...(pkg ? { package: pkg } : {}),
+  }
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
 /**
  * Reads a feed's JSON: the newest release in it, `null` when it lists none (a project with no
- * releases yet), or undefined when it isn't a feed Orbit can read.
+ * releases yet), or undefined when it isn't a feed Orbit can read. With `system` (systemKey), a
+ * release carries its update file for that system, if it has one.
  */
-export function parseFeed(json: unknown): ReleaseInfo | null | undefined {
+export function parseFeed(json: unknown, system?: string): ReleaseInfo | null | undefined {
   if (Array.isArray(json)) {
     let best: ReleaseInfo | null = null
     for (const item of json.slice(0, 100)) {
-      const release = isRecord(item) ? githubRelease(item) : undefined
+      const release = isRecord(item) ? githubRelease(item, system) : undefined
       if (release && (!best || isNewer(release.version, best.version))) best = release
     }
     return best
@@ -213,8 +301,8 @@ export function parseFeed(json: unknown): ReleaseInfo | null | undefined {
   if ('tag_name' in json) {
     // GitHub's "latest" is never a draft or pre-release; a single one that is offers nothing.
     if (json.draft === true || json.prerelease === true) return null
-    return githubRelease(json)
+    return githubRelease(json, system)
   }
-  if ('version' in json) return ownRelease(json)
+  if ('version' in json) return ownRelease(json, system)
   return undefined
 }

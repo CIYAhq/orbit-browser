@@ -20,7 +20,17 @@ export interface QuitGuard {
   lastWindowQuits: boolean
 }
 
-export function guardQuit(guard: QuitGuard): void {
+/**
+ * For a quit that asks before it starts (an update's relaunch, UP-05, which still has pages to ask
+ * and windows to fade): `confirm` asks now, if downloads run, and a yes stands for that quit, which
+ * then asks nothing more; `withdraw` takes the yes back when that quit doesn't come after all.
+ */
+export interface QuitAhead {
+  confirm: () => Promise<boolean>
+  withdraw: () => void
+}
+
+export function guardQuit(guard: QuitGuard): QuitAhead {
   let confirmed = false
   let asking: Promise<boolean> | undefined
   const confirm = (parent: BrowserWindow | undefined): Promise<boolean> => {
@@ -28,6 +38,17 @@ export function guardQuit(guard: QuitGuard): void {
       asking = undefined
     })
     return asking
+  }
+  const ahead: QuitAhead = {
+    confirm: async () => {
+      if (confirmed || guard.active() === 0) return true
+      const ok = await confirm(BrowserWindow.getFocusedWindow() ?? undefined)
+      if (ok) confirmed = true
+      return ok
+    },
+    withdraw: () => {
+      confirmed = false
+    },
   }
 
   app.prependListener('before-quit', (event) => {
@@ -43,7 +64,7 @@ export function guardQuit(guard: QuitGuard): void {
     })
   })
 
-  if (!guard.lastWindowQuits) return
+  if (!guard.lastWindowQuits) return ahead
   app.on('browser-window-created', (_event, win) => {
     win.on('close', (event) => {
       if (confirmed || event.defaultPrevented || guard.active() === 0) return
@@ -58,6 +79,7 @@ export function guardQuit(guard: QuitGuard): void {
       })
     })
   })
+  return ahead
 }
 
 /** The question, e.g. "2 downloads in progress, quit anyway?". */

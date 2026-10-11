@@ -31,6 +31,12 @@ export interface DownloadCommands {
   /** Downloads running or paused now (quitting asks first when there are any, DL-01). */
   'downloads.active': { args: Record<string, never>; result: number }
   /**
+   * Asks now what quitting would ask while downloads run (DL-01), for a quit about to start (an
+   * update's relaunch, UP-05): true to go ahead, and that quit asks nothing more. `withdraw`: that
+   * quit didn't come after all, so the next one asks again.
+   */
+  'downloads.confirmQuit': { args: { withdraw?: boolean }; result: boolean }
+  /**
    * Opens a finished download (DL-04): in a new tab when Orbit can show it (PDF, image, text, audio,
    * video), else with the system's app for it. False when its file is gone.
    */

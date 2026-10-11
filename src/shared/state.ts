@@ -9,7 +9,7 @@
 
 import type { PermissionPrompt } from './site'
 import type { SiteCategory, SiteDefault } from './site-settings'
-import type { UpdateStatus, WhatsNew } from './updates'
+import type { PendingUpdate, UpdateStatus, WhatsNew } from './updates'
 
 export type TabId = string
 export type FolderId = string
@@ -383,6 +383,8 @@ export interface Settings {
   lastRunVersion?: string
   /** The What's new banner (UP-06), until it is opened, dismissed or a few days old. */
   whatsNew?: WhatsNew
+  /** Set by a relaunch into a downloaded update (UP-05): the next start shows its What's new. */
+  pendingUpdate?: PendingUpdate
   /** The Library section used last: the Library reopens there (AR-02, DL-09). */
   librarySection: string
   /** Archive entries older than this many days are deleted (AR-08). 0 = kept forever. */

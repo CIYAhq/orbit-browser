@@ -91,6 +91,16 @@
   line-height: 16px;
 }
 
+/* What's new: the release's line, two lines at most (UP-06). */
+.upd__detail--news {
+  display: -webkit-box;
+  margin: 1px 0 2px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
 .upd__cta {
   display: inline-block;
   margin: 7px 0 2px;

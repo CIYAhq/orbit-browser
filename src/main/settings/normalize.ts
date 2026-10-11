@@ -4,7 +4,7 @@ import { chosenApps, isOnboardingStep } from '../../shared/onboarding'
 import { cleanSiteDefaults } from '../../shared/site-settings'
 import type { ColorMode, OrbitState, Settings } from '../../shared/state'
 import { normalizeSpaceTheme } from '../../shared/theme'
-import { cleanVersion, feedUrlProblem } from '../../shared/updates'
+import { cleanVersion, feedUrlProblem, isLoopbackHost } from '../../shared/updates'
 import { engineById, isBuiltInEngine } from '../../shared/url'
 
 /** A Settings section id: a short word from the section registry, never a path or markup. */
@@ -87,5 +87,28 @@ function normalizeUpdatePrefs(s: Settings): void {
     !(isRecord(news) && cleanVersion(news.version) === news.version && Number.isFinite(news.since))
   ) {
     delete s.whatsNew
+  } else if (s.whatsNew) {
+    releaseText(s.whatsNew)
+  }
+  const pending: unknown = s.pendingUpdate
+  if (pending !== undefined && !(isRecord(pending) && cleanVersion(pending.version) === pending.version)) {
+    delete s.pendingUpdate
+  } else if (s.pendingUpdate) {
+    releaseText(s.pendingUpdate)
+  }
+}
+
+/** A saved release's line and page (UP-06): kept only while they are short text and an https page. */
+function releaseText(r: { summary?: string; url?: string }): void {
+  if (r.summary !== undefined && (typeof r.summary !== 'string' || r.summary.length > 200)) delete r.summary
+  if (r.url !== undefined && !(typeof r.url === 'string' && r.url.length <= 2048 && safePage(r.url))) delete r.url
+}
+
+const safePage = (url: string): boolean => {
+  try {
+    const u = new URL(url)
+    return u.protocol === 'https:' || (u.protocol === 'http:' && isLoopbackHost(u.hostname))
+  } catch {
+    return false
   }
 }

@@ -1,4 +1,4 @@
-import { Download, LoaderCircle, ShieldAlert } from 'lucide-react'
+import { Download, LoaderCircle, RotateCw, ShieldAlert } from 'lucide-react'
 import { type ReactNode, useEffect, useState } from 'react'
 import type { BuildInfo } from '../../../shared/commands/settings'
 import { invoke } from '../api'
@@ -11,16 +11,20 @@ const readBuildInfo = () => invoke('settings.buildInfo', {})
 
 /**
  * Check for updates (UP-03, ST-03, ST-17): what the last check found, Check Now, and the newer
- * version's Download (its page in a tab, UP-10). `feedHere`: the feed field is in the same group.
+ * version's Download → progress → Relaunch where Orbit installs it itself; elsewhere Download opens
+ * its page in a tab (UP-10). `feedHere`: the feed field is in the same group.
  */
 export function UpdateCheckRow({ id, feedHere = false }: { id: string; feedHere?: boolean }) {
   const updates = useOrbit((s) => s.updates)
   const feed = useOrbit((s) => s.settings.updateFeedUrl)
+  const auto = useOrbit((s) => s.settings.updateChecks)
   // Read again whenever Settings comes to the front, which also refreshes "Checked 5 minutes ago"
   // without a timer running while Settings sits in the background.
   const [info] = useMainValue<BuildInfo>(readBuildInfo)
   const state = updates?.state ?? 'idle'
   const latest = updates?.latest
+  const installs = updates?.installable === true
+  const percent = Math.round((updates?.progress ?? 0) * 100)
   const version = info?.version ?? ''
   const checked = updates?.checkedAt ? ` Checked ${ago(updates.checkedAt)}.` : ''
   let status: ReactNode
@@ -40,8 +44,13 @@ export function UpdateCheckRow({ id, feedHere = false }: { id: string; feedHere?
     )
   } else if (state === 'checking') {
     status = 'Checking…'
+  } else if (latest && state === 'downloading') {
+    status = `Downloading Orbit ${latest.version}… ${percent}%`
+  } else if (latest && state === 'ready') {
+    status = `Orbit ${latest.version} is ready. Relaunch to update (you have ${version}).`
   } else if (latest) {
-    status = `Orbit ${latest.version} is available (you have ${version}).${latest.security ? ' It fixes a serious security problem.' : ''}`
+    const failed = updates?.downloadError ? ` ${updates.downloadError}${auto ? ' Orbit tries again later.' : ''}` : ''
+    status = `Orbit ${latest.version} is available (you have ${version}).${latest.security ? ' It fixes a serious security problem.' : ''}${failed}`
   } else if (state === 'current') {
     status = `Orbit ${version} is up to date.${checked}`
   } else if (state === 'failed') {
@@ -49,18 +58,41 @@ export function UpdateCheckRow({ id, feedHere = false }: { id: string; feedHere?
   } else {
     status = 'Not checked yet.'
   }
+  const shown = latest && (state === 'downloading' || state === 'ready') ? state : latest ? 'available' : state
   return (
     <SettingRow
       id={id}
       label="Updates"
       description={
-        <span data-testid="updates-status" data-state={latest ? 'available' : state}>
+        <span data-testid="updates-status" data-state={shown}>
           {status}
         </span>
       }
     >
-      {latest ? (
-        <Button kind="primary" testId="updates-download" onClick={() => void invoke('updates.open', {})}>
+      {latest && state === 'downloading' ? (
+        <div
+          className="st-progress"
+          role="progressbar"
+          aria-label={`Downloading Orbit ${latest.version}`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percent}
+          data-testid="updates-progress"
+        >
+          <div className="st-progress__bar" style={{ width: `${percent}%` }} />
+        </div>
+      ) : latest && state === 'ready' ? (
+        <Button kind="primary" testId="updates-relaunch" onClick={() => void invoke('updates.relaunch', {})}>
+          <RotateCw size={13} aria-hidden="true" />
+          Relaunch
+        </Button>
+      ) : latest ? (
+        // Orbit downloads it here, or, where it can't install it itself, opens its page (UP-10).
+        <Button
+          kind="primary"
+          testId="updates-download"
+          onClick={() => void invoke(installs ? 'updates.download' : 'updates.open', {})}
+        >
           {latest.security ? <ShieldAlert size={13} aria-hidden="true" /> : <Download size={13} aria-hidden="true" />}
           Download {latest.version}
         </Button>

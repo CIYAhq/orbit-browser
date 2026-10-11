@@ -883,6 +883,27 @@ html.reduce-motion[data-theme-fade] .settings * {
   overflow-wrap: anywhere;
 }
 
+/* An update's download, in place of its button (UP-03). */
+.st-progress {
+  flex: none;
+  width: 120px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--hover);
+}
+
+.st-progress__bar {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--dur-fast) var(--ease-out);
+}
+
+.reduce-motion .st-progress__bar {
+  transition: none;
+}
+
 /* A spinner inside a button ("Checking…", UP-03). */
 .st-spin {
   animation: st-spin 900ms linear infinite;

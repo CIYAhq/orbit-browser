@@ -5,7 +5,7 @@ import { PROJECT_URL, RELEASES_URL } from '../../shared/project'
 import type { WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
-import { BUILD_DATE, BUILT_VERSION, bugReportUrl, buildInfoText } from './build-info'
+import { BUILD_DATE, bugReportUrl, buildInfoText, runningVersion } from './build-info'
 import { creditsUrl } from './credits'
 import { stubDefaultBrowser, systemDefaultBrowser } from './default-browser'
 import { registerLinkSettings } from './links'
@@ -99,7 +99,7 @@ export function registerSettings(ctx: MainContext): void {
     return text
   })
   commands.register('settings.copyVersion', () => {
-    const version = BUILT_VERSION ?? app.getVersion()
+    const version = runningVersion(app.getVersion())
     clipboard.writeText(version)
     return version
   })
@@ -159,7 +159,7 @@ function buildInfo(): BuildInfo {
         ? `Windows ${version}`
         : `${process.platform === 'linux' ? 'Linux' : process.platform} ${version}`
   return {
-    version: BUILT_VERSION ?? app.getVersion(),
+    version: runningVersion(app.getVersion()),
     electron: process.versions.electron,
     chrome: process.versions.chrome,
     node: process.versions.node,
