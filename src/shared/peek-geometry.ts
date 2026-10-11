@@ -27,9 +27,9 @@ export interface Spring {
   damping: number
 }
 /**
- * Open: grows into place in about 280–320 ms with no visible overshoot (FL-19). FL-19's own numbers:
- * response 0.275 s, ratio 0.92, a little quicker and stiller than the standard token, which takes
- * longer than 320 ms to come to rest over a card's travel.
+ * Open: grows into place in about 280–320 ms with no visible overshoot (FL-19). A spring tuned to
+ * FL-19's 280–320 ms (D70): response 0.275 s, ratio 0.92, a little quicker and stiller than the
+ * standard token FL-19 names, which takes longer than 320 ms to come to rest over a card's travel.
  */
 export const PEEK_OPEN_SPRING: Spring = springFrom(0.275, 0.92)
 /** Expand to a tab: the card meets the page frame in about 220–260 ms (FL-19): the snappy token. */

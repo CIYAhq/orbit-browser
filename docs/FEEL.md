@@ -30,6 +30,7 @@
   - P1 rows (FL-07, 08, 11, 12, 15, 18, 20, 22, 25) and FL-19: `1920500`, the lane after its P0 fixes and before any P1 change, run with the P1 specs. Three runs on 2026-10-11 at load 3–4 (FL-19 at load 2).
   - FL-22's Before is read from the old toast code (a 220 ms CSS keyframe, toasts 6 px apart, removed after 2.2 s), because the test doesn't run on the old toasts.
 - **After:** the lane's app code at `5416e5c`. Three runs on 2026-10-11 at load 3–4.5. FL-19 ran at load 0.7–1. FL-03's leave row ran at load 5, after its poll was made finer. FL-26 ran nine times on the lane merged with `main` at `592096b`, which has the keys lane's switcher, at load 2.5–5.6.
+  - Fix round 1 (PR #25's review) measured the rows it touched again, on the lane after its fixes: FL-01's interruptions, FL-05's scroll, FL-09, FL-19's close, FL-21's accessibility row and the toasts under reduced motion. Their runs and loads are in the notes. The Before of a row new in this round is the lane just before its fix, in one run: FL-05's scroll at `a4adf9b` (load 4.4), the toasts at `0f9fbfb` (load 6.2–7.9). FL-21's accessibility row is the review's reading of `0f9fbfb`.
 - A blank Before cell has one of three causes:
   - the row's test came with its fix;
   - on the old build the test failed an earlier check and stopped before the row (FL-07's ⌘Z and other-Space rows, FL-12's closing);
@@ -38,10 +39,11 @@
 
 | ID | Observable | Target | Before | After |
 |---|---|---|---|---|
-| FL-01 | Space shortcut pressed again mid-slide: step in the frame after | ≤ 2 × the step before + 2 px | 23 px (23–24) | 23 px (22–25) |
-| FL-01 | Escape while the bar appears: opacity / scale step after | ≤ 2 × before + 0.05 / + 0.003 | 0.40 / 0.010 | 0.36 / 0.008 |
-| FL-01 | Hover sidebar: edge re-entered as it slides out: furthest out | turns back mid-way (< 270 px) | **gap**: 270 px | 226 px (223–226) |
-| FL-01 | Folder collapsed while it opens: step after the click | ≤ 2 × before + 2 px | 40 px (17–58) | 21 px (20–21) |
+| FL-01 | Space shortcut pressed again mid-slide: speed after, in px a frame | ≤ 2 × the speed before + 2 | 23 px (23–24) | 24 (19–38); 27 (22–33) before the press |
+| FL-01 | Escape while the bar appears: opacity / scale speed after, a frame | ≤ 2 × before + 0.05 / + 0.003 | 0.40 / 0.010 | 0.29 / 0.006 |
+| FL-01 | Escape while the bar appears: frames the exit fades over | ≥ 3 (no jump to the end) |  | 5 (3–6) |
+| FL-01 | Hover sidebar: edge re-entered as it slides out: furthest out | turns back mid-way (< 270 px) | **gap**: 270 px | 226 px (188–243) |
+| FL-01 | Folder collapsed while it opens: speed after the click, in px a frame | ≤ 2 × before + 2 | 40 px (17–58) | 23 (16–29); 26 (22–30) before the click |
 | FL-01 | ⌘S pressed again at 90 ms: jump ratio of the edge | ≤ 6 × average speed | 2.8× (2.8–3.1) | 3.1× |
 | FL-02 | ⌘S → sidebar starts moving | 1 frame | **gap**: 30 ms (23–38), 2 frames | 5 ms (3–19), 1 frame |
 | FL-02 | ⌘S → sidebar gone | ≤ 300 ms | 223 ms (221–230) | 236 ms (222–236) |
@@ -58,6 +60,10 @@
 | FL-05 | Press → page shown | ≤ 50 ms | 20 ms | 24 ms (22–24) |
 | FL-05 | Press: time with no row highlighted | 0 (one hands over to the other) | **gap**: 83 ms | 0 ms |
 | FL-05 | Press in the first frame after a row grows in (PR #10 review F1) | 3 of 3 select the row | **gap**: lost (it lands on the row’s slot) | 3 |
+| FL-05 | Selected row out of sight, 100 px below the edge: scroll / share of the way in its first frame | 200–250 ms ease-out | **gap**: 200 ms / 2 % (eases in; fastest in its third frame) | 217 ms / 12 % (fastest in its second frame) |
+| FL-05 | … a screen away (846 px): scroll | 200–250 ms | **gap**: 425 ms (417–433) | 233 ms |
+| FL-05 | … more than two screens away (2,034 px) / with reduced motion: frames moving | 1 / 1 (at once) | **gap**: 27 / 1 | 1 / 1 |
+| FL-05 | … rows on screen drawing nothing while it scrolls (FL-21) | 0 | 0 | 0 |
 | FL-06 | Enter → new row fully grown | ≤ 250 ms | 236 ms (224–247) | 216 ms (208–219) |
 | FL-06 | Enter → new row first drawn | 1 frame after the state | **gap**: 40 ms (36–47) | 8 ms (−1–19) |
 | FL-06 | Rows below: jump ratio | ≤ 6 | 3.2× (3.1–3.3) | 2.4× (2.2–3.4) |
@@ -70,9 +76,11 @@
 | FL-07 | Moved to another Space: the row above moves | 0 px (no scroll) |  | 0.0 px |
 | FL-08 | Hover the ×: circle fully in / frames part-way | ≈ 90 ms / ≥ 1 | **gap**: 13 ms / 0 | 95 ms (95–96) / 4 |
 | FL-08 | Press: frames to the glyph at 0.9 / smallest scale | 1 / ≈ 0.9 | 1 / 0.90 | 1 / 0.90 |
-| FL-08 | Release → row starts leaving | 2 frames (main closes it in between) | 2 frames | 2 frames |
-| FL-09 | ⌘W → next tab selected | 1 frame | **gap**: 33 ms (30–41), 3 frames | 11 ms (7–17), 1 frame |
-| FL-09 | ⌘W → gap closed | ≤ 250 ms | **gap**: 397 ms (383–407) | 217 ms (211–224) |
+| FL-08 | Release → row starts leaving | the release's frame; once main has closed the tab (D70) | 2 frames | 2 frames |
+| FL-09 | ⌘W → next tab selected (a sleeping tab below), median of five closes | 1 frame |  | 1 frame, 9 ms (8–11) |
+| FL-09 | ⌘W → next tab selected, the first close after a launch | 1 frame | **gap**: 33 ms (30–41), 3 frames | **gap**: 22 ms (22–24), 2 frames |
+| FL-09 | Next row selected no later than the closed one starts to leave | every close | yes | yes |
+| FL-09 | ⌘W → gap closed | ≤ 250 ms | **gap**: 397 ms (383–407) | 222 ms (222–224) |
 | FL-10 | 4 px → row lifted | 1 frame | 1 frame | 1 frame |
 | FL-10 | Frames where the row lags the pointer | 0 | 0 | 0 |
 | FL-10 | Row centre to the pointer while held (pressed at its centre) | 0 px |  | 0 px |
@@ -90,7 +98,7 @@
 | FL-13 | Swipe release → settled (release seen 90 ms after the last event) | ≤ 350 + 90 ms | **gap**: 476 ms (396–479) | 412 ms (394–412) |
 | FL-13 | Flick: travel / last event → settled | < 25 % / ≤ 350 + 90 ms | 23% / 361 ms (356–364) | 23% / 276 ms (275–291) |
 | FL-13 | Rubber band at the first Space, one width of travel | ≈ 35.5 % (formula) | 35.7% | 35.7% |
-| FL-13 | Rubber band: last event → back at rest | ≤ 350 + 90 ms | **gap**: 478 ms (477–480) | **gap**: 478 ms (477–479) |
+| FL-13 | Rubber band: last event → back at rest (within 0.5 px) | on FL-13's spring, ≈ 480 ms (D70: FL-29's 350 ms is for swipes that land on a Space) | 478 ms (477–480) | 478 ms (477–479) |
 | FL-13 | Frame p99 while swiping and settling | ≤ 16.7 ms (FL-29) | 16.8 ms (16.8–33.3) | 16.8 ms (16.8–33.3) |
 | FL-14 | Theme during a swipe: in-between colours / grey frames / contrast | > 2 / 0 / ≥ 4.5:1 | 16 / 0 / 9.8:1 | 16 / 0 / 9.8:1 |
 | FL-15 | Icon button: press → at 0.94 / smallest scale | at once (60 ms) / ≈ 0.94 | 14 ms (1–15) / 0.94 | 25 ms (17–31) / 0.94 |
@@ -125,8 +133,8 @@
 | FL-19 | Open: overshoot / card size, share of the page area / page dimmed by | ≤ 2 % / ≈ 90 % / 10–20 % | 0% / 90% / 18% | 0% / 90% / 18% |
 | FL-19 | Open: frame p99 / max | ≤ 16.7 / ≤ 33.3 ms (FL-29) | **gap**: 50.0 / 50.0 ms | **gap**: 33.4 / 33.4 ms |
 | FL-19 | Escape → card starts closing | 1 frame (FL-29) | **gap**: 2 frames | **gap**: 2 frames |
-| FL-19 | Close: first frame → last frame of the fade / smallest scale | 150–180 ms / ≈ 0.96 | 133 ms (117–133) / 0.96 | 150 ms / 0.96 |
-| FL-19 | Escape → no layer over the page (it takes clicks) | ≤ 200 ms | 192 ms (187–200) | 187 ms (173–195) |
+| FL-19 | Close: first frame → last frame of the fade / smallest scale | 150–180 ms / ≈ 0.96 | 133 ms (117–133) / 0.96 | 150 ms (133–150) / 0.96 |
+| FL-19 | Escape → no layer over the page (it takes clicks) | ≤ 200 ms | 192 ms (187–200) | 183 ms (173–194), best of up to three rounds; 4 of 10 rounds took 201–215 ms |
 | FL-19 | ⌘O: first move → edges within 2 px / meet the page card (0.5 px) | 220–260 ms | 183 ms (183–200) / 233 ms (233–250) | 200 ms (167–217) / 250 ms (233–250) |
 | FL-20 | New Favorite: first frame scale / largest scale | ≈ 0.85 / ≤ 1.04 | 0.85 / 1.007 | 0.85 / 1.007 |
 | FL-20 | Other tiles: largest step share | < 60 % | 17% (17–18) | 17% (16–17) |
@@ -139,6 +147,7 @@
 | FL-21 | … its own list drawn (interactive) | ≤ 350 ms (before the slide ends) | 231 ms (210–247) | 161 ms (144–163) |
 | FL-21 | … longest task / frame max | < 50 / ≤ 33.3 ms | **gap**: 258 / 283 ms | **gap**: 57 / 67 ms |
 | FL-21 | 300 tabs: rows on screen drawing nothing (wheel, keys, a tab found, a drag) | 0 in every frame |  | 0 |
+| FL-21 | 200 Today tabs, the 151st selected, list at the top: the place and list size a screen reader is told | each row's own place, of 200 | **gap**: of 69 (69 rows in the tree; the 151st comes right after the 68th) | its own place, of 200 (45 rows in the tree, the 151st among them) |
 | FL-22 | Toast in: first frame below its place / scale | ≈ 12 px / ≈ 0.96 | **gap**: 6 px / 0.98 (a 220 ms keyframe) | 12.6 px / 0.96 |
 | FL-22 | Toast in: first frame → in place / largest scale | 200–250 ms / ≤ 1.03 | 220 ms / 1 | 233 ms (233–250) / 1.002 |
 | FL-22 | Three stacked: gaps off 8 px / older pushed up, largest step share | 0 px / < 60 % | **gap**: 2 px (6 apart) / 100 % (jumped) | 0 px / 16% (16–17) |
@@ -166,6 +175,9 @@
 | FL-28 | Reduced motion (system), ⌘⌥→: horizontal movement | 0 px | 0 px | 0 px |
 | FL-28 | Reduced motion (system), ⌘⌥→: new Space shown / cross-fade done | first frame / < 150 ms | **gap**: 15 ms (7–17) / 182 ms (174–184) | 12 ms (9–19) / 129 ms (126–136) |
 | FL-28 | Reduced motion (Orbit setting), ⌘⌥→: movement / cross-fade done | 0 px / < 150 ms |  | 0 px / 125 ms (122–136) |
+| FL-28 | Reduced motion (Orbit setting / system), a toast: first frame below its place / its scale | 0 px / 1 | **gap**: 12.4 / 12.5 px, 0.961 | 0 px / 1 |
+| FL-28 | … the older toast pushed up: frames moving / a toast leaving: its drop | 1 (at once) / 0 px | **gap**: 12 / 11 frames, 8 px | 1 / 0 px |
+| FL-28 | … a toast's fade in / frames of its fade out | short fades |  | 117 ms (100–117) / 7–8 |
 | FL-29 | Space shortcut → slide starts | 1 frame | 1 frame | 1 frame |
 | FL-29 | Space shortcut → settled | ≤ 350 ms | **gap**: 409 ms (409–410) | 292 ms (285–299) |
 | FL-29 | Frame p99 / max during the slide | ≤ 16.7 / ≤ 33.3 ms | 16.8 / 16.8 ms | 16.8 / 16.8 ms |
@@ -173,6 +185,9 @@
 ### Notes
 
 - **FL-01:** interrupted motions turn round from where they are. Before, the hover sidebar slid fully out (270 px) before it came back.
+  - Each check compares speeds (a step over its frame's time), from the first frame that shows the input handled: the bar that is closing, or the value turning. A frame that comes late can't pass for a jump. Until review M4 the checks compared steps from the frame after main had the input, and the Before column is in that measure.
+  - The bar fades in fast, so a jump to the end would be no faster than its entrance. Its exit must also fade over 3 frames or more, in up to three rounds (D46). With the exit made a jump, 4 runs of 4 failed.
+  - After: 20 runs of the four tests at load 3.9–8.4. All passed, the bar in its first round.
 - **FL-02:** ⌘S now moves the sidebar in the frame that draws the change: the transition starts a frame along (`--motion-lead`).
   - Every hide, before and after, has one frame that takes two intervals. With about 15 frames in a hide, that frame sets both the p99 and the max.
   - Not fixed.
@@ -183,17 +198,23 @@
 - **FL-05:**
   - A press now selects its row in the frame it lands in, and the old highlight hands over in that same frame. Before, there were 83 ms with no row lit.
   - A press in the first frame after a row grows in now selects that row. Before, the press landed on the row's slot (PR #10 review F1).
+  - A selected row out of sight scrolls in on Orbit's own ease-out (`EASE.instant`, 225 ms), drawn a frame along so its first frame already moves. From more than two screens away, or with reduced motion, it is there at once. Before, Chromium's smooth scroll eased in and took 417–467 ms from further away (review M5). Three runs at load 2.6–4.1, the same each time.
 - **FL-07:** the row travels with the standard spring, as FL-07 asks.
   - FL-01 times that spring at about 260–300 ms, so FL-07's "about 250 ms" reads 276–286 ms within 0.5 px.
   - Known gap: at the very end of a scrolled list, a row that leaves makes the list shorter, and the browser clamps the scroll position. The rows in sight then move up. The test scrolls to a place with room below.
-- **FL-08:** the row starts leaving 2 frames after the release. The click closes the tab in main, and the row leaves in the frame after main's new state; starting earlier would mean guessing main's answer.
+- **FL-08:** the row starts leaving 2 frames after the release, once main has closed the tab (D70). FL-08 asks for the release's own frame, but main decides first: a pinned tab's × resets it (PN-04), and a page may ask to stay (NV-24).
   - The pinned tab's reset (PN-04) still acts on press; its circle now fades in like the ×'s.
+- **FL-09:** main wakes a sleeping tab's page only once the change has gone out to the shell (`windows.ts`, `fastSwitch`), so the next row is selected in the first frame drawn after ⌘W. Waking the page first takes main about 13 ms, which holds the change back a frame.
+  - The test closes five tabs a round, each with a sleeping tab below it, and judges the round on their median, in up to three rounds (D46). A key that comes as the shell starts a frame can't show in that frame.
+  - With the deferral, 5 runs of 5 passed in their first round at load 4.5–6.2, and 22 of their 25 closes took 1 frame. With 28 busy threads beside it (load 16–32), 10 runs of 10 passed: 7 in the first round, 2 in the second and 1 in the third.
+  - With the deferral taken out, 5 runs of 5 failed. Every round had a median of 2 frames, 24–27 ms after the key (71 of 75 closes in 2 frames).
+  - Gap: the first close after a launch took 2 frames in 10 runs of 15. Main sends that first change out 7–12 ms after the key, against 2–3.5 ms for later closes: the key's route, the close and the state update all run as cold code the first time. At `5416e5c`, before the lane took in the keys lane's key router from `main`, that close took 1 frame (11 ms, 7–17).
 - **FL-11:** audited. It was already within its targets; the test is new.
 - **FL-12:**
   - The chevron's tween is 160 ms (`CHEVRON` in `ItemList.tsx`) on the snappy ease. Its last frames turn less than 0.5°, so first-to-last moving frame reads 133 ms.
   - The children fade in 12 ms apart, so six of them span four frames.
 - **FL-13:** the swipe's settle and the flick are within budget. Both are timed from the last wheel event, including the 90 ms wait that detects the release, and the settle spring starts with the release velocity.
-  - The rubber band returns with the spring FL-13 gives it (response 0.3 s, ratio 1.0). From a third of the width that spring needs about 390 ms to come within 0.5 px, or 478 ms with the release wait. Not changed.
+  - The rubber band returns with the spring FL-13 gives it (response 0.3 s, ratio 1.0). From a third of the width that spring needs about 390 ms to come within 0.5 px, or 478 ms with the release wait. FL-29's 350 ms is for swipes that land on a Space, so the rubber band keeps FL-13's spring (D70).
 - **FL-15:** the release uses the pop spring (0.30 s, damping 0.70), as FL-15 asks; the spec gives it no time. From 0.94 the button is within 0.2 % of full size 193 ms after the release.
 - **FL-16:** the first ⌘T after a launch showed the bar in the second frame in two runs of three (14, 22 and 22 ms). Warm opens show it in the first frame.
 - **FL-18:**
@@ -202,9 +223,10 @@
   - The page makes room while the zone shows, so on release the new pane only takes the zone's place.
   - Adding a pane, a flip and closing a pane use the standard spring. The panes are within 2 px in 267–300 ms, as the spec asks, but within 0.5 px only at 433–483 ms, after a 1.4 px (0.2 %) overshoot.
   - Not built: the "bubble" while a tab hovers another tab's row, and the wobble on drop.
-- **FL-19:** the close's tween and the expand's spring now start their clocks when they are called, so their first frame already moves.
-  - The layer now goes once the card and the dim are under 0.1 % (the curve's last tenth). The page takes clicks again in 173–195 ms; before, it took 187–200 ms, at the edge of the target.
-  - This is a timing change in the peek lane's `PeekLayer.tsx`, shown by `feel-peek.spec.ts`.
+- **FL-19:** the close's tween and the expand's spring now start their clocks when they are called, so their first frame already moves. This is a timing change in the peek lane's `PeekLayer.tsx`, shown by `feel-peek.spec.ts`.
+  - The open uses a spring tuned to FL-19's 280–320 ms (response 0.275 s, ratio 0.92). The standard spring FL-19 names takes longer than 320 ms over a card's travel (D70).
+  - The layer goes when the close's curve ends, as it did before the lane. The lane had made it go once the card and the dim were under 0.1 %; no test showed that was needed, so it came out in fix round 1 (review follow-up 3).
+  - Six runs at load 15–19, each in up to three rounds (D46), took 173–194 ms at their best; 4 of their 10 rounds took 201–215 ms. That is at the edge of the target: the close starts in the second frame and runs 160 ms.
   - Two gaps remain:
     - During the open, the overlay draws at 30 fps on this machine while main moves the page view every frame, so p99 is two intervals. A fix belongs in `src/main/peek/`, which is the peek lane's.
     - Escape goes through main to the overlay view, so the close starts in the second frame (as with FL-03).
@@ -212,6 +234,7 @@
 - **FL-21:** only the rows near the visible band are drawn. A Space shown for the first time draws a stand-in at once (11 ms) and its own list by 161 ms.
   - Under load 3–4 the long lists still have frames of two intervals, so p99 is two intervals: 5 such frames per 200-tab fling, and 12 per 500-tab scroll (was 102).
   - The longest task during a first showing is 57 ms (was 258 ms).
+  - Rows that aren't drawn leave no hole for a screen reader: every row says its place in its list and the list's size (`aria-posinset`, `aria-setsize`), and its depth. Arrow keys, Home and End walk every row, drawn or not (review M3). Three runs at load 2.2–3.
 - **FL-22:** built as FL-22 says, with three exceptions:
   - toasts show at the bottom of the sidebar, not over the page card, so they are hidden with the sidebar;
   - plain toasts let clicks through, and only a toast with a button holds on hover;
@@ -225,7 +248,11 @@
   - Main's blur reaches the shell over IPC, so the dimming starts 1–3 frames later.
   - On a window resized a step every frame, X merges steps: 8–10 of 16 widths are drawn. The page view gets the card's width within a frame at the median and in 18 ms at worst (25 ms in one run). Any gap shows the page's own colour.
 - **FL-28:** the cross-fade is 120 ms (`--motion-fade`). It is done 122–136 ms after the shortcut, where it took 182 ms before.
+  - Toasts follow reduced motion, Orbit's switch or the system's (review M1). A toast fades in where it rests and fades out there, and the older one moves up at once. 20 runs (10 per setting) at load 2.9–4.2. Before, a toast rose 12 px from 0.96 and the push glided, and once under the config, motion still jumped the moves in a frame of their own: 12.6 px low in the first frame in 2 runs of 10, and an 8 px drop on leaving in all 10.
+  - `tests/unit/reduced-motion-guard.test.ts` reads the renderer's code: every component that renders motion's components sits under `OrbitMotionConfig` or reads reduced motion, every file that calls motion's `animate()` reads it, and no stylesheet keys a rule off the media query alone.
 - **FL-29:** the Space shortcut now settles in 292 ms (was 409 ms). The other budgets are in the rows for FL-02, 03, 05, 09, 10, 13, 16 and 17.
+  - FL-13's rubber band comes back in 478 ms on FL-13's own spring. FL-29's 350 ms is for swipes that land on a Space (D70).
+  - ⌘W selects the next tab in 1 frame at the median of five closes. The first close after a launch took 2 frames in 10 runs of 15 (FL-09).
 
 ### Not measured or not built
 
@@ -241,11 +268,11 @@ FL-30's nine points, judged against the spec's numbers and observables. The evid
 | # | Point | Verdict | Evidence |
 |---|---|---|---|
 | 1 | Your hand is never ahead of the screen | pass | No frame where the input leads the screen: 0 for a dragged row (FL-10), the swiped pages (FL-13) and the split divider (FL-18). The card keeps its margin in every frame of a resize (FL-27). Specs: `feel-rows`, `feel-spaces`, `feel-split`, `feel-window`. Not checked: the OS scroll direction, since Xvfb sends wheel events only. |
-| 2 | Momentum is respected | pass | A flick (23 % of the width) settles 276 ms after its last event, and a slow swipe 412 ms. The settle spring starts with the release velocity. A second shortcut carries the running slide on, with no jump (FL-01). Specs: `feel-spaces`, `feel-motion`. Gap: the rubber band's return, on the spec's own spring (478 ms). |
-| 3 | Clicks feel instant | fixed, gaps listed | Press → highlight in 8 ms (was 92); ⌘W selects the next tab in 1 frame (was 3); ⌘S moves in 1 frame (was 2). The command bar shows in 1 frame, and the × and the icon buttons press at once. Specs: `feel-rows`, `feel-sidebar`, `feel-commandbar`, `feel-chrome`. Gaps: the hover sidebar and the Peek's close start in the second frame (separate views), and the first ⌘T after a launch showed in the second frame in two runs of three. |
+| 2 | Momentum is respected | pass | A flick (23 % of the width) settles 276 ms after its last event, and a slow swipe 412 ms. The settle spring starts with the release velocity. A second shortcut carries the running slide on, with no jump (FL-01). Specs: `feel-spaces`, `feel-motion`. The rubber band comes back in 478 ms on FL-13's own spring; FL-29's 350 ms is for swipes that land on a Space (D70). |
+| 3 | Clicks feel instant | fixed, gaps listed | Press → highlight in 8 ms (was 92); ⌘W selects the next tab in 1 frame at the median of five closes (was 3); ⌘S moves in 1 frame (was 2). The command bar shows in 1 frame, and the × and the icon buttons press at once. Specs: `feel-rows`, `feel-sidebar`, `feel-commandbar`, `feel-chrome`. Gaps: the hover sidebar and the Peek's close start in the second frame (separate views), the first ⌘T after a launch showed in the second frame in two runs of three, and the first ⌘W after a launch took 2 frames in 10 runs of 15. |
 | 4 | Nothing flashes | partial | No grey frame between two themes (FL-14). Late suggestions move nothing (FL-17). No row on screen is drawn empty (FL-21). Resize gaps show the page's colour (FL-27). There is never a frame with no row selected (FL-05; was 83 ms). Hover fades out from where it is (FL-04). Not measured: hover flicker during a drag, favicons arriving, and the screen's own pixels (the specs read the DOM). |
 | 5 | One motion vocabulary | fixed | The tokens live in `src/shared/motion.ts` and `src/renderer/src/motion/motion.css`, and `tests/unit/motion-tokens.test.ts` checks them against each other. The lane moved the components it touched onto them. Timings the spec sets apart keep their own: the FL-23 sweep (1.2 s), the FL-12 chevron (160 ms) and FL-28's cross-fade (120 ms). |
 | 6 | Colour moves with space | pass | A swipe from a blue to an orange Space draws 16 colours in between, with no grey frame and titles at 9.8:1 (FL-14, `feel-spaces`). |
 | 7 | Native window behaviour | not measured | Linux on Xvfb has no system material, trackpad or haptics. Built, but not measured here: OS window controls, draggable areas, native menus, OS full screen and new windows a step down and right (NV-10). Haptics (FL-31, P2) are not built. |
-| 8 | Small, playful touches that never get in the way | fixed | FL-08, FL-15, FL-20 and FL-22 were added or reworked, and FL-23 was audited. Under reduced motion they become fades or nothing (`feel-reduced`, `tests/unit/reduce-motion.test.ts`). The action never waits for them: buttons fire on release, the reset on press, shortcuts on the key (`feel-chrome`, `feel-rows`). |
+| 8 | Small, playful touches that never get in the way | fixed | FL-08, FL-15, FL-20 and FL-22 were added or reworked, and FL-23 was audited. Under reduced motion they become fades or nothing. `tests/unit/reduced-motion-guard.test.ts` checks that every motion use in the renderer follows the setting, and `feel-reduced` checks the toasts frame by frame under both settings. The action never waits for them: buttons fire on release, the reset on press, shortcuts on the key (`feel-chrome`, `feel-rows`). |
 | 9 | Scale doesn't change the feel | partial | 500 tabs and 50 folders scroll with 12 frames over one interval (was 102). A 200-tab Space shown for the first time draws a stand-in in 11 ms and its list in 161 ms (was 231 ms, behind a 258 ms task). With 300 tabs, no row is drawn empty. Spec: `feel-sidebar`. Gap: p99 is still two intervals under load, and a first showing still has a 57 ms task. |
