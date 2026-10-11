@@ -544,9 +544,14 @@ test('[FL-07][PN-02] a row pinned with Cmd+D travels to the pinned section inste
   await shell.keyboard.press(`${MOD}+D`)
   const slot = shell.getByTestId('pinned-list').locator(`[data-slot][data-key="${third}"]`)
   await expect(slot).toHaveClass(/is-travelling/)
-  // It starts where it was and settles into the pinned section.
+  // It starts where it was and settles into the pinned section. The room it left in Today is never
+  // drawn, and goes once its own spring settles, which can be a frame after the row lands.
   await expect(slot).not.toHaveClass(/is-travelling/)
-  const after = await row(shell, third).boundingBox()
+  await expect(shell.getByTestId('today-list').locator(`[data-slot][data-key="${third}"]`)).toHaveCount(0)
+  const after = await shell
+    .getByTestId('pinned-list')
+    .locator(`[data-testid="tab-row"][data-tab-id="${third}"]`)
+    .boundingBox()
   expect((after?.y ?? 0) < (before?.y ?? 0)).toBe(true)
   expect((await space(app)).pinned).toEqual([third])
 })
