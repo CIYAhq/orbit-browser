@@ -9,8 +9,8 @@ import { join } from 'node:path'
  * go under it. Before, each e2e test left its user data in /tmp: about 3 MB a test, over 1 GB a
  * full run. A run that is killed leaves its one folder behind.
  *
- * Linux only: macOS's temp path is long, and Chromium's single-instance socket under it could pass
- * the platform's socket path limit. Nothing runs the suite on macOS or Windows now (D42).
+ * Linux only: on Windows `tmpdir()` reads TEMP and TMP, not `TMPDIR`, and nothing runs the suite
+ * on macOS or Windows now (D42), so it's untested there.
  */
 export default function runTmp(): () => void {
   if (process.platform !== 'linux') return () => {}
