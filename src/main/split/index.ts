@@ -838,6 +838,11 @@ export function registerSplit(ctx: MainContext): void {
     const current = activeSplit(windowOf(c))
     if (current) closePane(current.tabId)
   })
+  // The whole split, as its row's × closes it (SV-19), from the command bar (CB-13).
+  actions.register('split.closeSplit', (c) => {
+    const current = activeSplit(windowOf(c))
+    if (current) void commands.run('split.close', { splitId: current.splitId })
+  })
   actions.register('split.flip', (c) => {
     const current = activeSplit(windowOf(c))
     if (current) void commands.run('split.flip', { splitId: current.splitId })

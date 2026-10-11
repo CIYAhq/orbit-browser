@@ -4,6 +4,7 @@
  * the previous documents, and a state change only rebuilds what changed.
  */
 import { ACTIONS, formatAccelerator, shortcutsFor } from '../../shared/actions'
+import { SETTINGS_ACTIONS } from '../../shared/commands/settings'
 import { isFolderId, isSplitId, isTabId } from '../../shared/ids'
 import { keymapVersion } from '../../shared/keymap'
 import { paneOrder } from '../../shared/split'
@@ -38,6 +39,11 @@ export const ARCHIVE_DOCS_MAX = 5000
 
 /** Actions the bar never lists (they open the bar itself). */
 const NOT_IN_BAR = new Set(['tab.new', 'url.edit'])
+/**
+ * Settings sections and common settings (CB-05, ST-02): the settings lane lists one action per
+ * section of its registry (src/renderer/src/settings/registry.ts) in SETTINGS_ACTIONS.
+ */
+const SETTINGS_IDS = new Set(['app.settings', ...SETTINGS_ACTIONS.map((a) => a.id)])
 /** Actions that work without a current tab even though their id says otherwise. */
 const NO_TAB_NEEDED = new Set([
   'tab.reopenClosed',
@@ -195,6 +201,7 @@ export class SourceCache {
         keywords: [a.category.toLowerCase(), ...(a.keywords ?? []).map((k) => k.toLowerCase())],
         initials: initials(titleLower),
         needsTab: actionNeedsTab(a.id, a.category),
+        ...(SETTINGS_IDS.has(a.id) ? { settings: true } : {}),
       }
     })
     return this.actionDocs

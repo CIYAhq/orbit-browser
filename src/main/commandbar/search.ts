@@ -100,6 +100,14 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
     return input
   }
 
+  // The catalogue's Archive Tabs Below (CB-13): what a Today tab's menu item does (TD-05), for the
+  // current tab, or the split it is in.
+  actions.register('tab.archiveBelow', (c) => {
+    const windowId = windowOf(c)
+    const tabId = windowId ? activeTabOf(store.state, windowId) : null
+    if (tabId) void commands.run('tabs.archiveBelow', { tabId }, { windowId })
+  })
+
   commands.register('search.query', async (args, c) => {
     const wantsClipboard = args.mode === 'new-tab' && !args.query.trim() && !args.actionsOnly && !args.siteSearchId
     const clip = wantsClipboard ? await clipboardUrl() : undefined

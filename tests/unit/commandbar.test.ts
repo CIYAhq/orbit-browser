@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { fieldMatch, INSIDE, initials, PREFIX, WORD } from '../../src/main/commandbar/match'
 import {
@@ -17,6 +19,7 @@ import { HistoryStore, hostOf, urlKeyOf } from '../../src/main/history/store'
 import { hideImportTabs, releaseImportTabs } from '../../src/main/import/unplaced'
 import { makeTab } from '../../src/main/tabs/model'
 import { mergeSuggestions, type SearchResult } from '../../src/shared/commands/commandbar'
+import { SETTINGS_ACTIONS } from '../../src/shared/commands/settings'
 import { createInitialState, DEFAULT_SITE_SEARCH } from '../../src/shared/defaults'
 import { fillSearchTemplate, parseInput, topResultUrl } from '../../src/shared/url'
 
@@ -534,6 +537,117 @@ describe('sources', () => {
     } finally {
       releaseImportTabs([unshown, reached])
     }
+  })
+})
+
+describe('the action catalogue (CB-13)', () => {
+  /**
+   * Each name the spec's catalogue gives an action whose feature Orbit has, and the action it finds
+   * first. The rest wait for the lanes that own them (FEATURES.md, CB-13's note).
+   */
+  const CATALOGUE: [string, string][] = [
+    // Tabs
+    ['Pin Tab', 'tab.togglePin'],
+    ['Unpin Tab', 'tab.togglePin'],
+    ['Pin to Work', 'tab.pinToSpace'],
+    ['Duplicate Tab', 'tab.duplicate'],
+    ['Close Tab', 'tab.close'],
+    ['Reopen Closed Tab', 'tab.reopenClosed'],
+    ['Rename Tab', 'tab.rename'],
+    ['Reset Tab', 'tab.resetToPinned'],
+    ['Move to Work', 'tab.moveToSpace'],
+    ['Favorite this tab', 'tab.favorite'],
+    ['Unfavorite Tab', 'tab.favorite'],
+    ['Copy URL', 'tab.copyUrl'],
+    ['Copy URL as Markdown', 'tab.copyUrlMarkdown'],
+    ['Copy URLs', 'tab.copyUrl'],
+    ['Paste URL as New Tab', 'tab.pasteAsNewTab'],
+    ['Archive Tabs Below', 'tab.archiveBelow'],
+    ['Clear Today tabs', 'tabs.clearToday'],
+    // Sidebar and window
+    ['Toggle Sidebar', 'sidebar.toggle'],
+    ['New Window', 'window.new'],
+    ['New Private Window', 'window.newPrivate'],
+    ['New Mini Window', 'window.newMini'],
+    ['Collapse Pinned', 'pinned.toggleCollapsed'],
+    ['Expand Pinned', 'pinned.toggleCollapsed'],
+    // Spaces and folders
+    ['New Space', 'space.new'],
+    ['Rename Space', 'space.rename'],
+    ['Change Theme', 'space.theme'],
+    ['New Folder', 'folder.new'],
+    // Split view
+    ['Add Split View', 'split.add'],
+    ['Add Right Split', 'split.addRight'],
+    ['Add Left Split', 'split.addLeft'],
+    ['Add Top Split', 'split.addAbove'],
+    ['Add Bottom Split', 'split.addBelow'],
+    ['Close Split', 'split.closeSplit'],
+    // Library and archive
+    ['Open Library', 'app.library'],
+    ['View Archive', 'app.archive'],
+    ['Clear Archive', 'archive.clear'],
+    ['View History', 'app.history'],
+    ['Downloads', 'app.downloads'],
+    // Page
+    ['Reload', 'nav.reload'],
+    ['Hard Reload', 'nav.hardReload'],
+    ['Find in Page', 'page.find'],
+    ['Zoom In', 'page.zoomIn'],
+    ['Zoom Out', 'page.zoomOut'],
+    ['Zoom Reset', 'page.zoomReset'],
+    ['Print', 'page.print'],
+    ['View Source', 'page.viewSource'],
+    ['Developer Tools', 'devtools.toggle'],
+    ['Site controls', 'site.controls'],
+    // Settings and help
+    ['Settings', 'app.settings'],
+    ['Shortcuts', 'settings.shortcuts'],
+    ['Keyboard Shortcuts', 'help.shortcuts'],
+    ['Link settings', 'settings.links'],
+    ['Site search settings', 'settings.siteSearch'],
+    ['Clear browsing data', 'settings.clearBrowsingData'],
+    ['Import', 'app.import'],
+    ['Set as default browser', 'settings.defaultBrowser'],
+    ['Check for updates', 'app.checkForUpdates'],
+    ["What's new", 'help.releaseNotes'],
+    ['Help', 'help.open'],
+  ]
+
+  it.each(CATALOGUE)('"%s" finds %s first, with its live shortcut', (name, id) => {
+    const docs = new SourceCache().actions(() => true, 'darwin')
+    const tabs = [tab('t-1', 'Current', 'https://cur.example/')]
+    const rows = rank(input(name, { actions: docs, activeTabId: 't-1', tabs })).results
+    const first = rows.find((r) => r.kind === 'action')
+    expect(first?.actionId).toBe(id)
+    const doc = docs.find((d) => d.id === id)
+    if (doc) expect(first?.shortcut).toBe(doc.shortcut)
+  })
+})
+
+describe('sources: Settings sections (CB-05)', () => {
+  /** The section ids the Settings window's registry finds (every `*.settings.tsx` default export). */
+  function registeredSections(): string[] {
+    const root = join(__dirname, '../../src/renderer/src')
+    return (readdirSync(root, { recursive: true }) as string[])
+      .filter((f) => f.endsWith('.settings.tsx'))
+      .map((f) => /export default \{\s*id: '([^']+)'/.exec(readFileSync(join(root, f), 'utf8'))?.[1] ?? f)
+      .sort()
+  }
+
+  it('every section in the Settings registry is a row of its own, labelled Settings', () => {
+    const sections = registeredSections()
+    expect(sections).toEqual(expect.arrayContaining(['advanced', 'general', 'links', 'privacy', 'shortcuts']))
+    const docs = new SourceCache().actions(() => true, 'darwin')
+    for (const section of sections) {
+      const def = SETTINGS_ACTIONS.find((a) => a.settings.section === section && !a.settings.item)
+      expect(def, `an action for the "${section}" section`).toBeDefined()
+      const r = rank(input((def as (typeof SETTINGS_ACTIONS)[number]).title, { actions: docs })).results
+      expect(r.find((x) => x.actionId === def?.id)).toMatchObject({ kind: 'action', label: 'Settings' })
+    }
+    // Other actions keep their own label.
+    const other = rank(input('new space', { actions: docs })).results.find((x) => x.actionId === 'space.new')
+    expect(other?.label).toBe('Action')
   })
 })
 

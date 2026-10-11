@@ -81,6 +81,8 @@ export interface ActionDoc {
   needsTab: boolean
   /** Target Space of a "Move to / Pin to [Space]" action (TB-11, PN-02, SP-22). */
   spaceId?: SpaceId
+  /** Opens a Settings section or setting (CB-05, ST-02): its row says Settings, not Action. */
+  settings?: boolean
 }
 
 /** Bar-only actions with a Space parameter; search.open carries them out. */
@@ -375,7 +377,7 @@ function actionRow(a: ActionDoc, score: number): SearchResult {
     id: a.spaceId ? `action:${a.id}:${a.spaceId}` : `action:${a.id}`,
     kind: 'action',
     title: a.title,
-    label: 'Action',
+    label: a.settings ? 'Settings' : 'Action',
     actionId: a.id,
     ...(a.spaceId ? { spaceId: a.spaceId } : {}),
     ...(a.shortcut ? { shortcut: a.shortcut } : {}),
@@ -609,7 +611,9 @@ export function rank(input: RankInput): SearchResponse {
         if (a.needsTab && !input.activeTabId) continue
         const m = actionMatch(ts, lower, a)
         if (m.score === 0) continue
-        actions.add({ r: actionRow(a, 150 + m.score), strong: m.strong, prio: 0 })
+        // Its whole title typed beats a longer title that starts with it (Close Split, Close Split Pane).
+        const exact = a.titleLower === ts.join(' ') ? 1 : 0
+        actions.add({ r: actionRow(a, 150 + m.score + exact), strong: m.strong, prio: 0 })
       }
     }
   }

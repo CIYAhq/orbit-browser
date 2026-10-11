@@ -174,3 +174,59 @@ test("[SV-21][SV-22][SV-23] a split's icon replaces its panes' favicons on its r
   await expect(tile(orbit).locator('.favicon')).toHaveCount(2)
   await expect.poll(async () => (await state(orbit.app)).splits[splitId]?.icon).toBeUndefined()
 })
+
+// ---- The action catalogue (CB-13) ----
+
+/** Opens the bar, types `text` and returns the top row once it is the action `title`. */
+async function actionRow(text: string, title: string): Promise<{ overlay: Page; top: ReturnType<Page['locator']> }> {
+  const overlay = await openBar()
+  await input(overlay).fill(text)
+  const top = rows(overlay).first()
+  await expect(top).toHaveAttribute('data-kind', 'action')
+  await expect(top.getByTestId('command-result-title')).toHaveText(title)
+  return { overlay, top }
+}
+
+test('[CB-13][TD-05][KS-18] Archive Tabs Below from the command bar archives the Today tabs under the current one; its key shows in its row', async () => {
+  const { app } = orbit
+  const a = await newTab('Oldest')
+  const b = await newTab('Middle')
+  const c = await newTab('Newest')
+  // Today lists the newest first: Newest, Middle, Oldest. From Middle, only Oldest is below.
+  await run(app, 'tabs.activate', { tabId: b })
+  await expect.poll(() => activeTabId(app)).toBe(b)
+  expect(await run(app, 'keys.bind', { actionId: 'tab.archiveBelow', accel: 'F7' })).toEqual({ ok: true })
+
+  const { overlay, top } = await actionRow('archive tabs below', 'Archive Tabs Below')
+  await expect(top.getByTestId('command-shortcut')).toHaveText('F7')
+  await overlay.keyboard.press('Enter')
+  await expect.poll(async () => (await state(app)).tabs[a]).toBeUndefined()
+  const tabs = (await state(app)).tabs
+  expect(tabs[b]).toBeDefined()
+  expect(tabs[c]).toBeDefined()
+  expect(await activeTabId(app)).toBe(b)
+})
+
+test('[CB-13][SV-19][SV-17] Close Split from the command bar closes the whole split; Close Split Pane only the focused pane', async () => {
+  const { app } = orbit
+  const a = await newTab('Left')
+  const b = await newTab('Right')
+  const c = await newTab('Third')
+  const first = (await run(app, 'split.create', { tabIds: [a, b, c], focus: c })) as string
+  expect(first).toBeTruthy()
+  await expect.poll(() => activeTabId(app)).toBe(c)
+
+  // Close Split Pane: the focused pane goes, the split stays with the other two.
+  const pane = await actionRow('close split pane', 'Close Split Pane')
+  await pane.overlay.keyboard.press('Enter')
+  await expect.poll(async () => (await state(app)).tabs[c]).toBeUndefined()
+  expect((await state(app)).splits[first]).toBeDefined()
+
+  // Close Split: the whole split, as its row's × closes it.
+  const whole = await actionRow('close split', 'Close Split')
+  await whole.overlay.keyboard.press('Enter')
+  await expect.poll(async () => Object.keys((await state(app)).splits)).toEqual([])
+  const tabs = (await state(app)).tabs
+  expect(tabs[a]).toBeUndefined()
+  expect(tabs[b]).toBeUndefined()
+})
