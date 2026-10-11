@@ -423,19 +423,31 @@ export function jumpRatio(points: { t: number; v: number }[], eps = 0.5): number
   return Math.max(...moves.map((s) => s.speed)) / average
 }
 
+/** One refresh interval at 60 Hz: speeds below are per such frame. */
+const FRAME_MS = 1000 / 60
+
 /**
- * FL-01's interruption check: how far a value moved in the frames just after an interruption
- * (recording time `at`) against how fast it moved just before. An animation that carries on from
- * where it was steps about as far as it was stepping; one that jumps (to its end state, or back to
- * its start) steps far more.
+ * FL-01's interruption check: how fast a value moves in the two frames from the one that shows an
+ * interruption handled (recording time `at`), against how fast it moved in the two frames before.
+ * Speeds, not steps: each step over its own frame time, given per 60 Hz frame, so a frame that came
+ * late (a step over two intervals) doesn't read as a jump. `at` is the first frame that shows the
+ * interruption handled: the closing element there, the state that turns it, the value turning. Not
+ * when main saw the input: frames drawn before the renderer had it still belong to the first motion.
+ * An animation that carries on from where it was moves about as fast as it was moving; one that
+ * jumps (to its end state, or back to its start) moves far faster.
  */
 export function interruption(points: { t: number; v: number }[], at: number): { before: number; after: number } {
   const valid = points.filter((p) => !Number.isNaN(p.v))
   const k = valid.findIndex((p) => p.t >= at)
   if (k < 2) return { before: Number.NaN, after: Number.NaN }
-  const step = (j: number) => Math.abs((valid[j]?.v ?? Number.NaN) - (valid[j - 1]?.v ?? Number.NaN))
-  const before = Math.max(step(k - 1), step(k - 2) || 0)
-  const after = Math.max(step(k), valid[k + 1] ? step(k + 1) : 0)
+  const speed = (j: number) => {
+    const a = valid[j - 1]
+    const b = valid[j]
+    if (!a || !b) return 0
+    return (Math.abs(b.v - a.v) / Math.max(b.t - a.t, 1)) * FRAME_MS
+  }
+  const before = Math.max(speed(k - 1), speed(k - 2))
+  const after = Math.max(speed(k), speed(k + 1))
   return { before, after }
 }
 
