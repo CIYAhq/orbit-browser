@@ -1,5 +1,6 @@
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { crc32, deflateSync } from 'node:zlib'
 import { type ElectronApplication, expect, type Frame, type Page, test } from '@playwright/test'
 import type { MediaTestHooks } from '../../src/main/media'
 import type { PlayerHost, PlayerInfo } from '../../src/main/media/player'
@@ -31,6 +32,32 @@ function wav(seconds: number, freq: number, rate = 8000): Buffer {
   for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(Math.sin((2 * Math.PI * freq * i) / rate) * 6000), 44 + i * 2)
   return buf
 }
+
+/** A square PNG of one colour. */
+function png(size: number, rgb: readonly [number, number, number]): Buffer {
+  const chunk = (type: string, data: Buffer) => {
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data])
+    const out = Buffer.alloc(8 + body.length)
+    out.writeUInt32BE(data.length, 0)
+    body.copy(out, 4)
+    out.writeUInt32BE(crc32(body), 4 + body.length)
+    return out
+  }
+  const head = Buffer.alloc(13)
+  head.writeUInt32BE(size, 0)
+  head.writeUInt32BE(size, 4)
+  head[8] = 8 // 8 bits per channel
+  head[9] = 2 // RGB
+  const row = Buffer.alloc(1 + size * 3)
+  for (let x = 0; x < size; x++) row.set(rgb, 1 + x * 3)
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', head),
+    chunk('IDAT', deflateSync(Buffer.concat(Array.from({ length: size }, () => row)))),
+    chunk('IEND', Buffer.alloc(0)),
+  ])
+}
+const ART_RGB = [208, 64, 120] as const
 
 const page = (title: string, body: string) => `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
 <style>body{font:16px system-ui;margin:0;padding:24px;background:#f4f0ff}</style></head><body>${body}</body></html>`
@@ -118,11 +145,12 @@ Promise.all([record(c.captureStream(25), types[0]), record(dest.stream, types[1]
 })
 </script>`
 
-const AUDIO = (session: boolean) => `
+/** With `art`, the Media Session names artwork (two sizes, as music sites give). */
+const AUDIO = (session: boolean, art = false) => `
 <audio id="a" src="/media/tone.wav?s=30&f=440" loop></audio>
 <script>
 const a = document.getElementById('a')
-${session ? "navigator.mediaSession.metadata = new MediaMetadata({ title: 'Track One', artist: 'Orbit Test' })" : ''}
+${session ? `navigator.mediaSession.metadata = new MediaMetadata({ title: 'Track One', artist: 'Orbit Test'${art ? ", artwork: [{ src: '/media/art.png?size=512', sizes: '512x512', type: 'image/png' }, { src: '/media/art.png?size=96', sizes: '96x96', type: 'image/png' }]" : ''} })` : ''}
 a.play().then(() => { document.body.dataset.state = 'playing' })
 </script>`
 
@@ -203,7 +231,13 @@ async function startMediaFixtures(): Promise<Fixtures> {
       res.end(buf)
       return
     }
-    if (parts[0] === 'media' && parts[1] === 'audio') return html(AUDIO(u.searchParams.has('session')))
+    if (u.pathname === '/media/art.png') {
+      res.writeHead(200, { 'content-type': 'image/png' })
+      res.end(png(Math.min(1024, Number(u.searchParams.get('size') ?? 96)), ART_RGB))
+      return
+    }
+    if (parts[0] === 'media' && parts[1] === 'audio')
+      return html(AUDIO(u.searchParams.has('session'), u.searchParams.has('art')))
     if (parts[0] === 'media' && parts[1] === 'playlist') return html(PLAYLIST)
     if (parts[0] === 'media' && parts[1] === 'video') return html(STREAM_VIDEO)
     if (parts[0] === 'media' && parts[1] === 'file-video') return html(FILE_VIDEO(u.searchParams.has('once')))
@@ -1077,6 +1111,32 @@ test('[MD-09] next moves the page on to its next track', async () => {
   await expect.poll(() => p.page.evaluate(() => document.body.dataset.track)).toBe('Track Two')
   await expect(ctl.getByTestId('media-title')).toHaveText('Track Two')
   expect(await paused(p.page, '#a')).toBe(false)
+})
+
+test("[MD-09] the controller shows the artwork the page's Media Session gives, else the site icon", async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const a = await openPlaying(app, '/media/audio/Art%20Song?session&art')
+  const b = await openPlaying(app, '/media/audio/Plain%20Song?session')
+  await leave(app)
+  const art = controller(orbit, a.id).getByTestId('media-artwork')
+  await expect(art).toBeVisible()
+  // Made small (48 px) and kept as data: the shell shows no web images.
+  const look = await art.evaluate((img: HTMLImageElement) => {
+    const c = document.createElement('canvas')
+    c.width = img.naturalWidth
+    c.height = img.naturalHeight
+    const g = c.getContext('2d') as CanvasRenderingContext2D
+    g.drawImage(img, 0, 0)
+    const [r, gr, b] = g.getImageData(c.width / 2, c.height / 2, 1, 1).data
+    return { scheme: img.src.slice(0, 15), width: img.naturalWidth, rgb: [r, gr, b] }
+  })
+  expect(look.scheme).toBe('data:image/png;')
+  expect(look.width).toBe(48)
+  for (const [i, v] of look.rgb.entries()) expect(Math.abs((v ?? 0) - (ART_RGB[i] ?? 0))).toBeLessThanOrEqual(3)
+  // No artwork: the site's icon.
+  await expect(controller(orbit, b.id)).toBeVisible()
+  await expect(controller(orbit, b.id).getByTestId('media-artwork')).toHaveCount(0)
 })
 
 // ---- Tab lifecycle (MD-12) ----

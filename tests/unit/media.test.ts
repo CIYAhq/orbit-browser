@@ -38,6 +38,7 @@ const snap = (over: Partial<AgentSnapshot> = {}): AgentSnapshot => ({
   time: null,
   title: '',
   artist: '',
+  artwork: '',
   seekable: true,
   ended: false,
   pipEnd: null,
@@ -353,6 +354,8 @@ describe('media in frames: reports from several documents of a tab (MD-01, MD-09
     expect(both?.video).toBe(true)
     // No track name where the video is: the page's own is used.
     expect(both?.title).toBe('Page song')
+    const art = combineSnapshots([snap(), snap({ score: 3, artwork: 'https://example.com/a.png' })])
+    expect(art?.artwork).toBe('https://example.com/a.png')
   })
 
   it('[MD-14] a call in a frame: microphone muted only when every document with one muted it', () => {
@@ -384,6 +387,9 @@ describe('media in frames: reports from several documents of a tab (MD-01, MD-09
     expect(r?.time).toEqual({ position: 0, duration: 30, rate: 1, paused: true, live: false, at: 5 })
     expect(r?.pipEnd).toBeNull()
     expect(r && 'extra' in r).toBe(false)
+    expect(parseSnapshot({ v: 1, artwork: 'javascript:alert(1)' })?.artwork).toBe('')
+    expect(parseSnapshot({ v: 1, artwork: 'file:///etc/passwd' })?.artwork).toBe('')
+    expect(parseSnapshot({ v: 1, artwork: 'https://example.com/a.png' })?.artwork).toBe('https://example.com/a.png')
     expect(parseSnapshot(snap({ pipEnd: { n: 4, reason: 'ended' } }))?.pipEnd).toEqual({ n: 4, reason: 'ended' })
   })
 })

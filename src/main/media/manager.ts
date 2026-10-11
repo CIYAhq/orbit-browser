@@ -40,6 +40,7 @@ import type { OrbitState, TabId, TabMedia, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import { displayedTabs } from '../tabs/model'
 import { AGENT_SOURCE, frameAgentSource, MEDIA_WORLD } from './agent'
+import { loadArtwork } from './artwork'
 import { PipPlayer } from './player'
 
 /** One document's page script: the tab's own page, or one of its frames. */
@@ -93,6 +94,8 @@ const PAGE_HANDLE = 'window.__orbitMedia'
 const FRAME_HANDLE = `window[${JSON.stringify(FRAME_KEY)}]`
 /** A frame that doesn't answer in this long has gone, or is stuck. */
 const FRAME_CALL_MS = 5000
+/** Loaded artwork kept for this many images. */
+const MAX_ARTWORK = 64
 
 const call = (handle: string, fn: string, args: unknown[]) =>
   `${handle} ? ${handle}.${fn}(${args.map((a) => JSON.stringify(a ?? null)).join(', ')}) : null`
@@ -128,6 +131,9 @@ export class MediaManager {
   private chains = new Map<TabId, Chain>()
   /** Tabs on screen in any window at the last state change. */
   private shown = new Set<TabId>()
+  /** The artwork each tab's page names (profile and URL), and the images loaded for those (MD-09). */
+  private artWanted = new Map<TabId, string>()
+  private artLoaded = new Map<string, string>()
   /** Last menu template (tests read it instead of a native popup). */
   lastMenu: MenuItemConstructorOptions[] = []
   readonly player: PipPlayer
@@ -344,6 +350,7 @@ export class MediaManager {
     if (t) for (const a of this.agentsOf(t)) a.leave()
     this.tabs.delete(tabId)
     this.chains.delete(tabId)
+    this.artWanted.delete(tabId)
     this.ctx.store.update((d) => {
       const tab = d.tabs[tabId]
       if (tab?.media) delete tab.media
@@ -426,8 +433,11 @@ export class MediaManager {
     }
     // A video plays somewhere: get the player ready, so leaving its tab shows it at once (MD-01).
     if (snap.video) this.player.prewarm()
+    const artwork = this.artwork(tabId, t, snap.artwork)
     this.patch(tabId, (prev) => {
       const next = mediaFromSnapshot(prev, snap)
+      if (artwork) next.artwork = artwork
+      else delete next.artwork
       // Keep the "opened automatically" mark while the same picture-in-picture lasts.
       if (next.pip && prev?.autoPip) next.autoPip = true
       // Orbit's player decides whether it shows this tab (the page's report may lag behind).
@@ -441,6 +451,32 @@ export class MediaManager {
       }
       return next
     })
+  }
+
+  /**
+   * The artwork image for the page's Media Session artwork, once loaded (the site icon shows until
+   * then, and when it can't be loaded). A tab's own profile loads it, so private pages stay private.
+   */
+  private artwork(tabId: TabId, t: TabAgents, url: string): string | undefined {
+    if (!url) {
+      this.artWanted.delete(tabId)
+      return undefined
+    }
+    const key = `${this.ctx.store.state.tabs[tabId]?.profileId ?? ''} ${url}`
+    const loaded = this.artLoaded.get(key)
+    if (loaded !== undefined || this.artWanted.get(tabId) === key) {
+      this.artWanted.set(tabId, key)
+      return loaded || undefined
+    }
+    if (t.contents.isDestroyed()) return undefined
+    this.artWanted.set(tabId, key)
+    void loadArtwork(t.contents.session, url).then((image) => {
+      if (this.artLoaded.size >= MAX_ARTWORK) this.artLoaded.delete(this.artLoaded.keys().next().value as string)
+      this.artLoaded.set(key, image ?? '')
+      const now = this.tabs.get(tabId)
+      if (image && now && this.artWanted.get(tabId) === key) this.update(tabId, now)
+    })
+    return undefined
   }
 
   /** Updates a tab's media record and settles its tray membership; writes only real changes. */

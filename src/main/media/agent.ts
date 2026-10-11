@@ -202,11 +202,13 @@ const agentScript = (handle: string, define: string) => `(() => {
     }
     let title = ''
     let artist = ''
+    let artwork = ''
     try {
       const md = navigator.mediaSession && navigator.mediaSession.metadata
       if (md) {
         title = String(md.title || '').slice(0, 200)
         artist = String(md.artist || '').slice(0, 200)
+        artwork = pickArtwork(md.artwork)
       }
     } catch {}
     const tracks = localTracks()
@@ -227,6 +229,7 @@ const agentScript = (handle: string, define: string) => `(() => {
       resumable: pausedByOrbit.some((x) => x.isConnected),
       title,
       artist,
+      artwork,
       seekable: !!(m && seekable(m)),
       ended: !!(m && m.ended),
       time: timeOf(m),
@@ -236,6 +239,24 @@ const agentScript = (handle: string, define: string) => `(() => {
       camera: cams.length > 0,
       cameraOff: cams.length > 0 && cams.every((t) => !t.enabled),
     }
+  }
+
+  // The Media Session's artwork for the sidebar controller (MD-09): the smallest image of at
+  // least 64 px, else the largest; web and data: images only.
+  function pickArtwork(list) {
+    let best = ''
+    let bestRank = -1
+    for (const a of list || []) {
+      const src = String((a && a.src) || '')
+      if (!/^(https?:|data:image\\/)/.test(src) || src.length > 8192) continue
+      const size = Math.max(0, ...String(a.sizes || '').split(/\\s+/).map((s) => parseInt(s, 10) || 0))
+      const rank = size >= 64 ? 1e5 - size : size
+      if (rank > bestRank) {
+        best = src
+        bestRank = rank
+      }
+    }
+    return best
   }
 
   function bump(now) {

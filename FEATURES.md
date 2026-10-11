@@ -4,11 +4,11 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 238 built (85 partial) · 330 tested · 0 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 239 built (84 partial) · 330 tested · 0 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
-| P0 | 174 | 141 | 168 |
+| P0 | 174 | 142 | 168 |
 | P1 | 219 | 82 | 145 |
 | P2 | 79 | 15 | 17 |
 
@@ -313,7 +313,7 @@ Spec: `spec/media.md`
 | MD-06 | Move, resize and zoom the floating player | P1 | 🟡 partial | ✅ e2e+unit | – | drag or two-finger hover-scroll moves it and it glides to the corner the release or fling heads for; corner drag resizes keeping the shape, at least 200 px wide (tall videos too) and at most half the screen width and the screen's height, with rubber-band resistance; Cmd/Ctrl+scroll or pinch zooms (crops) inside the window; corner and size remembered; doesn't yet move aside for Orbit's alerts and dialogs |
 | MD-07 | Ending picture-in-picture | P0 | ✅ | ✅ e2e | – | returning (select, double-click, Back to tab) ends it with the video playing in the page; x closes it and the media keeps playing in the sidebar controls; closing or unloading the tab stops media and player; navigating the tab or the video ending closes it, without replay |
 | MD-08 | Turning automatic picture-in-picture off | P0 | 🟡 partial | ✅ e2e+unit | – | player ... menu Turn Off for Today / Always Turn Off for This Site (also in the tray controller menu); global switch (settings.autoPip, Picture in Picture action); turning off keeps playback (sidebar controls); muted tabs never trigger; the site controls checkbox (SB-04) and Settings > Advanced (ST-10) belong to other lanes (media.setSitePip and the setting are ready) |
-| MD-09 | Sidebar media controls for background audio | P0 | 🟡 partial | ✅ e2e+unit | – | controller above the bottom bar: favicon, Media Session title/artist or tab title (marquee), play/pause, next, previous where supported, x pauses and hides; click jumps to the tab (switching Space); quiet audio counts; hidden while its tab is selected; media in frames (embedded players, cross-site too) has the same controls; no artwork yet |
+| MD-09 | Sidebar media controls for background audio | P0 | ✅ | ✅ e2e+unit | – | controller above the bottom bar: the Media Session's artwork (loaded with the tab's session, kept small) or the favicon, Media Session title/artist or tab title (marquee), play/pause, next, previous where supported, x pauses and hides; click jumps to the tab (switching Space); quiet audio counts; hidden while its tab is selected; media in frames (embedded players, cross-site too) has the same controls |
 | MD-10 | Several players: the media tray | P1 | ✅ | ✅ e2e+unit | – | one controller per background tab, newest first, appears and disappears by itself, works across windows; a video's controller has Picture in Picture (Back to PiP): the player grows out of the controller while the controller gives way |
 | MD-11 | Audio and recording indicators, mute | P0 | 🟡 partial | ✅ e2e | – | pulsing camera/microphone indicator on tab rows (tracks the page shows); per-pane Mute/Unmute in the split row's menu (split lane's menu, tested here: only that pane goes silent); no screen-share indicator; no switcher indicators (TB-05 has no overlay yet) |
 | MD-12 | Media and the tab lifecycle | P0 | ✅ | ✅ e2e+unit | – | playing (muted too), PiP and camera/mic tabs never sleep, auto-archive, Clear or Archive Below; closing stops media, PiP and controller; isAnyMediaPlaying() is ready for the updates lane |

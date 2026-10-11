@@ -29,6 +29,8 @@ export interface AgentSnapshot {
   pipCandidate: boolean
   title: string
   artist: string
+  /** The Media Session's artwork (a web or data: image URL), '' when none (MD-09). */
+  artwork: string
   /** The main media has a finite length. */
   seekable: boolean
   /** The main media played to its end. */
@@ -194,6 +196,10 @@ export function parseSnapshot(raw: unknown): AgentSnapshot | null {
     pipCandidate: yes('pipCandidate'),
     title: text(r.title),
     artist: text(r.artist),
+    artwork:
+      typeof r.artwork === 'string' && r.artwork.length <= 8192 && /^(https?:|data:image\/)/.test(r.artwork)
+        ? r.artwork
+        : '',
     seekable: yes('seekable'),
     ended: yes('ended'),
     time: t
@@ -236,7 +242,7 @@ export function combineSnapshots(parts: readonly AgentSnapshot[]): AgentSnapshot
   const mics = parts.filter((p) => p.mic)
   const cameras = parts.filter((p) => p.camera)
   const held = parts.find((p) => p.player)
-  const named = main.title ? main : (parts.find((p) => p.title) ?? main)
+  const named = main.title || main.artwork ? main : (parts.find((p) => p.title || p.artwork) ?? main)
   return {
     v: parts.reduce((sum, p) => sum + p.v, 0),
     playing: any('playing'),
@@ -249,6 +255,7 @@ export function combineSnapshots(parts: readonly AgentSnapshot[]): AgentSnapshot
     pipCandidate: any('pipCandidate'),
     title: named.title,
     artist: named.artist,
+    artwork: named.artwork,
     seekable: main.seekable,
     ended: main.ended,
     time: main.time,

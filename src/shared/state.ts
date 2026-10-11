@@ -103,6 +103,8 @@ export interface TabMedia {
   /** Track details from the page's Media Session, when it sets them. */
   title?: string
   artist?: string
+  /** The Media Session's artwork, as a small data: image (MD-09). */
+  artwork?: string
   /** The main media has a known length: seeking, next and previous work. */
   seekable: boolean
   /** The main media played to its end. */

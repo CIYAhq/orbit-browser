@@ -50,6 +50,15 @@
   background: var(--hover);
 }
 
+/* The page's own artwork (Media Session), filling the icon's box. */
+.media-ctl__art {
+  display: block;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
 .media-ctl__emoji {
   font-size: 14px;
   line-height: 1;
