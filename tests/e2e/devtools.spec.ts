@@ -646,12 +646,13 @@ test('[DT-14] ⇧⌘R reloads bypassing the cache, and brings back a crashed tab
   expect(docs()[2]).toMatchObject({ cacheControl: 'no-cache', pragma: 'no-cache' })
   expect(assets()[1]).toMatchObject({ cacheControl: 'no-cache', pragma: 'no-cache' })
   expect(await actionsRun()).toEqual(['nav.reload', 'nav.hardReload'])
-  // A crashed tab: the window keeps the keyboard, and ⇧⌘R brings the page back.
+  // A crashed tab: the window keeps the keyboard (its crash screen has it, NV-14), and ⇧⌘R brings
+  // the page back.
   await orbit.app.evaluate((_e, id) => {
     ;(globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id)?.forcefullyCrashRenderer()
   }, tabId)
   await expect.poll(async () => (await state(orbit.app)).tabs[tabId]?.error?.code).toBe(-1000)
-  await expect.poll(focusedUrl).toContain('view=shell')
+  await expect.poll(focusedUrl).toContain('view=screen')
   await press('focused', 'Shift+Mod+R')
   await expect.poll(() => inPage(tabId, 'document.title')).toBe('Cached')
   expect(docs()[3]).toMatchObject({ cacheControl: 'no-cache' })

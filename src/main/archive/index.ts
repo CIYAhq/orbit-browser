@@ -145,8 +145,8 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
   ctx.actions.register('app.archive', (c) => openLibrary(c, { section: 'archive' }))
   // The menu and the command bar ask in the Library before anything goes (AR-07).
   ctx.actions.register('archive.clear', (c) => openLibrary(c, { section: 'archive', confirmClear: true }))
-  // ⌘Y / Ctrl+H, Archive → View History and the command bar (AR-10).
-  ctx.actions.register('app.history', (c) => openLibrary(c, { section: 'history' }))
+  // ⌘Y / Ctrl+H, Archive → View History and the command bar show History in a tab (AR-10, pages
+  // lane: src/main/pages/history.ts); the Library keeps its History section.
   // Help → Restore Data… and the command bar: the backups to choose from (AR-11).
   ctx.actions.register('app.restoreData', (c) => openLibrary(c, { section: 'backups' }))
 

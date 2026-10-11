@@ -28,7 +28,6 @@ test.afterEach(async () => {
 })
 
 const DAY = 86_400_000
-const HISTORY_KEY = process.platform === 'darwin' ? 'Meta+Y' : 'Control+H'
 
 /** Chooses a one-profile browser, keeps only History, and imports it into `profileId` (default: the current Space's). */
 async function importHistory(app: ElectronApplication, sourceId: string, profileId?: string): Promise<Page> {
@@ -79,8 +78,8 @@ test('[IM-07][IM-03][IM-15] Chrome’s history goes into History and the command
   expect(await pagesLoaded(app)).toEqual([])
   await clickDone(page)
 
-  // History (⌘Y, Ctrl+H) lists them, newest first.
-  await shell.keyboard.press(HISTORY_KEY)
+  // History lists them, newest first: the Library's section (⌘Y shows the same list in a tab, AR-10).
+  await run(app, 'library.open', { section: 'history' })
   const library = await libraryPage(app)
   await expect
     .poll(async () => (await library.getByTestId('history-row-title').allTextContents()).slice(0, 4))

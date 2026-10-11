@@ -128,7 +128,7 @@ export function showPageContextMenu(ctx: MainContext, tabId: TabId, contents: We
       },
       { label: 'Reload', click: () => contents.reload() },
       { type: 'separator' },
-      ...pageItems(ctx, tabId, contents),
+      ...pageItems(contents),
       { type: 'separator' },
       { label: 'Copy Page URL', click: () => clipboard.writeText(contents.getURL()) },
       { type: 'separator' },

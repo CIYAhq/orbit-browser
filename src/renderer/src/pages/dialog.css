@@ -1,0 +1,174 @@
+/*
+ * A page's dialog (NV-24): a card at the top of that page's area, in a transparent view over the
+ * page only. A light veil says the page waits for it; the rest of the window stays as it is.
+ */
+.page-dialog-view {
+  box-sizing: border-box;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  height: 100%;
+  padding: 16px 8px;
+  background: color-mix(in srgb, #000 8%, transparent);
+  font: 13px / 1.4 var(--font, system-ui, sans-serif);
+  color: var(--text, #1c1c1f);
+  cursor: default;
+  user-select: none;
+}
+
+.page-dialog {
+  --dialog-line: color-mix(in srgb, var(--text, #1c1c1f) 14%, transparent);
+  --dialog-fill: color-mix(in srgb, var(--text, #1c1c1f) 6%, transparent);
+  --dialog-fill-hover: color-mix(in srgb, var(--text, #1c1c1f) 11%, transparent);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(420px, 100%);
+  max-height: 100%;
+  padding: 16px;
+  border-radius: 12px;
+  overflow: auto;
+  background: var(--surface, #fff);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.16),
+    0 12px 32px rgba(0, 0, 0, 0.22),
+    0 2px 6px rgba(0, 0, 0, 0.08);
+  /* The popover timing (FL-25): a fade and 0.97 → 1 in 150 ms on the snappy curve, a frame along. */
+  animation: page-dialog-in 150ms var(--ease-snappy) var(--motion-lead);
+  transform-origin: 50% 0;
+}
+
+@keyframes page-dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(-4px);
+  }
+}
+
+/* Reduced motion (FL-28): the OS setting or Orbit's own, as the root's class (motion/reduced.ts). */
+.reduce-motion .page-dialog {
+  animation: none;
+}
+
+.page-dialog__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.page-dialog__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* An app's icon, as the OS gives it (NV-19). */
+.page-dialog__icon {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+}
+
+.page-dialog__message {
+  margin: 0;
+  max-height: 40vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.page-dialog__note {
+  margin: 0;
+  color: var(--text-muted, rgba(28, 28, 31, 0.56));
+  font-size: 12px;
+}
+
+.page-dialog__check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.page-dialog__check input {
+  flex: none;
+  margin: 1px 0 0;
+  accent-color: var(--accent, #5865d8);
+}
+
+.page-dialog__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.page-dialog__label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted, rgba(28, 28, 31, 0.56));
+}
+
+.page-dialog__field {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 8px;
+  outline: none;
+  background: var(--dialog-fill);
+  box-shadow: inset 0 0 0 1px var(--dialog-line);
+  color: var(--text, #1c1c1f);
+  font: inherit;
+  font-size: 13px;
+  user-select: text;
+}
+
+.page-dialog__field:focus {
+  box-shadow: inset 0 0 0 2px var(--accent, #5865d8);
+}
+
+.page-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.page-dialog__button {
+  min-height: 30px;
+  min-width: 72px;
+  padding: 5px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--dialog-fill);
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  transition: background var(--dur-fast, 120ms) ease;
+}
+
+.page-dialog__button:hover {
+  background: var(--dialog-fill-hover);
+}
+
+.page-dialog__button.is-primary {
+  background: var(--accent, #5865d8);
+  color: #fff;
+}
+
+.page-dialog__button.is-primary:hover {
+  background: color-mix(in srgb, var(--accent, #5865d8) 88%, #000);
+}
+
+.page-dialog__button:focus-visible {
+  outline: 2px solid var(--accent, #5865d8);
+  outline-offset: 1px;
+}
