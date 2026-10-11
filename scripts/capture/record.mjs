@@ -9,7 +9,7 @@
  *     [--fps 30] [--port 3380]
  *
  * --fps sets the recording's frame rate (60 to judge motion frame by frame). --port is where the fixture
- * server starts looking for a free port, so a capture can stay inside its own range.
+ * server starts looking for a free port, up to 9 above it, so a capture stays inside its own range.
  *
  * Scenarios live in scripts/capture/scenarios/<name>.mjs and export
  * `default async function (t)`; see helpers in `makeToolkit` below.
@@ -96,7 +96,7 @@ main{padding:40px;max-width:1100px}h1{font-size:40px;margin:8px 0 6px;letter-spa
   let port = PORT
   await new Promise((ok, fail) => {
     server.on('error', (err) =>
-      err.code === 'EADDRINUSE' && port < 3399 ? server.listen(++port, '127.0.0.1') : fail(err),
+      err.code === 'EADDRINUSE' && port < Math.min(PORT + 9, 3399) ? server.listen(++port, '127.0.0.1') : fail(err),
     )
     server.listen(port, '127.0.0.1', ok)
   })

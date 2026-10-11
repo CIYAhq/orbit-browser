@@ -4,8 +4,8 @@
  * bottom-right; the pointer over it shows its controls; selecting the tab again puts the video back in
  * the page, still playing; "Back to tab" plays the reverse motion.
  *
- * Each step prints a `[mark] <name> <ms>` line on stderr: its time from the start of the recording,
- * so frames around it can be cut from the clip.
+ * Each step prints a `[mark] <name> <ms>` line on stderr: its time since the scenario began.
+ * record.mjs begins it 0.7 s after the recording starts, so a step shows about 0.7 s later in the clip.
  */
 import { execFile } from 'node:child_process'
 
@@ -76,10 +76,12 @@ let notes = ''
 export async function setup(t) {
   const s = await t.state()
   const win = Object.values(s.windows).find((w) => w.kind === 'main')
-  await t.app.evaluate(
-    (_e, id) => globalThis.__orbit.ctx.windows.get(id)?.setBounds({ x: 0, y: 0, width: 1000, height: 640 }),
-    win.id,
-  )
+  // From a task of its own, as record.mjs resizes: the inspector runs an evaluate by interrupt, and Orbit's
+  // resize handler would run part-way through other main-process code.
+  await t.app.evaluate(async (_e, id) => {
+    await new Promise((r) => setImmediate(r))
+    globalThis.__orbit.ctx.windows.get(id)?.setBounds({ x: 0, y: 0, width: 1000, height: 640 })
+  }, win.id)
   await t.sleep(400)
   notes = await t.run('tabs.create', { url: t.fx.url('Notes'), spaceId: win.spaceId, activate: false })
   video = await t.run('tabs.create', { url: t.fx.url('Film club'), spaceId: win.spaceId, activate: false })

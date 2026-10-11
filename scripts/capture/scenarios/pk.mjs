@@ -4,8 +4,8 @@
  * ⌘Z brings it back; a short two-finger swipe down moves the card with the fingers and lets it spring
  * back, and a long one dismisses it; a last Peek expands into a full tab with ⌘O.
  *
- * Each step prints a `[mark] <name> <ms>` line on stderr: its time from the start of the recording,
- * so frames around it can be cut from the clip.
+ * Each step prints a `[mark] <name> <ms>` line on stderr: its time since the scenario began.
+ * record.mjs begins it 0.7 s after the recording starts, so a step shows about 0.7 s later in the clip.
  */
 import { execFile } from 'node:child_process'
 

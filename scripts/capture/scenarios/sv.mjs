@@ -1,10 +1,10 @@
 /**
- * Split view (SV-02, SV-11, SV-13, SV-17, SV-19, SV-26; FL-18), about 17 s, for the "feels right" sign-off (D48).
+ * Split view (SV-02, SV-03, SV-11, SV-13, SV-17, SV-19, SV-26; FL-18), about 17 s, for the "feels right" sign-off (D48).
  * A pane added beside the page grows in with the command bar to fill it; a second pane goes below;
  * the divider follows the pointer; the layout flips; panes close and the others grow back.
  *
- * Each step prints a `[mark] <name> <ms>` line on stderr: its time from the start of the recording,
- * so frames around it can be cut from the clip.
+ * Each step prints a `[mark] <name> <ms>` line on stderr: its time since the scenario began.
+ * record.mjs begins it 0.7 s after the recording starts, so a step shows about 0.7 s later in the clip.
  */
 
 let t0 = 0
@@ -37,13 +37,13 @@ export default async function (t) {
   t0 = performance.now()
   await t.sleep(600)
 
-  // SV-02, FL-18: a pane added on the right grows in; the page makes room with it, and an open tab fills it.
+  // SV-02, FL-18: ⌃⇧= adds a pane on the right; it grows in, the page makes room with it, and an open tab fills it.
   mark('add-right')
-  await t.action('split.addRight')
+  await t.action('split.add')
   await fill(t, 'metr')
   await t.sleep(1500)
 
-  // SV-02, SV-11: a third pane below the focused one.
+  // SV-03, SV-11: Add Split Below puts a third pane below the focused one.
   mark('add-below')
   await t.action('split.addBelow')
   await fill(t, 'stand')

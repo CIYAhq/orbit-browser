@@ -4,8 +4,8 @@
  * page into the main window, where its row slides into the sidebar; ⌘⌥N opens a blank one whose lookup
  * bar takes the keys typed at once; closing it fades it out.
  *
- * Each step prints a `[mark] <name> <ms>` line on stderr: its time from the start of the recording,
- * so frames around it can be cut from the clip.
+ * Each step prints a `[mark] <name> <ms>` line on stderr: its time since the scenario began.
+ * record.mjs begins it 0.7 s after the recording starts, so a step shows about 0.7 s later in the clip.
  */
 
 let t0 = 0
