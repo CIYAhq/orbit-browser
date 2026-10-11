@@ -14,6 +14,8 @@ async function boot(): Promise<void> {
   // Settings (settings lane): a window of its own, without the browser shell's code.
   if (isSettingsLaneView(window.orbit.view)) return bootSettingsLaneView()
   const view = window.orbit.view
+  // The import window (import lane, IM-01).
+  if (view === 'import') return (await import('./import/boot')).bootImport()
   // The floating player's controls (media lane): a small view of its own, without the app's shortcuts.
   if (view === 'pip') {
     const app = import('./pip/PipApp')

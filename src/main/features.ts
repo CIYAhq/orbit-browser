@@ -40,7 +40,7 @@ export function registerFeatures(ctx: MainContext): void {
   registerExtensions(ctx)
   registerDownloads(ctx)
   registerSettings(ctx)
-  registerImport(ctx)
+  registerImport(ctx, history)
   registerUpdates(ctx)
   // Last, so its guard on new tabs and windows goes before every other (Peek's, Mini Window's).
   registerInternalPages(ctx)

@@ -14,8 +14,10 @@ import {
 import { actionNeedsTab, SourceCache } from '../../src/main/commandbar/sources'
 import { parseSuggestions } from '../../src/main/commandbar/suggest'
 import { HistoryStore, hostOf, urlKeyOf } from '../../src/main/history/store'
+import { hideImportTabs, releaseImportTabs } from '../../src/main/import/unplaced'
+import { makeTab } from '../../src/main/tabs/model'
 import { mergeSuggestions, type SearchResult } from '../../src/shared/commands/commandbar'
-import { DEFAULT_SITE_SEARCH } from '../../src/shared/defaults'
+import { createInitialState, DEFAULT_SITE_SEARCH } from '../../src/shared/defaults'
 import { fillSearchTemplate, parseInput, topResultUrl } from '../../src/shared/url'
 
 const NOW = 1_800_000_000_000
@@ -420,6 +422,40 @@ describe('sources', () => {
     expect(docs.find((a) => a.id === 'tab.togglePin')?.shortcut).toBe('⌘D')
     expect(docs.some((a) => a.id === 'tab.new')).toBe(false)
     expect(docs.some((a) => a.id === 'window.newMini')).toBe(false)
+  })
+
+  it('[CB-05][IM-14] lists every open tab, a Peek’s floating one too, but not an import’s that no section shows yet (D65 (1))', () => {
+    const state = createInitialState(0)
+    const spaceId = state.spaceOrder[0] as string
+    const space = state.spaces[spaceId] as (typeof state.spaces)[string]
+    const add = (url: string) => {
+      const tab = makeTab({ spaceId, profileId: space.profileId, url }, NOW)
+      state.tabs[tab.id] = tab
+      return tab.id
+    }
+    const pinned = add('https://example.org/pinned')
+    space.pinned.push(pinned)
+    // In no section: a Peek's tab.
+    const floating = add('https://example.org/peek')
+    // Two of an import's, made out of sight: one the user reached anyway and put in Today (D65 (2)).
+    const unshown = add('https://example.com/page/1')
+    const reached = add('https://example.com/page/2')
+    space.today.push(reached)
+    hideImportTabs([unshown, reached])
+    try {
+      const cache = new SourceCache()
+      const listed = () =>
+        cache
+          .tabs(state)
+          .map((d) => d.id)
+          .sort()
+      expect(listed()).toEqual([pinned, floating, reached].sort())
+      // Shown whole, they're the user's: listed like any tab.
+      releaseImportTabs([unshown, reached])
+      expect(listed()).toEqual([pinned, floating, unshown, reached].sort())
+    } finally {
+      releaseImportTabs([unshown, reached])
+    }
   })
 })
 

@@ -78,9 +78,12 @@ test('[OB-02] a fresh install opens a usable browser window with nothing typed; 
   expect(remoteRequests(orbit.netLog).filter((url) => !SPELLCHECK_DICTIONARY.test(url))).toEqual([])
 })
 
+/** The import step (OB-03) looks for other browsers: in test runs, in no folder at all. */
+const NO_BROWSERS = { ORBIT_IMPORT_PLACES: '[]' }
+
 /** Starts Orbit as a first run that shows onboarding (test runs skip it unless asked). */
 function launchWithOnboarding(userData?: string): Promise<FirstRun> {
-  return launchFirstRun({ userData, env: { ORBIT_ONBOARDING: '1' } })
+  return launchFirstRun({ userData, env: { ORBIT_ONBOARDING: '1', ...NO_BROWSERS } })
 }
 
 /** The browser windows open (onboarding is not one). */
@@ -103,9 +106,9 @@ async function onboardingPage(app: ElectronApplication, step: string): Promise<P
   return page
 }
 
-/** Moves on with the step's own Continue button and waits for the next step. */
+/** Moves on with the step's own Continue button (the import step's "Do this later") and waits for the next step. */
 async function next(page: Page, to: string): Promise<void> {
-  await page.getByTestId('onboarding-next').click()
+  await page.getByTestId(to === 'theme' ? 'onboarding-import-later' : 'onboarding-next').click()
   await expect(page.getByTestId(`onboarding-step-${to}`)).toBeVisible()
 }
 
@@ -136,7 +139,7 @@ test('[OB-01][OB-04][OB-05][OB-07][OB-08][OB-09] a first run starts with onboard
   expect(await accountPrompts(page)).toEqual([])
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('onboarding-step-import')).toBeVisible()
-  await expect(page.getByTestId('onboarding-import-placeholder')).toBeVisible()
+  await expect(page.getByTestId('import-flow')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Bring your bookmarks along' })).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('onboarding-step-welcome')).toBeVisible()
@@ -342,7 +345,7 @@ test('[OB-01] an existing install never gets onboarding: its window comes back a
 })
 
 test('[OB-14] Reset Onboarding runs it again over the open window and keeps everything; browser keys rest meanwhile', async () => {
-  orbit = await launchFirstRun()
+  orbit = await launchFirstRun({ env: NO_BROWSERS })
   const { app } = orbit
   const shell = await viewPage(app, 'shell')
   await expect(shell.getByTestId('sidebar')).toBeVisible()

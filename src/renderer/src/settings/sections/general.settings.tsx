@@ -3,7 +3,7 @@ import { useState } from 'react'
 import type { DefaultBrowserStatus, SettingsCapabilities } from '../../../../shared/commands/settings'
 import { invoke } from '../../api'
 import { useOrbit } from '../../store'
-import { Button, type Option, Select, SettingGroup, SettingRow } from '../controls'
+import { Button, Checkbox, type Option, Select, SettingGroup, SettingRow } from '../controls'
 import { HOUR, withCurrent } from '../format'
 import { useMainValue } from '../hooks'
 import type { SettingsSection } from '../registry'
@@ -17,6 +17,31 @@ const MINI_WINDOW_ARCHIVE: Option<number>[] = [
   { value: 24 * HOUR, label: '24 hours' },
   { value: 0, label: 'Never' },
 ]
+
+/** Export pinned items as bookmarks (import lane, IM-17): a file any browser imports. */
+function ExportPinnedRow() {
+  const [today, setToday] = useState(false)
+  const [saved, setSaved] = useState<string | null>(null)
+  return (
+    <SettingRow
+      id="export-pinned"
+      label="Export pinned items as bookmarks"
+      description={
+        saved
+          ? `Saved to ${saved}`
+          : 'A bookmarks file any browser can import: each Space a folder, and the Favorites one more.'
+      }
+    >
+      <Checkbox checked={today} onChange={setToday} label="Include Today tabs" testId="export-today" />
+      <Button
+        testId="export-pinned"
+        onClick={() => void invoke('import.exportPinned', { includeToday: today }).then((path) => setSaved(path))}
+      >
+        Export…
+      </Button>
+    </SettingRow>
+  )
+}
 
 const readDefaultBrowser = () => invoke('settings.defaultBrowser', {})
 const readCapabilities = () => invoke('settings.capabilities', {})
@@ -69,7 +94,7 @@ function GeneralPage() {
         <UpdateSettingsRows />
       </SettingGroup>
       {capabilities?.importer && (
-        <SettingGroup title="Import">
+        <SettingGroup title="Import and export">
           <SettingRow
             id="import"
             label="Import bookmarks and data"
@@ -79,6 +104,7 @@ function GeneralPage() {
               Import…
             </Button>
           </SettingRow>
+          <ExportPinnedRow />
         </SettingGroup>
       )}
       <SettingGroup title="Mini Window">
@@ -106,5 +132,5 @@ export default {
   icon: SlidersHorizontal,
   order: 10,
   component: GeneralPage,
-  keywords: ['default browser', 'updates', 'check for updates', 'update feed', 'import', 'mini window'],
+  keywords: ['default browser', 'updates', 'check for updates', 'update feed', 'import', 'export', 'mini window'],
 } satisfies SettingsSection
