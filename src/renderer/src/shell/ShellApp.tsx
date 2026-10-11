@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react'
+import { OrbitMotionConfig } from '../motion'
 import { useWindow } from '../store'
 import { useShellTheme } from '../theme'
 import { ContentArea } from './ContentArea'
@@ -27,7 +28,10 @@ export function ShellApp() {
       <Sidebar win={win} />
       <ContentArea win={win} />
       {hidden && win.kind !== 'mini' && <SidebarEdge />}
-      <Toasts />
+      {/* Outside the sidebar's lists: the toasts' motion follows reduced motion here (FL-28). */}
+      <OrbitMotionConfig>
+        <Toasts />
+      </OrbitMotionConfig>
     </div>
   )
 }

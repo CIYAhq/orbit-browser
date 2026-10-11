@@ -24,7 +24,8 @@ const MAX_TOASTS = 3
 /**
  * FL-22's motion: in, a toast rises about 12 px, fades in and grows from 0.96 with the pop spring;
  * out, it fades and drops about 8 px (about 160 ms). A new toast pushes the older ones up with the
- * snappy spring. With reduced motion, motion keeps the fades and drops the moves (OrbitMotionConfig).
+ * snappy spring. With reduced motion, motion keeps the fades and drops the moves: ShellApp renders the
+ * toasts under OrbitMotionConfig (FL-28).
  */
 const ENTER = { opacity: 0, y: 12, scale: 0.96 }
 const SHOWN = { opacity: 1, y: 0, scale: 1, transition: { ...POP, opacity: tween('quick') } }

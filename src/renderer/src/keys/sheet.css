@@ -59,10 +59,9 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .ks-sheet {
-    animation: none;
-  }
+/* Reduced motion (FL-28): the OS setting or Orbit's own, as the root's class (motion/reduced.ts). */
+.reduce-motion .ks-sheet {
+  animation: none;
 }
 
 .ks-sheet__head {
