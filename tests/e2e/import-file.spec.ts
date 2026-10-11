@@ -28,6 +28,7 @@ import {
   startMainLag,
   tabsUnder,
 } from './import-support'
+import { tabsHook } from './tabs-support'
 
 /** Bookmarks from a file (IM-13, IM-05) and the import window's progress and summary (IM-14). */
 
@@ -445,9 +446,12 @@ test('[IM-13][IM-14] a quit part-way leaves nothing of the import, not even a ta
       )
     }
     // A tab of the import the user reached anyway (a test hook: nothing lists one, D65 (1)) and put in a split view with
-    // their second pinned tab: the quit takes it back too (D65 (2)), and the split goes with it.
+    // their second pinned tab: the quit takes it back too (D65 (2)), and the split goes with it. Main refuses it to a
+    // window (D66 (1)): with its guard off, the command stands for a route it doesn't guard.
     const placed = importedTabs(during)[0]?.id as string
+    await tabsHook(app, 'importGuard', false)
     const split = (await run(app, 'tabs.splitWith', { tabId: placed, target: mine[1], side: 'right' })) as string
+    await tabsHook(app, 'importGuard', true)
     expect(placesOf(await state(app), placed)).toEqual([`split ${split}`])
     await app.close()
     console.log(`[D62] quit with ${added.toLocaleString('en-US')} of 20,000 bookmarks made`)
