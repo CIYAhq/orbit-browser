@@ -224,6 +224,54 @@ test('[SV-22][TD-05] a split row in Today offers Archive Tabs Below: the items u
   expect(await clickShownMenu(app, 'Archive Tabs Below')).toBe(false)
 })
 
+test("[SV-21][FL-21] a split row is an item of the sidebar's tree with its own place in its list, so the rows around it count right (feel fix check N5)", async () => {
+  const { app, shell } = orbit
+  const below = await newTab('Below')
+  const a = await newTab('Alpha')
+  const b = await newTab('Bravo')
+  const splitId = (await run(app, 'split.create', { tabIds: [a, b] })) as string
+  const above = await newTab('Above')
+  const spaceId = (await state(app)).tabs[a]?.spaceId as string
+  await expect.poll(async () => (await state(app)).spaces[spaceId]?.today).toEqual([above, splitId, below])
+  const row = shell.locator(`[data-testid="split-row"][data-split-id="${splitId}"]`)
+  await expect(row.locator('.split-segment__title')).toHaveCount(2)
+  const titles = (await row.locator('.split-segment__title').allTextContents()).join(' | ')
+
+  // The tree as assistive technology gets it (as FL-21's own test reads it).
+  const cdp = await shell.context().newCDPSession(shell)
+  type AXNode = { role?: { value: string }; name?: { value: string }; backendDOMNodeId?: number }
+  const { nodes } = (await cdp.send('Accessibility.getFullAXTree')) as { nodes: AXNode[] }
+  const items = await Promise.all(
+    nodes
+      .filter((n) => n.role?.value === 'treeitem' && n.backendDOMNodeId)
+      .map(async (n) => {
+        const { node } = await cdp.send('DOM.describeNode', { backendNodeId: n.backendDOMNodeId as number })
+        const list = node.attributes ?? []
+        const attr = (name: string) => {
+          const i = list.indexOf(name)
+          return i >= 0 && i % 2 === 0 ? (list[i + 1] as string) : null
+        }
+        return {
+          id: attr('data-tab-id') ?? attr('data-split-id'),
+          name: n.name?.value ?? '',
+          level: attr('aria-level'),
+          pos: attr('aria-posinset'),
+          size: attr('aria-setsize'),
+        }
+      }),
+  )
+  await cdp.detach()
+  // Each place in Today is one item's: Above 1, the split 2, Below 3, of 3.
+  const today = items.filter((i) => [above, splitId, below].includes(i.id as string))
+  expect(today.map(({ id, pos, size, level }) => ({ id, pos, size, level }))).toEqual([
+    { id: above, pos: '1', size: '3', level: '1' },
+    { id: splitId, pos: '2', size: '3', level: '1' },
+    { id: below, pos: '3', size: '3', level: '1' },
+  ])
+  // It is called by its panes' titles, not by its close button.
+  expect(today[1]?.name).toBe(titles)
+})
+
 // ---- Pinned and Favorite splits (SV-23) ----
 
 test('[SV-23][PN-04] a pinned split resets as one: every pane goes back to its own pinned page, from its menu or a double-click on its Favorite tile', async () => {
