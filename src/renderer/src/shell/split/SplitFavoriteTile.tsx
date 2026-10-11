@@ -1,5 +1,5 @@
 import { motion } from 'motion/react'
-import { memo, useState } from 'react'
+import { memo, type Ref, useState } from 'react'
 import { invoke } from '../../api'
 import { POP, SNAPPY } from '../../motion'
 import { getOrbitState, useOrbit } from '../../store'
@@ -13,7 +13,14 @@ import { focusedPaneOf, lastFocusedPane, paneOrderKey } from './selectors'
  * behaving like the Favorites grid's tab tiles (press selects, drags like a tile, pops in).
  * Pressing it shows the split with the pane focused last.
  */
-export const SplitFavoriteTile = memo(function SplitFavoriteTile({ splitId }: { splitId: string }) {
+export const SplitFavoriteTile = memo(function SplitFavoriteTile({
+  splitId,
+  ref,
+}: {
+  splitId: string
+  /** The tile's element, for the grid's AnimatePresence (popLayout, FL-20). */
+  ref?: Ref<HTMLButtonElement>
+}) {
   const order = useOrbit((s) => paneOrderKey(s, splitId))
   const active = useOrbit((s) => focusedPaneOf(s, splitId) !== '')
   const title = useOrbit((s) => {
@@ -34,6 +41,7 @@ export const SplitFavoriteTile = memo(function SplitFavoriteTile({ splitId }: { 
   const panes = order.split(',')
   return (
     <motion.button
+      ref={ref}
       layout
       transition={SNAPPY}
       initial={instant ? false : { scale: 0.85, opacity: 0 }}

@@ -3,7 +3,18 @@
  * FL-29 budgets), measured frame by frame with the shared sampler (frames.ts).
  */
 import { expect, type Page, test } from '@playwright/test'
-import { type Frame, firstFrame, frameAfterWall, jumpRatio, mainInputs, note, pacing, record, series } from './frames'
+import {
+  type Frame,
+  firstFrame,
+  frameAfterWall,
+  jumpRatio,
+  mainInputs,
+  motionOf,
+  note,
+  pacing,
+  record,
+  series,
+} from './frames'
 import { type Fixtures, FRAME_SLACK, isMac, launchOrbit, type Orbit, run, startFixtures, state } from './helpers'
 import { floatingInfo, floatingPage, pageMouse, pressInPage } from './nav-support'
 import { newTab, row, settled, waitTab } from './tabs-support'
@@ -483,4 +494,75 @@ test('[FL-21][FL-29] the first showing of a 200-tab Space that is not next door 
   expect((shown?.t ?? Number.POSITIVE_INFINITY) - ms0).toBeLessThanOrEqual(100 * FRAME_SLACK + 50)
   expect((real?.t ?? Number.POSITIVE_INFINITY) - ms0).toBeLessThanOrEqual(350 * FRAME_SLACK + 50)
   expect(longest).toBeLessThan(50 * FRAME_SLACK + 50)
+})
+
+test('[FL-20] a new Favorite pops in from about 0.85 while the other tiles re-flow without a jump; a removed one shrinks and fades', async () => {
+  const { app, shell } = orbit
+  const tabs: string[] = []
+  for (let k = 0; k < 4; k++)
+    tabs.push((await run(app, 'tabs.create', { url: `about:blank#fav${k}`, activate: false })) as string)
+  for (const id of tabs.slice(0, 3)) await run(app, 'tabs.favorite', { tabId: id })
+  await expect(shell.getByTestId('favorite-tile')).toHaveCount(3)
+  /** Waits until the tiles stand still: the same boxes two frames apart. */
+  const tilesStill = () =>
+    expect
+      .poll(() =>
+        shell.evaluate(async () => {
+          const boxes = () =>
+            [...document.querySelectorAll('[data-testid="favorite-tile"]')]
+              .map((el) => {
+                const b = el.getBoundingClientRect()
+                return `${b.x},${b.y},${b.width},${b.height}`
+              })
+              .join(';')
+          const before = boxes()
+          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+          return before === boxes()
+        }),
+      )
+      .toBe(true)
+  await settled(shell)
+  await tilesStill()
+  const tiles = { selector: '[data-testid="favorite-tile"]', key: 'data-fav-id' }
+  const added = await record(shell, { tiles })
+  await run(app, 'tabs.favorite', { tabId: tabs[3] })
+  await expect(shell.getByTestId('favorite-tile')).toHaveCount(4)
+  const a = await added.until(700)
+  const fresh = tabs[3] as string
+  const end = a.frames.at(-1)?.lists.tiles?.[fresh]
+  const first = a.frames.find((f) => f.lists.tiles?.[fresh])?.lists.tiles?.[fresh]
+  if (!end || !first) throw new Error('the new tile never showed')
+  const peak = Math.max(...a.frames.map((f) => (f.lists.tiles?.[fresh]?.width ?? 0) / end.width))
+  const others = tabs
+    .slice(0, 3)
+    .flatMap((id) => [motionOf(series(a, 'tiles', (b) => b.x, id)), motionOf(series(a, 'tiles', (b) => b.width, id))])
+  const moving = others.filter((m) => m.travel > 2)
+  note('FL-20', 'new tile: first frame scale', first.width / end.width, '≈ 0.85', '×')
+  note('FL-20', 'new tile: largest scale', peak, '≤ 1.04 (pop spring)', '×')
+  note(
+    'FL-20',
+    'other tiles: largest step share',
+    Math.max(0, ...moving.map((m) => m.biggestStep)) * 100,
+    '< 60 %',
+    '%',
+  )
+  expect(first.width / end.width, 'the tile pops in from about 0.85').toBeLessThanOrEqual(0.9)
+  expect(peak, 'a small pop').toBeLessThanOrEqual(1.05)
+  if (FRAME_SLACK === 1)
+    for (const m of moving) expect(m.biggestStep, 'the other tiles re-flow with a spring').toBeLessThan(0.6)
+
+  await settled(shell)
+  await tilesStill()
+  const removed = await record(shell, { tiles })
+  await run(app, 'tabs.unfavorite', { tabId: tabs[0] })
+  await expect(shell.getByTestId('favorite-tile')).toHaveCount(3)
+  const rm = await removed.until(600)
+  const gone = tabs[0] as string
+  const size0 = rm.frames[0]?.lists.tiles?.[gone]?.width ?? 0
+  const leaving = rm.frames.map((f) => f.lists.tiles?.[gone]).filter((b) => !!b && b.opacity < 0.99)
+  const smallest = Math.min(...leaving.map((b) => (b?.width ?? 0) / size0))
+  note('FL-20', 'removed tile: frames fading', leaving.length, '≈ 150 ms of frames', 'frames')
+  note('FL-20', 'removed tile: smallest scale drawn', smallest, '≈ 0.85', '×')
+  expect(leaving.length, 'the removed tile fades out').toBeGreaterThanOrEqual(2)
+  expect(smallest, 'the removed tile shrinks to about 0.85 as it fades').toBeLessThanOrEqual(0.9)
 })

@@ -1,5 +1,5 @@
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
-import { forwardRef, memo, useMemo, useState } from 'react'
+import { forwardRef, memo, type Ref, useMemo, useState } from 'react'
 import { MAX_FAVORITES } from '../../../../shared/defaults'
 import { isSplitId, isTabId } from '../../../../shared/ids'
 import { isAwayFromPinned, tabTitle } from '../../../../shared/tabs'
@@ -74,7 +74,11 @@ export const Favorites = memo(
   }),
 )
 
-const FavoriteTile = memo(function FavoriteTile({ tabId }: { tabId: string }) {
+/**
+ * `ref` reaches the tile's element so the grid's AnimatePresence can take a leaving tile out of the
+ * flow at its size (popLayout): it shrinks and fades where it was while the grid closes up (FL-20).
+ */
+const FavoriteTile = memo(function FavoriteTile({ tabId, ref }: { tabId: string; ref?: Ref<HTMLButtonElement> }) {
   const tab = useOrbit((s) => s.tabs[tabId])
   const active = useOrbit((s) => activeTabId(s) === tabId)
   const hidden = useDrag((s) => !!s.hidden[tabId])
@@ -85,6 +89,7 @@ const FavoriteTile = memo(function FavoriteTile({ tabId }: { tabId: string }) {
   const title = tabTitle(tab)
   return (
     <motion.button
+      ref={ref}
       layout
       transition={TILE_SPRING}
       initial={instant ? false : { scale: 0.85, opacity: 0 }}
