@@ -8,6 +8,7 @@ import { note } from './frames'
 import {
   action,
   type Fixtures,
+  isMac,
   launchOrbit,
   MOD,
   type Orbit,
@@ -17,6 +18,7 @@ import {
   tabPage,
   viewPage,
 } from './helpers'
+import { pressInPage, toolsInfo, toolsPage } from './nav-support'
 import { screenPage, swipeInfo, swipeOverPage, waitNoScreen, waitScreen } from './pages-support'
 
 let fx: Fixtures
@@ -405,4 +407,266 @@ test("[FL-28][NV-02] with Orbit's Reduce Motion on, the swipe arrow fills and fa
   await reduceMotion(app)
   // On: forward to Two again, without.
   await check('One', 'Two', Array(8).fill(16), true)
+})
+
+// ---- A view put back in the window never shows its last frame first (NV-06, AR-02) ----
+
+/** A frame the page tools' page drew: the find bar's text and the zoom indicator's number in it, if any. */
+interface ToolsFrame {
+  /** When (ms since the epoch, as main counts it). */
+  at: number
+  find: string | null
+  zoom: string | null
+  /** Which zoom indicator element it drew (1, 2…), 0 for none. */
+  pill: number
+}
+
+/**
+ * Logs, in main, each time the page tools' view goes into or out of the first window: when (ms since
+ * the epoch, as their page counts it) and whether it is in. Returns a reader that stops it.
+ */
+async function watchToolsView(app: ElectronApplication): Promise<() => Promise<{ at: number; attached: boolean }[]>> {
+  await app.evaluate(() => {
+    type Orbit = {
+      windowIds: () => string[]
+      ctx: { windows: { get: (id: string) => Electron.BrowserWindow | undefined } }
+    }
+    const g = globalThis as unknown as {
+      __orbit: Orbit
+      __feelFixTools?: { log: { at: number; attached: boolean }[]; stop: () => void }
+    }
+    g.__feelFixTools?.stop()
+    const win = g.__orbit.ctx.windows.get(g.__orbit.windowIds()[0] as string)
+    if (!win) throw new Error('no window')
+    const log: { at: number; attached: boolean }[] = []
+    let attached = false
+    const host = win.contentView as unknown as Record<string, (...args: unknown[]) => unknown>
+    const undo = (['addChildView', 'removeChildView'] as const).map((name) => {
+      const original = host[name] as (...args: unknown[]) => unknown
+      host[name] = function (this: unknown, ...args: unknown[]) {
+        const result = original.apply(this, args)
+        const contents = (args[0] as Electron.WebContentsView | undefined)?.webContents
+        if (contents && !contents.isDestroyed() && contents.getURL().includes('view=tools')) {
+          const now = win.contentView.children.includes(args[0] as Electron.View)
+          if (now !== attached) log.push({ at: performance.timeOrigin + performance.now(), attached: now })
+          attached = now
+        }
+        return result
+      }
+      return () => {
+        host[name] = original
+      }
+    })
+    g.__feelFixTools = {
+      log,
+      stop: () => {
+        for (const fn of undo) fn()
+      },
+    }
+  })
+  return () =>
+    app.evaluate(() => {
+      const g = globalThis as unknown as {
+        __feelFixTools?: { log: { at: number; attached: boolean }[]; stop: () => void }
+      }
+      g.__feelFixTools?.stop()
+      const log = g.__feelFixTools?.log ?? []
+      g.__feelFixTools = undefined
+      return log
+    })
+}
+
+/** Records, in the page tools' page, what each frame it draws holds. Returns a reader. */
+async function recordTools(tools: Page): Promise<() => Promise<ToolsFrame[]>> {
+  await tools.evaluate(() => {
+    const frames: ToolsFrame[] = []
+    ;(window as unknown as { __feelFixFrames: ToolsFrame[] }).__feelFixFrames = frames
+    const ids = new WeakMap<Element, number>()
+    let next = 0
+    const tick = () => {
+      const input = document.querySelector<HTMLInputElement>('[data-testid="find-input"]')
+      const pill = document.querySelector('[data-testid="zoom-indicator"]')
+      if (pill && !ids.has(pill)) ids.set(pill, ++next)
+      frames.push({
+        at: performance.timeOrigin + performance.now(),
+        find: input ? input.value : null,
+        zoom: pill ? (pill.querySelector('[data-testid="zoom-percent"]')?.textContent ?? '') : null,
+        pill: pill ? (ids.get(pill) ?? 0) : 0,
+      })
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  })
+  return () => tools.evaluate(() => (window as unknown as { __feelFixFrames: ToolsFrame[] }).__feelFixFrames)
+}
+
+const drew = (f: ToolsFrame | undefined) =>
+  !f
+    ? 'nothing yet'
+    : f.find !== null
+      ? `the find bar ("${f.find}")`
+      : f.zoom !== null
+        ? `the zoom indicator (${f.zoom})`
+        : 'nothing'
+
+test('[NV-06][NV-05] the page tools leave the window drawn empty, so put back they never show the old find bar or zoom first; the zoom indicator changes its number in place', async () => {
+  const { app } = orbit
+  const mod = isMac ? 'meta' : 'control'
+  const tabId = await openTab('Tools')
+  await expect.poll(async () => (await state(app)).tabs[tabId]?.title).toBe('Tools')
+  const tools = await toolsPage(app)
+  await expect.poll(async () => ((await toolsInfo(app)) as { ready?: boolean }).ready, { timeout: 10_000 }).toBe(true)
+  const placements = await watchToolsView(app)
+  const frames = await recordTools(tools)
+  const lastFrame = async () =>
+    (await tools.evaluate(() => (window as unknown as { __feelFixFrames: ToolsFrame[] }).__feelFixFrames.at(-1))) as
+      | ToolsFrame
+      | undefined
+  const gone = async () => {
+    await expect.poll(async () => (await toolsInfo(app)).placed, { timeout: 8000 }).toBe(false)
+    // Out of the window (it may stay a moment, drawn empty): its page draws no more frames.
+    await expect
+      .poll(async () => {
+        const before = (await lastFrame())?.at
+        await new Promise((r) => setTimeout(r, 120))
+        return before === (await lastFrame())?.at
+      })
+      .toBe(true)
+  }
+  // The find bar, with a search, closed with Esc.
+  await pressInPage(app, '/page/Tools', 'F', [mod])
+  await expect(tools.getByTestId('find-input')).toBeFocused()
+  await tools.keyboard.type('page')
+  await expect(tools.getByTestId('find-count')).toHaveText(/^\d+\/\d+$/)
+  await tools.keyboard.press('Escape')
+  await gone()
+  // ⌘+ twice: the indicator comes, then its number changes.
+  const percent = tools.getByTestId('zoom-percent')
+  await pressInPage(app, '/page/Tools', '=', [mod])
+  await expect(percent).toHaveText('110%')
+  await expect.poll(async () => (await lastFrame())?.zoom).toBe('110%')
+  await pressInPage(app, '/page/Tools', '=', [mod])
+  await expect(percent).toHaveText('125%')
+  await expect.poll(async () => (await lastFrame())?.zoom).toBe('125%')
+  // It goes on its own; ⌘0 brings it back at 100%, and it goes again.
+  await gone()
+  await pressInPage(app, '/page/Tools', '0', [mod])
+  await expect(percent).toHaveText('100%')
+  await expect.poll(async () => (await lastFrame())?.zoom).toBe('100%')
+  await gone()
+
+  const log = await placements()
+  const drawn = await frames()
+  // Each time the view is put back, it shows what it last drew until it draws again.
+  const returns = log.filter((e) => e.attached && drawn.some((f) => f.at < e.at))
+  const shownFirst = returns.map((e) => drew(drawn.filter((f) => f.at < e.at).at(-1)))
+  console.info(`[feel] NV-06 the page tools put back in the window, before they draw again: ${shownFirst.join('; ')}`)
+  // While it shows, the indicator stays one element, in every frame from 110% to 125%.
+  const from = drawn.findIndex((f) => f.zoom === '110%')
+  const to = drawn.findIndex((f) => f.zoom === '125%')
+  const pills = [...new Set(drawn.slice(from, to + 1).map((f) => f.pill))]
+  console.info(
+    `[feel] NV-06 the zoom indicator from 110% to 125%: ${pills.length === 1 && pills[0] ? 'the same element in every frame' : `elements ${pills.join(', ')} (0: a frame without one)`}`,
+  )
+  expect(returns.length).toBeGreaterThanOrEqual(2)
+  expect({ shownFirst, pills: pills.length }).toEqual({ shownFirst: returns.map(() => 'nothing'), pills: 1 })
+  expect(pills[0]).toBeGreaterThan(0)
+})
+
+/** A frame the Library's page drew. */
+interface LibraryFrame {
+  at: number
+  visible: boolean
+  open: string
+  opacity: number
+  section: string
+  /** The sections whose entry in the list shows highlighted (its background, as drawn). */
+  marked: string[]
+}
+
+/** What the Library's page draws now (its next frame, if nothing changes first). */
+function libraryNow(): LibraryFrame | null {
+  const el = document.querySelector<HTMLElement>('[data-testid="library"]')
+  if (!el) return null
+  const alpha = (c: string) => {
+    if (c === 'transparent') return 0
+    const slash = /\/\s*([\d.]+)(%?)\s*\)$/.exec(c)
+    if (slash) return Number(slash[1]) / (slash[2] ? 100 : 1)
+    const parts = /\(([^)]*)\)/.exec(c)?.[1]?.split(',') ?? []
+    return parts.length === 4 ? Number(parts[3]) : 1
+  }
+  return {
+    at: performance.now(),
+    visible: document.visibilityState === 'visible',
+    open: el.dataset.open ?? '',
+    opacity: Number(getComputedStyle(el).opacity),
+    section: el.querySelector('[data-testid="library-section"]')?.getAttribute('data-section-id') ?? '',
+    marked: [...el.querySelectorAll('[data-testid="library-nav-item"]')]
+      .filter((b) => alpha(getComputedStyle(b).backgroundColor) > 0.02)
+      .map((b) => b.getAttribute('data-section-id') ?? ''),
+  }
+}
+
+test('[AR-02][FL-24][DL-10] the Library made ahead of its first open draws nothing until it opens, then only the section it opens on; a later open too', async () => {
+  const { app } = orbit
+  await run(app, 'archive.testSeed', { base: fx.url(''), count: 30, days: 3 })
+  // Nothing loading and nothing over the window: the view is made a few seconds after launch, hidden.
+  await expect
+    .poll(async () => ((await run(app, 'library.testInfo')) as { ready: boolean }).ready, { timeout: 20_000 })
+    .toBe(true)
+  let lib: Page | undefined
+  await expect
+    .poll(() => {
+      lib = app.windows().find((p) => p.url().includes('view=library'))
+      return !!lib
+    })
+    .toBe(true)
+  const page = lib as Page
+  await expect(page.getByTestId('library')).toHaveAttribute('data-open', 'false')
+  // What its first frame draws, before it hears what to show: nothing, with no section marked.
+  const idle = (await page.evaluate(`(${libraryNow.toString()})()`)) as LibraryFrame | null
+  await page.evaluate(`(() => {
+    const frames = []
+    window.__feelFixLibrary = frames
+    const now = ${libraryNow.toString()}
+    const tick = () => {
+      const f = now()
+      if (f) frames.push(f)
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  })()`)
+  const frames = () => page.evaluate('window.__feelFixLibrary') as Promise<LibraryFrame[]>
+  /** Opens the Library on `section` and returns the frames that showed it as anything else. */
+  const openOn = async (section: string) => {
+    await page.evaluate('window.__feelFixLibrary.length = 0')
+    await run(app, 'library.open', { section })
+    await expect(page.getByTestId('library')).toHaveAttribute('data-open', 'true')
+    await expect.poll(async () => (await frames()).some((f) => f.opacity >= 0.999), { timeout: 5000 }).toBe(true)
+    const drawn = await frames()
+    const first = drawn.find((f) => f.visible && f.opacity > 0.01)
+    console.info(
+      `[feel] AR-02 open on ${section}: ${drawn.length} frames; the first it shows in, ${first ? `${(first.at - (drawn[0]?.at ?? 0)).toFixed(0)} ms after the first: ${first.open === 'true' ? 'open' : 'closed'} on ${first.section}, ${first.marked.join(', ') || 'nothing'} marked, opacity ${first.opacity.toFixed(2)}` : 'none'}`,
+    )
+    return drawn
+      .filter((f) => f.visible && f.opacity > 0.01)
+      .filter((f) => f.open !== 'true' || f.section !== section || f.marked.some((id) => id !== section))
+      .map(
+        (f) =>
+          `${f.open === 'true' ? 'open' : 'closed'} on ${f.section}, ${f.marked.join(', ') || 'nothing'} marked, at ${f.opacity.toFixed(2)}`,
+      )
+  }
+  // The first open, on another section than the one it was made with (DL-10: Downloads after a download).
+  const firstOpen = await openOn('downloads')
+  await run(app, 'library.close', {})
+  await expect
+    .poll(async () => ((await run(app, 'library.testInfo')) as { visible: boolean }).visible, { timeout: 5000 })
+    .toBe(false)
+  // A later open, on the Archive.
+  const laterOpen = await openOn('archive')
+  expect({ idle: { opacity: idle?.opacity, marked: idle?.marked }, firstOpen, laterOpen }).toEqual({
+    idle: { opacity: 0, marked: [] },
+    firstOpen: [],
+    laterOpen: [],
+  })
 })

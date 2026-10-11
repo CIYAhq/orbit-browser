@@ -83,6 +83,8 @@ interface WindowRecord {
    */
   toolsReady: boolean
   toolsPrewarm?: ReturnType<typeof setTimeout>
+  /** The page tools are leaving the window once their page has drawn itself empty (hideTools). */
+  toolsLeaving?: { timer?: ReturnType<typeof setTimeout> }
   /**
    * A permission prompt over the active page's top-left corner while the sidebar is hidden (NV-15;
    * with the sidebar showing, the prompt is part of it). Started when first needed.
@@ -133,6 +135,8 @@ const OVERLAY_WARM_MAX_MS = 3000
 const HOLD_MS = 250
 /** The page tools' renderer starts this long after the window shows (NV-05: ⌘F finds the bar ready). */
 const TOOLS_PREWARM_MS = 1500
+/** The longest the page tools stay in the window after they hide, waiting for their page to draw itself empty (NV-06). */
+const TOOLS_LEAVE_MS = 250
 
 /** The floating sidebar's card sits this far from the window's edges (SB-12, SB-19). */
 export const FLOAT_INSET = 6
@@ -531,6 +535,8 @@ export class WindowManager {
       clearTimeout(rec.floatingDispose)
       clearTimeout(rec.buttonsTimer)
       clearTimeout(rec.toolsPrewarm)
+      clearTimeout(rec.toolsLeaving?.timer)
+      rec.toolsLeaving = undefined
       viewContents(rec.floating)?.close()
       viewContents(rec.tools)?.close()
       viewContents(rec.prompt)?.close()
@@ -774,6 +780,9 @@ export class WindowManager {
     const view = this.ensureTools(rec)
     view.setBounds(roundRect(bounds))
     rec.toolsShown = true
+    // Shown again while leaving: they stay, and draw what they show now.
+    clearTimeout(rec.toolsLeaving?.timer)
+    rec.toolsLeaving = undefined
     if (!rec.toolsReady) return false
     const parent = rec.win.contentView
     const children = parent.children
@@ -797,10 +806,12 @@ export class WindowManager {
   }
 
   /**
-   * Takes the page tools out of the window. The keyboard goes back to the page when they had it,
-   * or when nothing has it in the focused window (round 2 fix check, M3).
+   * Takes the page tools out of the window. The keyboard goes back to the page at once when they
+   * had it, or when nothing has it in the focused window (round 2 fix check, M3). With `drawn`, the
+   * view leaves once that settles (their page has drawn itself empty), TOOLS_LEAVE_MS at most: a view
+   * put back in the window shows the last frame it drew until it draws again (NV-06).
    */
-  hideTools(windowId: WindowId): void {
+  hideTools(windowId: WindowId, drawn?: Promise<unknown>): void {
     const rec = this.records.get(windowId)
     const view = rec?.tools
     if (!rec || !view || !rec.toolsShown) return
@@ -808,15 +819,33 @@ export class WindowManager {
     const contents = viewContents(view)
     const focused = webContents.getFocusedWebContents()
     if ((!focused || focused === contents) && !rec.overlayShown && rec.win.isFocused()) this.focusActiveTab(rec.id)
-    this.removeChild(rec, view)
+    clearTimeout(rec.toolsLeaving?.timer)
+    rec.toolsLeaving = undefined
+    if (!drawn) {
+      this.removeChild(rec, view)
+      return
+    }
+    const leaving: { timer?: ReturnType<typeof setTimeout> } = {}
+    const leave = () => {
+      if (rec.toolsLeaving !== leaving) return
+      clearTimeout(leaving.timer)
+      rec.toolsLeaving = undefined
+      if (rec.tools === view && !rec.toolsShown) this.removeChild(rec, view)
+    }
+    leaving.timer = setTimeout(leave, TOOLS_LEAVE_MS)
+    rec.toolsLeaving = leaving
+    void drawn.then(leave, leave)
   }
 
-  /** Test/debug view of a window's page tools; `ready`: their page has loaded. */
+  /**
+   * Test/debug view of a window's page tools; `ready`: their page has loaded; `placed`: they are in
+   * the window, shown (not on their way out).
+   */
   toolsInfo(windowId: WindowId): { exists: boolean; ready: boolean; placed: boolean; bounds?: Rect } {
     const rec = this.records.get(windowId)
     const view = rec?.tools
     if (!rec || !view || !viewContents(view)) return { exists: false, ready: false, placed: false }
-    const placed = rec.win.contentView.children.includes(view)
+    const placed = rec.toolsShown && rec.win.contentView.children.includes(view)
     return { exists: true, ready: rec.toolsReady, placed, bounds: view.getBounds() }
   }
 

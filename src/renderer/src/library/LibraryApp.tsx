@@ -139,7 +139,8 @@ export function LibraryApp() {
         <ul className="library__nav-list">
           {LIBRARY_SECTIONS.map((s) => {
             const Icon = s.icon
-            const active = s.id === section?.id
+            // Only the open Library marks its section: an open on another one would fade it from the old (DL-10).
+            const active = open && s.id === section?.id
             return (
               <li key={s.id}>
                 <button

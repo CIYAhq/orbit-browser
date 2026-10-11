@@ -63,6 +63,8 @@ export interface NavCommands {
   'pageTools.state': { args: Record<string, never>; result: { find: FindState; zoom: ZoomIndicator | null } }
   /** The pointer is over the page tools (the zoom indicator stays while it is). */
   'pageTools.hover': { args: { over: boolean }; result: void }
+  /** The page tools have drawn themselves empty for `away`: their view can leave the window (NV-06). */
+  'pageTools.drawn': { args: { away: number }; result: void }
   /** The find bar's text changed: highlight its matches in the active tab's page (NV-05). */
   'find.update': { args: { query: string }; result: void }
   /** Next (`forward`) or previous match (Enter, ⇧Enter, ⌘G, ⇧⌘G). */
