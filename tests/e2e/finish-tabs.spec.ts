@@ -29,8 +29,10 @@ import {
   activeId,
   closeOverlay,
   cmd,
+  liveTabs,
   menuFor,
   newTab,
+  type ResourceInfo,
   row,
   rowMenu,
   settled,
@@ -1852,4 +1854,154 @@ test('[FD-07][FL-12] a folder without an icon shows a folder in full colour, clo
   expect(fade.moving).toBeGreaterThanOrEqual(3)
   expect(both).toBeGreaterThanOrEqual(1)
   expect((fade.end ?? 0) - (fade.start ?? 0)).toBeLessThanOrEqual(250 * FRAME_SLACK)
+})
+
+// ---------- TB-16: limits in the background beyond the sleep timer ----------
+
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
+/** 1 GB, in KB as the system gives memory. */
+const GB = 1024 * 1024
+
+/** Keeps most of a core busy in a tab's page: 80 ms of work every 100 ms. */
+async function busyPage(urlPart: string): Promise<void> {
+  await (await tabPage(orbit.app, urlPart)).evaluate(() => {
+    setInterval(() => {
+      const end = performance.now() + 80
+      while (performance.now() < end) {}
+    }, 100)
+  })
+}
+
+test('[TB-16] a tab in the background that keeps a core busy is frozen after three passes of it, and carries on when shown; one on screen never is', async () => {
+  const { app } = orbit
+  const busy = await newTab(app, fx.url('/page/Busy'))
+  await waitTab(app, busy, '/page/Busy')
+  await busyPage('/page/Busy')
+  // Another site, so another process: the one on screen keeps a core busy too.
+  const front = await newTab(app, fx.url('/page/Front').replace('//localhost:', '//127.0.0.1:'))
+  await waitTab(app, front, '/page/Front')
+  await busyPage('/page/Front')
+  const pass = async () => {
+    await pause(1_000)
+    return tabsHook<ResourceInfo>(app, 'resources')
+  }
+  // The engine's reading is since the one before.
+  await tabsHook(app, 'resources')
+  let info = await pass()
+  expect(info.usage[busy]).toBeGreaterThanOrEqual(50)
+  // Not after one pass (the 10 s timer may have made one more).
+  expect(info.frozen).toEqual([])
+  for (let i = 0; i < 3 && !info.frozen.includes(busy); i++) info = await pass()
+  expect(info.frozen).toEqual([busy])
+  expect(info.usage[front]).toBeGreaterThanOrEqual(50)
+  // Under Playwright every page counts as on screen (its focus emulation), and the engine freezes
+  // no page on screen: here the page keeps running. Without Playwright it stops at once.
+  await cmd(app, 'tabs.activate', { tabId: busy })
+  await expect.poll(async () => (await tabsHook<ResourceInfo>(app, 'resources')).frozen.includes(busy)).toBe(false)
+})
+
+test('[TB-16] when the system is low on memory, tabs idle five minutes in the background sleep at once, whatever the timer', async () => {
+  const { app } = orbit
+  const a = await newTab(app, fx.url('/page/MemA'))
+  await waitTab(app, a, '/page/MemA')
+  const b = await newTab(app, fx.url('/page/MemB'))
+  await waitTab(app, b, '/page/MemB')
+  await tabsHook(app, 'clockAhead', 6 * 60_000)
+  // The timer is 30 minutes.
+  expect((await tabsHook<{ slept: string[] }>(app, 'maintenance')).slept).toEqual([])
+  const low = await tabsHook<ResourceInfo>(app, 'resources', { total: 8 * GB, available: 0.5 * GB })
+  expect(low.lowMemory).toBe(true)
+  expect((await state(app)).tabs[a]?.asleep).toBe(true)
+  expect(await liveTabs(app)).not.toContain(a)
+  // On screen: awake.
+  expect((await state(app)).tabs[b]?.asleep).toBeFalsy()
+  expect((await tabsHook<ResourceInfo>(app, 'resources', null)).lowMemory).toBe(false)
+})
+
+test('[TB-16] below 20 % on battery power: a heads-up that the battery saver is on, and tabs in the background sleep sooner; it lifts above 20 % or on charge', async () => {
+  const { app, shell } = orbit
+  const a = await newTab(app, fx.url('/page/BatA'))
+  await waitTab(app, a, '/page/BatA')
+  const b = await newTab(app, fx.url('/page/BatB'))
+  await waitTab(app, b, '/page/BatB')
+  await tabsHook(app, 'clockAhead', 8 * 60_000)
+  expect((await tabsHook<{ slept: string[] }>(app, 'maintenance')).slept).toEqual([])
+  /** The engine's battery, as the window's page reads it, changed. */
+  const battery = (level: number, charging: boolean) =>
+    shell.evaluate(
+      async ([l, c]) => {
+        const it = await (navigator as unknown as { getBattery: () => Promise<EventTarget> }).getBattery()
+        Object.defineProperty(it, 'level', { configurable: true, get: () => l })
+        Object.defineProperty(it, 'charging', { configurable: true, get: () => c })
+        it.dispatchEvent(new Event('levelchange'))
+      },
+      [level, charging] as const,
+    )
+  const saver = async () => (await tabsHook<ResourceInfo>(app, 'resources')).saver
+  const headsUp = shell.getByTestId('toast').filter({ hasText: 'Battery saver is on' })
+  await battery(0.15, false)
+  await expect(headsUp).toBeVisible()
+  expect(await saver()).toBe(true)
+  // A quarter of the 30-minute timer: the tab idle 8 minutes sleeps at once.
+  expect((await state(app)).tabs[a]?.asleep).toBe(true)
+  expect((await state(app)).tabs[b]?.asleep).toBeFalsy()
+  await battery(0.21, false)
+  await expect.poll(saver).toBe(false)
+  await battery(0.15, false)
+  await expect.poll(saver).toBe(true)
+  await battery(0.15, true)
+  await expect.poll(saver).toBe(false)
+})
+
+test('[TB-16] tabs put to sleep give their memory back; a sleeping tab costs under 5 MB', async () => {
+  const { app } = orbit
+  /** All of Orbit's processes, in KB: the middle of three readings. */
+  const memory = async () => {
+    const readings: number[] = []
+    for (let i = 0; i < 3; i++) {
+      await pause(300)
+      readings.push(
+        await app.evaluate(({ app }) => app.getAppMetrics().reduce((n, m) => n + m.memory.workingSetSize, 0)),
+      )
+    }
+    return readings.sort((x, y) => x - y)[1] as number
+  }
+  const processes = () => app.evaluate(({ app }) => app.getAppMetrics().length)
+  const stay = await newTab(app, fx.url('/page/Stay'))
+  await waitTab(app, stay, '/page/Stay')
+  // A tab loaded and put to sleep first: Orbit's own views a load brings (its loading indicator,
+  // its link pill) are made once, so they count before. Whatever was open sleeps too.
+  const first = await newTab(app, fx.url('/page/First'))
+  await waitTab(app, first, '/page/First')
+  await cmd(app, 'tabs.activate', { tabId: stay })
+  await tabsHook(app, 'clockAhead', 31 * 60_000)
+  await tabsHook(app, 'maintenance')
+  await expect.poll(async () => (await liveTabs(app)).length).toBe(1)
+  await pause(1_000)
+  const few = await processes()
+  const before = await memory()
+  const loaded: string[] = []
+  for (let i = 0; i < 10; i++) {
+    const id = await newTab(app, fx.url(`/page/Load${i}`))
+    await waitTab(app, id, `/page/Load${i}`)
+    loaded.push(id)
+  }
+  await cmd(app, 'tabs.activate', { tabId: stay })
+  const awake = await memory()
+  await tabsHook(app, 'clockAhead', 31 * 60_000)
+  expect((await tabsHook<{ slept: string[] }>(app, 'maintenance')).slept.sort()).toEqual([...loaded].sort())
+  // Their processes have gone (the engine may keep one spare).
+  await expect.poll(processes).toBeLessThanOrEqual(few + 1)
+  const slept = await memory()
+  // 40 more, asleep from the start: what a sleeping tab costs, its sidebar row included.
+  for (let i = 0; i < 40; i++) await newTab(app, fx.url(`/page/Never${i}`), { activate: false })
+  await pause(1_000)
+  const more = await memory()
+  const each = (more - slept) / 40 / 1024
+  const all = (more - before) / 50 / 1024
+  note('TB-16', '10 loaded tabs put to sleep: memory given back', (awake - slept) / 1024, 'it drops', 'MB')
+  note('TB-16', 'a sleeping tab, all processes, its sidebar row included (40 more asleep)', each, '< 5 MB', 'MB')
+  note('TB-16', '… the same over all 50, with what loading the 10 left behind', all, '< 5 MB', 'MB')
+  expect(awake - slept).toBeGreaterThan(10 * 1024)
+  expect(each).toBeLessThan(5)
 })

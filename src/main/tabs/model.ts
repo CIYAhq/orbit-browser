@@ -273,12 +273,37 @@ export function autoArchiveCandidates(state: OrbitState, now: number): ItemId[] 
 /** Favorites stay warm this many times longer than other tabs (FV-08). */
 export const FAVORITE_WARM_FACTOR = 4
 
+/** What makes tabs sleep sooner (TB-16): the system low on memory, the battery saver on. */
+export interface SleepPressure {
+  lowMemory?: boolean
+  saver?: boolean
+}
+
+/** On low memory, background tabs idle this long sleep, whatever the timer says (TB-16). */
+export const LOW_MEMORY_SLEEP_MS = 5 * 60_000
+
+/**
+ * How long a background tab stays loaded unused (TB-16): the timer (0 is Never). With the battery
+ * saver, a quarter of it, five minutes at least; on low memory, five minutes at most, Never too.
+ */
+export function sleepPeriod(timer: number, pressure: SleepPressure = {}): number {
+  let after = timer > 0 ? timer : 0
+  if (pressure.saver && after > 0) after = Math.min(after, Math.max(LOW_MEMORY_SLEEP_MS, Math.round(after / 4)))
+  if (pressure.lowMemory) after = after > 0 ? Math.min(after, LOW_MEMORY_SLEEP_MS) : LOW_MEMORY_SLEEP_MS
+  return after
+}
+
 /**
  * Awake tabs idle longer than the sleep period (TB-16). Never: tabs on screen or playing
  * audio. Favorites stay loaded for longer (FV-08).
  */
-export function sleepCandidates(state: OrbitState, now: number, awake: Iterable<TabId>): TabId[] {
-  const after = state.settings.sleepAfterMs
+export function sleepCandidates(
+  state: OrbitState,
+  now: number,
+  awake: Iterable<TabId>,
+  pressure?: SleepPressure,
+): TabId[] {
+  const after = sleepPeriod(state.settings.sleepAfterMs, pressure)
   if (!(after > 0)) return []
   const shown = displayedTabs(state)
   const out: TabId[] = []

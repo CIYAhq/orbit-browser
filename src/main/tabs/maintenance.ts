@@ -9,7 +9,7 @@ import { powerMonitor } from 'electron'
 import type { ItemId, OrbitState, TabId } from '../../shared/state'
 import { tabsInItem } from '../../shared/tree'
 import type { MainContext } from '../context'
-import { autoArchiveCandidates, displayedTabs, sleepCandidates } from './model'
+import { autoArchiveCandidates, displayedTabs, type SleepPressure, sleepCandidates } from './model'
 import type { TabOps } from './ops'
 
 export const MAINTENANCE_INTERVAL_MS = 60_000
@@ -26,6 +26,8 @@ export class TabMaintenance {
   private unsubscribe: (() => void) | undefined
   private shown = new Set<TabId>()
   private onResume = () => this.run()
+  /** Low memory or the battery saver: tabs sleep sooner (TB-16, resources.ts). */
+  pressure: () => SleepPressure = () => ({})
 
   constructor(
     private ctx: MainContext,
@@ -93,7 +95,7 @@ export class TabMaintenance {
       const tabIds = archived.flatMap((id) => tabsInItem(this.ctx.store.state, id))
       this.ops.closeTabs(tabIds, 'auto', { undoLabel: false, idle: true })
     }
-    const slept = sleepCandidates(this.ctx.store.state, now, this.ctx.tabs.liveTabIds()).filter(mayGo)
+    const slept = sleepCandidates(this.ctx.store.state, now, this.ctx.tabs.liveTabIds(), this.pressure()).filter(mayGo)
     for (const id of slept) if (!this.ops.sleepGuard?.(id)) this.ctx.tabs.sleep(id)
     return { archived, slept }
   }

@@ -23,7 +23,17 @@ type Hooks = {
     chooseRowMenu: (path: string, windowId?: string) => boolean
     toastView: (windowId?: string) => ToastViewInfo
     undo: () => string | undefined
+    resources: (memory?: { total: number; available: number } | null) => ResourceInfo
   }
+}
+
+/** A pass of the background limits (TB-16, `src/main/tabs/resources.ts`). */
+export interface ResourceInfo {
+  frozen: string[]
+  /** Each awake tab's process, in % of one core over the last pass. */
+  usage: Record<string, number>
+  lowMemory: boolean
+  saver: boolean
 }
 
 type Rect = { x: number; y: number; width: number; height: number }

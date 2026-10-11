@@ -37,6 +37,7 @@ import { TabMaintenance } from './maintenance'
 import { folderMenu, type MenuOps, tabMenu } from './menus'
 import { makeTab, numberedTarget, steppedTarget, todayInsertIndex } from './model'
 import { TabOps, type TabPage } from './ops'
+import { type MemoryInfo, type ResourceInfo, ResourceWatch } from './resources'
 import { type RowMenuInfo, registerRowMenus } from './row-menu'
 import { registerTabSwitcher } from './switcher'
 import { registerThemeUndo } from './theme-undo'
@@ -57,6 +58,8 @@ export interface TabTestHooks {
   toastView: (windowId?: WindowId) => ToastViewInfo
   undo: () => string | undefined
   recentlyClosed: () => string[]
+  /** Runs a pass of the background limits now (TB-16); `memory` stands in for the system's (null: the real one). */
+  resources: (memory?: MemoryInfo | null) => ResourceInfo
 }
 
 /** ⌘Z pressed in a page only undoes sidebar changes this recent (lane review FU-4). */
@@ -68,6 +71,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   /** Test runs move the maintenance clock ahead (clockAhead); otherwise it is the real one. */
   let ahead = 0
   const maintenance = new TabMaintenance(ctx, ops, () => Date.now() + ahead)
+  const resources = new ResourceWatch(ctx, ops, maintenance)
 
   const windowOf = (c: CallContext): WindowId | undefined => c.windowId ?? windows.focusedWindowId()
   /** Multi-selection per window, reported by the sidebar (TB-13). */
@@ -273,6 +277,9 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     tabId ? ops.reopen(tabId, windowOf(c)) : ops.reopenLast(windowOf(c)),
   )
   commands.register('tabs.favicon', ({ url }) => tabs.faviconFor(url) ?? null)
+  commands.register('tabs.battery', ({ level, charging }, c) => {
+    if (typeof level === 'number' && Number.isFinite(level)) resources.battery(level, charging === true, windowOf(c))
+  })
   commands.register('tabs.recentlyClosed', () =>
     [...ops.recentlyClosed]
       .reverse()
@@ -778,6 +785,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     for (const entry of d.archive) if (entry.favicon) delete entry.favicon
   })
   maintenance.start()
+  resources.start()
 
   if (ctx.e2e) {
     const hooks: TabTestHooks = {
@@ -792,6 +800,10 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
       toastView: (windowId) => toastView.info(windowId ?? windows.focusedWindowId() ?? windows.ids()[0] ?? ''),
       undo: () => ops.undo.undo(),
       recentlyClosed: () => ops.recentlyClosed.map((r) => r.tab.id),
+      resources: (memory) => {
+        if (memory !== undefined) resources.memory = memory
+        return resources.pass()
+      },
     }
     ;(globalThis as unknown as { __orbitTabs: TabTestHooks }).__orbitTabs = hooks
   }

@@ -107,6 +107,8 @@ export interface TabCommands {
   'tabs.focusSidebar': { args: Record<string, never>; result: void }
   /** Return keyboard focus to the selected tab's page (SB-22). */
   'tabs.focusPage': { args: Record<string, never>; result: void }
+  /** The battery as the window's page reads it: below 20 % on battery power, the battery saver (TB-16). */
+  'tabs.battery': { args: { level: number; charging: boolean }; result: void }
   'folders.create': {
     args: { container?: ContainerRef; index?: number; name?: string; items?: ItemId[] }
     result: FolderId
