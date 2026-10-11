@@ -29,7 +29,7 @@ import { TAB_MENU_KEYS, withKeyHints } from '../keys/menu-hints'
 import { printPage, savePage, viewSource } from '../pages/entry'
 import type { CallContext } from '../registry'
 import { tabSplitMenuItems } from '../split/menu'
-import { tabTweakMenuItems } from '../tweaks/menu'
+import { TWEAK_TAB_MENU_KEYS, tabTweakMenuItems } from '../tweaks/menu'
 import { TabMaintenance } from './maintenance'
 import { findMenuItem, folderMenu, type MenuOps, menuLabels, tabMenu } from './menus'
 import { makeTab, numberedTarget, steppedTarget, todayInsertIndex } from './model'
@@ -378,7 +378,8 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     const state = store.state
     const mo = menuOps(windowId)
     // Keys lane: an item that a key also does shows the key (KS-18).
-    const forTab = (tabId: TabId) => withKeyHints(tabMenu(state, tabId, selection, mo), TAB_MENU_KEYS)
+    const forTab = (tabId: TabId) =>
+      withKeyHints(tabMenu(state, tabId, selection, mo), [...TAB_MENU_KEYS, ...TWEAK_TAB_MENU_KEYS])
     const all = isFolderId(id) ? folderMenu(state, id, mo) : isTabId(id) ? forTab(id) : []
     // Private windows have no pinned tabs, Favorites, folders or other Spaces (NV-11, SB-25).
     const items = isTabId(id) && isPrivateTab(state, id) ? privateTabMenu(all) : all

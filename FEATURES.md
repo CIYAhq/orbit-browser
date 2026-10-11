@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 276 built (77 partial) · 356 tested · 74 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 277 built (79 partial) · 373 tested · 74 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 152 | 173 |
-| P1 | 219 | 107 | 162 |
-| P2 | 79 | 17 | 21 |
+| P1 | 219 | 108 | 176 |
+| P2 | 79 | 17 | 24 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -436,27 +436,27 @@ Spec: `spec/boosts.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| BO-01 | Create a site customization for the current site | P1 | – | – | – |  |
-| BO-02 | Editor panel: layout, live preview, close | P1 | – | – | – |  |
-| BO-03 | Colour wheel (theme tint) | P1 | – | – | – |  |
-| BO-04 | Invert lightness ("make this site dark") | P1 | – | – | – |  |
-| BO-05 | Advanced colour sliders | P2 | – | – | – |  |
-| BO-06 | Reset colours | P1 | – | – | – |  |
-| BO-07 | Font override presets | P1 | – | – | – |  |
-| BO-08 | Page size (zoom) control | P1 | – | – | – |  |
-| BO-09 | Text case control | P2 | – | – | – |  |
-| BO-10 | Hide-element mode | P1 | – | – | – |  |
-| BO-11 | Code editor: custom CSS and JavaScript per site | P1 | – | – | – |  |
+| BO-01 | Create a site customization for the current site | P1 | ✅ | ✅ e2e+unit | – | New Tweak… from the command bar (also "customize", "customization", "site style"), the sidebar's + menu, the site controls panel, a paintbrush in the address field (shown on hover, in the accent colour once the site has a Tweak on) and the tab's menu (Tweak this Site…); none bound to a key. Opens the editor over the page with a new Tweak named after the host; a second one adds a second Tweak. A one-screen intro the first time only. Internal pages, error pages and a Peek take none: the entries are greyed or gone, or say why. Nothing reloads |
+| BO-02 | Editor panel: layout, live preview, close | P1 | 🟡 partial | ✅ e2e | – | a small view of its own over the page's top-right corner, sized to the panel, draggable by its title and kept inside the page; the page around it stays live. Every change shows at once and is saved; Esc, the close button and Done close it and give the page the keyboard back; the site controls' › and Edit Tweak reopen it as it was. Another page of the site keeps it open; another site or tab closes it; it steps aside for a Peek or full screen. No request names the site. Controls so far: size (BO-08); the rest come with their rows |
+| BO-03 | Colour wheel (theme tint) | P1 | – | ✅ unit | – |  |
+| BO-04 | Invert lightness ("make this site dark") | P1 | – | ✅ unit | – |  |
+| BO-05 | Advanced colour sliders | P2 | – | ✅ unit | – |  |
+| BO-06 | Reset colours | P1 | – | ✅ unit | – |  |
+| BO-07 | Font override presets | P1 | – | ✅ unit | – |  |
+| BO-08 | Page size (zoom) control | P1 | – | ✅ e2e+unit | – |  |
+| BO-09 | Text case control | P2 | – | ✅ unit | – |  |
+| BO-10 | Hide-element mode | P1 | – | ✅ unit | – |  |
+| BO-11 | Code editor: custom CSS and JavaScript per site | P1 | – | ✅ unit | – |  |
 | BO-12 | Name, rename and reset all edits | P1 | – | – | – |  |
 | BO-13 | Shuffle (random style) | P2 | – | – | – |  |
-| BO-14 | Enable / disable a customization (per site) | P1 | – | – | – |  |
+| BO-14 | Enable / disable a customization (per site) | P1 | – | ✅ unit | – |  |
 | BO-15 | Manage all customizations (list view in the Library) | P1 | – | – | – |  |
-| BO-16 | Global on/off switch for all customizations | P1 | – | – | – |  |
-| BO-17 | Scope: which pages a customization applies to | P1 | – | – | – |  |
-| BO-18 | How customizations apply on page load (timing, safety) | P1 | – | – | – |  |
-| BO-19 | Use Space theme colours inside customization CSS | P2 | – | – | – |  |
+| BO-16 | Global on/off switch for all customizations | P1 | – | ✅ unit | – |  |
+| BO-17 | Scope: which pages a customization applies to | P1 | – | ✅ unit | – |  |
+| BO-18 | How customizations apply on page load (timing, safety) | P1 | 🟡 partial | ✅ e2e+unit | – | the page preload asks main for the site's sheets before the page's first paint (D40), so no frame shows the page without its Tweak (frame-capture test on a slow page's hard reload and first visit); main swaps in its own copies at document ready. Survives reloads, back and forward, a reopened tab, a woken tab and a restart. JavaScript runs from main once per load at document ready, main frame only, where allowed (its editor comes with BO-11); the Space colours come with BO-19 |
+| BO-19 | Use Space theme colours inside customization CSS | P2 | – | ✅ unit | – |  |
 | BO-20 | Sharing customizations and the customization gallery | P2 | – | – | – |  |
-| BO-21 | Customization commands in the command bar | P1 | – | – | – |  |
+| BO-21 | Customization commands in the command bar | P1 | – | ✅ e2e | – |  |
 | BO-22 | Legacy code-only customization builder | OOS | ⛔ out of scope | – | – | the spec leaves it out |
 
 ## Chrome extension support
