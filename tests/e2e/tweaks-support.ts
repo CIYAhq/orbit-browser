@@ -19,6 +19,8 @@ export interface TweakFixtures {
   seen: () => string[]
   /** From now on the home page (`/`) answers `ms` late, as a slow server does (0: at once). */
   slowHome: (ms: number) => void
+  /** From now on the home page (`/`) drops the connection unanswered, as a site that doesn't load does (false: answers). */
+  dropHome: (drop: boolean) => void
   close: () => Promise<void>
 }
 
@@ -81,7 +83,7 @@ const BLOCK_COLORS = ['#1f5fd6', '#18a058', '#c2410c', '#7c3aed']
  * - `/look/<name>`: text (`#text`), an icon (`#icon`), code (`#code`), a photo (`#photo`, a solid
  *   PHOTO square) and a field (`#field`): what the colour, font and case controls change or keep.
  * - `/`: a home page (`#title` "Home"), where the Library's Open Site goes (BO-15); `slowHome` makes
- *   it late, so its page asks for its sheets only then.
+ *   it late, so its page asks for its sheets only then, and `dropHome` drops it (no answer at all).
  * - `/cards/<name>`: a counting button (`#count`); a sidebar (`aside.sidebar`) with a widget
  *   (`#weather`) and two small stories; a feed (`main.feed`) with a promo link (`#promo`) and four
  *   stories (`article.story`); three links (`li.story`). Stories are padded: a point just inside one's
@@ -93,6 +95,7 @@ export async function startTweakFixtures(base = 3370): Promise<TweakFixtures> {
   const seen: string[] = []
   const loads = new Map<string, number>()
   let homeMs = 0
+  let homeDrops = false
   const server: Server = createServer((req, res) => {
     const u = new URL(req.url ?? '/', 'http://localhost')
     seen.push(`${req.headers.host ?? ''} ${req.method} ${u.pathname}${u.search}`)
@@ -203,6 +206,10 @@ ${u.searchParams.get('hidden') === '1' ? '<article class="story" hidden><h2>Stor
       return
     }
     if (u.pathname === '/') {
+      if (homeDrops) {
+        req.socket.destroy()
+        return
+      }
       const send = () => {
         res.writeHead(200, ok)
         res.end(`${head('Home', bg)}<body>${FIRST_FRAME}<h1 id="title">Home</h1></body></html>`)
@@ -225,6 +232,9 @@ ${u.searchParams.get('hidden') === '1' ? '<article class="story" hidden><h2>Stor
     seen: () => [...seen],
     slowHome: (ms) => {
       homeMs = ms
+    },
+    dropHome: (drop) => {
+      homeDrops = drop
     },
     close: () =>
       new Promise((resolve) => {

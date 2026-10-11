@@ -45,7 +45,10 @@ export interface TweakPages {
   tweakable(tabId: TabId): boolean
   /** The host of a tab's page, where tweakable. */
   hostOf(tabId: TabId): string | null
-  /** True once a tab shows a page Tweaks can change (now, or as its preload asks); false after `ms`. */
+  /**
+   * True once a tab shows a page Tweaks can change (now, or as its preload asks); false as soon as
+   * its page fails to load (an error page, a crash) or the tab goes, else after `ms`.
+   */
   whenTweakable(tabId: TabId, ms: number): Promise<boolean>
   /** Runs a Tweak's JavaScript in a tab's page now (BO-11's "Run now"); false where it may not run. */
   runNow(tabId: TabId, tweakId: string): boolean
@@ -294,15 +297,28 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
           resolve(true)
           return
         }
+        // The tab runtime marks a failed load on the tab (`error`), and clears it as a load starts.
+        const failed = (state: OrbitState) => {
+          const tab = state.tabs[tabId]
+          return !tab || !!tab.error
+        }
+        if (failed(store.state)) {
+          resolve(false)
+          return
+        }
         const finish = (ok: boolean) => {
           waiting.delete(check)
           clearTimeout(timer)
+          unsubscribe()
           resolve(ok)
         }
         const check = () => {
           if (recordOf(tabId)) finish(true)
         }
         const timer = setTimeout(() => finish(false), ms)
+        const unsubscribe = store.subscribe((next) => {
+          if (failed(next)) finish(false)
+        })
         waiting.add(check)
       }),
     runNow: (tabId, tweakId) => {

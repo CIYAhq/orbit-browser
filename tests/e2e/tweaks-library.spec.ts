@@ -27,6 +27,7 @@ test.afterAll(async () => {
 })
 test.afterEach(async () => {
   fx.slowHome(0)
+  fx.dropHome(false)
   await orbit?.app.close()
   orbit = undefined
 })
@@ -261,6 +262,37 @@ test('[BO-15] Edit and Open Site show the Tweak’s site: its tab in the Space w
   await waitEditor(app, true)
   expect(await editorInfo(app)).toMatchObject({ open: true, tweakId: calm, tabId: waiting })
   expect(await tabCount(app)).toBe(tabs)
+})
+
+test('[BO-15] Edit on a site that doesn’t load stops waiting as the load fails and says why; once the site loads, Edit opens the editor on it', async () => {
+  orbit = await launchOrbit({ args: HOST_ARGS })
+  const { app, shell } = orbit
+  const news = await openPage(app, '/page/News', 'news.lib.test')
+  const dark = await makeTweak(app, news.tabId, { name: 'Dark news', css: 'body { background: #123456 }' })
+  await cmd(app, 'tabs.close', { tabId: news.tabId })
+
+  // The site's server drops every connection: Edit's new tab gets an error page, and Edit gives up
+  // then, not after its 20 s wait, with a note saying why. The editor stays closed.
+  fx.dropHome(true)
+  const lib = await viewTweaks(app)
+  await lib.getByTestId('tweak-row').filter({ hasText: 'Dark news' }).click({ button: 'right' })
+  const started = Date.now()
+  await lib.getByTestId('tweaks-menu-edit').click()
+  await expect(lib.getByTestId('library')).toHaveAttribute('data-open', 'false')
+  const why = shell.getByTestId('toast').filter({ hasText: 'The site didn’t load, so the Tweak can’t open' })
+  await expect(why).toBeVisible()
+  expect(Date.now() - started).toBeLessThan(8000)
+  const failed = (await activeId(app)) as string
+  expect((await state(app)).tabs[failed]).toMatchObject({ url: fx.url('/', 'news.lib.test') })
+  expect((await state(app)).tabs[failed]?.error).toBeTruthy()
+  expect((await editorInfo(app)).open).toBe(false)
+
+  // The site back: Edit, from the command too, opens the editor on it.
+  fx.dropHome(false)
+  await cmd(app, 'tabs.close', { tabId: failed })
+  expect(await run(app, 'tweaks.open', { id: dark, edit: true })).toBe(true)
+  await waitEditor(app, true)
+  expect((await editorInfo(app)).tweakId).toBe(dark)
 })
 
 test('[BO-15] with no Tweaks, the Library explains them and offers Tweak This Site for the page underneath, where it is a website', async () => {

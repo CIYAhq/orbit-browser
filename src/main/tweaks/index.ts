@@ -26,9 +26,13 @@ export const TWEAK_MESSAGES = {
   peek: 'Open the page in a tab to tweak it',
   mini: 'Move the Mini Window’s page into a Space to tweak it',
   none: 'This site has no Tweaks',
+  unloaded: 'The site didn’t load, so the Tweak can’t open',
 } as const
 
-/** How long the Library's Edit waits for the Tweak's site to load before giving up (BO-15). */
+/**
+ * How long the Library's Edit waits for the Tweak's site to load before giving up (BO-15); a load
+ * that fails ends the wait at once.
+ */
 const OPEN_WAIT_MS = 20_000
 
 /** Test-only handle (ORBIT_E2E=1): globalThis.__orbitTweaks. */
@@ -238,10 +242,14 @@ export function registerTweaks(ctx: MainContext): void {
     else if (!shownTabs(store.state, windowId).has(tabId)) await commands.run('tabs.activate', { tabId }, { windowId })
     await commands.run('library.close', {}, { windowId })
     if (!edit) return true
-    // A tab just made, woken or still waiting for its server: the editor opens once its page can take it.
-    if (!(await pages.whenTweakable(tabId, OPEN_WAIT_MS))) return false
-    // Unless the user moved on meanwhile.
+    // A tab just made, woken or still waiting for its server: the editor opens once its page can take
+    // it. Unless the user moved on meanwhile; a site that didn't load says so.
+    const ready = await pages.whenTweakable(tabId, OPEN_WAIT_MS)
     if (!store.state.tweaks[id] || !shownTabs(store.state, windowId).has(tabId)) return false
+    if (!ready) {
+      say(windowId, TWEAK_MESSAGES.unloaded)
+      return false
+    }
     return commands.run('tweaks.edit', { id, tabId }, { windowId })
   })
 
