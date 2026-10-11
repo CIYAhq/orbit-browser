@@ -25,9 +25,11 @@ import type { MediaEvents } from '../../shared/commands/media'
 import { PLAYBACK_RATES } from '../../shared/media'
 import {
   anchoredResize,
+  asideRect,
   clampPipSize,
   cornerRect,
   cubicBezier,
+  dialogZone,
   draggedSize,
   EASE_OUT_CURVE,
   keepInside,
@@ -40,6 +42,7 @@ import {
   resizeWithResistance,
   roundedShape,
   STANDARD_CURVE,
+  sameRect,
   settleCorner,
   springStep,
 } from '../../shared/pip'
@@ -49,6 +52,7 @@ import type { MainContext } from '../context'
 import { reducedMotion } from '../motion'
 import { displayedTabs } from '../tabs/model'
 import { loadRenderer, rendererEntry, uiWebPreferences } from '../windows'
+import { onDialogsChanged, windowsWithDialogs } from './dialog-watch'
 
 const isMac = process.platform === 'darwin'
 /** Corner radius of the player where Orbit rounds it itself (macOS rounds its windows natively). */
@@ -74,6 +78,8 @@ const RELEASE_MS = 120
 const FRAME_MS = 16
 /** A pause in wheel scrolling ends a hover-scroll move (MD-06). */
 const WHEEL_IDLE_MS = 160
+/** How often a showing player looks for Orbit's alerts and dialogs (MD-06). */
+const DIALOG_CHECK_MS = 100
 
 export type PlayerEnd = 'close' | 'returned' | 'gone' | 'navigated' | 'ended' | 'replaced' | 'off' | 'quit'
 
@@ -180,6 +186,14 @@ export class PipPlayer {
   private opening: { tabId: TabId; done: Promise<boolean> } | undefined
   /** Finishes a closing fade at once (a new video is about to show). */
   private finishFade: (() => void) | undefined
+  /**
+   * Out of the way of Orbit's alerts and dialogs (MD-06): where it was, and where it went (null:
+   * hidden, no corner was clear); 'user' once the user moved it meanwhile, which it keeps.
+   */
+  private aside: { from: Rect; to: Rect | null } | 'user' | undefined
+  private dialogCheck: NodeJS.Timeout | undefined
+  /** macOS: windows with a sheet (their alerts and file pickers are sheets). */
+  private sheets = new WeakSet<BrowserWindow>()
   /** Last menu template (tests read it instead of a native popup). */
   lastMenu: MenuItemConstructorOptions[] = []
 
@@ -191,7 +205,16 @@ export class PipPlayer {
     // window must not keep the app alive once every Orbit window is closed.
     app.on('browser-window-created', (_e, win) => {
       win.once('closed', () => setImmediate(() => this.onWindowClosed()))
+      win.on('sheet-begin', () => {
+        this.sheets.add(win)
+        this.checkDialogs()
+      })
+      win.on('sheet-end', () => {
+        this.sheets.delete(win)
+        this.checkDialogs()
+      })
     })
+    onDialogsChanged(() => this.checkDialogs())
 
     screen.on('display-removed', () => this.refit())
     screen.on('display-metrics-changed', () => this.refit())
@@ -344,6 +367,7 @@ export class PipPlayer {
     this.openMs = Date.now() - began
     this.lastEnter = from ? { from: start, to: target } : null
     if (from) this.animateTimed(start, target, ms, () => this.pointerCheck())
+    this.watchDialogs()
     this.host.changed(tabId, true, opts.auto)
     return true
   }
@@ -369,6 +393,7 @@ export class PipPlayer {
     this.session = undefined
     this.seq++
     this.stopMotion()
+    this.unwatchDialogs()
     s.dispose()
     const win = this.win
     const release = () => {
@@ -583,6 +608,7 @@ export class PipPlayer {
     const t = e.t ?? Date.now()
     if (e.phase === 'start') {
       this.stopMotion()
+      if (this.aside) this.aside = 'user'
       this.gesture = {
         kind: e.kind ?? 'move',
         startX: e.x,
@@ -616,6 +642,7 @@ export class PipPlayer {
     const win = this.win
     if (!win || win.isDestroyed() || !(Number.isFinite(dx) && Number.isFinite(dy)) || (!dx && !dy)) return
     this.stopAnimation()
+    if (this.aside) this.aside = 'user'
     const b = win.getBounds()
     // The player follows the fingers (a two-finger scroll moves content the other way).
     this.place({ ...b, x: Math.round(b.x - dx), y: Math.round(b.y - dy) })
@@ -788,6 +815,84 @@ export class PipPlayer {
     this.place(cornerRect(area, corner, b.width, b.height))
   }
 
+  // ---- Orbit's alerts and dialogs (MD-06) ----
+
+  private watchDialogs(): void {
+    if (!this.dialogCheck) this.dialogCheck = setInterval(() => this.checkDialogs(), DIALOG_CHECK_MS)
+    this.checkDialogs()
+  }
+
+  private unwatchDialogs(): void {
+    clearInterval(this.dialogCheck)
+    this.dialogCheck = undefined
+    this.aside = undefined
+  }
+
+  /**
+   * The player never covers Orbit's alerts and dialogs (MD-06). While a window shows one (the
+   * engine disables the window meanwhile; on macOS it is a sheet; file pickers say so through
+   * dialog-watch), the player keeps clear of where it shows: it moves to the nearest corner that
+   * is clear, at the same size, or hides if none is. When they close it goes back, unless the user
+   * moved it meanwhile. None of this changes the remembered corner.
+   */
+  private checkDialogs(): void {
+    const win = this.win
+    if (!this.session || !win || win.isDestroyed()) return
+    const noted = new Set(windowsWithDialogs())
+    const owners = BrowserWindow.getAllWindows().filter(
+      (w) =>
+        !w.isDestroyed() && w.isVisible() && !w.isMinimized() && (noted.has(w) || this.sheets.has(w) || !w.isEnabled()),
+    )
+    if (owners.length === 0) {
+      this.stepBack()
+      return
+    }
+    // The user has it in hand, or it is still flying in: it is looked at again in a moment.
+    if (this.aside === 'user' || this.gesture || (this.anim && !this.aside)) return
+    const from = this.aside?.from ?? win.getBounds()
+    const zones = owners.map((w) => {
+      const bounds = w.getBounds()
+      return dialogZone(bounds, screen.getDisplayMatching(bounds).workArea, isMac)
+    })
+    const to = asideRect(this.areaFor(from), from, zones)
+    if (to === undefined) {
+      this.stepBack()
+      return
+    }
+    const was = this.aside?.to
+    if (was !== undefined && (was === to || (was && to && sameRect(was, to)))) return
+    this.aside = { from, to }
+    this.stopAnimation()
+    if (!to) {
+      win.hide()
+    } else if (!win.isVisible()) {
+      this.place(to)
+      win.showInactive()
+    } else {
+      this.glide(win.getBounds(), to)
+    }
+  }
+
+  /** The dialogs closed: back to where it was, unless the user moved it meanwhile. */
+  private stepBack(): void {
+    const aside = this.aside
+    this.aside = undefined
+    const win = this.win
+    if (!aside || aside === 'user' || !this.session || !win || win.isDestroyed()) return
+    if (win.isVisible()) {
+      this.glide(win.getBounds(), aside.from)
+    } else {
+      this.place(aside.from)
+      win.showInactive()
+    }
+  }
+
+  /** Moves the player, gliding there (the release's spring) unless reduced motion is asked for. */
+  private glide(from: Rect, to: Rect): void {
+    if (!reducedMotion(this.ctx)) this.animateSpring(from, to, { x: 0, y: 0 })
+    else this.place(to)
+  }
+
   // ---- Window ----
 
   private ensureWindow(): { win: BaseWindow; ui: WebContentsView } {
@@ -842,6 +947,7 @@ export class PipPlayer {
       const s = this.session
       this.session = undefined
       this.stopMotion()
+      this.unwatchDialogs()
       if (s) {
         s.dispose()
         if (!s.contents.isDestroyed()) void this.host.call(s.tabId, 'drop')

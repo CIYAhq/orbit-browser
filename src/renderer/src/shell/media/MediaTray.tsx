@@ -106,7 +106,13 @@ const MediaController = memo(function MediaController({ tabId }: { tabId: TabId 
         onClick={() => void invoke('media.focus', { tabId })}
       >
         <span className="media-ctl__icon">
-          {tab.icon ? <span className="media-ctl__emoji">{tab.icon}</span> : <Favicon src={tab.favicon} size={16} />}
+          {media.artwork ? (
+            <img className="media-ctl__art" data-testid="media-artwork" src={media.artwork} alt="" draggable={false} />
+          ) : tab.icon ? (
+            <span className="media-ctl__emoji">{tab.icon}</span>
+          ) : (
+            <Favicon src={tab.favicon} size={16} />
+          )}
         </span>
         <span className="media-ctl__text">
           <Marquee text={mediaTitle(tab)} />

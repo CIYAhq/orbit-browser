@@ -11,9 +11,13 @@ import { isSpacePanel, SpacePanels } from '../shell/spaces/SpacePanels'
 import { useWindow } from '../store'
 import { paletteVars, usePalette } from '../theme'
 import { CommandBar } from './CommandBar'
+import { installTypeahead } from './commandbar/typeahead'
 import { PeekLayer } from './PeekLayer'
 import { RowMenu } from './RowMenu'
 import { SiteControls } from './site/SiteControls'
+
+// Keys typed before the bar mounts (CB-22). Only here: a Mini Window's bar takes its keys itself.
+installTypeahead()
 
 /**
  * Transparent full-window layer above the tab views. It is only visible while

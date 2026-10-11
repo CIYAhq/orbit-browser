@@ -224,6 +224,7 @@ export type SettingsPatch = Partial<
     | 'miniWindowForExternalLinks'
     | 'externalLinksSpace'
     | 'miniWindowArchiveAfterMs'
+    | 'miniWindowTrayButton'
     | 'autoPip'
     | 'searchSuggestions'
     | 'searchTopResult'

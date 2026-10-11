@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   anchoredResize,
+  asideRect,
   clampPipSize,
   cornerRect,
   cubicBezier,
+  dialogZone,
   draggedSize,
   EASE_OUT_CURVE,
   keepInside,
@@ -12,14 +14,17 @@ import {
   mixRect,
   nearestCorner,
   normalizePlacement,
+  PIP_DIALOG_ROOM,
   PIP_MARGIN,
   PIP_MIN_SIZE,
   pipAspect,
   pipDimensions,
+  rectsOverlap,
   resizeWithResistance,
   roundedShape,
   rubberBand,
   STANDARD_CURVE,
+  sameRect,
   settleCorner,
   springStep,
 } from '../../src/shared/pip'
@@ -252,5 +257,52 @@ describe('player motion (MD-01, MD-16, FL-01, FL-32)', () => {
     const big = springStep(300, 0, 0.5)
     expect(Number.isFinite(big.offset)).toBe(true)
     expect(Math.abs(big.offset)).toBeLessThan(300)
+  })
+})
+
+describe("keeping clear of Orbit's alerts and dialogs (MD-06)", () => {
+  const corner = (c: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right') => cornerRect(AREA, c, 320, 180)
+
+  it('[MD-06] a dialog shows centered on its window, or hangs from its top as a sheet (macOS), within the screen', () => {
+    const win = { x: 270, y: 125, width: 900, height: 700 }
+    expect(dialogZone(win, AREA, false)).toEqual({ x: 270, y: 165, ...PIP_DIALOG_ROOM })
+    expect(dialogZone(win, AREA, true)).toEqual({ x: 270, y: 125, ...PIP_DIALOG_ROOM })
+    // A small window near the screen's corner: the dialog is bigger than it, but stays on the screen.
+    expect(dialogZone({ x: 1040, y: 400, width: 400, height: 400 }, AREA, false)).toEqual({
+      x: 790,
+      y: 290,
+      width: 650,
+      height: 610,
+    })
+  })
+
+  it('[MD-06] rects that only touch do not overlap', () => {
+    const a = { x: 0, y: 0, width: 10, height: 10 }
+    expect(rectsOverlap(a, { x: 10, y: 0, width: 10, height: 10 })).toBe(false)
+    expect(rectsOverlap(a, { x: 9, y: 9, width: 10, height: 10 })).toBe(true)
+    expect(rectsOverlap(a, { x: 2, y: 2, width: 0, height: 5 })).toBe(false)
+    expect(sameRect(a, { ...a })).toBe(true)
+    expect(sameRect(a, { ...a, width: 11 })).toBe(false)
+  })
+
+  it('[MD-06] the player stays put when clear of every dialog, else goes to the nearest clear corner at its size', () => {
+    const player = corner('bottom-right')
+    // A dialog in the middle of a big screen: nothing to do.
+    expect(asideRect(AREA, player, [{ x: 320, y: 140, width: 800, height: 500 }])).toBeUndefined()
+    // A dialog over the bottom-right of the screen: the top-right corner is nearest and clear.
+    expect(asideRect(AREA, player, [{ x: 790, y: 290, width: 650, height: 610 }])).toEqual(corner('top-right'))
+    // Two windows with dialogs: the left half and the bottom-right are taken; the top-right is left.
+    const left = { x: 0, y: 25, width: 720, height: 875 }
+    expect(asideRect(AREA, player, [left, { x: 1000, y: 600, width: 440, height: 300 }])).toEqual(corner('top-right'))
+    // From the top-left, the nearest clear corner is the bottom-left one.
+    const top = { x: 0, y: 25, width: 1440, height: 300 }
+    expect(asideRect(AREA, corner('top-left'), [top])).toEqual(corner('bottom-left'))
+  })
+
+  it('[MD-06] with no corner clear of the dialogs, the player hides (null)', () => {
+    const middle = { x: 200, y: 100, width: 1040, height: 700 }
+    expect(asideRect(AREA, corner('bottom-right'), [middle])).toBeNull()
+    // A dialog on another screen never moves it.
+    expect(asideRect(AREA, corner('bottom-right'), [{ x: 1500, y: 0, width: 900, height: 620 }])).toBeUndefined()
   })
 })

@@ -165,7 +165,8 @@ export const ACTIONS: ActionDef[] = [
     category: 'Tabs',
     mac: ['Cmd+Shift+C'],
     other: ['Ctrl+Shift+C'],
-    keywords: ['link', 'share'],
+    // "Copy URLs": with several tabs selected it copies every one (TB-20, CB-13).
+    keywords: ['link', 'share', 'urls', 'links'],
     // NV-17: on Windows and Linux the page gets Ctrl+Shift+C first (KS-02).
     preferWebsites: 'other',
   },
@@ -245,6 +246,13 @@ export const ACTIONS: ActionDef[] = [
     other: ['Ctrl+Shift+K'],
     keywords: ['archive', 'close unpinned'],
   },
+  // The Today tab menu's Archive Tabs Below (TD-05), for the current tab (CB-13's catalogue).
+  {
+    id: 'tab.archiveBelow',
+    title: 'Archive Tabs Below',
+    category: 'Tabs',
+    keywords: ['clear below', 'close below', 'close tabs below'],
+  },
   {
     id: 'folder.new',
     title: 'New Folder',
@@ -317,7 +325,14 @@ export const ACTIONS: ActionDef[] = [
     other: ['Ctrl+='],
   },
   { id: 'page.zoomOut', title: 'Zoom Out', category: 'Page', mac: ['Cmd+-'], other: ['Ctrl+-'] },
-  { id: 'page.zoomReset', title: 'Actual Size', category: 'Page', mac: ['Cmd+0'], other: ['Ctrl+0'] },
+  {
+    id: 'page.zoomReset',
+    title: 'Actual Size',
+    category: 'Page',
+    mac: ['Cmd+0'],
+    other: ['Ctrl+0'],
+    keywords: ['zoom', 'reset zoom', '100%'],
+  },
   { id: 'page.print', title: 'Print…', category: 'Page', mac: ['Cmd+P'], other: ['Ctrl+P'] },
   // Media (media lane, MD-02, MD-08)
   {
@@ -486,7 +501,7 @@ export const ACTIONS: ActionDef[] = [
     id: 'space.theme',
     title: 'Edit Theme',
     category: 'Spaces',
-    keywords: ['theme', 'colour', 'color', 'gradient', 'dark mode', 'light mode'],
+    keywords: ['change theme', 'colour', 'color', 'gradient', 'dark mode', 'light mode'],
   },
   { id: 'space.changeIcon', title: 'Change Space Icon', category: 'Spaces', keywords: ['emoji'] },
   { id: 'space.delete', title: 'Delete Space…', category: 'Spaces', keywords: ['remove space'] },
@@ -532,6 +547,13 @@ export const ACTIONS: ActionDef[] = [
     mac: ['Ctrl+Shift+-'],
     other: ['Ctrl+Shift+-'],
     keywords: ['split'],
+  },
+  // The whole split, as its row's × closes it (SV-19; CB-13's catalogue).
+  {
+    id: 'split.closeSplit',
+    title: 'Close Split',
+    category: 'Split View',
+    keywords: ['close split view', 'archive split'],
   },
   {
     id: 'split.flip',

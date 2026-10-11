@@ -1,0 +1,16 @@
+/* The split button beside the window controls on Windows and Linux (SV-07, SB-26). */
+
+.topbar__split {
+  flex: none;
+  margin-left: 4px;
+}
+
+/*
+ * Narrow sidebar: the split button goes before the sidebar toggle does (SB-03), so Back, Forward
+ * and Reload keep their room. The "+" menu and the keys still add splits.
+ */
+@container topbar (max-width: 213px) {
+  .topbar__split {
+    display: none;
+  }
+}

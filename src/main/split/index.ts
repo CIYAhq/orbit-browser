@@ -19,6 +19,7 @@ import {
   swapPanes,
 } from '../../shared/split'
 import type { ContainerRef, OrbitState, SplitId, SplitLayout, TabId, WindowId } from '../../shared/state'
+import { isAwayFromPinned } from '../../shared/tabs'
 import { paletteFor } from '../../shared/theme'
 import { insertItem, locate, sectionOf, splitOfTab } from '../../shared/tree'
 import type { MainContext } from '../context'
@@ -27,6 +28,8 @@ import type { CallContext } from '../registry'
 import { makeTab } from '../tabs/model'
 import { showRowMenu } from '../tabs/row-menu'
 import { activeTabOf } from '../windows'
+import { installLinkDrop } from './link-drop'
+import { newSplitMenuItems } from './menu'
 import {
   addPaneInDraft,
   adoptPlacement,
@@ -84,6 +87,7 @@ export function registerSplit(ctx: MainContext): void {
   const windowOf = (c: CallContext): WindowId | undefined => c.windowId ?? windows.focusedWindowId()
   const sessions = new Map<WindowId, PaneSession>()
   const strip = new PaneStrip(ctx)
+  installLinkDrop(ctx)
   // An empty pane whose command bar was open when Orbit quit has nothing to show.
   store.update((d) => {
     dropBlankPanes(d)
@@ -568,6 +572,28 @@ export function registerSplit(ctx: MainContext): void {
     })
   })
 
+  commands.register('split.setIcon', ({ splitId, icon }) => {
+    // One emoji (a single grapheme, skin tone and all), as the icon picker gives.
+    const first = icon ? [...new Intl.Segmenter().segment(icon.trim())][0]?.segment : undefined
+    store.update((d) => {
+      const split = d.splits[splitId]
+      if (!split) return
+      if (first) split.icon = first
+      else delete split.icon
+    })
+  })
+
+  // A pinned or Favorite split resets as one (SV-23): each pane away from its own pinned page
+  // goes back to it, as one pinned tab's reset does (PN-04).
+  commands.register('split.reset', ({ splitId }, c) => {
+    const split = store.state.splits[splitId]
+    if (!split) return
+    for (const tabId of paneOrder(split.layout)) {
+      const tab = store.state.tabs[tabId]
+      if (tab && isAwayFromPinned(tab)) void commands.run('tabs.resetToPinned', { tabId }, { windowId: windowOf(c) })
+    }
+  })
+
   commands.register('split.addPane', ({ side = 'right' }, c) => addPane(windowOf(c), side))
 
   commands.register('split.move', ({ splitId, to, index }, c) =>
@@ -624,6 +650,13 @@ export function registerSplit(ctx: MainContext): void {
     if (items.length > 0) Menu.buildFromTemplate(items).popup(win ? { window: win } : {})
   })
 
+  commands.register('split.addMenu', ({ x, y }, c) => {
+    const windowId = windowOf(c)
+    const win = windowId ? windows.get(windowId) : undefined
+    const items = withKeyHints(newSplitMenuItems(ctx, windowId), SPLIT_PANE_MENU_KEYS)
+    Menu.buildFromTemplate(items).popup(win ? { window: win, x: Math.round(x), y: Math.round(y) } : {})
+  })
+
   commands.register('split.contextMenu', ({ splitId, at }, c) => {
     const windowId = windowOf(c)
     const state = store.state
@@ -667,6 +700,11 @@ export function registerSplit(ctx: MainContext): void {
           windows.sendToWindow(windowId, 'sidebar:rename', { id: splitId })
         },
       },
+      // The sidebar's icon picker, as for a tab (TB-12); it can remove the icon too.
+      {
+        label: 'Change Icon…',
+        click: () => windowId && windows.sendToWindow(windowId, 'sidebar:icon', { id: splitId }),
+      },
       ...(split.name
         ? [{ label: 'Show Pane Titles', click: () => void commands.run('split.rename', { splitId, name: null }) }]
         : []),
@@ -679,6 +717,16 @@ export function registerSplit(ctx: MainContext): void {
       items.push({
         label: 'Pin Split',
         click: () => void moveSplit(splitId, { kind: 'pinned', spaceId }, Number.MAX_SAFE_INTEGER, windowId),
+      })
+    }
+    if (section === 'pinned' || section === 'favorite') {
+      items.push({
+        label: 'Reset to Pinned URLs',
+        enabled: leaves.some((tabId) => {
+          const tab = state.tabs[tabId]
+          return !!tab && isAwayFromPinned(tab)
+        }),
+        click: () => void commands.run('split.reset', { splitId }, { windowId }),
       })
     }
     if (spaceId && section === 'pinned') {
@@ -708,6 +756,15 @@ export function registerSplit(ctx: MainContext): void {
           label: state.spaces[id]?.name ?? id,
           click: () => void moveSplit(splitId, { kind: 'today', spaceId: id }, 0, windowId),
         })),
+      })
+    }
+    // As a Today tab's row offers it (TD-05): the Today items under the split go to the Archive.
+    if (first && spaceId && loc.container.kind === 'today') {
+      const today = state.spaces[spaceId]?.today ?? []
+      items.push({
+        label: 'Archive Tabs Below',
+        enabled: loc.index < today.length - 1,
+        click: () => void commands.run('tabs.archiveBelow', { tabId: first }, { windowId }),
       })
     }
     items.push(
@@ -827,6 +884,11 @@ export function registerSplit(ctx: MainContext): void {
   actions.register('split.close', (c) => {
     const current = activeSplit(windowOf(c))
     if (current) closePane(current.tabId)
+  })
+  // The whole split, as its row's × closes it (SV-19), from the command bar (CB-13).
+  actions.register('split.closeSplit', (c) => {
+    const current = activeSplit(windowOf(c))
+    if (current) void commands.run('split.close', { splitId: current.splitId })
   })
   actions.register('split.flip', (c) => {
     const current = activeSplit(windowOf(c))

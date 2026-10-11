@@ -56,6 +56,8 @@ export interface DropPreview {
   side: PaneSide | 'center'
   /** A pane of the shown split being moved (SV-20) rather than a tab joining it. */
   move?: boolean
+  /** A link dragged from a page (SV-08): the preview ends when the pane it opens appears. */
+  link?: boolean
 }
 
 interface PaneAnim {
@@ -78,6 +80,20 @@ interface Drag {
 export const dividerKey = (path: LayoutPath, index: number) => `${path.join('.')}:${index}`
 
 const rectOf = (a: PaneAnim): Box => ({ x: a.x.value, y: a.y.value, width: a.w.value, height: a.h.value })
+
+/** A zero-width (or zero-height) sliver of `target` on the side a neighbour has, else its left edge. */
+function edgeOf(target: Box, targets: PaneBox[], tabId: TabId): Box {
+  const others = targets.filter((t) => t.tabId !== tabId).map((t) => t.rect)
+  const across = (r: Box) => r.y < target.y + target.height && target.y < r.y + r.height
+  const along = (r: Box) => r.x < target.x + target.width && target.x < r.x + r.width
+  if (others.some((r) => across(r) && r.x + r.width <= target.x + 1)) return { ...target, width: 0 }
+  if (others.some((r) => across(r) && r.x >= target.x + target.width - 1))
+    return { ...target, x: target.x + target.width, width: 0 }
+  if (others.some((r) => along(r) && r.y + r.height <= target.y + 1)) return { ...target, height: 0 }
+  if (others.some((r) => along(r) && r.y >= target.y + target.height - 1))
+    return { ...target, y: target.y + target.height, height: 0 }
+  return { ...target, width: 0 }
+}
 
 function union(boxes: Box[]): Box | undefined {
   if (boxes.length === 0) return undefined
@@ -213,6 +229,7 @@ export class PaneEngine {
       // A pane drag's preview ends as soon as the drop changes the stored layout.
       if (!sameLayout(this.model.layout, model.layout)) this.preview = null
     } else if (this.preview && after.includes(this.preview.tabId)) this.preview = null
+    else if (this.preview?.link && after.some((id) => !before.includes(id))) this.preview = null
     this.model = model
     this.ready = true
     this.relayout(related && !prefersReducedMotion())
@@ -440,16 +457,22 @@ export class PaneEngine {
   private entryRect(tabId: TabId, target: Box, targets: PaneBox[], previous: Map<TabId, Box>): Box {
     const fromDrop = this.preview === null ? previous.get(DROP_PANE) : undefined
     if (fromDrop && tabId !== DROP_PANE) return fromDrop
-    let best: { id: TabId; area: number } | undefined
+    // The pane it splits is one that stays: a pane closing in the same change (or a frame before)
+    // may still cover the new one's place.
+    let best: { id: TabId; area: number; now: Box } | undefined
     for (const [id, rect] of previous) {
       if (id === DROP_PANE) continue
+      const now = targets.find((t) => t.tabId === id)?.rect
+      if (!now) continue
       const o = intersect(rect, target)
       const area = o.width * o.height
-      if (area > 0 && (!best || area > best.area)) best = { id, area }
+      if (area > 0 && (!best || area > best.area)) best = { id, area, now }
     }
     const old = best ? previous.get(best.id) : undefined
-    const now = best ? targets.find((t) => t.tabId === best?.id)?.rect : undefined
-    if (!old || !now) return target
+    const now = best?.now
+    // No pane covers its place yet (a neighbour still growing back): it grows from its own edge,
+    // next to a neighbour (PR #19 review F10).
+    if (!old || !now) return edgeOf(target, targets, tabId)
     if (target.x >= now.x + now.width - 1)
       return { x: old.x + old.width + PANE_GAP, y: target.y, width: 0, height: target.height }
     if (target.x + target.width <= now.x + 1)

@@ -52,11 +52,20 @@ export interface SplitCommands {
   'split.move': { args: { splitId: SplitId; to: ContainerRef; index?: number }; result: boolean }
   /** Names a split (null or blank clears it, showing the pane titles again) (SV-22). */
   'split.rename': { args: { splitId: SplitId; name: string | null }; result: void }
+  /** Gives a split an emoji icon in place of its panes' favicons; null removes it (SV-21, SV-22). */
+  'split.setIcon': { args: { splitId: SplitId; icon: string | null }; result: void }
+  /** Brings every pane of a pinned or Favorite split back to its own pinned page (SV-23). */
+  'split.reset': { args: { splitId: SplitId }; result: void }
   /** Right-click menu of a split row (SV-22). */
   /** The split row's menu, at `at` (the sender's coordinates) or the pointer (tabs lane's row menu, TB-14). */
   'split.contextMenu': { args: { splitId: SplitId; at?: RowMenuAt }; result: void }
   /** The split-controls menu of a pane (SV-12). */
   'split.paneMenu': { args: { tabId: TabId }; result: void }
+  /**
+   * The menu of the split button beside the window controls on Windows and Linux (SV-07): Add Split
+   * Right, Left, Above, Below. At a point in window coordinates.
+   */
+  'split.addMenu': { args: { x: number; y: number }; result: void }
   /** The pane the strip currently belongs to (the strip asks once its page has loaded). */
   'split.stripTarget': { args: Record<string, never>; result: { tabId: TabId | null } }
   /** The pane strip relays a drag of its pane (strip-view coordinates) to the frame (SV-20). */
