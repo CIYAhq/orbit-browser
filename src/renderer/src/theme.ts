@@ -2,14 +2,13 @@ import { type CSSProperties, useCallback, useLayoutEffect, useMemo, useSyncExter
 import { isPrivateSpace, PRIVATE_PALETTE } from '../../shared/private'
 import type { SpaceTheme } from '../../shared/state'
 import { mixPalettes, type Palette, paletteFor, resolveDark } from '../../shared/theme'
+import { reducedMotion } from './motion/reduced'
 import { getOrbitState, useOrbit } from './store'
 
 const darkQuery = window.matchMedia('(prefers-color-scheme: dark)')
-const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
 
-export function prefersReducedMotion(): boolean {
-  return reducedMotionQuery.matches
-}
+/** Reduced motion: the OS setting or Orbit's own (FL-28; see ./motion/reduced). */
+export const prefersReducedMotion = reducedMotion
 
 function onDarkChange(notify: () => void): () => void {
   darkQuery.addEventListener('change', notify)

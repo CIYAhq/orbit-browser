@@ -13,6 +13,7 @@ import { layoutLeaves, MAX_PANES, rowDropSide } from '../../../../shared/split'
 import type { ItemId, OrbitState, SpaceId } from '../../../../shared/state'
 import { locate, parseContainerKey, visibleTabOrder } from '../../../../shared/tree'
 import { invoke } from '../../api'
+import { EASE, REDUCED_SETTLE, reducedMotion, STANDARD, tween } from '../../motion'
 import { activeTabId } from '../../selectors'
 import { getOrbitState, getSeq, useMirror } from '../../store'
 import { stripSettled } from '../spaces/switcher'
@@ -25,7 +26,6 @@ import {
   rowShifts,
   type Slot,
 } from './dnd-model'
-import { reducedMotion, STANDARD } from './motion-tokens'
 import { IDLE_DRAG, useDrag, useSelection } from './ui-state'
 
 /** Movement before a press becomes a drag (TB-08: no long-press, a few pixels). */
@@ -721,7 +721,9 @@ async function drop(s: Session, ev: PointerEvent): Promise<void> {
 
 function settle(s: Session, landing: 'row' | 'tile' | 'into' | 'away', folderId: string | null): void {
   const finish = () => endSession(s)
-  if (reducedMotion()) {
+  const reduced = reducedMotion()
+  // FL-28: no flight into a folder or away; the row lands in place with a short ease-out.
+  if (reduced && landing !== 'row' && landing !== 'tile') {
     finish()
     return
   }
@@ -732,9 +734,7 @@ function settle(s: Session, landing: 'row' | 'tile' | 'into' | 'away', folderId:
   else if (landing === 'into' && folderId)
     el = ctx.scroll?.querySelector<HTMLElement>(`[data-slot][data-key="${folderId}"]`) ?? null
   if (!el || landing === 'away') {
-    void Promise.all([animate(ghostOpacity, 0, { duration: 0.14 }), animate(ghostScale, 0.9, { duration: 0.14 })]).then(
-      finish,
-    )
+    void Promise.all([animate(ghostOpacity, 0, tween('quick')), animate(ghostScale, 0.9, tween('quick'))]).then(finish)
     return
   }
   const r = el.getBoundingClientRect()
@@ -743,8 +743,8 @@ function settle(s: Session, landing: 'row' | 'tile' | 'into' | 'away', folderId:
     const icon = el.querySelector<HTMLElement>('.folder-row__icon')
     const target = icon?.getBoundingClientRect() ?? r
     void Promise.all([
-      animate(ghostX, target.left - 4, { duration: 0.18, ease: [0.4, 0, 0.2, 1] }),
-      animate(ghostY, target.top - r.height / 4, { duration: 0.18, ease: [0.4, 0, 0.2, 1] }),
+      animate(ghostX, target.left - 4, { duration: 0.18, ease: EASE.snappy }),
+      animate(ghostY, target.top - r.height / 4, { duration: 0.18, ease: EASE.snappy }),
       animate(ghostScale, 0.5, { duration: 0.18 }),
       animate(ghostOpacity, 0, { duration: 0.18 }),
     ]).then(() => {
@@ -758,13 +758,10 @@ function settle(s: Session, landing: 'row' | 'tile' | 'into' | 'away', folderId:
     })
     return
   }
-  // The shadow eases off as the row settles (FL-10).
+  // The shadow eases off as the row settles (FL-10); with reduced motion, a short ease-out (FL-28).
+  const to = reduced ? REDUCED_SETTLE : SETTLE
   void animate(ghostOpacity, 1, { duration: 0.15 })
-  void Promise.all([
-    animate(ghostX, r.left, SETTLE),
-    animate(ghostY, r.top, SETTLE),
-    animate(ghostScale, 1, SETTLE),
-  ]).then(finish)
+  void Promise.all([animate(ghostX, r.left, to), animate(ghostY, r.top, to), animate(ghostScale, 1, to)]).then(finish)
 }
 
 function cancel(s: Session): void {
@@ -777,13 +774,13 @@ function cancel(s: Session): void {
     spaceTarget: null,
   })
   const finish = () => endSession(s)
-  if (reducedMotion() || ctx.spaceId !== s.spaceAtStart) {
+  if (ctx.spaceId !== s.spaceAtStart) {
     finish()
     return
   }
-  void Promise.all([
-    animate(ghostX, s.originX, SPRING),
-    animate(ghostY, s.originY, SPRING),
-    animate(ghostScale, 1, SPRING),
-  ]).then(finish)
+  // Back to its slot with the standard spring; with reduced motion, a short ease-out (FL-28).
+  const to = reducedMotion() ? REDUCED_SETTLE : SPRING
+  void Promise.all([animate(ghostX, s.originX, to), animate(ghostY, s.originY, to), animate(ghostScale, 1, to)]).then(
+    finish,
+  )
 }

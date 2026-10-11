@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 237 built (86 partial) · 330 tested · 0 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 252 built (91 partial) · 346 tested · 0 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
-| P0 | 174 | 140 | 168 |
-| P1 | 219 | 82 | 145 |
+| P0 | 174 | 147 | 173 |
+| P1 | 219 | 90 | 156 |
 | P2 | 79 | 15 | 17 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -220,7 +220,7 @@ Spec: `spec/split-view.md`
 | SV-23 | Pinned and Favorite splits | P1 | 🟡 partial | ✅ e2e+unit | – | pinning keeps panes/sizes/orientation; drops onto pinned tabs stay pinned; Favorite splits show a combined tile and drag like tiles; resetting every pane and Peek from pinned splits not built |
 | SV-24 | Splits persist | P0 | ✅ | ✅ e2e+unit | – | panes, order, orientation, sizes and focused pane survive relaunch; a Today split closed or auto-archived as one unit restores from the Archive as one unit, with its layout and sizes |
 | SV-25 | Limits and edge cases | P1 | ✅ | ✅ e2e+unit | – | fifth pane refused with a toast on every route; no split from an empty window; HTML full screen (core) fills the window, hides the strip and returns to the split |
-| SV-26 | Feel: create, resize, close | P1 | 🟡 partial | ✅ e2e+unit | – | springs for create/close/flip, closing card fades, 1:1 resize, drop indicator fade/slide, frame colour until loaded, split row entrance; sidebar row-merge reflow belongs to the tabs lane's list animation |
+| SV-26 | Feel: create, resize, close | P1 | 🟡 partial | ✅ e2e+unit | – | springs for create/close/flip, closing card fades, 1:1 resize, drop indicator fades in and moves between halves at once (FL-18), frame colour until loaded, split row entrance; sidebar row-merge reflow belongs to the tabs lane's list animation |
 
 ## Page navigation, windows, links and page-level controls (prefix NV)
 
@@ -373,36 +373,36 @@ Spec: `spec/feel.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| FL-01 | Motion principles and shared tokens | P0 | – | ✅ e2e+unit | – |  |
-| FL-02 | Sidebar show/hide (docked toggle) | P0 | ✅ | ✅ e2e | – | 260 ms standard curve drives the sidebar column and the card margins together; interruptible; reduced motion snaps |
+| FL-01 | Motion principles and shared tokens | P0 | ✅ | ✅ e2e+unit | – | one token set in shared/motion.ts and motion.css (instant 90 ms, quick 130 ms, pop 240 ms; snappy, standard and pop springs), checked against each other by a unit test; interrupted motions turn round from where they are (Space slide, command bar, hover card, folders, ⌘S), checked as speeds from the first frame that shows the input handled |
+| FL-02 | Sidebar show/hide (docked toggle) | P0 | ✅ | ✅ e2e | – | 260 ms standard curve drives the sidebar column and the card margins together; interruptible; reduced motion snaps; starts a frame along, so the frame that draws ⌘S already moves |
 | FL-03 | Sidebar hover-reveal overlay | P0 | ✅ | ✅ e2e | – | 0 ms dwell; card in 200 ms (snappy), out 160 ms (quick); hysteresis band; re-entering while it leaves brings it back |
-| FL-04 | Tab row hover | P0 | – | – | – |  |
-| FL-05 | Tab selection | P0 | – | – | – |  |
-| FL-06 | New-tab insertion | P0 | – | – | – |  |
-| FL-07 | Rows moving between sections without a drag | P1 | – | ✅ e2e | – |  |
-| FL-08 | Row buttons (close ×, folder search, reset) | P1 | – | – | – |  |
-| FL-09 | Close and archive exit | P0 | – | – | – |  |
-| FL-10 | Drag and drop: lift, follow, spring, drop | P0 | – | ✅ e2e | – |  |
-| FL-11 | Clear Today: staggered sweep | P1 | – | – | – |  |
-| FL-12 | Folder and pinned-section expand/collapse | P1 | – | – | – |  |
-| FL-13 | Space switching: swipe physics, settle and rubber-band | P0 | ✅ | ✅ e2e+unit | – | strip of pages, 1:1 tracking, commit thresholds, settle/rubber-band springs, one-page slides for clicks and keys, reduced motion cross-fade |
+| FL-04 | Tab row hover | P0 | ✅ | ✅ e2e | – | row hover lights on the instant timing and fades out from where it is when the pointer leaves; every row a sweep enters lights |
+| FL-05 | Tab selection | P0 | ✅ | ✅ e2e | – | a press selects the row in its frame, before the page shows (within 50 ms); a press on a row still growing in selects it; a selected row out of sight scrolls into view with a 225 ms ease-out, or at once from more than two screens away or with reduced motion |
+| FL-06 | New-tab insertion | P0 | ✅ | ✅ e2e | – | a new row grows with the snappy spring, its content fading in over the last 60 %; the rows below glide |
+| FL-07 | Rows moving between sections without a drag | P1 | ✅ | ✅ e2e | – | pinned, unpinned or moved by key or menu: the row travels with the standard spring while the room it leaves and the room it takes close and open with it; to a place out of sight or another Space it collapses out in place and the list does not scroll; ⌘Z plays it back |
+| FL-08 | Row buttons (close ×, folder search, reset) | P1 | ✅ | ✅ e2e | – | ×, audio and folder search buttons: circle fades in on the instant timing; the glyph presses to 0.9 at once and springs back (pop); the click fires on release and the row starts leaving once main has closed the tab, about 2 frames after the release (D70: main decides first, as a pinned tab's × resets it and a page may ask to stay); the reset acts on press (PN-04) |
+| FL-09 | Close and archive exit | P0 | ✅ | ✅ e2e | – | a closing row fades and slides 12 px while its room collapses with the snappy spring and the rows below rise; the next tab is selected no later than the closing row starts to leave, in the first frame after ⌘W at the median of five closes (main wakes a sleeping page only once the change has gone out); the first close after a launch can take 2 frames; rows out of sight go without motion |
+| FL-10 | Drag and drop: lift, follow, spring, drop | P0 | ✅ | ✅ e2e | – | a 4 px move lifts the row (1.03, shadow, 95 %) in that frame; the row is drawn under the pointer in every frame; Escape springs it back to its slot |
+| FL-11 | Clear Today: staggered sweep | P1 | ✅ | ✅ e2e | – | Clear sweeps the rows out one after another (25 ms apart, at most 12 staggered) within 450 ms; the divider and New Tab stay; ⌘Z brings them back in one group |
+| FL-12 | Folder and pinned-section expand/collapse | P1 | ✅ | ✅ e2e | – | folders and the pinned section: the chevron turns in 160 ms; the box grows with the snappy spring while its rows fade in 12 ms apart (only when the user opens it); closing is quicker; reduced motion fades |
+| FL-13 | Space switching: swipe physics, settle and rubber-band | P0 | ✅ | ✅ e2e+unit | – | strip of pages, 1:1 tracking, commit thresholds, settle/rubber-band springs, one-page slides for clicks and keys, reduced motion cross-fade; the rubber band keeps the spring FL-13 names (response 0.3 s, ratio 1.0) and comes back within 0.5 px about 480 ms after the last event: FL-29's 350 ms is for swipes that land on a Space (D70) |
 | FL-14 | Theme-colour transition between Spaces | P0 | ✅ | ✅ e2e+unit | – | theme blends with the gesture/spring in OKLab; 200 ms preset blends; light/dark cross-fade |
-| FL-15 | Button press micro-animations | P1 | 🟡 partial | – | – | top row: Back/Forward nudge, Reload glyph turns once, press to 0.94 with pop release, restarts on repeat, none when disabled or reduced motion |
+| FL-15 | Button press micro-animations | P1 | ✅ | ✅ e2e | – | every icon button presses to 0.94 at once and springs back (pop), the Library button too; Back/Forward nudge, Reload's glyph turns once, the + scales to 0.92; restarts on repeat; none when disabled; no spring with reduced motion |
 | FL-16 | Command bar open and close | P0 | ✅ | ✅ e2e | – | motion spring (0.97→1, 4 px drop), 100 ms exit (80 ms after choosing a row) while focus returns at once; fade only with reduced motion; centred in the window |
 | FL-17 | Command bar typing and result updates | P0 | ✅ | ✅ e2e+unit | – | per-keystroke local results, identity-keyed memoized rows, instant highlight; engine suggestions fill free rows without moving the highlight |
-| FL-18 | Split view create and resize | P1 | – | – | – |  |
-| FL-19 | Link preview open, expand, close | P1 | ✅ | ✅ e2e+unit | – | open spring done in ~280 ms with no overshoot, 18% dim; expand meets the frame in ~250 ms, then the row enters; split slides to the right half; close 160 ms to 0.96 + fade; drag/swipe dismiss; ⌘Z/⌘⇧T replay the open |
-| FL-20 | Favorites tiles | P1 | – | – | – |  |
-| FL-21 | Sidebar scrolling and large-sidebar performance | P0 | – | ✅ e2e | – |  |
-| FL-22 | Toasts | P1 | – | – | – |  |
+| FL-18 | Split view create and resize | P1 | 🟡 partial | ✅ e2e | – | a tab dragged over the page: the zone fades in over 100 ms on the half the new pane takes and moves between halves at once; the new pane grows in from its side with the standard spring; the divider follows the pointer 1:1; flip and close travel with the spring (docs/FEEL.md); a tab dragged onto another tab row highlights the half (SV-05) but has no bubble preview or wobble on drop |
+| FL-19 | Link preview open, expand, close | P1 | ✅ | ✅ e2e+unit | – | open: a spring tuned to FL-19's 280–320 ms (response 0.275 s, ratio 0.92; the standard token FL-19 names takes longer over a card's travel, D70), within 2 px in ~320 ms with no overshoot, 18% dim; expand meets the frame in ~250 ms, then the row enters; split slides to the right half; close 160 ms to 0.96 + fade, the page behind takes clicks again 173–194 ms after Escape (best of up to three rounds, at the edge of 200 ms); drag/swipe dismiss; ⌘Z/⌘⇧T replay the open |
+| FL-20 | Favorites tiles | P1 | ✅ | ✅ e2e | – | a new Favorite pops in from 0.85 with the pop spring while the other tiles re-flow with the snappy spring; a removed one shrinks to 0.85 and fades where it was while the grid closes up |
+| FL-21 | Sidebar scrolling and large-sidebar performance | P0 | 🟡 partial | ✅ e2e | – | only the rows near the visible band are drawn, and every row tells screen readers its place and its list's size, drawn or not; a Space shown for the first time draws a stand-in at once and its list within ~160 ms; on this machine under load a 200-tab fling and a 500-tab scroll still have a few frames of two intervals (5 and 12), so p99 is two intervals, against none over one (docs/FEEL.md) |
+| FL-22 | Toasts | P1 | 🟡 partial | ✅ e2e | – | rise 12 px from 0.96 with the pop spring, at most three 8 px apart, a new one pushes the others up with the snappy spring, stays 3 s (4 s with a button), a hovered one with a button waits until 1 s after the pointer leaves; fade and 8 px drop in 160 ms; under reduced motion a toast fades in where it rests, at its size, and the older ones move at once. Shown at the bottom of the sidebar (not over the page card, so hidden behind the page when the sidebar is), plain toasts let clicks through, and no Space theme yet (AP-14) |
 | FL-23 | Page loading indicator | P1 | ✅ | ✅ e2e | – | after 150 ms, a 48x4 theme-accent pill sweeping on a 1.2 s cycle (a pulse with reduced motion); on load end it fills (80 ms) and fades (150 ms), gone 180 ms after; never moves page content |
 | FL-24 | Library and Archive motion | P2 | ✅ | ✅ e2e+unit | – | Library opens with a 220 ms fade and 0.98→1 scale (opacity only with reduced motion) and fades out; sections cross-fade in 90 ms; search answers within 50 ms; restored rows fade and the rows below rise; long lists virtualised; a previewed entry opens and closes with the Peek's motion (FL-19) |
-| FL-25 | Menus, popovers and tooltips | P1 | – | – | – |  |
-| FL-26 | Recent-tab switcher (Ctrl+Tab) | P1 | – | – | – |  |
-| FL-27 | Window-level motion | P1 | – | – | – |  |
-| FL-28 | Reduced motion | P0 | – | ✅ e2e+unit | – |  |
-| FL-29 | Responsiveness budgets (input to visual) | P0 | – | – | – |  |
-| FL-30 | What makes it feel native and smooth | P0 | – | – | – |  |
+| FL-25 | Menus, popovers and tooltips | P1 | ✅ | ✅ e2e | – | folder search and icon picker: drawn in the first frame, from 0.97 with the snappy timing (150 ms); close with the quick fade; keys go back to the sidebar at once |
+| FL-26 | Recent-tab switcher (Ctrl+Tab) | P1 | – | ✅ e2e | – |  |
+| FL-27 | Window-level motion | P1 | ✅ | ✅ e2e | – | a resized window keeps the card's margin in every frame and the page view gets each width within a frame at the median (18 ms at worst), over the page's own colour; the OS full-screen transition; new windows open a step down and right (NV-10) with the command bar's entrance; an inactive window's sidebar dims over 150 ms and comes back at once on focus; no launch sheen (optional) |
+| FL-28 | Reduced motion | P0 | ✅ | ✅ e2e+unit | – | follows the OS setting, with a setting to force it on (AP-17); springs, slides and scales become short fades or instant changes, toasts included, also for what is already on screen when it turns on; a unit guard checks that every motion component sits under the config or reads the setting, and that every element with a layout animation, an entrance, an exit, a press or a moving animate asks useReducedMotion(), since motion reads the config only as an element mounts; drags still follow the pointer and settle with a short ease |
+| FL-29 | Responsiveness budgets (input to visual) | P0 | 🟡 partial | ✅ e2e | – | measured by the feel specs against each budget (docs/FEEL.md); press, ⌘W, ⌘S, Space switch (settles in ~290 ms), command bar and drag budgets met; still missed: p99 at two intervals in some animations under load (⌘S hide, long lists, a Peek opening), the hover sidebar and a Peek's close start in the second frame, and the first ⌘T or ⌘W after a launch can show in the second frame. The rubber band comes back in ~480 ms on FL-13's own spring: the 350 ms settle is for swipes that land on a Space (D70) |
+| FL-30 | What makes it feel native and smooth | P0 | 🟡 partial | – | – | the nine points as a checklist in docs/FEEL.md: pass, gap or fixed, each with the test that shows it |
 | FL-31 | Haptics (macOS trackpads) | P2 | – | – | – |  |
 | FL-32 | Picture-in-picture and media tray motion | P2 | ✅ | ✅ e2e+unit | – | corner resize follows the pointer, resists past its limits (rubber band) and springs back on release; a fling heads for the corner in its direction and settles with the spring; tray slides up with the snappy timing; Back to tab flies to the video's place; pinch zooms (MD-06) rather than resizes |
 
@@ -428,7 +428,7 @@ Spec: `spec/appearance.md`
 | AP-14 | Toast notifications (in-app) | P1 | – | – | – |  |
 | AP-15 | Link-hover status pill | P1 | – | – | – |  |
 | AP-16 | Tooltips with keyboard shortcuts | P1 | – | – | – |  |
-| AP-17 | Motion principles and reduced motion | P1 | – | – | – |  |
+| AP-17 | Motion principles and reduced motion | P1 | 🟡 partial | ✅ e2e+unit | – | one set of motion tokens for every surface (FL-01): ease-out curves of 90–270 ms and springs of 0.25–0.32 s; buttons and the × press to 0.9 (FL-08); the loading pill at the top centre of the card (FL-23); reduced motion from the OS setting or Orbit's own switch in Appearance, turning slides, flights and springs into short fades (FL-28). No shimmer when the app starts |
 
 ## Site customizations
 

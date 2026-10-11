@@ -124,6 +124,8 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
     .map((s) => ({ id: String(s.id || s.keyword), name: String(s.name || s.keyword), keyword: s.keyword, url: s.url }))
   if (typeof state.settings.searchSuggestions !== 'boolean') state.settings.searchSuggestions = false
   if (typeof state.settings.searchTopResult !== 'boolean') state.settings.searchTopResult = false
+  // Reduced motion forced on (FL-28): off unless set.
+  if (typeof state.settings.reduceMotion !== 'boolean') state.settings.reduceMotion = false
   // The Library section used last (AR-02): a section id, else the Archive.
   const section = state.settings.librarySection
   if (!(typeof section === 'string' && /^[\w.-]{1,64}$/.test(section))) state.settings.librarySection = 'archive'

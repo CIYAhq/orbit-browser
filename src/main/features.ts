@@ -11,6 +11,7 @@ import { registerImport } from './import'
 import { registerKeys } from './keys'
 import { registerMedia } from './media'
 import { registerMiniWindow } from './miniwindow'
+import { registerMotion } from './motion'
 import { registerNav } from './nav'
 import { registerPeek } from './peek'
 import { registerSettings } from './settings'
@@ -25,6 +26,7 @@ export function registerFeatures(ctx: MainContext): void {
   // First: the user's key bindings, so whatever reads a shortcut as it registers reads theirs (KS-01).
   registerKeys(ctx)
   registerCore(ctx)
+  registerMotion(ctx)
   const { ops } = registerTabs(ctx)
   registerNav(ctx, ops)
   // Before Peek and Mini Windows: a DevTools key held down is ignored before they act on it.

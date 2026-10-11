@@ -7,6 +7,7 @@
  *
  * Linux: xvfb-run -a -s "-screen 0 1440x900x24" node scripts/perf/run.mjs [--runs 5] [--out perf-results/latest.json]
  *   [--port 3350] (the fixture server's first port; it takes the next free one up to 3399)
+ *   [--cold-only] (Orbit's cold start alone: no interactive scenarios, no Chromium baseline)
  */
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -22,7 +23,8 @@ const opt = (name, fallback) => {
 }
 const RUNS = Number(opt('runs', '5'))
 const OUT = resolve(opt('out', 'perf-results/latest.json'))
-const SKIP_CHROME = args.includes('--no-chrome')
+const COLD_ONLY = args.includes('--cold-only')
+const SKIP_CHROME = COLD_ONLY || args.includes('--no-chrome')
 const FIRST_PORT = Number(opt('port', '3350'))
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const median = (xs) => {
@@ -102,6 +104,22 @@ async function launchOrbit(userData) {
   if (!shell) throw new Error('shell window not found')
   return { app, shell }
 }
+/**
+ * Quits Orbit as the e2e harness does (askQuit in tests/e2e/helpers.ts, PR #16): asked from a task of
+ * its own, since Playwright's `app.close()` asks through the inspector, which can run the quit handlers
+ * part-way through other main-process code. Playwright's own close then only cleans up.
+ */
+async function quitOrbit(app) {
+  const exited = new Promise((resolve) => app.once('close', resolve))
+  await app
+    .evaluate(async ({ app: electronApp }) => {
+      await new Promise((r) => setImmediate(r))
+      electronApp.quit()
+    })
+    .catch(() => {})
+  await Promise.race([exited, sleep(15_000)])
+  await app.close()
+}
 const marks = (app) => app.evaluate(() => globalThis.__orbit.marks())
 const orbitRun = (app, name, a) =>
   app.evaluate((_e, [n, x]) => globalThis.__orbit.run(n, x, globalThis.__orbit.windowIds()[0]), [name, a])
@@ -141,13 +159,13 @@ async function orbitColdStart(fx) {
     const tabId = await orbitRun(app, 'tabs.create', { url: fx.url(i), activate: true })
     await waitTabsLoaded(app, [tabId])
     await app.evaluate(() => globalThis.__orbit.flush())
-    await app.close()
+    await quitOrbit(app)
     log('relaunch with restored tab')
     const w0 = Date.now()
     ;({ app } = await launchOrbit(dir))
     restoredPaint.push(await waitMark(app, `tab:${tabId}:loaded`))
     restoredWall.push(Date.now() - w0)
-    await app.close()
+    await quitOrbit(app)
     rmSync(dir, { recursive: true, force: true })
   }
   return {
@@ -423,7 +441,7 @@ async function orbitInteractive(fx) {
     samples: bigTimes,
   }
 
-  await app.close()
+  await quitOrbit(app)
   rmSync(dir, { recursive: true, force: true })
   return result
 }
@@ -471,7 +489,7 @@ async function chromeBaseline(fx) {
 const fx = await startFixtures()
 const report = { date: new Date().toISOString(), platform: process.platform, runs: RUNS }
 try {
-  report.orbit = { coldStart: await orbitColdStart(fx), ...(await orbitInteractive(fx)) }
+  report.orbit = { coldStart: await orbitColdStart(fx), ...(COLD_ONLY ? {} : await orbitInteractive(fx)) }
   if (!SKIP_CHROME) {
     try {
       report.chromium = await chromeBaseline(fx)

@@ -150,20 +150,18 @@
   box-shadow: 0 0 0 1.5px #e5484d;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .media-ctl__title.is-scrolling .media-ctl__title-inner {
-    animation: none;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    vertical-align: top;
-  }
-  .media-ctl__btn {
-    transition: none;
-  }
-  .media-ctl__btn:active {
-    transform: none;
-  }
+.reduce-motion .media-ctl__title.is-scrolling .media-ctl__title-inner {
+  animation: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: top;
+}
+.reduce-motion .media-ctl__btn {
+  transition: none;
+}
+.reduce-motion .media-ctl__btn:active {
+  transform: none;
 }
 
 /* Camera / microphone in use: a pulsing red mark on the tab row (TB-15, MD-11). */
@@ -190,8 +188,6 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .capture-indicator {
-    animation: none;
-  }
+.reduce-motion .capture-indicator {
+  animation: none;
 }

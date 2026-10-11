@@ -245,6 +245,22 @@ const sealOffline = (app) =>
     return Promise.all([...all].map((s) => s.resolveProxy('https://example.com/')))
   }, `http://${OFFLINE_PROXY}`)
 
+/**
+ * Quits Orbit as the e2e harness does (askQuit in tests/e2e/helpers.ts, PR #16): asked from a task of
+ * its own, not by the inspector's interrupt; Playwright's own close then only cleans up.
+ */
+async function quitOrbit(app) {
+  const exited = new Promise((resolve) => app.once('close', resolve))
+  await app
+    .evaluate(async ({ app: electronApp }) => {
+      await new Promise((r) => setImmediate(r))
+      electronApp.quit()
+    })
+    .catch(() => {})
+  await Promise.race([exited, sleep(15_000)])
+  await app.close()
+}
+
 const fx = await startFixtures()
 const userData = mkdtempSync(join(tmpdir(), 'orbit-capture-'))
 const main = resolve('out/main/index.js')
@@ -270,9 +286,11 @@ try {
     if (!shell) await sleep(50)
   }
   await shell.getByTestId('sidebar').waitFor()
-  // Fill the display so the capture shows the whole window.
+  // Fill the display so the capture shows the whole window. From a task of its own: the inspector runs
+  // an evaluate by interrupt, and Orbit's resize handler would run part-way through other main-process code.
   await app.evaluate(
-    ({ BrowserWindow }, [w, h]) => {
+    async ({ BrowserWindow }, [w, h]) => {
+      await new Promise((r) => setImmediate(r))
       for (const win of BrowserWindow.getAllWindows()) win.setBounds({ x: 0, y: 0, width: w, height: h })
     },
     [W, H],
@@ -313,7 +331,7 @@ try {
   saved = true
 } finally {
   if (rec) await rec.stop()
-  await app?.close().catch(() => {})
+  if (app) await quitOrbit(app).catch(() => {})
   fx.close()
   rmSync(userData, { recursive: true, force: true })
   if (!saved) rmSync(partial, { force: true })

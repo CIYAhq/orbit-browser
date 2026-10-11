@@ -635,22 +635,19 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .ob-step,
-  .ob-logo,
-  .ob-welcome .ob-title,
-  .ob-welcome .ob-lead,
-  .ob-welcome .ob-note,
-  .ob-welcome .ob-actions {
-    animation: none;
-  }
-
-  .ob-progress__dot,
-  .ob-button,
-  .ob-app,
-  .ob-app__check {
-    transition: none;
-  }
+.reduce-motion .ob-step,
+.reduce-motion .ob-logo,
+.reduce-motion .ob-welcome .ob-title,
+.reduce-motion .ob-welcome .ob-lead,
+.reduce-motion .ob-welcome .ob-note,
+.reduce-motion .ob-welcome .ob-actions {
+  animation: none;
+}
+.reduce-motion .ob-progress__dot,
+.reduce-motion .ob-button,
+.reduce-motion .ob-app,
+.reduce-motion .ob-app__check {
+  transition: none;
 }
 
 html[data-theme-fade] .ob,

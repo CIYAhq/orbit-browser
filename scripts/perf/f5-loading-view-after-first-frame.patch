@@ -1,0 +1,47 @@
+F5's cold-start A/B: PERF.md, "2026-10-10 23:20 UTC: cold start after chrome's loading view".
+
+A: the loading indicator's view is made at `ready-to-show`, as Orbit does.
+B: it is made once the shell has drawn its first frame (the `shell:first-frame` mark).
+
+One build runs both: ORBIT_LOADING_AT=ready gives A, anything else gives B. The patch also marks
+`loading:view` when the view is made. From the repository's root:
+
+  git apply scripts/perf/f5-loading-view-after-first-frame.patch && npm run build
+  ORBIT_LOADING_AT=ready xvfb-run -a -s "-screen 0 1440x900x24" node scripts/perf/run.mjs --cold-only --runs 7 --out perf-results/f5-a1.json
+  xvfb-run -a -s "-screen 0 1440x900x24" node scripts/perf/run.mjs --cold-only --runs 7 --out perf-results/f5-b1.json
+
+Three rounds of each, alternating A and B; then `git apply -R` the patch and build again.
+
+--- a/src/main/nav/loading.ts
++++ b/src/main/nav/loading.ts
+@@ -104,6 +104,7 @@
+     if (live(s.view)) return s.view
+     s.ready = false
+     const view = windows.createUiView(windowId, 'loading')
++    ctx.perf.mark('loading:view')
+     s.view = view
+     viewContents(view)?.once('did-finish-load', () => {
+       if (s.view !== view) return
+@@ -203,12 +204,19 @@
+ 
+   // Each window's view is made as the window shows, out of the window, so a load in its first second
+   // finds it ready and shows the indicator after the usual 150 ms (fix check A, F1 and round 2, F3).
+-  windows.onWindowCreated((windowId, win) => {
+-    win.once('ready-to-show', () => {
++  if (process.env.ORBIT_LOADING_AT === 'ready')
++    windows.onWindowCreated((windowId, win) => {
++      win.once('ready-to-show', () => {
++        const s = stateOf(windowId)
++        if (s) viewFor(windowId, s)
++      })
++    })
++  else
++    ctx.events.on('perf.mark', ({ name }, { windowId }) => {
++      if (name !== 'shell:first-frame' || !windowId) return
+       const s = stateOf(windowId)
+       if (s) viewFor(windowId, s)
+     })
+-  })
+ 
+   // Another tab shown (tab switch, Space switch, split focus), or the page card moved.
+   store.subscribe((next, prev) => {

@@ -133,8 +133,6 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .peek__button {
-    transition: none;
-  }
+.reduce-motion .peek__button {
+  transition: none;
 }
