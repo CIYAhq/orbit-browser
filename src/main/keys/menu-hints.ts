@@ -28,6 +28,8 @@ export const TAB_MENU_KEYS: KeyHints = [
   ['Duplicate', 'tab.duplicate'],
   ['Mute Tab', 'tab.toggleMute'],
   ['Unmute Tab', 'tab.toggleMute'],
+  // From the tweaks lane (src/main/tweaks/menu.ts, BO-01): no key unless the user gives it one.
+  ['Tweak this Site…', 'tweak.new'],
   ['Close Tab', 'tab.close'],
   [/^Close \d+ Tabs$/, 'tab.close'],
 ]

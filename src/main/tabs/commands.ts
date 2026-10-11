@@ -29,6 +29,7 @@ import { TAB_MENU_KEYS, withKeyHints } from '../keys/menu-hints'
 import { printPage, savePage, viewSource } from '../pages/entry'
 import type { CallContext } from '../registry'
 import { tabSplitMenuItems } from '../split/menu'
+import { tabTweakMenuItems } from '../tweaks/menu'
 import { TabMaintenance } from './maintenance'
 import { findMenuItem, folderMenu, type MenuOps, menuLabels, tabMenu } from './menus'
 import { makeTab, numberedTarget, steppedTarget, todayInsertIndex } from './model'
@@ -211,6 +212,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     pasteUrlInto: (folderId) => void pasteUrlAsTab(windowId, { kind: 'folder', folderId }),
     deleteFolder: (folderId) => void confirmDeleteFolder(windowId, folderId),
     splitItems: (tabIds) => tabSplitMenuItems(ctx, tabIds, windowId),
+    tweakItems: (tabId) => tabTweakMenuItems(ctx, tabId, windowId),
   })
 
   // ---- Commands ----

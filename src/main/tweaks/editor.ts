@@ -228,6 +228,7 @@ export function registerTweakEditor(ctx: MainContext): TweakEditor {
       if (
         !tweak ||
         !tab ||
+        tab.error ||
         !next.settings.tweaksEnabled ||
         !shownTabs(next, windowId).has(tab.id) ||
         !tweakAppliesTo(tweak, tweakHostOf(tab.url))
@@ -235,7 +236,10 @@ export function registerTweakEditor(ctx: MainContext): TweakEditor {
         close(windowId)
         continue
       }
-      if (peekShown(next, windowId) !== peekShown(prev, windowId) || next.windows[windowId] !== prev.windows[windowId]) {
+      if (
+        peekShown(next, windowId) !== peekShown(prev, windowId) ||
+        next.windows[windowId] !== prev.windows[windowId]
+      ) {
         place(windowId)
       }
     }
@@ -275,8 +279,13 @@ export function registerTweakEditor(ctx: MainContext): TweakEditor {
       }
       const d = e.drag
       if (!d) return
+      // The panel stays where the last move put it: a release where the pointer was then may be
+      // reported after the view moved, at a point that never was (synthetic input).
+      if (phase === 'end') {
+        e.drag = undefined
+        return
+      }
       e.offset = { x: d.ox + x - d.x, y: d.oy + y - d.y }
-      if (phase === 'end') e.drag = undefined
       place(windowId)
     },
     info: (windowId) => {

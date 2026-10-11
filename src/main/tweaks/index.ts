@@ -45,7 +45,10 @@ export function registerTweaks(ctx: MainContext): void {
    * The tab an entry point acts on, shown in its window so the panel can go over it; null (with a
    * note in the window saying why) where Tweaks can't open.
    */
-  const target = async (asked: TabId | undefined, c: CallContext): Promise<{ windowId: WindowId; tabId: TabId; host: string } | null> => {
+  const target = async (
+    asked: TabId | undefined,
+    c: CallContext,
+  ): Promise<{ windowId: WindowId; tabId: TabId; host: string } | null> => {
     const state = store.state
     const windowId = (asked ? windows.windowOfTab(asked) : undefined) ?? windowOf(c)
     if (!windowId) return null

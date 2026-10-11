@@ -41,9 +41,7 @@ export function TweakEditorApp() {
       style={paletteVars(palette) as CSSProperties}
       data-testid="tweak-view"
     >
-      {state?.open && tweak && (
-        <TweakPanel key={state.nonce} state={state} tweak={tweak} intro={!introSeen} />
-      )}
+      {state?.open && tweak && <TweakPanel key={state.nonce} state={state} tweak={tweak} intro={!introSeen} />}
     </div>
   )
 }
@@ -53,24 +51,36 @@ function TweakPanel({ state, tweak, intro }: { state: TweakEditorState; tweak: T
   const head = useRef<HTMLElement>(null)
   const content = useRef<HTMLDivElement>(null)
   const foot = useRef<HTMLElement>(null)
-  const wide = false
 
   // Main sizes the view to the panel: its natural height, whatever room the view has now.
   useLayoutEffect(() => {
     const parts = [head.current, content.current, foot.current]
     const report = () => {
       const height = parts.reduce((sum, el) => sum + (el?.offsetHeight ?? 0), 0) + 2
-      void invoke('tweaks.editorLayout', { width: wide ? TWEAK_EDITOR.wideWidth : TWEAK_EDITOR.width, height })
+      void invoke('tweaks.editorLayout', { width: TWEAK_EDITOR.width, height })
     }
     report()
     const observer = new ResizeObserver(report)
     for (const el of parts) if (el) observer.observe(el)
     return () => observer.disconnect()
-  }, [wide])
+  }, [])
 
-  // Each opening starts at the top, with the keyboard in the panel: Esc closes it (BO-02, KS-19).
+  // Each opening starts with the keyboard in the panel (KS-19), and so does the controls' first
+  // showing after the intro: its button is gone, and the keyboard would be nowhere.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on opening, and as the intro goes
   useEffect(() => {
     panel.current?.focus({ preventScroll: true })
+  }, [intro])
+
+  // Esc anywhere in the panel closes it (BO-02), unless a field used it (a rename it cancels, say).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return
+      e.preventDefault()
+      void invoke('tweaks.closeEditor', {})
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
   }, [])
 
   const close = () => void invoke('tweaks.closeEditor', {})
@@ -84,12 +94,7 @@ function TweakPanel({ state, tweak, intro }: { state: TweakEditorState; tweak: T
       data-tweak={tweak.id}
       aria-label={`Tweak: ${tweak.name}`}
       tabIndex={-1}
-      style={{ width: wide ? TWEAK_EDITOR.wideWidth : TWEAK_EDITOR.width }}
-      onKeyDown={(e) => {
-        if (e.key !== 'Escape' || e.defaultPrevented || e.nativeEvent.isComposing) return
-        e.preventDefault()
-        close()
-      }}
+      style={{ width: TWEAK_EDITOR.width }}
     >
       <header ref={head} className="tweak-panel__head" {...drag}>
         <span className="tweak-panel__badge" aria-hidden>
@@ -137,8 +142,8 @@ function Intro({ host }: { host: string }) {
       </div>
       <h2 className="tweak-intro__title">Tweak any website</h2>
       <p className="tweak-intro__text">
-        Change how <strong>{host}</strong> looks: its colours, fonts and size, or hide what you don't need. Every
-        change shows at once and is saved as you go.
+        Change how <strong>{host}</strong> looks: its colours, fonts and size, or hide what you don't need. Every change
+        shows at once and is saved as you go.
       </p>
       <p className="tweak-intro__text">
         Tweaks stay on this device and come back each time you visit. Turn them off any time from the site controls.
@@ -157,11 +162,9 @@ function Intro({ host }: { host: string }) {
 
 function Controls({ tweak }: { tweak: Tweak }) {
   return (
-    <>
-      <Row label="Size">
-        <SizeControl tweak={tweak} />
-      </Row>
-    </>
+    <Row label="Size">
+      <SizeControl tweak={tweak} />
+    </Row>
   )
 }
 

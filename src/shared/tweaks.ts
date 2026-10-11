@@ -14,8 +14,8 @@
  * - JavaScript (BO-11): the code main runs in the page, with errors going to the page's console.
  */
 import { TWEAK_SHEET_MEDIA } from './site'
-import { hexToHsl } from './theme'
 import type { Settings, Tweak, TweakHidden, TweakStyle } from './state'
+import { hexToHsl } from './theme'
 
 // ---- Model ----------------------------------------------------------------
 
@@ -659,7 +659,8 @@ export function mediaFilter(chain: FilterStep[]): string | null {
   if (!inverse) return null
   const { m, t } = inverse
   const r = (n: number) => String(round(n, 4))
-  const row = (k: number) => `${r(m[k * 3] as number)} ${r(m[k * 3 + 1] as number)} ${r(m[k * 3 + 2] as number)} 0 ${r(t[k] as number)}`
+  const row = (k: number) =>
+    `${r(m[k * 3] as number)} ${r(m[k * 3 + 1] as number)} ${r(m[k * 3 + 2] as number)} 0 ${r(t[k] as number)}`
   const values = `${row(0)} ${row(1)} ${row(2)} 0 0 0 1 0`
   const svg = `<svg xmlns="http://www.w3.org/2000/svg"><filter id="m" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="${values}"/></filter></svg>`
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}#m")`
@@ -764,7 +765,16 @@ export function hiddenCss(hidden: readonly TweakHidden[], skip?: string): string
 // ---- Custom CSS (BO-11) -----------------------------------------------------
 
 /** At-rules whose blocks hold more rules. */
-const GROUP_RULES = new Set(['media', 'supports', 'layer', 'container', 'document', '-moz-document', 'scope', 'starting-style'])
+const GROUP_RULES = new Set([
+  'media',
+  'supports',
+  'layer',
+  'container',
+  'document',
+  '-moz-document',
+  'scope',
+  'starting-style',
+])
 /** At-rules whose blocks hold keyframes: their declarations can't be important. */
 const KEYFRAMES = /^(-webkit-|-moz-|-o-)?keyframes$/
 
@@ -778,7 +788,8 @@ function stringEnd(css: string, i: number): { end: number; closed: boolean } {
     const c = css[j]
     if (c === '\\') j += 2
     else if (c === quote) return { end: j + 1, closed: true }
-    else if (c === '\n') return { end: j, closed: true } // CSS ends a string at a line break
+    else if (c === '\n')
+      return { end: j, closed: true } // CSS ends a string at a line break
     else j++
   }
   return { end: css.length, closed: false }
@@ -956,11 +967,14 @@ export type ThemeVariables = Record<string, string>
 /** `var(--orbit-…)` replaced by the colour (or its fallback), so the page never sees the variables. */
 export function withThemeVariables(css: string, vars: ThemeVariables | undefined): string {
   if (!css.includes('--orbit-')) return css
-  return css.replace(/var\(\s*(--orbit-[\w-]+)\s*(?:,\s*([^()]*(?:\([^()]*\)[^()]*)*))?\)/g, (all, name: string, fallback?: string) => {
-    const value = vars?.[name]
-    if (value) return value
-    return fallback !== undefined ? fallback.trim() : all
-  })
+  return css.replace(
+    /var\(\s*(--orbit-[\w-]+)\s*(?:,\s*([^()]*(?:\([^()]*\)[^()]*)*))?\)/g,
+    (all, name: string, fallback?: string) => {
+      const value = vars?.[name]
+      if (value) return value
+      return fallback !== undefined ? fallback.trim() : all
+    },
+  )
 }
 
 // ---- A page's stylesheets ---------------------------------------------------

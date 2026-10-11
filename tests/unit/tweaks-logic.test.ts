@@ -63,7 +63,15 @@ describe('[BO-17] which pages a Tweak applies to', () => {
     expect(tweakHostOf('http://example.com./')).toBe('example.com')
     expect(tweakHostOf('http://127.0.0.1:3300/x')).toBe('127.0.0.1')
     expect(tweakHostOf('http://[::1]:3300/')).toBe('[::1]')
-    for (const url of ['orbit://settings/', 'file:///tmp/a.html', 'about:blank', 'data:text/html,x', 'chrome://gpu', '', 'nonsense'])
+    for (const url of [
+      'orbit://settings/',
+      'file:///tmp/a.html',
+      'about:blank',
+      'data:text/html,x',
+      'chrome://gpu',
+      '',
+      'nonsense',
+    ])
       expect(tweakHostOf(url)).toBeNull()
   })
 
@@ -109,7 +117,13 @@ describe('[BO-17] which pages a Tweak applies to', () => {
 describe('[BO-01][BO-18] the saved Tweak', () => {
   it('starts named after its host, on, changing nothing, its JavaScript allowed on this device', () => {
     const t = newTweak('t1', 'news.example.com', 42)
-    expect(t).toMatchObject({ name: 'news.example.com', enabled: true, subdomains: false, jsAllowed: true, jsInPrivate: false })
+    expect(t).toMatchObject({
+      name: 'news.example.com',
+      enabled: true,
+      subdomains: false,
+      jsAllowed: true,
+      jsInPrivate: false,
+    })
     expect(t.style).toEqual(DEFAULT_TWEAK_STYLE)
     expect(isEmptyTweak(t)).toBe(true)
   })
@@ -118,9 +132,22 @@ describe('[BO-01][BO-18] the saved Tweak', () => {
     const t = normalizeTweak('x', {
       host: 'Example.COM.',
       js: 'console.log(1)',
-      style: { size: 500, intensity: 2, hue: -30, font: 'nope', textCase: 'shout', hidden: [{ id: 'h', selector: '#ad' }, { selector: 'a{' }] },
+      style: {
+        size: 500,
+        intensity: 2,
+        hue: -30,
+        font: 'nope',
+        textCase: 'shout',
+        hidden: [{ id: 'h', selector: '#ad' }, { selector: 'a{' }],
+      },
     })
-    expect(t).toMatchObject({ host: 'example.com', name: 'example.com', enabled: true, jsAllowed: false, subdomains: false })
+    expect(t).toMatchObject({
+      host: 'example.com',
+      name: 'example.com',
+      enabled: true,
+      jsAllowed: false,
+      subdomains: false,
+    })
     expect(t?.style).toMatchObject({ size: 150, intensity: 1, hue: 330, font: '', textCase: 'none' })
     expect(t?.style.hidden).toEqual([{ id: 'h', selector: '#ad', label: '' }])
     expect(normalizeTweak('y', { host: '' })).toBeNull()
@@ -130,12 +157,20 @@ describe('[BO-01][BO-18] the saved Tweak', () => {
 
   it('loads a state file from before Tweaks had their controls, and the switches default on and unseen', () => {
     const raw = createInitialState(0) as unknown as Record<string, unknown>
-    raw.tweaks = { old: { id: 'old', host: 'example.com', name: 'Mine', enabled: false, css: 'a{}', js: '', createdAt: 3 } }
+    raw.tweaks = {
+      old: { id: 'old', host: 'example.com', name: 'Mine', enabled: false, css: 'a{}', js: '', createdAt: 3 },
+    }
     const settings = raw.settings as Record<string, unknown>
     delete settings.tweaksEnabled
     delete settings.tweakIntroSeen
     const state = normalizeState(JSON.parse(JSON.stringify(raw)) as Partial<OrbitState>)
-    expect(state.tweaks.old).toMatchObject({ name: 'Mine', enabled: false, css: 'a{}', updatedAt: 3, style: DEFAULT_TWEAK_STYLE })
+    expect(state.tweaks.old).toMatchObject({
+      name: 'Mine',
+      enabled: false,
+      css: 'a{}',
+      updatedAt: 3,
+      style: DEFAULT_TWEAK_STYLE,
+    })
     expect(state.settings.tweaksEnabled).toBe(true)
     expect(state.settings.tweakIntroSeen).toBe(false)
   })
@@ -258,7 +293,11 @@ describe('[BO-03][BO-04][BO-05][BO-06] colours', () => {
       seed = (seed * 16807) % 2147483647
       return seed / 2147483647
     }
-    for (const s of [style({ invert: true }), style({ hue: 220, accent: 220, intensity: 0.5 }), style({ contrast: 120, brightness: 90 })]) {
+    for (const s of [
+      style({ invert: true }),
+      style({ hue: 220, accent: 220, intensity: 0.5 }),
+      style({ contrast: 120, brightness: 90 }),
+    ]) {
       const chain = colorChain(s)
       const inverse = invertAffine(composeChain(chain))
       expect(inverse).not.toBeNull()
@@ -268,7 +307,13 @@ describe('[BO-03][BO-04][BO-05][BO-06] colours', () => {
         const grey = 0.25 + random() * 0.5
         const x: Rgb = [grey + (random() - 0.5) * 0.2, grey + (random() - 0.5) * 0.2, grey + (random() - 0.5) * 0.2]
         const undone = [0, 1, 2].map((r) =>
-          Math.min(1, Math.max(0, inverse.m[r * 3]! * x[0] + inverse.m[r * 3 + 1]! * x[1] + inverse.m[r * 3 + 2]! * x[2] + inverse.t[r]!)),
+          Math.min(
+            1,
+            Math.max(
+              0,
+              inverse.m[r * 3]! * x[0] + inverse.m[r * 3 + 1]! * x[1] + inverse.m[r * 3 + 2]! * x[2] + inverse.t[r]!,
+            ),
+          ),
         ) as Rgb
         expect(near(runChain(chain, undone), x, 4 / 255)).toBe(true)
       }
@@ -285,8 +330,18 @@ describe('[BO-03][BO-04][BO-05][BO-06] colours', () => {
 
 describe('[BO-07][BO-08][BO-09][BO-14] a page’s stylesheets', () => {
   it('are in the Tweak layer, one for the colours, one for type and one per Tweak', () => {
-    const a = tweak('a', 'example.com', { css: 'body { color: red }', style: { ...DEFAULT_TWEAK_STYLE, size: 110, invert: true } }, 1)
-    const b = tweak('b', 'example.com', { style: { ...DEFAULT_TWEAK_STYLE, size: 125, hidden: [{ id: 'h', selector: '.ad', label: 'Ad' }] } }, 2)
+    const a = tweak(
+      'a',
+      'example.com',
+      { css: 'body { color: red }', style: { ...DEFAULT_TWEAK_STYLE, size: 110, invert: true } },
+      1,
+    )
+    const b = tweak(
+      'b',
+      'example.com',
+      { style: { ...DEFAULT_TWEAK_STYLE, size: 125, hidden: [{ id: 'h', selector: '.ad', label: 'Ad' }] } },
+      2,
+    )
     const parts = tweakSheets([a, b])
     expect(parts.map((p) => p.key)).toEqual(['color', 'base', 't:a', 't:b'])
     for (const part of parts) expect(part.css.startsWith('@layer orbit-tweaks {')).toBe(true)

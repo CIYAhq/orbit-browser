@@ -59,7 +59,8 @@ const screenShared = (count: number) => {
  * shows in the engine's viewer, which no Tweak changes (BO-01).
  */
 function applyTweakSheets(): void {
-  if (window.top !== window || !/^https?:$/.test(location.protocol) || document.contentType === 'application/pdf') return
+  if (window.top !== window || !/^https?:$/.test(location.protocol) || document.contentType === 'application/pdf')
+    return
   let sheets: unknown
   try {
     sheets = ipcRenderer.sendSync(PAGE_CHANNEL.tweakSheets)

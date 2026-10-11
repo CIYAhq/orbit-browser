@@ -2,11 +2,21 @@ import { type IpcMainEvent, ipcMain, type Session, type WebContents } from 'elec
 import { isPrivateProfileId } from '../../shared/private'
 import { PAGE_CHANNEL } from '../../shared/site'
 import type { OrbitState, ProfileId, TabId } from '../../shared/state'
-import { enabledTweaksFor, type SheetOptions, type SheetPart, tweakHostOf, tweakScript, tweakSheets } from '../../shared/tweaks'
+import {
+  enabledTweaksFor,
+  type SheetOptions,
+  type SheetPart,
+  tweakHostOf,
+  tweakScript,
+  tweakSheets,
+} from '../../shared/tweaks'
 import type { MainContext } from '../context'
 
 /** The isolated world main's own scripts for Tweaks run in (never the page's world). */
 export const TWEAK_WORLD = 1040
+
+/** Chromium's net::ERR_ABORTED: a navigation stopped or replaced, which leaves the page as it was. */
+const ERR_ABORTED = -3
 
 /**
  * Takes the page preload's Tweak sheets out of the page (they carry the marker media type).
@@ -121,7 +131,9 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
     if (record.adopted) {
       // Main's own sheets are in: the preload's go.
       record.adopted = false
-      await record.contents.executeJavaScriptInIsolatedWorld(TWEAK_WORLD, [{ code: RETIRE_PRELOAD_SHEETS }]).catch(() => {})
+      await record.contents
+        .executeJavaScriptInIsolatedWorld(TWEAK_WORLD, [{ code: RETIRE_PRELOAD_SHEETS }])
+        .catch(() => {})
     }
   }
 
@@ -179,6 +191,14 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
     contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
       // Same document, same origin: the page keeps its sheets (BO-17: in-page navigations).
       if (isMainFrame && record.host && tweakHostOf(url) === record.host) record.url = url
+    })
+    // An error page took the page's place, or the page crashed: no Tweak goes there, until a page
+    // asks again (a stopped or replaced navigation leaves the page as it was).
+    contents.on('did-fail-load', (_event, code, _description, _url, isMainFrame) => {
+      if (isMainFrame && code !== ERR_ABORTED) record.host = null
+    })
+    contents.on('render-process-gone', () => {
+      record.host = null
     })
     contents.once('destroyed', () => records.delete(id))
     return record
@@ -244,7 +264,7 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
     runNow: (tabId, tweakId) => {
       const record = recordOf(tabId)
       const tweak = store.state.tweaks[tweakId]
-      if (!record || !tweak || !tweak.js.trim() || !tweak.jsAllowed) return false
+      if (!record || !tweak?.js.trim() || !tweak.jsAllowed) return false
       if (isPrivateProfileId(profileOf(record.contents)) && !tweak.jsInPrivate) return false
       record.contents.mainFrame.executeJavaScript(tweakScript(tweak)).catch(() => {})
       return true
