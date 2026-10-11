@@ -560,6 +560,24 @@ export async function clickInFrame(app: ElectronApplication, url: string): Promi
   await expect.poll(async () => Number(await inFrame(app, url, 'window.__clicks || 0'))).toBeGreaterThan(before)
 }
 
+/** A fixture page's address on 127.0.0.1: another site than `fx.url`'s (localhost), so a frame from it has a process of its own. */
+export function otherSite(fx: PagesFixtures, path: string): string {
+  return `http://127.0.0.1:${fx.port}${path}`
+}
+
+/**
+ * Clicks in a `/framed` page's frame from another site (a `/warn` page) the way a person does, once
+ * the frame has loaded, and waits until the frame got the press. Playwright's click goes through the
+ * browser, which sends it to the frame's own process; `sendInputEvent` (clickInFrame) reaches only
+ * the page's.
+ */
+export async function clickInOtherSiteFrame(app: ElectronApplication, url: string): Promise<void> {
+  await expect.poll(() => inFrame(app, url, 'document.readyState')).toBe('complete')
+  const before = Number(await inFrame(app, url, 'window.__clicks || 0'))
+  await (await tabPage(app, url)).frameLocator('#frame').locator('#area').click()
+  await expect.poll(async () => Number(await inFrame(app, url, 'window.__clicks || 0'))).toBeGreaterThan(before)
+}
+
 export function leaveInfo(app: ElectronApplication, tabId: string): Promise<LeaveInfo | null> {
   return app.evaluate((_e, id) => (globalThis as unknown as PagesGlobal).__orbitPages.leave(id), tabId)
 }

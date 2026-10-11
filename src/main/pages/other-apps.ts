@@ -16,9 +16,9 @@ import type { ProfileId, TabId } from '../../shared/state'
 import { sectionOf } from '../../shared/tree'
 import type { MainContext } from '../context'
 import { setAppLinkHandler } from '../nav/permissions'
-import { isActivation } from '../tabs/runtime'
 import { activeTabOf } from '../windows'
 import type { PageDialogs$ } from './dialogs'
+import { gestureCount, watchGestures } from './gestures'
 
 /**
  * Opens a link in the app the OS has for it: the one place Orbit launches another app (NV-19).
@@ -173,10 +173,11 @@ function neverShowedPage(page: WebContents): boolean {
  * followed the link. Orbit asks over that page, in a page dialog: the app with its icon, the site,
  * and "Always allow" for a web site; Cancel is the default. Open launches the app through
  * `launch`, the one place Orbit starts another app. A site always allowed for a kind of link opens
- * it without asking, once per user gesture in the page, as in Chromium: a page can't open the app
- * again and again unasked. A page asks one question at a time: a link it follows meanwhile is dropped.
- * Once the user answers Cancel, the page asks again only after a new user gesture in it, as in
- * Chromium: a page can't keep asking once the user said no.
+ * it without asking, once per user gesture in the page (a click or a key in any of its frames,
+ * `gestureCount`, D77), as in Chromium: a page can't open the app again and again unasked. A page
+ * asks one question at a time: a link it follows meanwhile is dropped. Once the user answers Cancel,
+ * the page asks again only after a new user gesture in it, as in Chromium: a page can't keep asking
+ * once the user said no.
  *
  * A tab, Peek, Mini Window or pop-up opened only for such a link (`target=_blank`, `window.open`,
  * or a redirect there) never shows a page: it closes itself once its navigation ends, and the tab
@@ -209,8 +210,8 @@ export function registerOtherApps(
   const asking = new Set<number>()
   /** Where each watched page's main frame is going, or went last: the address after any redirect. */
   const going = new Map<number, string>()
-  /** Pages (by contents id) with a user gesture that no link to another app has used yet. */
-  const gestured = new Set<number>()
+  /** Each page's gesture count (by contents id) when it last followed a link to another app: that link used them up. */
+  const used = new Map<number, number>()
   /** Pages (by contents id) whose last question the user answered Cancel: they ask again only with a new gesture. */
   const refused = new Set<number>()
 
@@ -269,17 +270,12 @@ export function registerOtherApps(
     page.on('did-stop-loading', () => {
       if (launchOnly(page)) setImmediate(() => closeLaunchOnly(page))
     })
-    page.on('input-event', (_event, input) => {
-      if (isActivation(input)) gestured.add(id)
-    })
-    // A click in a frame from another site (in a process of its own) comes only as a mouse event.
-    page.on('before-mouse-event', (_event, mouse) => {
-      if (mouse.type === 'mouseDown') gestured.add(id)
-    })
+    // A click or a key in any of its frames, one from another site's too (D77).
+    watchGestures(page)
     page.once('destroyed', () => {
       going.delete(id)
       asking.delete(id)
-      gestured.delete(id)
+      used.delete(id)
       refused.delete(id)
     })
   }
@@ -331,8 +327,10 @@ export function registerOtherApps(
     if (!scheme || page.isDestroyed() || !dialogs.hostable(page)) return
     // The site asking is the frame that followed the link (the page's own, or one in it).
     const origin = permissionOrigin(details.requestingUrl)
-    // Each link to another app uses up the page's last user gesture (Chromium's rule).
-    const fresh = gestured.delete(page.id)
+    // Each link to another app uses up the page's user gestures so far (Chromium's rule).
+    const count = gestureCount(page)
+    const fresh = count > (used.get(page.id) ?? 0)
+    used.set(page.id, count)
     if (origin && /^https?:\/\//i.test(origin) && choices.has(profileId, origin, scheme)) {
       // Always allowed: it opens without asking, but only for a gesture no link used yet (NV-19).
       if (fresh) launch(page, url)

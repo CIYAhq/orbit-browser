@@ -3,8 +3,8 @@ import { leaveDialog } from '../../shared/pages'
 import type { ArchivedTab, TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import type { CloseTabsOptions, TabOps } from '../tabs/ops'
-import { isActivation } from '../tabs/runtime'
 import type { PageDialogs$ } from './dialogs'
+import { gestureCount, watchGestures } from './gestures'
 
 /** How long Orbit waits for the page preload to say which navigation a warning stopped. */
 const ASK_MS = 250
@@ -39,15 +39,16 @@ type Stopped = Started | 'page' | 'close'
 /** What Orbit knows of one page about its leave-page warning. */
 interface LeavePage {
   /**
-   * User gestures that reached the page's current document: a page without one never warns
-   * (Chromium's rule), so Orbit closes it without asking the engine.
+   * The page's gesture count (`gestureCount`, D77) when its current document began: a document
+   * that no gesture has reached, in any of its frames, never warns (Chromium's rule), so Orbit
+   * closes it without asking the engine.
    */
-  gestures: number
+  since: number
   /** Main-frame documents so far. */
   doc: number
   /**
    * Auto-archive or sleep tried to let the page go, and it warned: they leave it until it navigates
-   * or gets a new user gesture (D73).
+   * or gets a new user gesture (D73). `gestures`: its gesture count then.
    */
   refused?: { doc: number; gestures: number }
   /** The user chose Leave: the page's next warning goes through until then. */
@@ -61,7 +62,7 @@ interface LeavePage {
 }
 
 export interface LeaveInfo {
-  /** User gestures in the page's current document. */
+  /** User gestures in the page's current document, from any of its frames. */
   gestures: number
   /** Auto-archive and sleep found the page warning, and leave it until it navigates or gets a new gesture. */
   refused: boolean
@@ -112,21 +113,24 @@ export function registerLeave(ctx: MainContext, ops: TabOps, dialogs: PageDialog
   const stateOf = (page: WebContents): LeavePage => {
     let p = pages.get(page.id)
     if (!p) {
-      p = { gestures: 0, doc: 0, allowUntil: 0, closingUntil: 0 }
+      p = { since: gestureCount(page), doc: 0, allowUntil: 0, closingUntil: 0 }
       pages.set(page.id, p)
     }
     return p
   }
+
+  /** User gestures in the page's current document, from any of its frames (D77). */
+  const gesturesIn = (page: WebContents, p: LeavePage | undefined): number => (p ? gestureCount(page) - p.since : 0)
 
   /**
    * Whether a page could warn now: Chromium's warning needs a user gesture in the page first, and a
    * page waiting on its own alert, confirm or prompt goes with it.
    */
   const mayWarn = (page: WebContents | undefined): page is WebContents =>
-    !!page && !page.isDestroyed() && (pages.get(page.id)?.gestures ?? 0) > 0 && !dialogs.pending(page, 'script')
+    !!page && !page.isDestroyed() && gesturesIn(page, pages.get(page.id)) > 0 && !dialogs.pending(page, 'script')
 
-  const isRefused = (p: LeavePage | undefined): boolean =>
-    !!p?.refused && p.refused.doc === p.doc && p.refused.gestures === p.gestures
+  const isRefused = (page: WebContents, p: LeavePage | undefined): boolean =>
+    !!p?.refused && p.refused.doc === p.doc && p.refused.gestures === gestureCount(page)
 
   /** Runs one of the preload's answers in its world; `fallback` when the page is gone or too busy. */
   const ask = <T>(page: WebContents, code: string, fallback: T, timeout = ASK_MS): Promise<T> => {
@@ -187,7 +191,7 @@ export function registerLeave(ctx: MainContext, ops: TabOps, dialogs: PageDialog
     const page = tabs.contents(tabId)
     if (!page) return
     const p = stateOf(page)
-    p.refused = { doc: p.doc, gestures: p.gestures }
+    p.refused = { doc: p.doc, gestures: gestureCount(page) }
   }
 
   // ---- Navigations ----
@@ -264,10 +268,9 @@ export function registerLeave(ctx: MainContext, ops: TabOps, dialogs: PageDialog
   const watch = (page: WebContents, kind: 'tab' | 'popup') => {
     if (watched.has(page)) return
     watched.add(page)
+    // A press in any of its frames counts (D77): an embedded editor is often another site's.
+    watchGestures(page)
     const p = stateOf(page)
-    page.on('input-event', (_event, input) => {
-      if (isActivation(input)) p.gestures++
-    })
     page.on('did-start-navigation', (details) => {
       if (!details.isMainFrame) return
       // The navigation goes on: nothing is stopped, and a Leave was used or no longer needed.
@@ -279,7 +282,7 @@ export function registerLeave(ctx: MainContext, ops: TabOps, dialogs: PageDialog
     page.on('did-navigate', () => {
       // A new document: no gesture has reached it yet.
       p.doc++
-      p.gestures = 0
+      p.since = gestureCount(page)
     })
     page.on('will-prevent-unload', (event) => {
       if (windows.isUi(page)) return
@@ -451,12 +454,12 @@ export function registerLeave(ctx: MainContext, ops: TabOps, dialogs: PageDialog
       // A page waiting on the user (its dialog, or a sign-in) waits for them.
       if (dialogs.pending(page, 'all')) return false
       // Being let go already, or it warned when last tried (D73).
-      return !guardingTabs.has(tabId) && !isRefused(pages.get(page.id))
+      return !guardingTabs.has(tabId) && !isRefused(page, pages.get(page.id))
     },
     info(page) {
       const p = pages.get(page.id)
       if (!p) return null
-      return { gestures: p.gestures, refused: isRefused(p), allowed: Date.now() <= p.allowUntil }
+      return { gestures: gesturesIn(page, p), refused: isRefused(page, p), allowed: Date.now() <= p.allowUntil }
     },
   }
   ops.mayDiscard = (tabId) => service.mayDiscard(tabId)

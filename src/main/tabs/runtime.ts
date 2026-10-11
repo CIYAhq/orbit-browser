@@ -16,6 +16,7 @@ import type { Tab, TabId, WindowId } from '../../shared/state'
 import { isAwayFromPinned, sameDocUrl } from '../../shared/tabs'
 import type { MainContext } from '../context'
 import { KEEP_KEYBOARD } from '../keys/focus'
+import { onGesture } from '../pages/gestures'
 import { showPageContextMenu } from './context-menu'
 import { FaviconStore } from './favicon-store'
 import { isIco, readIco } from './ico'
@@ -311,12 +312,12 @@ export class TabRuntime {
       const icon = favicons.find((f) => /^(https?|data):/.test(f))
       if (icon) void this.storeFavicon(tabId, contents, icon)
     })
-    // Pop-ups need a recent user gesture in the opener (NV-09).
-    contents.on('input-event', (_e, input) => {
-      if (!isActivation(input)) return
+    // Pop-ups need a recent user gesture in the opener (NV-09): a click or a key in any of its
+    // frames, one from another site's too (D77).
+    onGesture(contents, () => {
       const now = Date.now()
       const last = this.gestures.get(tabId)
-      // One physical press can arrive as two events (raw key down + key down): one activation.
+      // Two presses within 30 ms are one activation.
       if (last && now - last.at < 30) last.at = now
       else this.gestures.set(tabId, { at: now, used: false })
     })
