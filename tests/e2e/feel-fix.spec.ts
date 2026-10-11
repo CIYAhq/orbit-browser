@@ -5,7 +5,19 @@
  */
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 import { note } from './frames'
-import { action, type Fixtures, launchOrbit, MOD, type Orbit, run, startFixtures, state, viewPage } from './helpers'
+import {
+  action,
+  type Fixtures,
+  launchOrbit,
+  MOD,
+  type Orbit,
+  run,
+  startFixtures,
+  state,
+  tabPage,
+  viewPage,
+} from './helpers'
+import { screenPage, swipeInfo, swipeOverPage, waitNoScreen, waitScreen } from './pages-support'
 
 let fx: Fixtures
 let orbit: Orbit
@@ -310,4 +322,87 @@ test('[SV-02][SV-03][SV-07][SV-15] an open tab chosen for a pane goes straight i
   check('SV-15', await chooseOpenTab(overlay, 'Notes', notes, [base, metrics, standup, notes]))
   expect(await splitTabs(orbit.app, base)).not.toContain(design)
   expect(Object.keys((await state(orbit.app)).tabs)).toContain(design)
+})
+
+// ---- Reduce Motion in the page screens and the swipe arrow (D70, FL-28) ----
+
+/** Turns Orbit's own Reduce Motion on (the system asks for nothing here). */
+async function reduceMotion(app: ElectronApplication): Promise<void> {
+  await action(app, 'app.toggleReduceMotion')
+  await expect.poll(async () => (await state(app)).settings.reduceMotion).toBe(true)
+}
+
+/** The longest of a computed `transition-duration` list ("0.12s, 0s"), in ms. */
+const longest = (durations: string) => Math.max(0, ...durations.split(',').map((d) => Number.parseFloat(d) * 1000))
+
+test("[FL-28][NV-13] with Orbit's Reduce Motion on, a page's error screen shows in place, with no animation", async () => {
+  const { app } = orbit
+  const tabId = await openTab('Start')
+  await expect.poll(async () => (await state(app)).tabs[tabId]?.title).toBe('Start')
+  /** Whether the screen's view has reduced motion, and the animation its card runs as it shows. */
+  const check = async (reduced: boolean) => {
+    await run(app, 'tabs.navigate', { tabId, url: 'http://nonexistent.invalid/' })
+    const shown = await waitScreen(app, (s) => s.tabId === tabId && s.onScreen)
+    const view = await screenPage(app, shown.id)
+    const card = view.locator(`[data-screen-id="${shown.id}"]`)
+    await expect
+      .poll(async () => ({
+        reduced: await view.locator('html').evaluate((html) => html.classList.contains('reduce-motion')),
+        animation: await card.evaluate((el) => getComputedStyle(el).animationName),
+      }))
+      .toEqual({ reduced, animation: reduced ? 'none' : 'page-screen-in' })
+    await run(app, 'tabs.navigate', { tabId, url: fx.url('/page/Start') })
+    await waitNoScreen(app, tabId)
+  }
+  // Off, with a system that asks for nothing: the card fades and rises in.
+  await check(false)
+  await reduceMotion(app)
+  await check(true)
+})
+
+test("[FL-28][NV-02] with Orbit's Reduce Motion on, the swipe arrow fills and fades with no motion: no transition and no scale", async () => {
+  const { app } = orbit
+  const tabId = await openTab('One')
+  await expect.poll(async () => (await state(app)).tabs[tabId]?.title).toBe('One')
+  await (await tabPage(app, '/page/One')).evaluate((to) => location.assign(to), fx.url('/page/Two'))
+  await expect.poll(async () => (await state(app)).tabs[tabId]?.title).toBe('Two')
+  const windowId = Object.keys((await state(app)).windows)[0] as string
+  /** A full swipe from `from` (the arrow fills, and letting go goes there); what its arrow did. */
+  const check = async (from: string, to: string, deltas: number[], reduced: boolean) => {
+    const info = await swipeOverPage(app, windowId, fx.url(`/page/${from}`), { x: 300, y: 300 }, deltas)
+    expect(info).toMatchObject({ visible: true, armed: true })
+    let view: Page | undefined
+    await expect
+      .poll(() => {
+        view = app.windows().find((p) => p.url().includes('view=swipe'))
+        return !!view
+      })
+      .toBe(true)
+    const arrow = (view as Page).getByTestId('swipe-arrow')
+    // Filled: its circle scales up a little as it fills, over the quick timing.
+    await expect(arrow).toHaveAttribute('data-armed', 'true')
+    const filled = await arrow.evaluate((el) => {
+      const circle = el.querySelector('.swipe-arrow__circle') as HTMLElement
+      const style = getComputedStyle(circle)
+      return {
+        reduced: document.documentElement.classList.contains('reduce-motion'),
+        transform: style.transform,
+        duration: style.transitionDuration,
+      }
+    })
+    expect(filled.reduced).toBe(reduced)
+    expect(filled.transform === 'none', `the filled circle's transform (${filled.transform})`).toBe(reduced)
+    expect(longest(filled.duration) > 0, `the circle's transitions (${filled.duration})`).toBe(!reduced)
+    // Let go: the page goes, and the arrow fades out (or just goes).
+    await expect.poll(async () => (await state(app)).tabs[tabId]?.title).toBe(to)
+    await expect.poll(() => arrow.evaluate((el) => el.classList.contains('is-done'))).toBe(true)
+    const fade = await arrow.evaluate((el) => getComputedStyle(el).transitionDuration)
+    expect(longest(fade) > 0, `the arrow's fade (${fade})`).toBe(!reduced)
+    await expect.poll(async () => (await swipeInfo(app, windowId)).visible).toBe(false)
+  }
+  // Off: back to One, with motion.
+  await check('Two', 'One', Array(8).fill(-16), false)
+  await reduceMotion(app)
+  // On: forward to Two again, without.
+  await check('One', 'Two', Array(8).fill(16), true)
 })
