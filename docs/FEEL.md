@@ -234,8 +234,9 @@
   - The layer goes when the close's curve ends, as it did before the lane. The lane had made it go once the card and the dim were under 0.1 %; no test showed that was needed, so it came out in fix round 1 (review follow-up 3).
   - Six runs at load 15–19, each in up to three rounds (D46), took 173–194 ms at their best; 4 of their 10 rounds took 201–215 ms. That is at the edge of the target: the close starts in the second frame and runs 160 ms.
   - Two gaps remain:
-    - During the open, the overlay draws at 30 fps on this machine while main moves the page view every frame, so p99 is two intervals. A fix belongs in `src/main/peek/`, which is the peek lane's.
+    - During the open, the overlay draws at 30 fps on this machine, so p99 is two intervals. Under Xvfb's software compositing it draws at 30–60 fps whatever it shows.
     - Escape goes through main to the overlay view, so the close starts in the second frame (as with FL-03).
+  - Main used to resize the page view in every frame of the open, from the link's size (13 times in an open), so the page showed laid out narrow until about 230 ms in. Since the feel-fix lane (PK-06) the page is laid out once, at its size, out of sight, and joins the card at rest; the card grows blank and shows a still of the page while it moves. The view changes size 0 times in an open and once in an expand (8 before). The close fades that still: the view leaves the screen 2–6 ms after Escape and the still fades over 133–150 ms. Three runs at load 4–5: the open within 2 px in 300–317 ms, its longest frame 33–67 ms (50–83 before); the expand within 0.5 px in 217–250 ms.
 - **FL-20:** a removed Favorite used to fade at full size. It now shrinks to 0.85 where it was.
 - **FL-21:** only the rows near the visible band are drawn. A Space shown for the first time draws a stand-in at once (11 ms) and its own list by 161 ms.
   - Under load 3–4 the long lists still have frames of two intervals, so p99 is two intervals: 5 such frames per 200-tab fling, and 12 per 500-tab scroll (was 102).
