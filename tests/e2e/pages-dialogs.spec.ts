@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { action, isMac, launchOrbit, type Orbit, state } from './helpers'
-import { clickInPage, closeWindow, cmdIn, pressInPage, windowState } from './nav-support'
+import { clickInPage, closeWindow, cmdIn, pressInPage, toolsPage, windowState } from './nav-support'
 import {
   AUTH_PASSWORD,
   AUTH_USER,
@@ -132,6 +132,78 @@ test('[NV-24][KS-19][KS-16] prompt and alert: Enter answers, Esc cancels, and th
   await expect(alertView.getByTestId('page-dialog-ok')).toBeFocused()
   await alertView.keyboard.press('Enter')
   await answered(alerting, 'undefined')
+})
+
+/**
+ * Types each of `keys` (a character, or a key such as 'Enter') wherever the keyboard is, as the
+ * keyboard does: Enter comes with its character too, which a form's submit button acts on.
+ * Returns the address of the view that took each.
+ */
+function typeWhereKeyboardIs(keys: string[]): Promise<string[]> {
+  return orbit.app.evaluate(
+    ({ webContents }, list) =>
+      list.map((key) => {
+        const contents = webContents.getFocusedWebContents()
+        if (!contents) return 'nothing'
+        const char = key === 'Enter' ? '\r' : [...key].length === 1 ? key : null
+        contents.sendInputEvent({ type: 'keyDown', keyCode: key })
+        if (char) contents.sendInputEvent({ type: 'char', keyCode: char })
+        contents.sendInputEvent({ type: 'keyUp', keyCode: key })
+        return contents.getURL()
+      }),
+    keys,
+  )
+}
+
+test('[NV-24][KS-19] a dialog the page times leaves the keyboard in a tab being renamed; it takes it when the keyboard goes back to the page (D72)', async () => {
+  const { app, shell } = orbit
+  const url = fx.url('/ask?kind=confirm&msg=Timed')
+  const asking = await newTab(app, url)
+  await waitTab(app, asking, '/ask')
+  // The user renames the tab in the sidebar, which has the keyboard (as after a click there)...
+  await row(shell, asking).getByTestId('tab-title').dblclick()
+  const field = shell.getByTestId('rename-field')
+  await expect(field).toBeFocused()
+  await cmd(app, 'spaces.focusShell')
+  await expect.poll(focusedUrl).toContain('view=shell')
+  // ...as the page asks (review REPRO G).
+  await inPage(app, url, 'setTimeout(ask, 0); 0')
+  const shown = await waitDialog(app, (d) => d.tabId === asking && d.onScreen)
+  expect(shown.focused).toBe(false)
+  // What the user types goes on into the field, and Enter saves the name: the page isn't answered.
+  const typed = await typeWhereKeyboardIs(['M', 'a', 'i', 'l', 'Enter'])
+  expect(typed.every((at) => at.includes('view=shell'))).toBe(true)
+  await expect(row(shell, asking).getByTestId('tab-title')).toHaveText('Mail')
+  expect(await waitDialog(app, (d) => d.id === shown.id)).toMatchObject({ onScreen: true, focused: false })
+  // Once the keyboard goes back to the page, the dialog has it, and Enter answers.
+  await cmd(app, 'tabs.focusPage')
+  await expect.poll(async () => (await waitDialog(app, (d) => d.id === shown.id)).focused).toBe(true)
+  expect(await typeWhereKeyboardIs(['Enter'])).toEqual([expect.stringContaining('view=dialog')])
+  await answered(asking, 'true')
+})
+
+test('[NV-24][KS-19][NV-05] a dialog the page times leaves the keyboard in the find bar; it takes it when the bar closes (D72)', async () => {
+  const { app } = orbit
+  const url = fx.url('/ask?kind=confirm&msg=Timed')
+  const asking = await newTab(app, url)
+  await waitTab(app, asking, '/ask')
+  await pressInPage(app, url, 'F', [MOD_KEY])
+  const input = (await toolsPage(app)).getByTestId('find-input')
+  await expect(input).toBeFocused()
+  await expect.poll(focusedUrl).toContain('view=tools')
+  // The page asks while the user types a search (review REPRO H).
+  await inPage(app, url, 'setTimeout(ask, 0); 0')
+  const shown = await waitDialog(app, (d) => d.tabId === asking && d.onScreen)
+  expect(shown.focused).toBe(false)
+  const typed = await typeWhereKeyboardIs(['A', 's', 'k', 'Enter'])
+  expect(typed.every((at) => at.includes('view=tools'))).toBe(true)
+  await expect(input).toHaveValue('Ask')
+  expect(await waitDialog(app, (d) => d.id === shown.id)).toMatchObject({ onScreen: true, focused: false })
+  // Esc closes the bar and gives the page the keyboard: the dialog takes it, and Esc there cancels.
+  expect(await typeWhereKeyboardIs(['Escape'])).toEqual([expect.stringContaining('view=tools')])
+  await expect.poll(async () => (await waitDialog(app, (d) => d.id === shown.id)).focused).toBe(true)
+  expect(await typeWhereKeyboardIs(['Escape'])).toEqual([expect.stringContaining('view=dialog')])
+  await answered(asking, 'false')
 })
 
 test('[NV-24] a background tab’s dialog waits until its tab shows', async () => {

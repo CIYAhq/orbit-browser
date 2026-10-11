@@ -1,4 +1,4 @@
-import { type IpcMainEvent, ipcMain, type WebContents } from 'electron'
+import { webContents as allContents, type IpcMainEvent, ipcMain, type WebContents } from 'electron'
 import { type PageDialogAnswer, type PageDialogContent, scriptAnswer, scriptDialog } from '../../shared/pages'
 import type { Rect } from '../../shared/rpc'
 import { PAGE_CHANNEL } from '../../shared/site'
@@ -11,6 +11,8 @@ interface Dialog {
   resolve: (answer: PageDialogAnswer | null) => void
   /** The page's own alert, confirm or prompt: it goes when the page navigates. */
   script: boolean
+  /** The page had the keyboard when the dialog came: it takes the keyboard when it shows (D72). */
+  hadKeyboard: boolean
 }
 
 export interface PageDialogInfo {
@@ -52,8 +54,10 @@ export interface PageDialogs$ {
  * window stays usable: other tabs, the sidebar, the command bar. A dialog waits while its page is
  * off screen (another tab is selected, the window is closed to the Library) and shows again when
  * the page does. Each page's dialogs show one at a time in a transparent view over the page
- * (`createCovers`), which takes the keyboard (Enter, Esc and Tab go to the dialog first, KS-19) and
- * gives it back to the page when the last one closes (KS-16).
+ * (`createCovers`), which takes the keyboard where the page had it (Enter, Esc and Tab go to the
+ * dialog first, KS-19) and gives it back to the page when the last one closes (KS-16). Where Orbit's
+ * own UI has the keyboard (the find bar, a sidebar field, the address field), it stays there, and
+ * the dialog takes it once the user clicks the dialog or the keyboard next goes to the page (D72).
  */
 export function registerDialogs(ctx: MainContext): PageDialogs$ {
   const { tabs, commands } = ctx
@@ -61,7 +65,18 @@ export function registerDialogs(ctx: MainContext): PageDialogs$ {
   const queues = new Map<number, { page: WebContents; list: Dialog[] }>()
   let nextId = 1
 
-  const covers = createCovers(ctx, { view: 'dialog', content: (page) => queues.get(page.id)?.list[0]?.content })
+  /** Whether nothing, or the page itself, has the keyboard. */
+  const pageHasKeyboard = (page: WebContents, focused = allContents.getFocusedWebContents() ?? null) =>
+    !focused || focused.isDestroyed() || focused === page
+
+  const covers = createCovers(ctx, {
+    view: 'dialog',
+    content: (page) => queues.get(page.id)?.list[0]?.content,
+    // A dialog takes the keyboard only where the page had it, as a screen does (D72): a page can't
+    // time one to catch keys meant for the find bar or a sidebar field.
+    mayTakeKeyboard: (page, focused) =>
+      pageHasKeyboard(page, focused) || queues.get(page.id)?.list[0]?.hadKeyboard === true,
+  })
 
   const matches = (dialog: Dialog, which: DialogsWhich) =>
     which === 'all' || (which === 'script' ? dialog.script : dialog.content.kind === 'hang')
@@ -96,7 +111,7 @@ export function registerDialogs(ctx: MainContext): PageDialogs$ {
             for (const dialog of made.list.splice(0)) dialog.resolve(null)
           })
         }
-        queue.list.push({ content: { ...content, id: nextId++ }, resolve, script })
+        queue.list.push({ content: { ...content, id: nextId++ }, resolve, script, hadKeyboard: pageHasKeyboard(page) })
         if (queue.list.length === 1) covers.update(page)
       })
     },
