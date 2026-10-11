@@ -149,6 +149,68 @@ export function keepInside(area: Rect, rect: Rect): Rect {
   return { ...rect, x: Math.round(x), y: Math.round(y) }
 }
 
+// Orbit's alerts and dialogs (MD-06: the player never covers them).
+
+/**
+ * The most room a dialog takes: a file picker (alerts are smaller). Where it shows over its window
+ * isn't known exactly, so the player keeps clear of this much of it.
+ */
+export const PIP_DIALOG_ROOM = { width: 900, height: 620 } as const
+
+/**
+ * Where a dialog over a window can be (MD-06): the dialog room centered on the window, or hanging
+ * from its top where dialogs are sheets (macOS); within the work area of the window's screen.
+ */
+export function dialogZone(window: Rect, area: Rect, sheet: boolean): Rect {
+  const { width, height } = PIP_DIALOG_ROOM
+  const x = window.x + (window.width - width) / 2
+  const y = sheet ? window.y : window.y + (window.height - height) / 2
+  const left = Math.max(area.x, x)
+  const top = Math.max(area.y, y)
+  const right = Math.min(area.x + area.width, x + width)
+  const bottom = Math.min(area.y + area.height, y + height)
+  return {
+    x: Math.round(left),
+    y: Math.round(top),
+    width: Math.max(0, Math.round(right - left)),
+    height: Math.max(0, Math.round(bottom - top)),
+  }
+}
+
+/** Whether two rects are the same. */
+export function sameRect(a: Rect, b: Rect): boolean {
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
+}
+
+/** Whether two rects share some area (rects that only touch don't). */
+export function rectsOverlap(a: Rect, b: Rect): boolean {
+  if (a.width <= 0 || a.height <= 0 || b.width <= 0 || b.height <= 0) return false
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+}
+
+/**
+ * Where the player goes while dialogs show in `zones` (MD-06): `undefined` when it is clear of them
+ * all where it is; else the corner of the work area nearest to it that is clear of them all, at the
+ * same size; else `null` (no corner is clear: it hides until they close).
+ */
+export function asideRect(area: Rect, player: Rect, zones: readonly Rect[]): Rect | null | undefined {
+  if (!zones.some((zone) => rectsOverlap(player, zone))) return undefined
+  const cx = player.x + player.width / 2
+  const cy = player.y + player.height / 2
+  let best: Rect | null = null
+  let nearest = Number.POSITIVE_INFINITY
+  for (const corner of PIP_CORNERS) {
+    const rect = cornerRect(area, corner, player.width, player.height)
+    if (zones.some((zone) => rectsOverlap(rect, zone))) continue
+    const distance = Math.hypot(rect.x + rect.width / 2 - cx, rect.y + rect.height / 2 - cy)
+    if (distance < nearest) {
+      best = rect
+      nearest = distance
+    }
+  }
+  return best
+}
+
 /** Normalizes a stored placement (persisted settings may be old or hand-edited). */
 export function normalizePlacement(value: unknown): PipPlacement | undefined {
   if (!value || typeof value !== 'object') return undefined

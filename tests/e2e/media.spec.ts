@@ -946,6 +946,98 @@ test('[MD-06][FL-32] the player snaps to the corner a move or fling heads for, r
   expect(await v.page.evaluate(() => getComputedStyle(document.getElementById('v') as Element).transform)).toBe('none')
 })
 
+/** Orbit's first window, as the main process holds it. */
+type WindowHooks = {
+  __orbit: { windowIds: () => string[]; ctx: { windows: { get: (id: string) => Electron.BrowserWindow | undefined } } }
+  __asked?: AbortController
+}
+
+test("[MD-06] the player keeps clear of Orbit's alerts and dialogs: it moves to the nearest clear corner, or out of sight when none is, and goes back when they close", async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const v = await openPlaying(app, '/media/long-video/Film')
+  const pip = await pipPage(app)
+  await leave(app)
+  const info = await expectPlayer(app, v.id)
+  const area = info.workArea as Box
+  const home = cornerBox(area, 'bottom-right', 320, 180)
+  expect(info.bounds).toEqual(home)
+
+  const placeWindow = (bounds: Box) =>
+    app.evaluate((_e, b) => {
+      const { __orbit } = globalThis as unknown as WindowHooks
+      __orbit.ctx.windows.get(__orbit.windowIds()[0] as string)?.setBounds(b)
+    }, bounds)
+  /** An alert over Orbit's window, like the one before deleting a folder; answer() closes it. */
+  const ask = () =>
+    app.evaluate(({ dialog }) => {
+      const g = globalThis as unknown as WindowHooks
+      const win = g.__orbit.ctx.windows.get(g.__orbit.windowIds()[0] as string)
+      const asked = new AbortController()
+      g.__asked = asked
+      if (win) {
+        const options = { message: 'Delete “Reading”?', buttons: ['Delete', 'Cancel'], signal: asked.signal }
+        dialog.showMessageBox(win, options).catch(() => {})
+      }
+    })
+  const answer = () =>
+    app.evaluate(() => {
+      const g = globalThis as unknown as WindowHooks
+      g.__asked?.abort()
+      return g.__orbit.ctx.windows.get(g.__orbit.windowIds()[0] as string)?.isEnabled()
+    })
+  const shown = async () => {
+    const p = await player(app)
+    return { tabId: p.tabId, visible: p.visible, bounds: p.bounds }
+  }
+  const at = (bounds: Box) => ({ tabId: v.id, visible: true, bounds })
+
+  // Orbit's window sits in the bottom-right of the screen, under the player. An alert over it: the
+  // player moves to the nearest corner clear of it, the top-right one, still playing...
+  await placeWindow({ x: area.x + area.width - 600, y: area.y + area.height - 500, width: 600, height: 500 })
+  await ask()
+  await expect.poll(shown).toEqual(at(cornerBox(area, 'top-right', 320, 180)))
+  expect(await paused(v.page, '#v')).toBe(false)
+  // ...without taking that as its place. When the alert closes it goes back.
+  expect((await state(app)).settings.pipPlacement).toEqual({ corner: 'bottom-right', size: 320 })
+  await answer()
+  await expect.poll(shown).toEqual(at(home))
+
+  // Moved by hand while an alert shows, it stays where it was put once the alert closes.
+  await ask()
+  await expect.poll(shown).toEqual(at(cornerBox(area, 'top-right', 320, 180)))
+  let b = (await player(app)).bounds as Box
+  await dragPlayer(pip, 'move', { x: b.x + 100, y: b.y + 50 }, { x: area.x + 300, y: area.y + 200 }, 10, 60)
+  await expect.poll(shown).toEqual(at(cornerBox(area, 'top-left', 320, 180)))
+  await expect.poll(answer).toBe(true)
+  const after = await samplePlayer(app, 400)
+  expect(after.every((s) => s.visible && s.x === area.x + 16 && s.y === area.y + 16)).toBe(true)
+
+  // Bigger, with Orbit's window in the middle of the screen: no corner is clear of an alert there.
+  // The player goes out of sight while it shows, the video playing on, and comes back where it was.
+  b = (await player(app)).bounds as Box
+  const corner = { x: b.x + b.width, y: b.y + b.height }
+  await dragPlayer(pip, 'bottom-right', corner, { x: corner.x + 800, y: corner.y + 450 }, 10, 60)
+  await expect
+    .poll(async () => {
+      const p = await player(app)
+      return !p.animating && p.bounds?.width === Math.floor(area.width / 2)
+    })
+    .toBe(true)
+  const big = (await player(app)).bounds as Box
+  await placeWindow({
+    x: area.x + Math.round((area.width - 800) / 2),
+    y: area.y + Math.round((area.height - 600) / 2),
+    width: 800,
+    height: 600,
+  })
+  await ask()
+  await expect.poll(shown).toEqual({ tabId: v.id, visible: false, bounds: big })
+  expect(await paused(v.page, '#v')).toBe(false)
+  await expect.poll(answer).toBe(true)
+  await expect.poll(shown).toEqual(at(big))
+})
+
 test('[MD-08] the player menu turns automatic picture-in-picture off for today or always; playback continues in the sidebar', async () => {
   orbit = await launchOrbit()
   const { app } = orbit

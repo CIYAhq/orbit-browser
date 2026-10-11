@@ -3,6 +3,7 @@ import { dialog, type OpenDialogOptions } from 'electron'
 import { ACTIONS_BY_ID, type ActionDef, BORROWED_KEYS } from '../../shared/actions'
 import type { OrbitState, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
+import { withDialog } from '../media/dialog-watch'
 import { browserWindowFor } from './browser-window'
 
 /**
@@ -34,7 +35,9 @@ export function registerOpenFile(ctx: MainContext): void {
     if (win && !win.isDestroyed() && !win.isFocused()) win.focus()
     const options: OpenDialogOptions = { title: 'Open File', properties: ['openFile', 'multiSelections'] }
     const { canceled, filePaths } =
-      win && !win.isDestroyed() ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+      win && !win.isDestroyed()
+        ? await withDialog(win, dialog.showOpenDialog(win, options))
+        : await dialog.showOpenDialog(options)
     if (canceled) return
     for (const [i, path] of filePaths.entries()) {
       const url = pathToFileURL(path).href

@@ -5,6 +5,7 @@ import { type PageReferrer, referrerPolicyName } from '../../shared/nav'
 import { isPrivateTab } from '../../shared/private'
 import type { TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
+import { withDialog } from '../media/dialog-watch'
 import type { TabPage } from '../tabs/ops'
 import { NAV_WORLD } from './focus'
 
@@ -181,7 +182,7 @@ export function pageItems(ctx: MainContext, tabId: TabId, contents: WebContents)
         const options = complete
           ? { defaultPath: `${name}.html`, filters: [html, single] }
           : { defaultPath: `${name}.mhtml`, filters: [single, html] }
-        void (win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options)).then(
+        void (win ? withDialog(win, dialog.showSaveDialog(win, options)) : dialog.showSaveDialog(options)).then(
           ({ canceled, filePath }) => {
             if (canceled || !filePath || contents.isDestroyed()) return
             // Asked again: the page may have changed while the dialog was open.
