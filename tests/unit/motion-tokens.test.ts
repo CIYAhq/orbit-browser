@@ -6,6 +6,7 @@ import {
   durationMs,
   EASE,
   EXIT_FACTOR,
+  ONE_FRAME_S,
   REDUCED,
   SPRING,
   springFrom,
@@ -92,5 +93,6 @@ describe('motion tokens (FL-01)', () => {
     for (const [k, b] of Object.entries(EASE)) expect(prop(`ease-${k}`), k).toBe(`cubic-bezier(${b.join(', ')})`)
     expect(prop('motion-exit')).toBe(String(EXIT_FACTOR))
     expect(prop('motion-fade')).toBe(`${REDUCED.fadeMs}ms`)
+    expect(prop('motion-lead')).toBe(`calc(-1000ms / ${1 / ONE_FRAME_S})`)
   })
 })

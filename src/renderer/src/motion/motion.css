@@ -23,4 +23,10 @@
   --ease-gentle: cubic-bezier(0.42, 0, 0.58, 1);
   /* Reduced motion's cross-fade (FL-28: about 100–150 ms). */
   --motion-fade: 120ms;
+  /*
+   * A transition's first frame shows where it starts, so a response would only move in the frame
+   * after the one that draws the change. As a delay it starts a 60 Hz frame along (ONE_FRAME_S),
+   * so the first frame already shows its first step (FL-29: "starts moving: 1 frame").
+   */
+  --motion-lead: calc(-1000ms / 60);
 }

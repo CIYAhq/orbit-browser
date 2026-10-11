@@ -336,6 +336,7 @@ export class PaneEngine {
 
   private measure(): boolean {
     if (!this.host) return false
+    this.catchSlide(this.host)
     const r = this.host.getBoundingClientRect()
     const changed =
       r.left !== this.frame.x ||
@@ -344,6 +345,20 @@ export class PaneEngine {
       r.height !== this.frame.height
     this.frame = { x: r.left, y: r.top, width: r.width, height: r.height }
     return changed
+  }
+
+  /**
+   * The sidebar's slide starts a frame along (FL-02), so its first frame already moves the frame,
+   * before the transition's run event comes: whatever measures that frame first (the resize observer,
+   * or the frame loop still following the last slide) starts the slide, from the frame as it was.
+   */
+  private catchSlide(host: HTMLElement): void {
+    const content = host.parentElement
+    const shell = content?.parentElement
+    if (this.slide || !content || !shell || !columnSliding(shell)) return
+    this.followUntil = performance.now() + FOLLOW_CAP_MS
+    this.startSlide(shell, content)
+    this.schedule()
   }
 
   /** Recomputes targets; springs toward them when `animate`, otherwise jumps. Writes at once. */

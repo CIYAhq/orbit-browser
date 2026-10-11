@@ -97,9 +97,10 @@ html.is-resizing * {
   /*
    * Show/hide (SB-11, FL-02): the sidebar column, the card's margins and the sidebar's slide share
    * one duration and curve, so the sidebar's right edge and the card's left edge move together.
-   * A reversal mid-way starts from where they are.
+   * A reversal mid-way starts from where they are. They start a frame along, so the frame that draws
+   * ⌘S already moves (FL-29).
    */
-  transition: grid-template-columns var(--sidebar-dur) var(--sidebar-ease);
+  transition: grid-template-columns var(--sidebar-dur) var(--sidebar-ease) var(--motion-lead);
 }
 
 .shell--sidebar-hidden {
@@ -109,7 +110,7 @@ html.is-resizing * {
 .content {
   min-width: 0;
   padding: var(--gutter) var(--gutter) var(--gutter) 0;
-  transition: padding var(--sidebar-dur) var(--sidebar-ease);
+  transition: padding var(--sidebar-dur) var(--sidebar-ease) var(--motion-lead);
 }
 
 .shell--sidebar-hidden .content {

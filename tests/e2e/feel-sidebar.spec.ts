@@ -41,7 +41,11 @@ test('[FL-02][FL-29][FL-01] ⌘S slides the sidebar out edge to edge within 300 
   await settled(shell)
   const width = (await sidebar()).width
   const keys = await mainInputs(app)
-  const targets = { sidebar: '[data-testid="sidebar"]', frame: '[data-testid="content-frame"]' }
+  const targets = {
+    sidebar: '[data-testid="sidebar"]',
+    frame: '[data-testid="content-frame"]',
+    shell: { selector: '.shell', matches: ['.shell--sidebar-hidden'] },
+  }
   const press = () => pressInPage(app, 'view=shell', 'S', [MOD_KEY])
 
   // Hide.
@@ -62,8 +66,13 @@ test('[FL-02][FL-29][FL-01] ⌘S slides the sidebar out edge to edge within 300 
     .filter((f) => f.els.sidebar && f.els.frame)
     .map((f) => (f.els.frame?.x ?? 0) - ((f.els.sidebar?.x ?? 0) + (f.els.sidebar?.width ?? 0)))
   const hidePace = pacing(hide.frames.filter((f) => f.i >= after && (!gone || f.i <= gone.i)))
+  // The frame that first draws the sidebar as hidden already shows it moving (the motion lead):
+  // however late a loaded machine draws ⌘S, it is never drawn as a frame that stands still.
+  const drawn = hide.frames.find((f) => f.els.shell?.matched?.includes('.shell--sidebar-hidden'))
+  const drawnRight = drawn?.els.sidebar ? drawn.els.sidebar.x + drawn.els.sidebar.width : 0
   note('FL-02', '⌘S → sidebar starts moving', moved ? moved.t - t0 : undefined, '1 frame (16.7 ms)')
   note('FL-02', 'frames from ⌘S to the first move', moved ? moved.i - after + 1 : undefined, '1', 'frames')
+  note('FL-02', 'first frame drawn hidden: edge moved', drawn ? width - drawnRight : undefined, '> 0', 'px')
   note('FL-02', '⌘S → sidebar gone', gone ? gone.t - t0 : undefined, '≤ 300 ms')
   note('FL-02', 'gap between sidebar and card, min', Math.min(...gaps), `${MARGIN_HIDDEN}–8 px, never apart`, 'px')
   note('FL-02', 'gap between sidebar and card, max', Math.max(...gaps), `${MARGIN_HIDDEN}–8 px, never apart`, 'px')
@@ -93,6 +102,8 @@ test('[FL-02][FL-29][FL-01] ⌘S slides the sidebar out edge to edge within 300 
     `[feel] FL-02 reversed show, edge per frame: ${revRight.map((p) => `${Math.round(p.t)}:${Number.isNaN(p.v) ? '-' : Math.round(p.v)}`).join(' ')}`,
   )
   expect(moved, 'the sidebar moved').toBeTruthy()
+  expect(drawn, 'a frame drew the sidebar hidden').toBeTruthy()
+  expect(drawnRight, 'the first frame drawn hidden already moves').toBeLessThan(width - 0.5)
   expect(gone ? gone.t - t0 : Number.POSITIVE_INFINITY).toBeLessThanOrEqual(300 * FRAME_SLACK + FRAME)
   expect(Math.min(...gaps, ...revGaps)).toBeGreaterThanOrEqual(-1)
   expect(Math.max(...gaps, ...revGaps)).toBeLessThanOrEqual(8 + 1)
