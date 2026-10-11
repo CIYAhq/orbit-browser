@@ -348,6 +348,63 @@ test('[FL-09][FL-29] closing the second of five: the third is selected in the sa
   expect(closed ? closed.t - t0 : Number.POSITIVE_INFINITY).toBeLessThanOrEqual(250 * FRAME_SLACK)
 })
 
+test('[FL-09][FL-29] ⌘W selects the next tab in the first frame drawn after the key, while its page still wakes', async () => {
+  const { app, shell } = orbit
+  // Each close uses two fresh tabs: the one closed, and the one below it, still asleep.
+  const ids = await blankTabs(31)
+  let k = 0
+  type Close = { frames: number; ms: number; beforeLeaving: boolean }
+  /** Activates a tab, closes it with ⌘W and counts the frames until the one below it shows selected. */
+  async function close(): Promise<Close> {
+    const target = ids[k] as string
+    const next = ids[k + 1] as string
+    k += 2
+    await cmd(app, 'tabs.activate', { tabId: target })
+    await expect(row(shell, target)).toHaveClass(/is-active/)
+    await settled(shell)
+    await shell.waitForTimeout(300)
+    const keys = await mainInputs(app)
+    const rec = await record(shell, {
+      slots: { selector: '[data-testid="today-list"] > [data-slot]', key: 'data-key', classes: true },
+      rows: { selector: TODAY_ROWS, key: 'data-tab-id', classes: true },
+    })
+    await pressInPage(app, 'view=shell', 'W', [MOD_KEY])
+    const r = await rec.until(400)
+    const key = (await keys()).find((x) => x.type === 'keyDown' && x.key.toLowerCase() === 'w')
+    if (!key) throw new Error('the close key never reached main')
+    const after = frameAfterWall(r, key.wall)
+    const selected = r.frames.find((f) => f.i >= after && f.lists.rows?.[next]?.classes?.includes('is-active'))
+    const leaving = r.frames.find((f) => f.lists.slots?.[target] && f.lists.rows?.[target] && isExiting(r, f.i, target))
+    if (!selected) throw new Error('the tab below was never selected')
+    return {
+      frames: selected.i - after + 1,
+      ms: selected.t - (key.wall - r.wall0),
+      beforeLeaving: selected.i <= (leaving?.i ?? Number.POSITIVE_INFINITY),
+    }
+  }
+  // A key that comes as the shell starts a frame can't show in that frame, which happens to about
+  // one close in seven: a round is five closes, judged on their median, in up to three rounds (D46).
+  // Main wakes the page below only once the change has gone out to the shell (windows.ts,
+  // fastSwitch): woken first, it holds the selection back a frame (review M2).
+  const budget = FRAME_SLACK > 1 ? 2 : 1
+  const middle = (xs: number[]) => xs.slice().sort((a, b) => a - b)[2] as number
+  const { best, all } = await bestOf(
+    async () => {
+      const closes: Close[] = []
+      for (let n = 0; n < 5; n++) closes.push(await close())
+      return { closes, frames: middle(closes.map((c) => c.frames)), ms: middle(closes.map((c) => c.ms)) }
+    },
+    (x) => x.frames <= budget,
+  )
+  for (const [n, x] of all.entries())
+    console.log(`[feel] FL-09 ⌘W round ${n + 1}: frames ${x.closes.map((c) => c.frames).join(', ')}`)
+  note('FL-09', '⌘W → next tab selected, median of five closes', best.frames, '1', 'frames')
+  note('FL-09', '⌘W → next tab selected, median of five closes', best.ms, '1 frame (16.7 ms)')
+  for (const c of all.flatMap((x) => x.closes))
+    expect(c.beforeLeaving, 'the next row is selected no later than the closed one starts to leave').toBe(true)
+  expect(best.frames).toBeLessThanOrEqual(budget)
+})
+
 test('[FL-07] ⌘D on the third Today tab: it travels into the pinned section as the others re-flow; ⌘Z plays it back', async () => {
   const { app, shell } = orbit
   const ids = await blankTabs(5)
