@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 250 built (73 partial) · 331 tested · 0 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 252 built (72 partial) · 333 tested · 0 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 144 | 168 |
-| P1 | 219 | 91 | 145 |
-| P2 | 79 | 15 | 18 |
+| P1 | 219 | 92 | 145 |
+| P2 | 79 | 16 | 20 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -294,9 +294,9 @@ Spec: `spec/mini-window.md`
 | MW-09 | Closing, auto-archive and the Archive | P0 | ✅ | ✅ e2e+unit | – | close and idle auto-close (settings.miniWindowArchiveAfterMs, 6 h, 0 = never; not while audible) archive with from 'mini' |
 | MW-10 | Profiles | P1 | ✅ | ✅ e2e+unit | – | profile pill/menu reopens the page in another profile; remembered per site |
 | MW-11 | Turning the Mini Window off | P1 | ✅ | ✅ e2e | – | settings.miniWindowForExternalLinks off: tabs in the most recent or chosen Space (externalLinksSpace) |
-| MW-12 | What works inside a Mini Window | P2 | 🟡 partial | – | – | fullscreen video fills the window, copy URL, devtools, downloads via the session; no captures |
-| MW-13 | Menu-bar / tray button | P2 | – | – | – |  |
-| MW-14 | Platforms | P1 | 🟡 partial | ✅ e2e+unit | – | all platforms with Ctrl+Alt+N / Ctrl+O / Ctrl+Alt+O; New Mini Window and Show/Hide All in the Windows jump list and as Linux launcher actions (a packaged folder build writes its own desktop entry at start-up under Electron's desktop name, keeps it pointing at where Orbit runs from, and never touches an entry a package installed or the user wrote; checked on a packaged build: both actions reach the running Orbit); no tray button yet (MW-13) |
+| MW-12 | What works inside a Mini Window | P2 | 🟡 partial | ✅ e2e | – | a video's full screen happens in the Mini Window: the window fills the screen with the page, which stays there, and the card comes back on exit (tested); copy URL, devtools, downloads through the profile's session. Not built: extensions (Orbit has no extension support yet, EX-11), captures saved to a canvas (no Canvases yet) and sharing (Orbit has no share feature) |
+| MW-13 | Menu-bar / tray button | P2 | ✅ | ✅ e2e+unit | – | off by default; Settings > General > Mini Window turns it on: Orbit's mark as a template glyph in the macOS menu bar, the app's icon in the Windows and Linux tray (the drawn mark where a build has no icon file); a click opens a blank Mini Window with its lookup bar focused (macOS: right-click for its menu); its menu has New Mini Window and Show/Hide All Mini Windows, New Mini Window first for Linux trays that show only the menu (tested through the button's click and menu). GNOME shows tray icons only with an AppIndicator extension; on Windows and Linux Orbit still quits with its last window, button or not |
+| MW-14 | Platforms | P1 | ✅ | ✅ e2e+unit | – | all platforms with Ctrl+Alt+N / Ctrl+O / Ctrl+Alt+O, in-app outside macOS (D23), with the tray button (MW-13) as the way in from other apps; New Mini Window and Show/Hide All in the macOS dock menu, the Windows jump list, Linux launcher actions and the tray menu. Launcher actions: a packaged Linux folder build writes its own desktop entry at start-up under Electron's desktop name, keeps it pointing at where Orbit runs from, and never touches an entry a package installed or the user wrote (checked on a packaged build: both actions reach the running Orbit). Only a person can check the Windows jump list |
 | MW-15 | Feel | P1 | ✅ | ✅ e2e | – | warm spare window takes keys at once, page loads before the window shows; opens with MW-04's 200 ms grow and fade; Open in… shrinks to 92% and fades (140 ms, macOS/Windows) as the row enters Today |
 
 ## Picture-in-picture, sidebar media player and call controls (prefix MD)
@@ -319,7 +319,7 @@ Spec: `spec/media.md`
 | MD-12 | Media and the tab lifecycle | P0 | ✅ | ✅ e2e+unit | – | playing (muted too), PiP and camera/mic tabs never sleep, auto-archive, Clear or Archive Below; closing stops media, PiP and controller; isAnyMediaPlaying() is ready for the updates lane |
 | MD-13 | Video calls: automatic call picture-in-picture | P1 | 🟡 partial | ✅ e2e | – | leaving a call tab floats the largest participant video (never the self view) in Orbit's player with microphone/camera toggles and Back to call tab; moves and resizes like any video (a pinch zooms, as for any video). Not built: leave call (the site's Media Session hang-up handler lives in the page's own script world, which Orbit reaches only through a page patch, a lead decision under D40), a chat toggle (no web API exposes a site's chat), and the site's own document picture-in-picture view (also only through the page's Media Session) |
 | MD-14 | Call controls in the sidebar | P1 | 🟡 partial | ✅ e2e+unit | – | a background call tab (or a closed call window) gets a sidebar call controller: microphone and camera toggles (track.enabled on the tracks the page shows) and jump back. Not built: a call is seen only when its page shows its own camera (a self view); an audio-only call isn't, because the browser process can't see what a page captures and watching getUserMedia takes a page patch (a lead decision under D40) |
-| MD-15 | Switch which tab is being screen-shared | P2 | – | – | – |  |
+| MD-15 | Switch which tab is being screen-shared | P2 | – | – | – | not possible as specified: Orbit's screen chooser shares a screen or a window, never a single tab, and the engine can't change what a running share captures (switching the shared tab is the Chrome browser's own feature, not in Electron); swapping the call page's video track would take a page patch, a lead decision under D40 |
 | MD-16 | Feel: entering and leaving picture-in-picture | P1 | ✅ | ✅ e2e+unit | – | enter: the video shrinks from its place in the page to the corner (~300 ms, standard curve); Back to tab/double-click: the tab is selected at once and a still of the last frame flies back into the page; release glides to the corner; Back to PiP grows from the controller; tray slides with the snappy spring; with reduced motion (FL-28) the player appears and goes without motion and a release settles with a 120 ms ease-out. Not possible: a haptic tick on macOS (Electron has no haptics; it would take native code), and fading in the engine's own PiP window, which shows only while the tab stays selected (MD-02). Only a person can check playback for stutter |
 
 ## Archive, recently closed, history and sidebar backups (prefix AR)

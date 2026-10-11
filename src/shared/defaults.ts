@@ -35,6 +35,7 @@ export const DEFAULT_SETTINGS: Settings = {
   linkRules: [],
   miniWindowArchiveAfterMs: 6 * 60 * 60 * 1000,
   miniWindowProfiles: {},
+  miniWindowTrayButton: false,
   onboarded: false,
   settingsSection: 'general',
   siteSearch: DEFAULT_SITE_SEARCH,

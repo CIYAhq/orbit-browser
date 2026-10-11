@@ -30,6 +30,7 @@ import { activateInDraft, detachFromSplit, reselectAway, todayInsertIndex } from
 import { activeTabOf, loadRenderer, rendererEntry, uiWebPreferences } from '../windows'
 import { writeDesktopEntry } from './desktop-entry'
 import { miniSwitchIn, NEW_MINI_SWITCH, systemWideShortcut, TOGGLE_MINIS_SWITCH } from './switches'
+import { registerTrayButton } from './tray'
 
 /**
  * Mini Windows (MW-*): small, separate windows holding one page, for links from other apps and
@@ -1100,6 +1101,9 @@ export function registerMiniWindow(ctx: MainContext): void {
   app.on('second-instance', (_event, argv) => onSwitch(argv))
   // Launched from the jump list while Orbit was not running.
   if (miniSwitchIn(process.argv)) setImmediate(() => onSwitch(process.argv))
+
+  // The menu-bar or tray button, when Settings turns it on (MW-13).
+  registerTrayButton(ctx, { open: () => open(), toggleAll })
 
   // macOS dock menu: a blank Mini Window, and show/hide them all (MW-08).
   if (isMac) {

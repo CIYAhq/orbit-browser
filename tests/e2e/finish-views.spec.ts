@@ -1,4 +1,5 @@
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
+import type { TrayTestHooks } from '../../src/main/miniwindow/tray'
 import type { SearchResponse } from '../../src/shared/commands/commandbar'
 import { paneOrder } from '../../src/shared/split'
 import {
@@ -26,6 +27,7 @@ import {
   windowState,
 } from './nav-support'
 import { blockNetwork, clickInTab, findPage, type OrbitGlobal, overlayOf, startSites } from './peek-helpers'
+import { openSettings } from './settings-support'
 
 /** Views lane follow-ups: the command bar, split view, Peek, Mini Windows and media. */
 
@@ -1142,4 +1144,143 @@ test('[MW-04][MW-15] a Mini Window opens with a quick scale-and-fade: its UI gro
   }, id)
   expect(card.view).toEqual({ x: 6, y: 40, width: card.width - 12, height: card.height - 46 })
   await expect(ui.getByTestId('mini')).toHaveCSS('transform', 'none')
+})
+
+type TrayGlobal = { __orbitTray: TrayTestHooks }
+
+/** The Mini Window button as the OS has it (MW-13), or null while it is off. */
+function trayInfo(): Promise<ReturnType<TrayTestHooks['info']>> {
+  return orbit.app.evaluate(() => (globalThis as unknown as TrayGlobal).__orbitTray.info())
+}
+
+/** The Mini Windows open: whether each shows, and its tab (none for a blank one). */
+function miniWindows(): Promise<{ id: string; visible: boolean; tabId: string | null }[]> {
+  return orbit.app.evaluate(({ BrowserWindow }) => {
+    const ctx = (globalThis as unknown as OrbitGlobal).__orbit.ctx
+    return Object.values(ctx.store.state.windows)
+      .filter((w) => w.kind === 'mini')
+      .map((w) => {
+        const win = BrowserWindow.getAllWindows().find(
+          (b) => !b.isDestroyed() && ctx.windows.isUi(b.webContents) && ctx.windows.windowIdFor(b.webContents) === w.id,
+        )
+        return { id: w.id, visible: !!win?.isVisible(), tabId: w.activeTab[w.spaceId] ?? null }
+      })
+  })
+}
+
+test('[MW-13][MW-14] the Mini Window button, off until Settings turns it on, opens a blank Mini Window with its lookup bar focused; its menu shows and hides them all; it is back after a restart', async () => {
+  const { app } = orbit
+  expect((await state(app)).settings.miniWindowTrayButton).toBe(false)
+  expect(await trayInfo()).toBeNull()
+  const settings = await openSettings(app, { section: 'general' })
+  const toggle = settings.getByTestId('mini-window-tray')
+  await expect(toggle).toHaveAttribute('aria-checked', 'false')
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-checked', 'true')
+  // A menu-bar template glyph on macOS; a tray icon elsewhere. 16 px, with a high-density version.
+  await expect.poll(trayInfo).toEqual({
+    menu: ['New Mini Window', 'Show/Hide All Mini Windows'],
+    template: process.platform === 'darwin',
+    size: { width: 16, height: 16 },
+    scales: [1, 2],
+  })
+
+  // A click opens a blank Mini Window that takes typing at once.
+  await app.evaluate(() => (globalThis as unknown as TrayGlobal).__orbitTray.click())
+  await expect.poll(async () => (await miniWindows()).map((m) => [m.visible, m.tabId])).toEqual([[true, null]])
+  const [mini] = await miniWindows()
+  const ui = await miniUi(mini?.id ?? '')
+  await expect(ui.getByTestId('mini-lookup')).toBeFocused()
+
+  // Its menu: Show/Hide All hides them and shows them again; New Mini Window opens another.
+  const pick = (label: string) =>
+    app.evaluate((_e, l) => (globalThis as unknown as TrayGlobal).__orbitTray.pick(l), label)
+  await pick('Show/Hide All Mini Windows')
+  await expect.poll(async () => (await miniWindows()).map((m) => m.visible)).toEqual([false])
+  await pick('Show/Hide All Mini Windows')
+  await expect.poll(async () => (await miniWindows()).map((m) => m.visible)).toEqual([true])
+  await pick('New Mini Window')
+  await expect
+    .poll(async () => (await miniWindows()).map((m) => [m.visible, m.tabId]))
+    .toEqual([
+      [true, null],
+      [true, null],
+    ])
+
+  // Off, the button goes; on again, it is there from the start after a restart.
+  await toggle.click()
+  await expect.poll(trayInfo).toBeNull()
+  await toggle.click()
+  await expect.poll(trayInfo).not.toBeNull()
+  const { userData } = orbit
+  await app.close()
+  orbit = await launchOrbit({ userData })
+  await expect.poll(trayInfo).not.toBeNull()
+})
+
+/** Runs page script in a tab (with a user gesture), giving up after 15 s instead of hanging. */
+function inTab(tabId: string, code: string): Promise<string> {
+  return orbit.app.evaluate(
+    (_e, [id, js]) => {
+      const contents = (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.get(id)?.webContents
+      if (!contents) return Promise.resolve('no page')
+      return Promise.race([
+        contents.executeJavaScript(js, true).then((v) => String(v)),
+        new Promise<string>((r) => setTimeout(() => r('timeout'), 15_000)),
+      ])
+    },
+    [tabId, code] as const,
+  )
+}
+
+test('[MW-12] a video in a Mini Window goes full screen there: the page covers the whole window and stays in the Mini Window, and goes back on the card on exit', async () => {
+  const { app } = orbit
+  const url = fx.url('/page/Film')
+  await app.evaluate(({ app: electronApp }, u) => electronApp.emit('open-url', { preventDefault() {} }, u), url)
+  await expect.poll(async () => (await miniWindows()).length).toBe(1)
+  const [mini] = await miniWindows()
+  const windowId = mini?.id ?? ''
+  const tabId = mini?.tabId ?? ''
+  await expect.poll(async () => (await miniPage(windowId)).visible).toBe(true)
+  // The Mini Window: whether it is full screen, its content size, and where its page shows in it.
+  const placed = () =>
+    app.evaluate(
+      ({ BrowserWindow }, [wid, tid]) => {
+        const ctx = (globalThis as unknown as OrbitGlobal).__orbit.ctx
+        const win = BrowserWindow.getAllWindows().find(
+          (b) => !b.isDestroyed() && ctx.windows.isUi(b.webContents) && ctx.windows.windowIdFor(b.webContents) === wid,
+        )
+        const [width = 0, height = 0] = win?.getContentSize() ?? []
+        const view = ctx.tabs.get(tid)
+        const inWindow = !!view && !!win && win.contentView.children.includes(view)
+        return { fullscreen: !!win?.isFullScreen(), view: view?.getBounds(), width, height, inWindow }
+      },
+      [windowId, tabId] as const,
+    )
+  const normal = await placed()
+  expect(normal.view).toEqual({ x: 6, y: 40, width: normal.width - 12, height: normal.height - 46 })
+  expect(await inTab(tabId, 'document.documentElement.requestFullscreen().then(() => "in")')).toBe('in')
+  // No card around the page: it covers the window, which fills the screen. (Under Xvfb, with no
+  // window manager, the window's reported size flips between the screen's and its own.)
+  await expect
+    .poll(async () => {
+      const p = await placed()
+      const covers = (p.view?.width ?? 0) >= normal.width && (p.view?.height ?? 0) >= normal.height
+      return { fullscreen: p.fullscreen, inWindow: p.inWindow, x: p.view?.x, y: p.view?.y, covers }
+    })
+    .toEqual({ fullscreen: true, inWindow: true, x: 0, y: 0, covers: true })
+  // Still the Mini Window's page: it never joined the sidebar or the main window.
+  expect((await state(app)).tabs[tabId]?.floating).toBe('mini')
+  expect(await mainToday()).not.toContain(tabId)
+  expect(await inTab(tabId, 'document.exitFullscreen().then(() => "out")')).toBe('out')
+  await expect
+    .poll(async () => {
+      const p = await placed()
+      return (
+        !p.fullscreen &&
+        JSON.stringify(p.view) === JSON.stringify({ x: 6, y: 40, width: p.width - 12, height: p.height - 46 })
+      )
+    })
+    .toBe(true)
+  expect((await placed()).width).toBe(normal.width)
 })

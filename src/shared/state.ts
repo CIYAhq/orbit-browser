@@ -328,6 +328,8 @@ export interface Settings {
   miniWindowProfiles: Record<string, ProfileId>
   /** Size and position of the last Mini Window the user moved or resized (MW-04). */
   miniWindowBounds?: { x: number; y: number; width: number; height: number }
+  /** A menu-bar (macOS) or tray (Windows, Linux) button that opens a blank Mini Window (MW-13). */
+  miniWindowTrayButton: boolean
   /** First-run onboarding is done or skipped (OB-01): later starts open the browser at once. */
   onboarded: boolean
   /** The onboarding step a quit left off at, resumed on the next start (OB-14); see ONBOARDING_STEPS. */
