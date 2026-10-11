@@ -186,7 +186,10 @@ export function registerDialogs(ctx: MainContext): PageDialogs$ {
         reply(scriptAnswer(kind, null))
         return
       }
-      const content = scriptDialog(kind, frame.url, String(message ?? ''), String(value ?? ''))
+      // An empty page (`about:blank`) that its opener writes into is the opener's: the dialog names
+      // the opener's site, as Chromium's does, from the page's origin when its address isn't a web one.
+      const asking = /^https?:/i.test(frame.url) ? frame.url : frame.origin
+      const content = scriptDialog(kind, asking, String(message ?? ''), String(value ?? ''))
       service.open(page, content, true).then(
         (answer) => reply(scriptAnswer(kind, answer)),
         () => reply(scriptAnswer(kind, null)),

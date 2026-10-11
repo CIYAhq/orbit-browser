@@ -63,7 +63,9 @@ export function dialogText(text: string): string {
 
 /**
  * Who a dialog says asks (Chromium's wording): "<host> says" for a web page, its host with the
- * port; "This page says" for anything else (a local file, `data:`, `about:blank`).
+ * port; "This page says" for anything else (a local file, `data:`, an origin that names no site).
+ * Give it the page's address, or its origin where the address isn't a web one: an `about:blank`
+ * page its opener writes into has the opener's origin.
  */
 export function dialogTitle(pageUrl: string | undefined): string {
   try {

@@ -25,6 +25,13 @@ describe('[NV-24] page dialogs: who asks', () => {
       expect(dialogTitle(url)).toBe('This page says')
     }
   })
+
+  it('names the site of an origin: an about:blank page’s is its opener’s', () => {
+    expect(dialogTitle('http://localhost:3341')).toBe('localhost:3341 says')
+    expect(dialogTitle('https://example.com')).toBe('example.com says')
+    // An opaque origin (a data: page, a sandboxed one) or a file's names no site.
+    for (const origin of ['null', 'file://']) expect(dialogTitle(origin)).toBe('This page says')
+  })
 })
 
 describe('[NV-24] page dialogs: the page’s alert, confirm and prompt', () => {

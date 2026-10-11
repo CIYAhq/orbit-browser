@@ -206,6 +206,25 @@ test('[NV-24][KS-19][NV-05] a dialog the page times leaves the keyboard in the f
   await answered(asking, 'false')
 })
 
+test('[NV-24] a dialog from an empty tab or pop-up that its opener scripts names the opener’s site', async () => {
+  const { app } = orbit
+  for (const how of ['tab', 'popup'] as const) {
+    const url = fx.url(`/blank-ask?how=${how}`)
+    const opener = await newTab(app, url)
+    await waitTab(app, opener, '/blank-ask')
+    await clickInPage(app, url, '#go')
+    // The empty page is about:blank, with its opener's origin (review REPRO I).
+    const shown = await waitDialog(app, (d) => d.message === 'From the empty page' && d.host === how && d.onScreen)
+    if (how === 'tab') expect(shown.tabId).not.toBe(opener)
+    expect(shown.title).toBe(`localhost:${fx.port} says`)
+    const view = await dialogPage(app, shown.id)
+    await expect(view.getByTestId('page-dialog-title')).toHaveText(`localhost:${fx.port} says`)
+    // A pop-up's dialog has a view of its own, which goes with the dialog.
+    await clickClosing(view.getByTestId('page-dialog-ok'))
+    await expect.poll(async () => (await pageDialogs(app)).some((d) => d.id === shown.id)).toBe(false)
+  }
+})
+
 test('[NV-24] a background tab’s dialog waits until its tab shows', async () => {
   const { app, shell } = orbit
   const url = fx.url('/ask?kind=confirm&msg=Later')

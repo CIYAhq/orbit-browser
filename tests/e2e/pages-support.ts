@@ -66,6 +66,8 @@ const html = (title: string, body: string, head = '') => `<!doctype html>
  * - `/receipt?how=popup|tab|nav`: a button (`#go`) that prints a receipt as shops' pages do: it
  *   writes "Receipt copy" into a new pop-up window (`popup`) or tab (`tab`), prints it and closes it
  *   at once; or (`nav`) prints this page and goes on to `/page/Printed` at once.
+ * - `/blank-ask?how=tab|popup`: a button (`#go`) that opens an empty (`about:blank`) tab or pop-up
+ *   window and has it ask `confirm('From the empty page')`; that page's title says what it returned.
  * - `/swipe`: a strip that scrolls sideways (`#strip`, scrolled to its middle), and an area that uses
  *   the wheel itself (`#grab`, preventDefault), as a map does.
  *
@@ -229,6 +231,24 @@ addEventListener('afterprint', () => window.__print.after++)
 document.getElementById('print').addEventListener('click', () => {
   window.print()
   window.__print.returned = true
+})
+</script>`,
+        ),
+      )
+      return
+    }
+    if (u.pathname === '/blank-ask') {
+      const how = u.searchParams.get('how') ?? 'tab'
+      send(
+        html(
+          'Blank asker',
+          `<button id="go">Ask from an empty page</button><div id="area"></div>
+<script>
+document.getElementById('go').addEventListener('click', () => {
+  const w = ${JSON.stringify(how)} === 'popup' ? window.open('', 'asker', 'width=500,height=400') : window.open('')
+  w.setTimeout(() => {
+    w.document.title = 'Answered ' + w.confirm('From the empty page')
+  }, 0)
 })
 </script>`,
         ),
