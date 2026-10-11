@@ -1235,6 +1235,11 @@ test('[KS-18] remap Pin to ⌘⇧P: the command bar’s row and the tab’s righ
   expect(await menuHints()).toEqual(
     expect.arrayContaining([`Pin Tab=${menuKey('Shift+P')}`, `Close Tab=${menuKey('W')}`]),
   )
+  // The row menu is Orbit's own, in the overlay (TB-14): it draws the key as the keymap has it.
+  const pinHint = overlay.locator('[data-testid="row-menu-item"][data-label="Pin Tab"] .row-menu__hint')
+  await expect(pinHint).toHaveText(isMac ? '⇧⌘P' : 'Ctrl+Shift+P')
+  await overlay.keyboard.press('Escape')
+  await expect(overlay.getByTestId('row-menu')).toHaveCount(0)
 
   // The page's own menu: Reload shows its keys, and another key once remapped.
   const page = await tabPage(app, '/page/Hints')

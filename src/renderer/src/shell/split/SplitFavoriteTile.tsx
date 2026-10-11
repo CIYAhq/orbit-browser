@@ -5,6 +5,7 @@ import { AT_ONCE, POP, REDUCED_FADE, SNAPPY, useReducedMotion } from '../../moti
 import { getOrbitState, useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
 import { pressItem } from '../sidebar/drag'
+import { menuAt } from '../sidebar/menu-at'
 import { clearSelection, useDrag } from '../sidebar/ui-state'
 import { focusedPaneOf, lastFocusedPane, paneOrderKey } from './selectors'
 
@@ -76,7 +77,7 @@ export const SplitFavoriteTile = memo(function SplitFavoriteTile({
       }}
       onContextMenu={(e) => {
         e.preventDefault()
-        void invoke('split.contextMenu', { splitId })
+        void invoke('split.contextMenu', { splitId, at: menuAt(e, splitId) })
       }}
     >
       <span className="split-favorite__icons">

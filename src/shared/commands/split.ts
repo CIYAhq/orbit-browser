@@ -1,4 +1,5 @@
 import type { PageReferrer } from '../nav'
+import type { RowMenuAt } from '../row-menu'
 import type { LayoutPath, PaneSide, SplitAxis } from '../split'
 import type { ContainerRef, SplitId, TabId } from '../state'
 
@@ -52,7 +53,8 @@ export interface SplitCommands {
   /** Names a split (null or blank clears it, showing the pane titles again) (SV-22). */
   'split.rename': { args: { splitId: SplitId; name: string | null }; result: void }
   /** Right-click menu of a split row (SV-22). */
-  'split.contextMenu': { args: { splitId: SplitId }; result: void }
+  /** The split row's menu, at `at` (the sender's coordinates) or the pointer (tabs lane's row menu, TB-14). */
+  'split.contextMenu': { args: { splitId: SplitId; at?: RowMenuAt }; result: void }
   /** The split-controls menu of a pane (SV-12). */
   'split.paneMenu': { args: { tabId: TabId }; result: void }
   /** The pane the strip currently belongs to (the strip asks once its page has loaded). */

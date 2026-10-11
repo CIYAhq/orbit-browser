@@ -25,6 +25,7 @@ import type { MainContext } from '../context'
 import { SPLIT_PANE_MENU_KEYS, withKeyHints } from '../keys/menu-hints'
 import type { CallContext } from '../registry'
 import { makeTab } from '../tabs/model'
+import { showRowMenu } from '../tabs/row-menu'
 import { activeTabOf } from '../windows'
 import {
   addPaneInDraft,
@@ -623,7 +624,7 @@ export function registerSplit(ctx: MainContext): void {
     if (items.length > 0) Menu.buildFromTemplate(items).popup(win ? { window: win } : {})
   })
 
-  commands.register('split.contextMenu', ({ splitId }, c) => {
+  commands.register('split.contextMenu', ({ splitId, at }, c) => {
     const windowId = windowOf(c)
     const state = store.state
     const split = state.splits[splitId]
@@ -659,7 +660,12 @@ export function registerSplit(ctx: MainContext): void {
       { type: 'separator' },
       {
         label: 'Rename…',
-        click: () => windowId && windows.sendToWindow(windowId, 'sidebar:rename', { id: splitId }),
+        click: () => {
+          if (!windowId) return
+          // The menu gave the keyboard back where it was (TB-14): the sidebar's name field takes it.
+          windows.sidebarContents(windowId)?.focus()
+          windows.sendToWindow(windowId, 'sidebar:rename', { id: splitId })
+        },
       },
       ...(split.name
         ? [{ label: 'Show Pane Titles', click: () => void commands.run('split.rename', { splitId, name: null }) }]
@@ -712,8 +718,8 @@ export function registerSplit(ctx: MainContext): void {
         click: () => void commands.run('split.close', { splitId }),
       },
     )
-    const win = windowId ? windows.get(windowId) : undefined
-    Menu.buildFromTemplate(items).popup(win ? { window: win } : {})
+    // A row menu: Orbit's own, in the overlay and the Space's colours (tabs lane, TB-14).
+    showRowMenu(windowId, items, { key: splitId, label: split.name || 'Split View', at, sender: c.sender })
   })
 
   commands.register('split.stripHover', ({ hovered }, c) => strip.setHovered(windowOf(c), hovered))

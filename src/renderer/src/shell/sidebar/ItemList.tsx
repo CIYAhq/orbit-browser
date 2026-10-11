@@ -13,6 +13,7 @@ import {
   useState,
 } from 'react'
 import { isFolderId, isSplitId, isTabId } from '../../../../shared/ids'
+import { ROW_MENU_PANEL } from '../../../../shared/row-menu'
 import type { ItemId, OrbitState, TabId } from '../../../../shared/state'
 import { isAwayFromPinned, rowTitle } from '../../../../shared/tabs'
 import { splitOfTab, tabsInItem, visibleTabOrder } from '../../../../shared/tree'
@@ -34,6 +35,7 @@ import { getOrbitState, useMirror, useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
 import { CaptureIndicator } from '../media/CaptureIndicator'
 import { pressItem } from './drag'
+import { menuAt } from './menu-at'
 import { RenameField } from './RenameField'
 import { RowWindowContext, useInRowWindow } from './row-window'
 import { SplitRow } from './SplitRow'
@@ -570,7 +572,7 @@ function fadeHover(el: HTMLElement, entering: boolean) {
 function openContextMenu(e: ReactMouseEvent, id: ItemId) {
   e.preventDefault()
   const sel = useSelection.getState().ids
-  void invoke('tabs.contextMenu', { id, selection: sel.includes(id) ? sel : [] })
+  void invoke('tabs.contextMenu', { id, selection: sel.includes(id) ? sel : [], at: menuAt(e, id) })
 }
 
 export const TabRow = memo(function TabRow({
@@ -610,13 +612,25 @@ export const TabRow = memo(function TabRow({
   )
 })
 
-/** Rows drawn wherever they are: the selected one, the keyboard's, those in a group selection, one being renamed. */
+/**
+ * Rows drawn wherever they are: the selected one, the keyboard's, those in a group selection, one
+ * being renamed, one whose menu is open (TB-14: its items act on it however far the list scrolls).
+ */
 function useKeptRow(tabId: TabId): boolean {
   const active = useShownActive(tabId)
   const focused = useKeyboardFocus((s) => s.id === tabId)
   const selected = useSelection((s) => s.ids.includes(tabId))
   const renaming = useRename((s) => s.id === tabId)
-  return active || focused || selected || renaming
+  const menu = useRowMenuOpen(tabId)
+  return active || focused || selected || renaming || menu
+}
+
+/** The row's right-click menu is open in this window's overlay (TB-14). */
+export function useRowMenuOpen(key: string): boolean {
+  return useOrbit((s) => {
+    const overlay = s.windows[window.orbit.windowId]?.overlay
+    return overlay?.kind === 'panel' && overlay.panel === ROW_MENU_PANEL && overlay.params?.key === key
+  })
 }
 
 /**
@@ -644,6 +658,7 @@ export const TabRowBody = memo(function TabRowBody({
   const selected = useSelection((s) => s.ids.includes(tabId))
   const focused = useKeyboardFocus((s) => s.id === tabId)
   const renaming = useRename((s) => (s.id === tabId ? s.mode : null))
+  const menuOpen = useRowMenuOpen(tabId)
   const [iconHover, setIconHover] = useState(false)
   // A tab that just opened in the background glows once so the eye finds it (FL-06).
   const [fresh] = useState(() => !!tab && !active && Date.now() - tab.createdAt < 1500)
@@ -666,7 +681,7 @@ export const TabRowBody = memo(function TabRowBody({
       aria-posinset={index >= 0 ? index + 1 : undefined}
       aria-setsize={index >= 0 ? size : undefined}
       aria-label={prefix ? `${prefix} / ${title}` : title}
-      className={`tab-row${active ? ' is-active' : ''}${selected ? ' is-selected' : ''}${tab.asleep ? ' is-asleep' : ''}${tab.loading ? ' is-loading' : ''}${away ? ' is-away' : ''}${focused ? ' is-focused' : ''}${fresh ? ' is-new-background' : ''}`}
+      className={`tab-row${active ? ' is-active' : ''}${selected ? ' is-selected' : ''}${tab.asleep ? ' is-asleep' : ''}${tab.loading ? ' is-loading' : ''}${away ? ' is-away' : ''}${focused ? ' is-focused' : ''}${fresh ? ' is-new-background' : ''}${menuOpen ? ' is-menu-open' : ''}`}
       style={{ paddingLeft: 8 + depth * INDENT }}
       data-testid="tab-row"
       data-tab-id={tabId}
@@ -777,6 +792,7 @@ const FolderRow = memo(function FolderRow({
   })
   const into = useDrag((s) => s.intoFolder === folderId)
   const focused = useKeyboardFocus((s) => s.id === folderId)
+  const menuOpen = useRowMenuOpen(folderId)
   const renaming = useRename((s) => s.id === folderId)
   const hidden = useDrag((s) => !!s.hidden[folderId])
   const collapsedBefore = useRef<boolean | null>(null)
@@ -810,7 +826,7 @@ const FolderRow = memo(function FolderRow({
           aria-level={depth + 1}
           aria-posinset={index + 1}
           aria-setsize={size}
-          className={`folder-row${into ? ' is-drop-into' : ''}${focused ? ' is-focused' : ''}`}
+          className={`folder-row${into ? ' is-drop-into' : ''}${focused ? ' is-focused' : ''}${menuOpen ? ' is-menu-open' : ''}`}
           style={{ paddingLeft: 8 + depth * INDENT }}
           data-testid="folder-row"
           onPointerEnter={(e) => fadeHover(e.currentTarget, true)}

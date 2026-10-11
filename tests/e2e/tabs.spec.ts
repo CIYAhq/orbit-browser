@@ -14,9 +14,11 @@ import {
   act,
   activeId,
   center,
+  chooseRowMenu,
   cmd,
   drag,
   liveTabs,
+  menuFor,
   newTab,
   PROFILE,
   row,
@@ -335,7 +337,7 @@ test('[TB-11][TB-14] context menus by tab type; Move to another Space selects th
   const t = await newTab(app, fx.url('/page/Mover'))
   await waitTab(app, t, '/page/Mover')
   await row(shell, t).click({ button: 'right' })
-  const today = await tabsHook<string[]>(app, 'lastMenu')
+  const today = await menuFor(app, t)
   for (const label of [
     'Pin Tab',
     'Add to Favorites',
@@ -355,7 +357,7 @@ test('[TB-11][TB-14] context menus by tab type; Move to another Space selects th
   }
   expect(today).not.toContain('Unpin Tab')
   await row(shell, pinned).click({ button: 'right' })
-  const pin = await tabsHook<string[]>(app, 'lastMenu')
+  const pin = await menuFor(app, pinned)
   for (const label of [
     'Unpin Tab',
     'Reset to Pinned URL',
@@ -368,7 +370,8 @@ test('[TB-11][TB-14] context menus by tab type; Move to another Space selects th
   expect(pin).not.toContain('Pin Tab')
   // Move the selected Today tab to Work's pinned section from the menu.
   await row(shell, t).click({ button: 'right' })
-  expect(await tabsHook<boolean>(app, 'clickMenu', 'Move to > Work > Pinned')).toBe(true)
+  await menuFor(app, t)
+  expect(await chooseRowMenu(app, 'Move to > Work > Pinned')).toBe(true)
   await expect.poll(async () => (await state(app)).spaces[sB]?.pinned).toEqual([t])
   const s = await state(app)
   expect(s.spaces[sA]?.today).toEqual([below])

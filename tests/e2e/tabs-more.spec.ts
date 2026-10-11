@@ -4,8 +4,11 @@ import {
   act,
   activeId,
   center,
+  chooseRowMenu,
+  closeOverlay,
   cmd,
   liveTabs,
+  menuFor,
   newTab,
   PROFILE,
   row,
@@ -56,10 +59,11 @@ test('[TB-13][TB-06][TB-20] Cmd/Shift-click select several tabs; Cmd+W closes th
   expect(text).not.toContain('utm_source')
   // The menu offers group actions.
   await row(shell, c).click({ button: 'right' })
-  const labels = await tabsHook<string[]>(app, 'lastMenu')
+  const labels = await menuFor(app, c)
   expect(labels).toContain('Close 3 Tabs')
   expect(labels).toContain('New Folder with Tabs')
-  // Cmd+W closes all of them.
+  // Cmd+W closes all of them (once the menu is closed: while it is open, its keys are its own, KS-19).
+  await closeOverlay(app)
   await shell.keyboard.press(`${MOD}+W`)
   await expect.poll(async () => (await space(app)).today).toEqual([b])
   // Escape or a plain click clears a selection.
@@ -106,7 +110,8 @@ test('[TB-12][PN-08] rename by double-click survives navigation and relaunch; em
   await expect(row(shell, p).getByTestId('tab-title')).toHaveText('Mail / Inbox-next')
   // Emoji icon replaces the favicon.
   await row(shell, p).click({ button: 'right' })
-  expect(await tabsHook<boolean>(app, 'clickMenu', 'Change Icon…')).toBe(true)
+  await menuFor(app, p)
+  expect(await chooseRowMenu(app, 'Change Icon…')).toBe(true)
   await expect(shell.getByTestId('icon-picker')).toBeVisible()
   await shell.getByTestId('icon-choice').first().click()
   await expect(row(shell, p).locator('.tab-row__emoji')).toHaveText('⭐')
@@ -176,7 +181,8 @@ test('[TB-18][TD-05] undo walks back archive-below, a rename and a move; redo re
   expect((await space(app)).today).toEqual(moved)
   await cmd(app, 'tabs.rename', { tabId: top, title: 'Renamed' })
   await row(shell, top).click({ button: 'right' })
-  expect(await tabsHook<boolean>(app, 'clickMenu', 'Archive Tabs Below')).toBe(true)
+  await menuFor(app, top)
+  expect(await chooseRowMenu(app, 'Archive Tabs Below')).toBe(true)
   await expect.poll(async () => (await space(app)).today).toEqual([ids[3], ids[0]])
   // ⌘Z three times: archive-below, rename, move.
   await shell.keyboard.press(`${MOD}+Z`)
@@ -213,12 +219,14 @@ test('[PN-07][PN-04] edit the pinned URL inline, or replace it with the current 
   await (await tabPage(app, '/page/Start')).click('#next')
   await waitTab(app, p, '/page/Start-next')
   await row(shell, p).click({ button: 'right' })
-  expect(await tabsHook<boolean>(app, 'clickMenu', 'Pinned URL > Replace with Current URL')).toBe(true)
+  await menuFor(app, p)
+  expect(await chooseRowMenu(app, 'Pinned URL > Replace with Current URL')).toBe(true)
   await expect.poll(async () => (await tab(app, p))?.pinnedUrl).toContain('/page/Start-next')
   await expect(row(shell, p).getByTestId('tab-title')).toHaveText('Start-next')
   // Edit… opens an inline field with the pinned URL.
   await row(shell, p).click({ button: 'right' })
-  expect(await tabsHook<boolean>(app, 'clickMenu', 'Pinned URL > Edit…')).toBe(true)
+  await menuFor(app, p)
+  expect(await chooseRowMenu(app, 'Pinned URL > Edit…')).toBe(true)
   const field = shell.getByTestId('rename-field')
   await expect(field).toHaveValue(/\/page\/Start-next/)
   await field.fill(fx.url('/page/Home'))
@@ -262,7 +270,7 @@ test('[FV-07][FD-09][FD-06][FD-07][FD-10] Favorite and folder menus, nested fold
   const fav = await newTab(app, fx.url('/page/Fav'), { container: { kind: 'favorites', profileId: PROFILE } })
   await waitTab(app, fav, '/page/Fav')
   await shell.locator(`[data-fav-id="${fav}"]`).click({ button: 'right' })
-  const favMenu = await tabsHook<string[]>(app, 'lastMenu')
+  const favMenu = await menuFor(app, fav)
   for (const label of [
     'Remove from Favorites',
     'Reset to Pinned URL',
@@ -274,6 +282,7 @@ test('[FV-07][FD-09][FD-06][FD-07][FD-10] Favorite and folder menus, nested fold
   ]) {
     expect(favMenu).toContain(label)
   }
+  await closeOverlay(app)
   const inner = await newTab(app, fx.url('/page/Inner'), {
     container: { kind: 'pinned', spaceId: sp },
     activate: false,
@@ -298,7 +307,7 @@ test('[FV-07][FD-09][FD-06][FD-07][FD-10] Favorite and folder menus, nested fold
   await cmd(app, 'folders.setIcon', { folderId: outer, icon: '📚' })
   await expect(shell.locator(`[data-folder-id="${outer}"] .tab-row__emoji`).first()).toHaveText('📚')
   await shell.locator(`[data-folder-id="${outer}"] .folder-row`).first().click({ button: 'right' })
-  const folderMenu = await tabsHook<string[]>(app, 'lastMenu')
+  const folderMenu = await menuFor(app, outer)
   for (const label of [
     'Rename…',
     'Change Icon…',
@@ -309,13 +318,14 @@ test('[FV-07][FD-09][FD-06][FD-07][FD-10] Favorite and folder menus, nested fold
   ]) {
     expect(folderMenu).toContain(label)
   }
-  expect(await tabsHook<boolean>(app, 'clickMenu', 'Duplicate Folder')).toBe(true)
+  expect(await chooseRowMenu(app, 'Duplicate Folder')).toBe(true)
   await expect.poll(async () => (await space(app)).pinned.length).toBe(2)
   const copy = (await space(app)).pinned[1] as string
   expect((await state(app)).folders[copy]?.name).toBe('Outer copy')
   // Delete moves the contents to the Archive; undo restores the whole folder.
   await shell.locator(`[data-folder-id="${outer}"] .folder-row`).first().click({ button: 'right' })
-  expect(await tabsHook<boolean>(app, 'clickMenu', 'Delete Folder…')).toBe(true)
+  await menuFor(app, outer)
+  expect(await chooseRowMenu(app, 'Delete Folder…')).toBe(true)
   await expect.poll(async () => (await state(app)).folders[outer]).toBeUndefined()
   let s = await state(app)
   expect(s.tabs[inner]).toBeUndefined()

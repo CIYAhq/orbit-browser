@@ -1,3 +1,4 @@
+import type { RowMenuAt } from '../row-menu'
 import type { ContainerRef, FolderId, ItemId, ProfileId, SpaceId, TabId, WindowId } from '../state'
 
 /** Owned by the sidebar/tabs lane. */
@@ -72,8 +73,13 @@ export interface TabCommands {
   'tabs.clearToday': { args: { spaceId?: SpaceId }; result: void }
   /** Collapse or expand a Space's pinned section (PN-09). */
   'tabs.setPinnedCollapsed': { args: { spaceId?: SpaceId; collapsed: boolean }; result: void }
-  /** Right-click menu for a tab or folder; `selection` is the multi-selection (TB-13, TB-14). */
-  'tabs.contextMenu': { args: { id: ItemId; selection?: TabId[] }; result: void }
+  /**
+   * Right-click menu for a tab or folder; `selection` is the multi-selection (TB-13, TB-14). It opens
+   * in the overlay at `at` (the sender's coordinates), else at the pointer.
+   */
+  'tabs.contextMenu': { args: { id: ItemId; selection?: TabId[]; at?: RowMenuAt }; result: void }
+  /** The overlay's row menu: run item `id` ("4.1.0") of menu `menu`, if it is still open (TB-14). */
+  'rowMenu.choose': { args: { menu: number; id: string }; result: boolean }
   /** The sidebar's multi-selection in this window, so ⌘W and ⌘⇧C act on all of it (TB-13). */
   'tabs.setSelection': { args: { tabIds: TabId[] }; result: void }
   /** Control was released: the recent-tab switch in progress settles on the current tab (TB-05). */

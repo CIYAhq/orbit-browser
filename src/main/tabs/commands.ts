@@ -2,8 +2,6 @@ import {
   type BrowserWindow,
   clipboard,
   dialog,
-  Menu,
-  type MenuItemConstructorOptions,
   WebContentsView,
   type WebContentsViewConstructorOptions,
 } from 'electron'
@@ -29,15 +27,18 @@ import { TAB_MENU_KEYS, withKeyHints } from '../keys/menu-hints'
 import type { CallContext } from '../registry'
 import { tabSplitMenuItems } from '../split/menu'
 import { TabMaintenance } from './maintenance'
-import { findMenuItem, folderMenu, type MenuOps, menuLabels, tabMenu } from './menus'
+import { folderMenu, type MenuOps, tabMenu } from './menus'
 import { makeTab, numberedTarget, steppedTarget, todayInsertIndex } from './model'
 import { TabOps, type TabPage } from './ops'
+import { type RowMenuInfo, registerRowMenus } from './row-menu'
 
 /** Test-only handle (ORBIT_E2E=1): globalThis.__orbitTabs. */
 export interface TabTestHooks {
   maintenance: (now?: number) => { archived: string[]; slept: string[] }
-  lastMenu: () => string[]
-  clickMenu: (path: string) => boolean
+  /** The row menu open in a window (default: the focused one), as the overlay draws it (TB-14). */
+  rowMenu: (windowId?: WindowId) => RowMenuInfo | null
+  /** Chooses an item of the open row menu by its label path ("Move to > Work > Pinned"), as a click does. */
+  chooseRowMenu: (path: string, windowId?: WindowId) => boolean
   undo: () => string | undefined
   recentlyClosed: () => string[]
 }
@@ -49,7 +50,6 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   const { store, commands, actions, tabs, windows } = ctx
   const ops = new TabOps(ctx)
   const maintenance = new TabMaintenance(ctx, ops)
-  let lastMenu: MenuItemConstructorOptions[] = []
 
   const windowOf = (c: CallContext): WindowId | undefined => c.windowId ?? windows.focusedWindowId()
   /** Multi-selection per window, reported by the sidebar (TB-13). */
@@ -180,9 +180,14 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     ops.deleteFolder(folderId, false)
   }
 
+  /** A menu item that edits in the sidebar gives it the keyboard (the menu gave it to the page). */
+  const toSidebar = (windowId: WindowId | undefined, channel: string, payload: unknown) => {
+    if (windowId) windows.sidebarContents(windowId)?.focus()
+    send(windowId, channel, payload)
+  }
   const menuOps = (windowId: WindowId | undefined): MenuOps => ({
-    rename: (id) => send(windowId, 'sidebar:rename', { id }),
-    changeIcon: (id) => send(windowId, 'sidebar:icon', { id }),
+    rename: (id) => toSidebar(windowId, 'sidebar:rename', { id }),
+    changeIcon: (id) => toSidebar(windowId, 'sidebar:icon', { id }),
     copyLinks: (tabIds, markdown) => void copyLinks(windowId, tabIds, markdown),
     duplicate: (tabId) => void commands.run('tabs.duplicate', { tabId }, { windowId }).catch(() => {}),
     setMuted: (tabId, muted) => void commands.run('tabs.setMuted', { tabId, muted }, { windowId }),
@@ -201,7 +206,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     archiveBelow: (tabId) => ops.archiveBelow(tabId),
     resetToPinned: (tabId) => ops.resetToPinned(tabId, { windowId }),
     replacePinnedUrl: (tabId) => ops.setPinnedUrl(tabId),
-    editPinnedUrl: (tabId) => send(windowId, 'sidebar:edit-pinned-url', { id: tabId }),
+    editPinnedUrl: (tabId) => toSidebar(windowId, 'sidebar:edit-pinned-url', { id: tabId }),
     close: (tabIds) => ops.closeTabs(tabIds, 'closed'),
     remove: (id) => ops.deleteItem(id),
     newFolder: (items) => void commands.run('folders.create', { items }, { windowId }),
@@ -211,6 +216,16 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     deleteFolder: (folderId) => void confirmDeleteFolder(windowId, folderId),
     splitItems: (tabIds) => tabSplitMenuItems(ctx, tabIds, windowId),
   })
+
+  const rowMenus = registerRowMenus(ctx)
+  /** What a row menu is about, for screen readers: the tab, the folder or the selection. */
+  const menuLabelFor = (id: ItemId, selection: TabId[]): string => {
+    const state = store.state
+    if (selection.length > 1 && selection.includes(id as TabId)) return `${selection.length} tabs`
+    if (isFolderId(id)) return state.folders[id]?.name ?? 'Folder'
+    const tab = state.tabs[id as TabId]
+    return tab?.customTitle || tab?.title || tab?.url || 'Tab'
+  }
 
   // ---- Commands ----
 
@@ -370,7 +385,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     if (windowId) windows.focusActiveTab(windowId)
   })
 
-  commands.register('tabs.contextMenu', ({ id, selection = [] }, c) => {
+  commands.register('tabs.contextMenu', ({ id, selection = [], at }, c) => {
     const windowId = windowOf(c)
     const state = store.state
     const mo = menuOps(windowId)
@@ -380,10 +395,8 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     // Private windows have no pinned tabs, Favorites, folders or other Spaces (NV-11, SB-25).
     const items = isTabId(id) && isPrivateTab(state, id) ? privateTabMenu(all) : all
     if (items.length === 0) return
-    lastMenu = items
-    if (ctx.e2e) return
-    const win = windowId ? windows.get(windowId) : undefined
-    Menu.buildFromTemplate(items).popup(win ? { window: win } : undefined)
+    // Orbit's own menu in the overlay, in the Space's colours (TB-14, SP-16).
+    rowMenus.show(windowId, items, { key: id, label: menuLabelFor(id, selection), at, sender: c.sender })
   })
 
   commands.register('folders.create', ({ container, index, name = 'New Folder', items = [] }, c) => {
@@ -816,13 +829,9 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   if (ctx.e2e) {
     const hooks: TabTestHooks = {
       maintenance: (now) => maintenance.run(now),
-      lastMenu: () => menuLabels(lastMenu),
-      clickMenu: (path) => {
-        const item = findMenuItem(lastMenu, path)
-        if (!item?.click || item.enabled === false) return false
-        ;(item.click as () => void)()
-        return true
-      },
+      rowMenu: (windowId) => rowMenus.info(windowId ?? windows.focusedWindowId() ?? windows.ids()[0]),
+      chooseRowMenu: (path, windowId) =>
+        rowMenus.chooseByLabel(windowId ?? windows.focusedWindowId() ?? windows.ids()[0], path),
       undo: () => ops.undo.undo(),
       recentlyClosed: () => ops.recentlyClosed.map((r) => r.tab.id),
     }

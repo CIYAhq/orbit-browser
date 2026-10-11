@@ -10,6 +10,7 @@ import { useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
 import { SplitFavoriteTile } from '../split/SplitFavoriteTile'
 import { pressItem } from './drag'
+import { menuAt } from './menu-at'
 import { clearSelection, useDrag } from './ui-state'
 
 /** Stable empty list (a fresh [] per call would re-render forever). */
@@ -135,7 +136,7 @@ const FavoriteTile = memo(function FavoriteTile({ tabId, ref }: { tabId: string;
       }}
       onContextMenu={(e) => {
         e.preventDefault()
-        void invoke('tabs.contextMenu', { id: tabId })
+        void invoke('tabs.contextMenu', { id: tabId, at: menuAt(e, tabId) })
       }}
     >
       {tab.icon ? <span className="favorite__emoji">{tab.icon}</span> : <Favicon src={tab.favicon} size={20} />}

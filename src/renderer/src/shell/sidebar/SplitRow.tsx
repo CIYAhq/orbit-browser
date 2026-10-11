@@ -7,6 +7,7 @@ import { getOrbitState, useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
 import { focusedPaneOf, lastFocusedPane, paneOrderKey } from '../split/selectors'
 import { pressItem } from './drag'
+import { menuAt } from './menu-at'
 import { clearSelection } from './ui-state'
 
 /**
@@ -67,7 +68,7 @@ export function SplitRow({ splitId, depth }: { splitId: string; depth: number })
       }}
       onContextMenu={(e) => {
         e.preventDefault()
-        void invoke('split.contextMenu', { splitId })
+        void invoke('split.contextMenu', { splitId, at: menuAt(e, splitId) })
       }}
     >
       {renaming ? (
