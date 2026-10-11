@@ -371,13 +371,14 @@ export function shouldAutoPip(
 
 /**
  * Media keeps a tab alive (MD-12, TB-16, TD-02): playing (muted or not), in picture-in-picture,
- * or using the camera or microphone. Such tabs never sleep, auto-archive or clear.
+ * using the camera or microphone, or sharing a screen Orbit's chooser granted (`screenGranted`; the
+ * page's own count never does, D69). Such tabs never sleep, auto-archive or clear.
  */
 export function isMediaBusy(tab: Pick<Tab, 'audible' | 'media'> | undefined): boolean {
   if (!tab) return false
   if (tab.audible) return true
   const m = tab.media
-  return !!m && (m.playing || m.active || m.pip || !!m.mic || !!m.camera)
+  return !!m && (m.playing || m.active || m.pip || !!m.mic || !!m.camera || !!m.screenGranted)
 }
 
 /** Anything playing anywhere (updates wait for it, MD-12). */

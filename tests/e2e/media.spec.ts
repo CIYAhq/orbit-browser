@@ -192,6 +192,19 @@ navigator.mediaDevices.getUserMedia({ audio: true, video: true }).then((s) => {
 }).then(() => { document.body.dataset.state = 'in-call' }, (e) => { document.body.dataset.state = 'error ' + e.name })
 </script>`
 
+/** Shares the screen on each click of its button (MD-11); the streams stay in `window.shares`. */
+const SHARE = `
+<button id="share">Share screen</button>
+<script>
+window.shares = []
+document.getElementById('share').addEventListener('click', () => {
+  navigator.mediaDevices.getDisplayMedia({ video: true }).then(
+    (s) => { window.shares.push(s); document.body.dataset.state = 'sharing' },
+    (e) => { document.body.dataset.state = 'error ' + e.name },
+  )
+})
+</script>`
+
 interface Fixtures {
   url: (path: string) => string
   close: () => Promise<void>
@@ -245,6 +258,7 @@ async function startMediaFixtures(): Promise<Fixtures> {
     if (parts[0] === 'media' && parts[1] === 'long-video')
       return html(LONG_VIDEO(Number(u.searchParams.get('s') ?? 60)))
     if (parts[0] === 'media' && parts[1] === 'call') return html(CALL(u.searchParams.has('participant')))
+    if (parts[0] === 'media' && parts[1] === 'share') return html(SHARE)
     // A page whose own !important rule (with an id) sizes its video to fill its box.
     if (parts[0] === 'media' && parts[1] === 'forced-video')
       return html(
@@ -257,7 +271,7 @@ async function startMediaFixtures(): Promise<Fixtures> {
       if (!src.startsWith('/media/')) return html('<p>No frame.</p>')
       const origin = u.searchParams.has('cross') ? `http://127.0.0.1:${req.socket.localPort}` : ''
       return html(
-        `<iframe id="f" src="${origin}${encodeURI(src)}" width="560" height="420" allow="autoplay; picture-in-picture"></iframe>`,
+        `<iframe id="f" src="${origin}${encodeURI(src)}" width="560" height="420" allow="autoplay; picture-in-picture; display-capture"></iframe>`,
       )
     }
     if (parts[0] === 'page') return html('<p>A quiet page.</p>')
@@ -1907,4 +1921,230 @@ test('[MD-08][NV-16][ST-10] the site controls switch and Settings › Advanced t
   await shell.getByTestId('site-controls-button').click()
   await expect(pip).toHaveAttribute('aria-checked', 'true')
   await expect(panel.getByTestId('site-controls-pip')).toContainText('Off for every site in Settings')
+})
+
+// ---- Screen sharing (MD-11, TB-15) ----
+
+/**
+ * Under Xvfb, a list of screens and windows sometimes comes back without Chromium's fake screen
+ * (one list in eight, more under load; each takes about 3 s). When that happens, Orbit's chooser
+ * gets the screens alone, without thumbnails: that list doesn't fail.
+ */
+async function steadyScreens(app: ElectronApplication): Promise<void> {
+  await app.evaluate(({ desktopCapturer }) => {
+    const list = desktopCapturer.getSources
+    const found = (sources: Electron.DesktopCapturerSource[]) => sources.some((s) => s.id.startsWith('screen:'))
+    desktopCapturer.getSources = async (options) => {
+      let sources = await list(options)
+      for (let attempt = 0; attempt < 5 && !found(sources); attempt++)
+        sources = await list({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } })
+      return sources
+    }
+  })
+}
+
+/**
+ * Clicks the page's Share button and allows its screen in Orbit's prompt. Should the fake screen
+ * still be missing from the prompt's list (see steadyScreens), the prompt is dismissed and the
+ * button clicked again.
+ */
+async function shareScreen(app: ElectronApplication, tabId: string, where: Page | Frame): Promise<void> {
+  const count = () => where.evaluate(() => (window as unknown as { shares: MediaStream[] }).shares.length)
+  const before = await count()
+  let prompt: { id: number; type: string; sources?: { id: string }[] } | undefined
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await where.click('#share')
+    // Orbit asks which screen to share, and nothing about the camera or microphone first.
+    await expect
+      .poll(async () => {
+        prompt = (await tab(app, tabId))?.permissionPrompt as typeof prompt
+        return prompt?.type ?? null
+      })
+      .not.toBeNull()
+    expect(prompt?.type).toBe('screen')
+    if (prompt?.sources?.length) break
+    await cmd(app, 'permissions.answer', { id: prompt?.id, choice: 'dismiss' })
+    await expect.poll(async () => (await tab(app, tabId))?.permissionPrompt).toBeUndefined()
+  }
+  const pick = prompt?.sources?.[0]?.id
+  expect(pick).toBeTruthy()
+  await cmd(app, 'permissions.answer', { id: prompt?.id, choice: 'allow', pick })
+  await expect.poll(count).toBe(before + 1)
+}
+
+/** What Orbit counts for a tab: the page preload's count, and main's watcher's for the page and each frame. */
+function shareCounts(
+  app: ElectronApplication,
+  tabId: string,
+): Promise<{ page: number; main: number; frames: number[] }> {
+  return app.evaluate(
+    (_e, id) => (globalThis as unknown as { __orbitMedia: MediaTestHooks }).__orbitMedia.manager.screens.counts(id),
+    tabId,
+  )
+}
+
+test('[MD-11][TB-15][TB-16] a tab sharing its screen shows a sharing indicator on its row until the page stops sharing or leaves', async () => {
+  orbit = await launchWithFakeDevices()
+  const { app, shell } = orbit
+  await steadyScreens(app)
+  const id = await newTab(app, fx.url('/media/share/Presenter'))
+  await waitTab(app, id, '/media/share/Presenter')
+  const p = await tabPage(app, '/media/share/Presenter')
+  const sharing = shell.locator(`[data-tab-id="${id}"] [data-testid="tab-screen-share"]`)
+  await expect(sharing).toHaveCount(0)
+
+  await shareScreen(app, id, p)
+  await expect(sharing).toBeVisible()
+  // Distinct from the camera and microphone indicator.
+  await expect(shell.locator(`[data-tab-id="${id}"] [data-testid="tab-capture"]`)).toHaveCount(0)
+  expect((await media(app, id))?.screen).toBe(true)
+  // In the background it never sleeps or archives while it shares (TB-16, TD-02).
+  await leave(app)
+  await expect(sharing).toBeVisible()
+  const run = await tabsHook<{ archived: string[]; slept: string[] }>(
+    app,
+    'maintenance',
+    Date.now() + 30 * 24 * 3600_000,
+  )
+  expect([...run.archived, ...run.slept]).not.toContain(id)
+  await cmd(app, 'tabs.activate', { tabId: id })
+  // Stopping the shared track ends it.
+  await p.evaluate(() => {
+    for (const t of (window as unknown as { shares: MediaStream[] }).shares[0]?.getTracks() ?? []) t.stop()
+  })
+  await expect(sharing).toHaveCount(0)
+  expect((await media(app, id))?.screen).toBeUndefined()
+
+  // A clone of the shared track shares too: stopping the first leaves it on.
+  await shareScreen(app, id, p)
+  await expect(sharing).toBeVisible()
+  await p.evaluate(() => {
+    const w = window as unknown as { shares: MediaStream[]; copy: MediaStreamTrack }
+    const track = w.shares[1]?.getVideoTracks()[0] as MediaStreamTrack
+    w.copy = track.clone()
+    track.stop()
+  })
+  // Both sources agree (D69): the page preload's count and main's own watcher.
+  await expect.poll(() => shareCounts(app, id)).toEqual({ page: 1, main: 1, frames: [] })
+  await expect(sharing).toBeVisible()
+  await p.evaluate(() => (window as unknown as { copy: MediaStreamTrack }).copy.stop())
+  await expect(sharing).toHaveCount(0)
+
+  // Leaving the page ends it.
+  await shareScreen(app, id, p)
+  await expect(sharing).toBeVisible()
+  await cmd(app, 'tabs.navigate', { tabId: id, url: fx.url('/page/Elsewhere') })
+  await expect(sharing).toHaveCount(0)
+})
+
+test('[MD-11][TB-15] a frame from another site sharing the screen shows the indicator until it stops, or loads another page', async () => {
+  orbit = await launchWithFakeDevices()
+  const { app, shell } = orbit
+  await steadyScreens(app)
+  const path = '/media/frame/Meeting'
+  const id = await newTab(app, fx.url(`${path}?src=${encodeURIComponent('/media/share/Embed')}&cross`))
+  await waitTab(app, id, path)
+  const p = await tabPage(app, path)
+  let frame: Frame | undefined
+  await expect
+    .poll(async () => {
+      frame = p.frames().find((f) => f.url().includes('/media/share/Embed'))
+      return frame ? await frame.evaluate(() => !!document.getElementById('share')).catch(() => false) : false
+    })
+    .toBe(true)
+  const f = frame as Frame
+  const sharing = shell.locator(`[data-tab-id="${id}"] [data-testid="tab-screen-share"]`)
+
+  await shareScreen(app, id, f)
+  await expect(sharing).toBeVisible()
+  await f.evaluate(() => {
+    for (const t of (window as unknown as { shares: MediaStream[] }).shares[0]?.getTracks() ?? []) t.stop()
+  })
+  await expect(sharing).toHaveCount(0)
+
+  await shareScreen(app, id, f)
+  await expect(sharing).toBeVisible()
+  await p.evaluate(() => {
+    ;(document.getElementById('f') as HTMLIFrameElement).src = 'about:blank'
+  })
+  await expect(sharing).toHaveCount(0)
+})
+
+test("[MD-11][TB-15] a share the system's own picker grants, without Orbit's chooser, still shows: the page's own count (D69)", async () => {
+  orbit = await launchWithFakeDevices()
+  const { app, shell } = orbit
+  const id = await newTab(app, fx.url('/media/share/System'))
+  await waitTab(app, id, '/media/share/System')
+  const p = await tabPage(app, '/media/share/System')
+  const sharing = shell.locator(`[data-tab-id="${id}"] [data-testid="tab-screen-share"]`)
+  // As on macOS 15 and later: something else grants the share and Orbit's handler is never asked.
+  await app.evaluate(({ desktopCapturer, webContents }, path) => {
+    const page = webContents.getAllWebContents().find((w) => w.getURL().includes(path))
+    page?.session.setDisplayMediaRequestHandler(async (_request, callback) => {
+      // Chromium's fake screen is sometimes missing from a list under Xvfb.
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const [screen] = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } })
+        if (screen) return callback({ video: screen })
+      }
+      callback(null)
+    })
+  }, '/media/share/System')
+  const shares = () => p.evaluate(() => (window as unknown as { shares: MediaStream[] }).shares.length)
+  await p.click('#share')
+  await expect.poll(shares).toBe(1)
+  expect((await tab(app, id))?.permissionPrompt).toBeUndefined()
+  await expect(sharing).toBeVisible()
+  expect(await shareCounts(app, id)).toEqual({ page: 1, main: 0, frames: [] })
+  await p.evaluate(() => {
+    for (const t of (window as unknown as { shares: MediaStream[] }).shares[0]?.getTracks() ?? []) t.stop()
+  })
+  await expect(sharing).toHaveCount(0)
+
+  // The page's own count lights its indicators only: it never keeps the tab awake or unarchived.
+  await p.click('#share')
+  await expect.poll(shares).toBe(2)
+  await expect(sharing).toBeVisible()
+  expect((await media(app, id))?.screenGranted).toBeUndefined()
+  await leave(app)
+  const run = await tabsHook<{ archived: string[]; slept: string[] }>(
+    app,
+    'maintenance',
+    Date.now() + 30 * 24 * 3600_000,
+  )
+  expect([...run.archived, ...run.slept]).toContain(id)
+})
+
+test("[MD-11][TB-15] the page's share count is taken only from a tab's own page, and clamped (D69)", async () => {
+  orbit = await launchOrbit()
+  const { app, shell } = orbit
+  const path = '/media/frame/Counted'
+  const id = await newTab(app, fx.url(`${path}?src=${encodeURIComponent('/media/share/Inner')}&cross`))
+  await waitTab(app, id, path)
+  const p = await tabPage(app, path)
+  await expect.poll(() => p.frames().some((f) => f.url().includes('/media/share/Inner'))).toBe(true)
+  const sharing = shell.locator(`[data-tab-id="${id}"] [data-testid="tab-screen-share"]`)
+  /** Delivers a count on the preload's channel as if `from` (the page, or its frame) sent it. */
+  const send = (from: 'page' | 'frame', count: number) =>
+    app.evaluate(
+      ({ ipcMain, webContents }, { path, from, count }) => {
+        const page = webContents.getAllWebContents().find((w) => w.getURL().includes(path))
+        if (!page) throw new Error('no page')
+        const frame = from === 'page' ? page.mainFrame : page.mainFrame.frames[0]
+        if (!frame) throw new Error('no frame')
+        ipcMain.emit('orbit-page:screen-share', { sender: page, senderFrame: frame }, count)
+      },
+      { path, from, count },
+    )
+  // A frame's word is ignored.
+  await send('frame', 3)
+  expect(await shareCounts(app, id)).toEqual({ page: 0, main: 0, frames: [] })
+  await expect(sharing).toHaveCount(0)
+  // The page's, clamped.
+  await send('page', 1e12)
+  expect((await shareCounts(app, id)).page).toBe(1000)
+  await expect(sharing).toBeVisible()
+  expect((await media(app, id))?.screenGranted).toBeUndefined()
+  await send('page', -2)
+  expect((await shareCounts(app, id)).page).toBe(0)
+  await expect(sharing).toHaveCount(0)
 })

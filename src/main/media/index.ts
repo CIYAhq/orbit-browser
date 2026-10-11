@@ -1,4 +1,5 @@
-import { app, Menu, type MenuItemConstructorOptions } from 'electron'
+import { app, type IpcMainEvent, ipcMain, Menu, type MenuItemConstructorOptions } from 'electron'
+import { PAGE_CHANNEL } from '../../shared/site'
 import type { TabId } from '../../shared/state'
 import type { MainContext } from '../context'
 import { activeTabOf } from '../windows'
@@ -100,6 +101,25 @@ export function registerMedia(ctx: MainContext): MediaManager {
       },
       { type: 'separator' },
     ]
+  })
+
+  // Screen sharing (MD-11, TB-15; D69): a tab's sharing indicators show while either main's own
+  // watcher (installed when Orbit's screen chooser grants a share) or the page preload's count of
+  // its own page's live shared tracks says it shares (screen-share.ts).
+  ctx.hooks.screenShare ??= []
+  ctx.hooks.screenShare.push((tabId, contents, frame) => media.screens.grant(tabId, contents, frame))
+  ipcMain.on(PAGE_CHANNEL.screenShare, (event: IpcMainEvent, count: unknown) => {
+    // Only from a tab's own page: the preload runs in main frames only, and a frame's word is ignored.
+    const contents = event.sender
+    try {
+      const frame = event.senderFrame
+      const main = contents.mainFrame
+      if (!frame || frame.detached || frame.processId !== main.processId || frame.routingId !== main.routingId) return
+    } catch {
+      return
+    }
+    const tabId = ctx.tabs.tabIdFor(contents)
+    if (tabId) media.screens.pageCount(tabId, contents, count)
   })
 
   if (ctx.e2e) {

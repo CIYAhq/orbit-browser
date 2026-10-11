@@ -11,7 +11,8 @@
  *   Orbit's floating player (player.ts, MD-01), and coming back ends it. A video in a frame goes
  *   through each frame on the way (`Chain`);
  * - each tab's `media` record (shared/state.ts) holds what the sidebar and the player need, and
- *   `tray` says whether its controller shows (shared/media.ts settleTray).
+ *   `tray` says whether its controller shows (shared/media.ts settleTray);
+ * - a tab sharing a screen or window says so too (`screen`, MD-11; screen-share.ts).
  *
  * The engine's own picture-in-picture window is still used while the tab stays on screen (the
  * page's own PiP button, "Picture in Picture" on the selected tab): Orbit's player borrows the
@@ -24,6 +25,7 @@ import {
   type AgentSnapshot,
   applySitePip,
   combineSnapshots,
+  emptyMedia,
   type MediaAction,
   mediaFromSnapshot,
   type PipEndReason,
@@ -42,6 +44,7 @@ import { displayedTabs } from '../tabs/model'
 import { AGENT_SOURCE, frameAgentSource, MEDIA_WORLD } from './agent'
 import { loadArtwork } from './artwork'
 import { PipPlayer } from './player'
+import { ScreenShares } from './screen-share'
 
 /** One document's page script: the tab's own page, or one of its frames. */
 interface Agent {
@@ -137,6 +140,8 @@ export class MediaManager {
   /** Last menu template (tests read it instead of a native popup). */
   lastMenu: MenuItemConstructorOptions[] = []
   readonly player: PipPlayer
+  /** Tabs sharing a screen or window (MD-11). */
+  readonly screens = new ScreenShares((tabId) => this.showScreen(tabId))
 
   constructor(
     private ctx: MainContext,
@@ -199,6 +204,9 @@ export class MediaManager {
     contents.on('did-frame-navigate', (_e, _url, _code, _status, isMainFrame, pid, rid) => {
       if (!isMainFrame) this.frameNavigated(tabId, contents, pid, rid)
     })
+    // A page's shared screen ends with its document (MD-11).
+    contents.on('did-navigate', () => this.screens.tabGone(tabId, contents))
+    contents.once('destroyed', () => this.screens.tabGone(tabId, contents))
     contents.once('destroyed', () => this.drop(tabId, contents, 'gone'))
   }
 
@@ -357,14 +365,15 @@ export class MediaManager {
     })
   }
 
-  /** A frame of the tab loaded a new document: its script and media went with the old one. */
+  /** A frame of the tab loaded a new document: its script, media and shares went with the old one. */
   private frameNavigated(tabId: TabId, contents: WebContents, pid: number, rid: number): void {
-    const t = this.tabs.get(tabId)
-    if (!t || t.contents !== contents) return
     let node: number | undefined
     try {
       node = webFrameMain.fromId(pid, rid)?.frameTreeNodeId
     } catch {}
+    if (node !== undefined) this.screens.frameGone(tabId, contents, node)
+    const t = this.tabs.get(tabId)
+    if (!t || t.contents !== contents) return
     if (node !== undefined) {
       t.navs.set(node, (t.navs.get(node) ?? 0) + 1)
       this.dropFrame(tabId, t, node)
@@ -428,7 +437,7 @@ export class MediaManager {
   private update(tabId: TabId, t: TabAgents): void {
     const snap = combineSnapshots(this.reports(t))
     if (!snap) {
-      this.patch(tabId, () => undefined)
+      this.patch(tabId, () => this.withScreen(tabId, undefined))
       return
     }
     // A video plays somewhere: get the player ready, so leaving its tab shows it at once (MD-01).
@@ -438,6 +447,7 @@ export class MediaManager {
       const next = mediaFromSnapshot(prev, snap)
       if (artwork) next.artwork = artwork
       else delete next.artwork
+      this.withScreen(tabId, next)
       // Keep the "opened automatically" mark while the same picture-in-picture lasts.
       if (next.pip && prev?.autoPip) next.autoPip = true
       // Orbit's player decides whether it shows this tab (the page's report may lag behind).
@@ -477,6 +487,33 @@ export class MediaManager {
       if (image && now && this.artWanted.get(tabId) === key) this.update(tabId, now)
     })
     return undefined
+  }
+
+  /** A tab started or stopped sharing a screen or window: its row says so (MD-11, TB-15). */
+  private showScreen(tabId: TabId): void {
+    const t = this.tabs.get(tabId)
+    if (t) {
+      this.update(tabId, t)
+      return
+    }
+    // Without page scripts, its record holds nothing else.
+    this.patch(tabId, () => this.withScreen(tabId, undefined))
+  }
+
+  /**
+   * `media` with the tab's sharing marks set (D69): `screen` while either source says it shares,
+   * `screenGranted` only while a share Orbit's chooser granted is live. A record kept only for them
+   * goes when they do. Changes `media` in place.
+   */
+  private withScreen(tabId: TabId, media: TabMedia | undefined): TabMedia | undefined {
+    const screen = this.screens.sharing(tabId)
+    const granted = this.screens.sharingGranted(tabId)
+    if (!media) return screen ? { ...emptyMedia(), screen, ...(granted ? { screenGranted: true } : {}) } : undefined
+    if (screen) media.screen = true
+    else delete media.screen
+    if (granted) media.screenGranted = true
+    else delete media.screenGranted
+    return media
   }
 
   /** Updates a tab's media record and settles its tray membership; writes only real changes. */

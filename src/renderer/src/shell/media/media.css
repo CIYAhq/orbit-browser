@@ -189,6 +189,22 @@
   animation: capture-pulse 1.6s ease-in-out infinite;
 }
 
+/* Sharing a screen or window: blue, so it reads apart from the camera and microphone. */
+.capture-indicator.is-screen {
+  background: #2f6fed;
+  animation-name: share-pulse;
+}
+
+@keyframes share-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(47, 111, 237, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(47, 111, 237, 0);
+  }
+}
+
 @keyframes capture-pulse {
   0%,
   100% {

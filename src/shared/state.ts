@@ -105,6 +105,13 @@ export interface TabMedia {
   artist?: string
   /** The Media Session's artwork, as a small data: image (MD-09). */
   artwork?: string
+  /** The tab shares a screen or window (getDisplayMedia; MD-11, TB-15): its sharing indicators show. */
+  screen?: boolean
+  /**
+   * A share Orbit's own screen chooser granted is live, as main's watcher says (D69). Only this,
+   * never the page preload's count behind `screen`, keeps the tab awake and unarchived.
+   */
+  screenGranted?: boolean
   /** The main media has a known length: seeking, next and previous work. */
   seekable: boolean
   /** The main media played to its end. */

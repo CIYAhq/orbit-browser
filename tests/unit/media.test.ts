@@ -268,6 +268,9 @@ describe('media and the tab lifecycle (MD-12)', () => {
     expect(isMediaBusy(tab('t-a', { ...base, active: true }))).toBe(true)
     expect(isMediaBusy(tab('t-a', { ...base, pip: true }))).toBe(true)
     expect(isMediaBusy(tab('t-a', { ...base, camera: true }))).toBe(true)
+    // Sharing a screen Orbit's chooser granted (MD-11, TB-16); the page's own count alone never (D69).
+    expect(isMediaBusy(tab('t-a', { ...base, screen: true, screenGranted: true }))).toBe(true)
+    expect(isMediaBusy(tab('t-a', { ...base, screen: true }))).toBe(false)
     expect(isMediaBusy(tab('t-a', { ...base, tray: true }))).toBe(false)
     expect(isMediaBusy(undefined)).toBe(false)
   })
