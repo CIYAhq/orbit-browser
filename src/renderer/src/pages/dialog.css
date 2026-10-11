@@ -58,6 +58,20 @@
   overflow-wrap: anywhere;
 }
 
+.page-dialog__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* An app's icon, as the OS gives it (NV-19). */
+.page-dialog__icon {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+}
+
 .page-dialog__message {
   margin: 0;
   max-height: 40vh;
@@ -71,6 +85,19 @@
   margin: 0;
   color: var(--text-muted, rgba(28, 28, 31, 0.56));
   font-size: 12px;
+}
+
+.page-dialog__check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.page-dialog__check input {
+  flex: none;
+  margin: 1px 0 0;
+  accent-color: var(--accent, #5865d8);
 }
 
 .page-dialog__fields {

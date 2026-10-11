@@ -5,6 +5,7 @@ import type { MainContext } from '../context'
 import type { TabOps } from '../tabs/ops'
 import { type PageDialogInfo, type PageDialogs$, registerDialogs } from './dialogs'
 import { type LeaveInfo, registerLeave } from './leave'
+import { findSystemApp, findTestApp, launchInApp, registerOtherApps } from './other-apps'
 import { LOAD_TIMEOUT_MS, type PageScreenInfo, registerScreens } from './screens'
 
 /** Test-only handle (ORBIT_E2E=1): globalThis.__orbitPages. */
@@ -17,13 +18,15 @@ export interface PagesTestHooks {
   mayDiscard: (tabId: TabId) => boolean
   /** Every page's error or crash screen (NV-13, NV-14). */
   screens: () => PageScreenInfo[]
+  /** Links Orbit opened in another app, oldest first (NV-19): test runs never start one. */
+  launched: string[]
 }
 
 /**
  * The pages lane: what a page does beyond loading. Page dialogs (NV-24): a page's alert, confirm and
  * prompt, the leave-page warning and HTTP sign-in, in Orbit's own dialog over that page. Error and
  * crash screens (NV-13, NV-14): what the page's area shows when its page couldn't load, crashed or
- * stopped responding.
+ * stopped responding. Links that open other apps (NV-19): asked about over the page.
  */
 export function registerPages(ctx: MainContext, ops: TabOps): void {
   const dialogs = registerDialogs(ctx)
@@ -32,6 +35,20 @@ export function registerPages(ctx: MainContext, ops: TabOps): void {
   // Tests give a navigation's first answer less time (ORBIT_E2E_LOAD_TIMEOUT_MS).
   const testTimeout = ctx.e2e ? Number(process.env.ORBIT_E2E_LOAD_TIMEOUT_MS) : Number.NaN
   const screens = registerScreens(ctx, ops, dialogs, testTimeout > 0 ? testTimeout : LOAD_TIMEOUT_MS)
+  // Test runs record each launch instead, and take the OS's apps from ORBIT_E2E_APPS.
+  const launched: string[] = []
+  registerOtherApps(
+    ctx,
+    dialogs,
+    ctx.e2e
+      ? {
+          launch: async (url) => {
+            launched.push(url)
+          },
+          findApp: findTestApp(process.env.ORBIT_E2E_APPS),
+        }
+      : { launch: launchInApp, findApp: findSystemApp },
+  )
 
   if (ctx.e2e) {
     const hooks: PagesTestHooks = {
@@ -42,6 +59,7 @@ export function registerPages(ctx: MainContext, ops: TabOps): void {
       },
       mayDiscard: (tabId) => leave.mayDiscard(tabId),
       screens: () => screens.info(),
+      launched,
     }
     ;(globalThis as unknown as { __orbitPages: PagesTestHooks }).__orbitPages = hooks
   }

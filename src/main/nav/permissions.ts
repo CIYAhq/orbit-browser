@@ -54,6 +54,18 @@ const ALWAYS_ALLOW = new Set([
 /** Device APIs: a site may ask, and the chooser asks the user for each device. */
 const DEVICE_APIS = new Set(['serial', 'usb', 'hid'])
 
+/** Who takes a page's link to another app (`openExternal`): the pages lane asks the user (NV-19). */
+export type AppLinkHandler = (profileId: ProfileId, contents: WebContents, details: PermissionRequestDetails) => void
+let appLinkHandler: AppLinkHandler | undefined
+
+/**
+ * Sets who handles a page's links to other apps (`mailto:`, `zoommtg:`…; pages lane, NV-19). The
+ * engine never launches one itself: until a handler is set, each is refused.
+ */
+export function setAppLinkHandler(handler: AppLinkHandler): void {
+  appLinkHandler = handler
+}
+
 /** The prompt's card in its own view (sidebar hidden): width, and the shadow's margin around it. */
 export const PROMPT_VIEW = { width: 320, margin: 12, inset: 10, estimate: 168 }
 
@@ -418,6 +430,13 @@ export function registerPermissions(ctx: MainContext, prefs: SitePrefs): Permiss
       return kinds.every((k) => allowedNow(profileId, origin, k))
     },
     request: (profileId, contents, permission, callback, details) => {
+      if (permission === 'openExternal') {
+        // A link to another app: refused to the engine, which would launch it unasked; the pages
+        // lane asks the user and launches it itself (NV-19).
+        callback(false)
+        appLinkHandler?.(profileId, contents, details)
+        return
+      }
       if (ALWAYS_ALLOW.has(permission)) return callback(true)
       if (permission === 'fileSystem') return askFile(profileId, contents, details, callback)
       const media = 'mediaTypes' in details ? details.mediaTypes : undefined

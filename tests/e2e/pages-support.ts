@@ -48,6 +48,10 @@ const html = (title: string, body: string, head = '') => `<!doctype html>
  * - `/page/<name>`: a plain page.
  * - `/opener?to=…`: opens `to` in a pop-up window on a click of `#open`.
  * - `/upload?to=…`: a form (`#form`) that posts to `to`.
+ * - `/apps?frame=…`: links to other apps (NV-19): `#mail` (mailto:), `#call` (tel:), `#mail-tab`
+ *   (mailto: in a new tab), `#app-tab` (a new tab that redirects to zoommtg:), `#pop` (a pop-up
+ *   window for mailto:), and an `#frame` loading `frame` (`/app-frame`: a `#frame-mail` link).
+ * - `/to-app?to=…`: redirects to `to`.
  *
  * Every page has an icon (PAGE_ICON). `port` listens on that port only (a server back on the port
  * it left).
@@ -179,6 +183,36 @@ addEventListener('pagehide', () => note('pagehide', prompt('Your name?', 'Ada'))
       send(html(name, `<h1 id="title">${name}</h1><div id="area"></div>`))
       return
     }
+    if (u.pathname === '/apps') {
+      const frame = u.searchParams.get('frame')
+      send(
+        html(
+          'Apps',
+          `<p><a id="mail" href="mailto:someone@example.com?subject=Hello%20there">Mail</a>
+<a id="call" href="tel:+15550100">Call</a>
+<a id="mail-tab" href="mailto:tab@example.com" target="_blank">Mail in a new tab</a>
+<a id="app-tab" href="/to-app?to=${encodeURIComponent('zoommtg://join?confno=123')}" target="_blank">Join</a>
+<button id="pop">Pop-up</button></p>
+${frame ? `<iframe id="frame" src="${frame}" width="300" height="60"></iframe>` : ''}<div id="area"></div>
+<script>document.getElementById('pop').addEventListener('click', () => {
+  window.open('mailto:pop@example.com', 'pop', 'popup,width=320,height=240')
+})</script>`,
+        ),
+      )
+      return
+    }
+    if (u.pathname === '/app-frame') {
+      send(html('Frame', '<a id="frame-mail" href="mailto:frame@example.com">Mail from the frame</a>'))
+      return
+    }
+    if (u.pathname === '/to-app') {
+      res.writeHead(302, {
+        location: u.searchParams.get('to') ?? 'mailto:someone@example.com',
+        'cache-control': 'no-store',
+      })
+      res.end()
+      return
+    }
     if (u.pathname === '/upload') {
       send(
         html(
@@ -290,7 +324,23 @@ type PagesGlobal = {
     leave: (tabId: string) => LeaveInfo | null
     mayDiscard: (tabId: string) => boolean
     screens: () => PageScreenInfo[]
+    launched: string[]
   }
+}
+
+/** The icon test runs' OS gives its mail app (NV-19). */
+export const APP_ICON =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a7de1'/%3E%3C/svg%3E"
+
+/**
+ * The apps a test run's OS has (ORBIT_E2E_APPS, for launchOrbit's `env`): Mail opens `mailto:`
+ * links, with an icon; any other kind's app goes unnamed, as on Linux (NV-19).
+ */
+export const APPS_ENV = { ORBIT_E2E_APPS: JSON.stringify({ mailto: { name: 'Mail', icon: APP_ICON } }) }
+
+/** Links Orbit opened in another app, oldest first: test runs record each and start none (NV-19). */
+export function launchedLinks(app: ElectronApplication): Promise<string[]> {
+  return app.evaluate(() => [...(globalThis as unknown as PagesGlobal).__orbitPages.launched])
 }
 
 /**

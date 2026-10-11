@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 239 built (87 partial) · 332 tested · 0 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 240 built (87 partial) · 333 tested · 0 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 140 | 168 |
-| P1 | 219 | 84 | 147 |
+| P1 | 219 | 85 | 148 |
 | P2 | 79 | 15 | 17 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -246,7 +246,7 @@ Spec: `spec/navigation.md`
 | NV-16 | Site controls panel | P0 | 🟡 partial | ✅ e2e+unit | – | button at the address's right end and the Site Controls action (never shows the hidden sidebar): host and connection, switches for permissions the site used or asked for (pop-ups too), devices, zoom with reset, Reset permissions, Clear cookies and site data, Reload hint; Esc or a click outside closes; auto PiP, Peek, Developer mode, Tweaks, extensions, capture and the all-sites link wait on their features |
 | NV-17 | Copy the current URL | P0 | ✅ | ✅ e2e | – | copy button = Cmd+Shift+C (clean URL, Copied toast); one-time shortcut tip when the URL is copied from the command bar; on Windows/Linux a page that uses Ctrl+Shift+C gets it first and a toast offers Copy URL, a second press within a second copies (KS-02) |
 | NV-18 | Links from other apps (Orbit as the default browser) | P0 | ✅ | ✅ e2e | – | summary of MW-02/05/09/10/11: links from other apps open a Mini Window or follow routing rules, else a Today tab in the most recent Space; never in a private window (e2e); a launch with --private-window takes its links to a private window (NV-11); rules UI is ST-09, Archive restores AR-05 |
-| NV-19 | Links that open other apps (external protocols) | P1 | – | – | – |  |
+| NV-19 | Links that open other apps (external protocols) | P1 | ✅ | ✅ e2e+unit | – | a link to another app (mailto:, tel:, zoommtg:…) asks first, in a dialog over the page that followed it (a tab's, a split pane's, a Peek's, a Mini Window's or a pop-up's): "Open Mail?" with the app's icon where the OS gives one (macOS, Windows; Linux names the app from its desktop entry and gives no icon), "<site> wants to open this application." naming the site of the frame that followed it, and "Always allow <site> to open links of this type in the associated app" (web sites only; kept per profile, site and kind of link, a private window's in memory only); Cancel is the default (the keyboard starts there; Enter and Esc give it); an app the OS can't name gets "Open this link in another app?"; on macOS and Windows a kind of link no app opens gets a toast instead of the dialog (not in e2e: test runs give the OS's apps through ORBIT_E2E_APPS); a tab, Peek, Mini Window or pop-up opened only for such a link (target=_blank, window.open, or a redirect there) closes itself once its navigation ends, the tab it came from is selected again, and nothing goes to the Archive; the launch is one function (launchInApp, shell.openExternal) that test runs replace with a recorder, so no test starts an app; schemes Chromium never hands to the OS (shell:, vbscript:, ms-msdt:…) never launch; a page asks one question at a time; an Always allow can't be undone in Orbit's UI yet (Site settings has no row for it): deleting the profile forgets it |
 | NV-20 | Full screen | P1 | – | ✅ e2e | – |  |
 | NV-21 | Save page and view source | P2 | – | – | – |  |
 | NV-22 | Translate a page | P2 | ⛔ out of scope | – | – | Orbit's engine has no built-in translation, and the spec allows no paid API (D45). ST-14's offer to translate, the Translate command and the address field's translate button go with it |

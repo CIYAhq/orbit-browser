@@ -1,15 +1,16 @@
 /**
  * What a page asks of the user, shown in Orbit's own dialogs over that page (pages lane, NV-24):
  * the page's `alert`, `confirm` and `prompt`, "Leave site?" before a page that asks for it goes,
- * HTTP sign-in, and "Page unresponsive" (NV-14). And what the page's area shows when the page
- * couldn't load or crashed (NV-13, NV-14).
+ * HTTP sign-in, "Page unresponsive" (NV-14) and "Open Mail?" for a link to another app (NV-19).
+ * And what the page's area shows when the page couldn't load or crashed (NV-13, NV-14).
  */
+import { siteLabel } from './site'
 
 /**
  * The kinds of page dialog. `leave` and `reload` are the leave-page warning (`beforeunload`),
- * `hang` the page that stopped responding.
+ * `hang` the page that stopped responding, `app` a link that opens another app.
  */
-export type PageDialogKind = 'alert' | 'confirm' | 'prompt' | 'leave' | 'reload' | 'auth' | 'hang'
+export type PageDialogKind = 'alert' | 'confirm' | 'prompt' | 'leave' | 'reload' | 'auth' | 'hang' | 'app'
 
 /** What a dialog view shows. */
 export interface PageDialogContent {
@@ -31,6 +32,12 @@ export interface PageDialogContent {
   noCancel?: boolean
   /** Esc answers with the accepting button (the safe answer), not the other one. */
   escapeAccepts?: boolean
+  /** Cancel is the safe answer: the keyboard starts on it, and Enter anywhere but on the accepting button gives it. */
+  defaultCancel?: boolean
+  /** An app's icon, as the OS gives it (a `data:` URL). */
+  icon?: string
+  /** A checkbox under the message, unchecked at first: "Always allow …". */
+  check?: string
 }
 
 /** The user's answer; `ok: false` is Cancel (or Esc, or the dialog going away). */
@@ -42,6 +49,8 @@ export interface PageDialogAnswer {
   /** auth: what the user typed. */
   user?: string
   password?: string
+  /** The checkbox, for a dialog with one: checked or not. */
+  checked?: boolean
 }
 
 /** A dialog shows at most this much of a page's text (the rest is cut, with an ellipsis). */
@@ -147,6 +156,118 @@ export function hangDialog(pageUrl: string | undefined): Omit<PageDialogContent,
     cancelLabel: 'Close page',
     escapeAccepts: true,
   }
+}
+
+// ---- Links that open other apps (NV-19) ----
+
+/** The app the OS opens a link in: its name, and its icon where the OS gives one (a `data:` URL). */
+export interface OtherApp {
+  name: string
+  icon?: string
+}
+
+/**
+ * Schemes that never go to another app: the ones the engine or Orbit loads itself, and the ones
+ * Chromium refuses to hand to the OS (they run programs or reach local files).
+ */
+const NOT_APP_LINKS = new Set([
+  'http',
+  'https',
+  'file',
+  'about',
+  'data',
+  'blob',
+  'filesystem',
+  'javascript',
+  'view-source',
+  'orbit',
+  'chrome',
+  'chrome-extension',
+  'chrome-untrusted',
+  'devtools',
+  'ws',
+  'wss',
+  // Chromium's blocked list: these reach programs or files on some systems.
+  'afp',
+  'disk',
+  'disks',
+  'hcp',
+  'ie.http',
+  'ms-help',
+  'nntp',
+  'res',
+  'shell',
+  'vbscript',
+  'vnd.ms.radio',
+  'ms-msdt',
+  'search-ms',
+])
+
+/**
+ * The scheme of a link that opens another app ("mailto", "zoommtg"), lower case, or "" for any
+ * other address (a web page, a local file, a scheme that never leaves the browser).
+ */
+export function appScheme(url: string | undefined): string {
+  const match = /^([a-z][a-z0-9+.-]*):/i.exec(url?.trim() ?? '')
+  const scheme = match?.[1]?.toLowerCase() ?? ''
+  return scheme && !NOT_APP_LINKS.has(scheme) ? scheme : ''
+}
+
+/**
+ * An app's name as the OS gives it, for a dialog. Linux names the app's desktop entry
+ * ("thunderbird.desktop", "org.gnome.Evolution.desktop"): its last part, in words, capitalised.
+ */
+export function appName(raw: string, platform: string): string {
+  const name = raw.trim()
+  if (platform !== 'linux') return name
+  let entry = name.replace(/\.desktop$/i, '')
+  // A reverse-DNS entry ("org.gnome.Evolution"): the app is its last part.
+  if (/^[a-z0-9-]+(\.[a-z0-9_-]+){2,}$/i.test(entry)) entry = entry.split('.').pop() ?? entry
+  entry = entry.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim()
+  return entry === entry.toLowerCase()
+    ? entry.replace(/(^|\s)(\p{L})/gu, (_m, gap: string, c: string) => gap + c.toUpperCase())
+    : entry
+}
+
+/** Printable characters Chromium escapes in a link it hands to another app. */
+const ESCAPED_FOR_APPS = new Set('"<>\\^`{|}')
+
+/**
+ * A link as Orbit hands it to the OS: characters an app's handler could take for more than one
+ * argument are escaped, as Chromium does (spaces and other controls, quotes, angle brackets…).
+ */
+export function launchableUrl(url: string): string {
+  let out = ''
+  for (const c of url) {
+    const code = c.charCodeAt(0)
+    const unsafe = code <= 0x20 || code === 0x7f || ESCAPED_FOR_APPS.has(c)
+    out += unsafe ? `%${code.toString(16).toUpperCase().padStart(2, '0')}` : c
+  }
+  return out
+}
+
+/**
+ * "Open Mail?" (NV-19, Chromium's external-protocol dialog): the app a link opens, with its icon,
+ * and the site asking (`origin`, the frame that followed the link). Cancel is the default; Open
+ * launches the app. Only a web site (http or https) may be always allowed to open links of that kind.
+ */
+export function appDialog(app: OtherApp | undefined, origin: string | null): Omit<PageDialogContent, 'id'> {
+  const who = origin ? siteLabel(origin) : 'A website'
+  const web = !!origin && /^https?:\/\//i.test(origin)
+  return {
+    kind: 'app',
+    title: app ? `Open ${app.name}?` : 'Open this link in another app?',
+    message: app ? `${who} wants to open this application.` : `${who} wants to open a link in another app.`,
+    ...(app?.icon ? { icon: app.icon } : {}),
+    ...(web ? { check: `Always allow ${who} to open links of this type in the associated app` } : {}),
+    okLabel: app ? `Open ${app.name}` : 'Open link',
+    defaultCancel: true,
+  }
+}
+
+/** Said instead of asking when the OS has no app for a link's kind. */
+export function noAppMessage(scheme: string): string {
+  return `No app on this device opens ${scheme}: links`
 }
 
 // ---- Error and crash screens (NV-13, NV-14) ----

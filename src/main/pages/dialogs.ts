@@ -47,8 +47,8 @@ export interface PageDialogs$ {
 }
 
 /**
- * Page dialogs (NV-24): a page's alert, confirm and prompt, the leave-page warning, HTTP sign-in and
- * "Page unresponsive", in Orbit's own small dialog over that page's area only. The rest of the
+ * Page dialogs (NV-24): a page's alert, confirm and prompt, the leave-page warning, HTTP sign-in,
+ * "Page unresponsive" and "Open Mail?" (NV-19), in Orbit's own small dialog over that page's area only. The rest of the
  * window stays usable: other tabs, the sidebar, the command bar. A dialog waits while its page is
  * off screen (another tab is selected, the window is closed to the Library) and shows again when
  * the page does. Each page's dialogs show one at a time in a transparent view over the page
@@ -146,6 +146,7 @@ export function registerDialogs(ctx: MainContext): PageDialogs$ {
       ...(typeof answer.value === 'string' ? { value: answer.value } : {}),
       ...(typeof answer.user === 'string' ? { user: answer.user } : {}),
       ...(typeof answer.password === 'string' ? { password: answer.password } : {}),
+      ...(first.content.check && typeof answer.checked === 'boolean' ? { checked: answer.checked } : {}),
     })
   })
 

@@ -16,10 +16,11 @@ import './dialog.css'
 
 /**
  * A page's dialog (NV-24), in a transparent view main keeps over that page only: the page's alert,
- * confirm or prompt, "Leave site?", HTTP sign-in, or "Page unresponsive" (NV-14). It takes the
- * keyboard while it shows (KS-19): Enter answers with the accepting button, Esc cancels (or gives
- * the safe answer: an alert's OK, Wait), and Tab stays inside the card. Main gives the keyboard back
- * to the page when it goes (KS-16).
+ * confirm or prompt, "Leave site?", HTTP sign-in, "Page unresponsive" (NV-14), or "Open Mail?" for
+ * a link to another app (NV-19). It takes the keyboard while it shows (KS-19): Enter answers with
+ * the accepting button (with Cancel, where Cancel is the safe answer), Esc cancels (or gives the
+ * safe answer: an alert's OK, Wait), and Tab stays inside the card. Main gives the keyboard back to
+ * the page when it goes (KS-16).
  */
 export function DialogApp() {
   const win = useWindow()
@@ -64,6 +65,7 @@ interface Fields {
   value?: string
   user?: string
   password?: string
+  checked?: boolean
 }
 
 function DialogCard({
@@ -76,20 +78,24 @@ function DialogCard({
   const card = useRef<HTMLFormElement>(null)
   const firstField = useRef<HTMLInputElement>(null)
   const okButton = useRef<HTMLButtonElement>(null)
+  const cancelButton = useRef<HTMLButtonElement>(null)
   const [value, setValue] = useState(content.value ?? '')
   const [user, setUser] = useState('')
   const [password, setPassword] = useState('')
+  const [checked, setChecked] = useState(false)
   const titleId = `page-dialog-title-${content.id}`
   const messageId = `page-dialog-message-${content.id}`
 
-  // The prompt's text is selected, sign-in starts at the username, the rest at the accepting button.
+  // The prompt's text is selected, sign-in starts at the username, a dialog whose safe answer is
+  // Cancel at Cancel, the rest at the accepting button.
+  const startButton = content.defaultCancel ? cancelButton : okButton
   useLayoutEffect(() => {
     const field = firstField.current
     if (field) {
       field.focus()
       if (content.kind === 'prompt') field.select()
-    } else okButton.current?.focus()
-  }, [content.kind])
+    } else startButton.current?.focus()
+  }, [content.kind, startButton])
 
   // The view can get the keyboard after the card shows (main focuses it when the page is current).
   useEffect(() => {
@@ -97,15 +103,16 @@ function DialogCard({
       if (card.current?.contains(document.activeElement)) return
       const field = firstField.current
       if (field) field.focus()
-      else okButton.current?.focus()
+      else startButton.current?.focus()
     }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
-  }, [])
+  }, [startButton])
 
   const accept = () => {
     if (content.kind === 'prompt') answer(content, true, { value })
     else if (content.kind === 'auth') answer(content, true, { user, password })
+    else if (content.check) answer(content, true, { checked })
     else answer(content, true)
   }
   const cancel = () => answer(content, false)
@@ -122,6 +129,13 @@ function DialogCard({
       // An alert has one button: Esc closes it as OK does; "Page unresponsive" waits.
       if (content.noCancel || content.escapeAccepts) accept()
       else cancel()
+      return
+    }
+    // Where Cancel is the safe answer, Enter gives it anywhere but on the accepting button.
+    if (e.key === 'Enter' && content.defaultCancel && document.activeElement !== okButton.current) {
+      e.preventDefault()
+      e.stopPropagation()
+      cancel()
       return
     }
     if (e.key !== 'Tab' || !card.current) return
@@ -147,7 +161,13 @@ function DialogCard({
     content.kind === 'confirm' ||
     content.kind === 'leave' ||
     content.kind === 'reload' ||
-    content.kind === 'hang'
+    content.kind === 'hang' ||
+    content.kind === 'app'
+  const title = (
+    <h2 id={titleId} className="page-dialog__title" data-testid="page-dialog-title">
+      {content.title}
+    </h2>
+  )
   return (
     <form
       ref={card}
@@ -163,9 +183,14 @@ function DialogCard({
       onKeyDown={onKeyDown}
       autoComplete="off"
     >
-      <h2 id={titleId} className="page-dialog__title" data-testid="page-dialog-title">
-        {content.title}
-      </h2>
+      {content.icon ? (
+        <div className="page-dialog__head">
+          <img className="page-dialog__icon" src={content.icon} alt="" data-testid="page-dialog-icon" />
+          {title}
+        </div>
+      ) : (
+        title
+      )}
       {content.message && (
         <p id={messageId} className="page-dialog__message" data-testid="page-dialog-message">
           {content.message}
@@ -214,9 +239,26 @@ function DialogCard({
           {content.note}
         </p>
       )}
+      {content.check && (
+        <label className="page-dialog__check">
+          <input
+            type="checkbox"
+            data-testid="page-dialog-check"
+            checked={checked}
+            onChange={(e) => setChecked(e.target.checked)}
+          />
+          <span>{content.check}</span>
+        </label>
+      )}
       <div className="page-dialog__actions">
         {!content.noCancel && (
-          <button type="button" className="page-dialog__button" data-testid="page-dialog-cancel" onClick={cancel}>
+          <button
+            ref={cancelButton}
+            type="button"
+            className="page-dialog__button"
+            data-testid="page-dialog-cancel"
+            onClick={cancel}
+          >
             {content.cancelLabel ?? 'Cancel'}
           </button>
         )}
