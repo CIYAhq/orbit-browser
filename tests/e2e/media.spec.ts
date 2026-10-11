@@ -2471,6 +2471,187 @@ test("[MD-02][MD-07] Orbit's mark on its own picture-in-picture lasts only as lo
   expect(await raises(app)).toBe(0)
 })
 
+// ---- One picture-in-picture at a time (D75) ----
+
+/**
+ * Each document of a tab, as main last heard from it: whether it shows picture-in-picture, and
+ * how its last one ended (how many it has ended, and why).
+ */
+function pipReports(app: ElectronApplication, tabId: string): Promise<{ pip: boolean; n: number; reason: string }[]> {
+  return app.evaluate((_e, id) => {
+    type Doc = { snap?: { pip?: boolean; pipEnd?: { n: number; reason: string } | null } }
+    const g = globalThis as unknown as { __orbitMedia: MediaTestHooks }
+    const tabs = (g.__orbitMedia.manager as unknown as { tabs: Map<string, { page?: Doc; frames: Map<unknown, Doc> }> })
+      .tabs
+    const t = tabs.get(id)
+    const docs = t ? [...(t.page ? [t.page] : []), ...t.frames.values()] : []
+    return docs.map((d) => ({ pip: !!d.snap?.pip, n: d.snap?.pipEnd?.n ?? 0, reason: d.snap?.pipEnd?.reason ?? '' }))
+  }, tabId)
+}
+
+/** A playing video, in a tab's page or in a frame of it, and how to reach it. */
+interface Playing {
+  name: string
+  id: string
+  /** The video's document. */
+  doc: Page | Frame
+  /** The tab's page. */
+  page: Page
+  /** The window it's in (0: the first). */
+  w: number
+}
+
+type Opener = 'action' | 'menu' | 'page'
+
+let speeds = 0
+
+/**
+ * Picture-in-picture on `first`, then on `second` (selected), opened by Orbit's action, by its
+ * page menu or by the page itself. The engine closes the first's window as it opens the second's:
+ * nothing goes back to the first, no window comes forward, and when Orbit opened the second it
+ * ended the first itself (D75).
+ */
+async function oneAtATime(
+  app: ElectronApplication,
+  first: Playing,
+  second: Playing,
+  opener: Opener,
+  openFirst: () => Promise<void>,
+): Promise<void> {
+  const label = `${first.name} then ${second.name} by ${opener}`
+  /** Past the page script's wait, a speed change in that document main must have seen (a new speed each time). */
+  const settle = async (p: Playing) => {
+    const rate = 1 + ((speeds++ % 60) + 1) / 64
+    await p.doc.evaluate((r) => {
+      setTimeout(() => {
+        ;(document.getElementById('v') as HTMLVideoElement).playbackRate = r
+      }, 500)
+    }, rate)
+    await expect.poll(async () => (await media(app, p.id))?.rate, { message: label }).toBe(rate)
+  }
+  await openFirst()
+  await expect.poll(() => enginePip(first.doc), { message: label }).toBe(true)
+  // Main has the first's own report of it.
+  await expect.poll(async () => (await pipReports(app, first.id)).some((d) => d.pip), { message: label }).toBe(true)
+  const before = await pipReports(app, first.id)
+  await cmd(app, 'tabs.activate', { tabId: second.id }, second.w)
+  if (opener === 'action') await act(app, 'media.togglePip', second.w)
+  else if (opener === 'page')
+    await second.doc.evaluate(async () => {
+      await (document.getElementById('v') as HTMLVideoElement).requestPictureInPicture()
+    })
+  else {
+    // The page's own menu on the video (in its frame, for a frame's).
+    let at = await second.doc.evaluate(() => {
+      const r = (document.getElementById('v') as HTMLVideoElement).getBoundingClientRect()
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+    })
+    if (second.doc !== second.page) {
+      const box = await second.page.evaluate(() => {
+        const el = document.getElementById('f') as HTMLIFrameElement
+        const r = el.getBoundingClientRect()
+        return { x: r.x + el.clientLeft, y: r.y + el.clientTop }
+      })
+      at = { x: at.x + box.x, y: at.y + box.y }
+    }
+    await second.page.mouse.click(at.x, at.y, { button: 'right' })
+    // This tab's menu, unticked: not one kept from before.
+    await expect
+      .poll(async () => {
+        const m = await pageMenu(app)
+        return m?.tabId === second.id && m.labels.includes('Picture in Picture') && !m.checked['Picture in Picture']
+      })
+      .toBe(true)
+    expect(await choosePageMenu(app, 'Picture in Picture')).toBe(true)
+  }
+  await expect.poll(() => enginePip(second.doc), { message: label }).toBe(true)
+  await expect.poll(() => enginePip(first.doc), { message: label }).toBe(false)
+  await settle(first)
+  expect(await activeId(app, second.w), label).toBe(second.id)
+  expect(await raises(app), label).toBe(0)
+  if (opener !== 'page') {
+    // Orbit ended the first itself, with its own exit: a new ending, Orbit's.
+    const after = await pipReports(app, first.id)
+    expect(
+      after.some((e, i) => e.reason === 'orbit' && e.n > (before[i]?.n ?? 0)),
+      `${label}: ${JSON.stringify(before)} -> ${JSON.stringify(after)}`,
+    ).toBe(true)
+  }
+  // The second ends; nothing comes forward either.
+  await act(app, 'media.togglePip', second.w)
+  await expect.poll(() => enginePip(second.doc), { message: label }).toBe(false)
+  await settle(second)
+  expect(await activeId(app, second.w), label).toBe(second.id)
+  expect(await raises(app), label).toBe(0)
+}
+
+test("[MD-02][MD-07] in a split, a picture-in-picture the engine closes because another pane's opened isn't Back to tab: whoever opens the second, in a page or a frame, its pane stays selected and no window comes forward (D75)", async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  // Automatic picture-in-picture off, as in the review's case (each pane plays on regardless).
+  await act(app, 'media.toggleAutoPip')
+  const a = await openPlaying(app, '/media/long-video/First')
+  const b = await openPlaying(app, '/media/long-video/Second')
+  const f = await openFramePlaying(app, 'Framed%20Third', '/media/long-video/Third', true)
+  for (const id of [a.id, b.id, f.id]) await expect.poll(async () => (await media(app, id))?.video).toBe(true)
+  expect(await cmd<string | null>(app, 'split.create', { tabIds: [a.id, b.id, f.id], focus: a.id })).toBeTruthy()
+  // Its panes in place (a new split lays them out with a spring), so a click lands where it aims.
+  for (const id of [a.id, b.id, f.id]) await stableView(app, orbit.shell, id)
+  // The window has focus, so a wrong select shows even where only a focused window's tab is selected.
+  await countRaises(app)
+  await haveFocus(app, true)
+  const A: Playing = { name: 'A', id: a.id, doc: a.page, page: a.page, w: 0 }
+  const B: Playing = { name: 'B', id: b.id, doc: b.page, page: b.page, w: 0 }
+  const F: Playing = { name: 'F (a frame)', id: f.id, doc: f.frame, page: f.page, w: 0 }
+  /** Orbit's own Picture in Picture on a pane: its mark may raise the window on Back to tab (D71). */
+  const byOrbit = (p: Playing) => async () => {
+    await cmd(app, 'tabs.activate', { tabId: p.id })
+    await act(app, 'media.togglePip')
+  }
+  for (const opener of ['action', 'page', 'menu'] as const) await oneAtATime(app, A, B, opener, byOrbit(A))
+  for (const opener of ['action', 'page'] as const) await oneAtATime(app, F, B, opener, byOrbit(F))
+  for (const opener of ['page', 'menu'] as const) await oneAtATime(app, A, F, opener, byOrbit(A))
+})
+
+test("[MD-02][MD-07] in two tabs, a picture-in-picture the engine closes because another tab's opened isn't Back to tab: a tab in the background, or in another window (D75)", async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  await act(app, 'media.toggleAutoPip')
+  const a = await openPlaying(app, '/media/long-video/First')
+  const b = await openPlaying(app, '/media/long-video/Second')
+  for (const id of [a.id, b.id]) await expect.poll(async () => (await media(app, id))?.video).toBe(true)
+  await countRaises(app)
+  await haveFocus(app, true)
+  const A: Playing = { name: 'A (in the background)', id: a.id, doc: a.page, page: a.page, w: 0 }
+  const B: Playing = { name: 'B', id: b.id, doc: b.page, page: b.page, w: 0 }
+  // A's page opens its own picture-in-picture while B is selected (a click on its button just
+  // before the switch): the engine's window, which Orbit's player doesn't take over.
+  const byPage = (p: Playing) => async () => {
+    await p.doc.evaluate(async () => {
+      await (document.getElementById('v') as HTMLVideoElement).requestPictureInPicture()
+    })
+  }
+  for (const opener of ['action', 'page', 'menu'] as const) await oneAtATime(app, A, B, opener, byPage(A))
+
+  // In another window: B moves to a new window, A stays selected in the first.
+  await act(app, 'window.new')
+  await expect
+    .poll(async () => (await app.evaluate(() => (globalThis as unknown as WindowHooks).__orbit.windowIds())).length)
+    .toBe(2)
+  const c = await cmd<string>(app, 'tabs.create', { url: fx.url('/media/long-video/Third'), activate: true }, 1)
+  await waitTab(app, c, '/media/long-video/Third')
+  const cp = await tabPage(app, '/media/long-video/Third')
+  await expect.poll(() => cp.evaluate(() => document.body.dataset.state ?? ''), { timeout: 20_000 }).toBe('playing')
+  await cmd(app, 'tabs.activate', { tabId: a.id })
+  const A1: Playing = { name: 'A (window 1)', id: a.id, doc: a.page, page: a.page, w: 0 }
+  const C2: Playing = { name: 'C (window 2)', id: c, doc: cp, page: cp, w: 1 }
+  const byOrbit = async () => {
+    await cmd(app, 'tabs.activate', { tabId: a.id })
+    await act(app, 'media.togglePip')
+  }
+  for (const opener of ['action', 'page', 'menu'] as const) await oneAtATime(app, A1, C2, opener, byOrbit)
+})
+
 // ---- The switches in other panels (MD-08: site controls NV-16, Settings › Advanced ST-10) ----
 
 test('[MD-08][NV-16][ST-10] the site controls switch and Settings › Advanced turn automatic picture-in-picture off; the video plays on in the sidebar', async () => {

@@ -361,11 +361,12 @@ const agentScript = (handle: string, define: string, frame: boolean) => `(() => 
 
   // The engine's own picture-in-picture window, used while the tab stays on screen (MD-02).
   // auto: only the page's main playing, unmuted video (MD-01); otherwise any video with frames.
-  async function pip(on, auto) {
+  // dry: only says whether there is one to show.
+  async function pip(on, auto, dry) {
     if (!on) return exitPip()
     const m = main()
     const v = pipVideo() || (!auto && m && frames(m) && !m.disablePictureInPicture ? m : null)
-    if (!v) return false
+    if (!v || dry) return !!v
     if (document.pictureInPictureElement === v) return true
     try {
       await v.requestPictureInPicture()
