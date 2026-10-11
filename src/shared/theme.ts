@@ -196,6 +196,11 @@ export interface Palette {
   divider: string
   /** Grain overlay strength 0..1 (SP-17). */
   grain: number
+  /**
+   * How far the frame lets the system material through where there is one (SB-24, SP-15): 1 for
+   * the neutral theme, 0 (or absent) for a coloured one, in between while one blends into the other.
+   */
+  translucent?: number
 }
 
 const LIGHT_BASE = '#f6f6f8'
@@ -246,6 +251,7 @@ export function paletteFor(theme: SpaceTheme, dark: boolean): Palette {
     accent,
     selection: `${accent}55`,
     grain: clamp01(theme.grain),
+    translucent: stops ? 0 : 1,
   }
   if (dark) {
     return {
@@ -291,7 +297,53 @@ export function mixPalettes(a: Palette, b: Palette, t: number): Palette {
     selection: `${accent}55`,
     surface: mixOklab(a.surface, b.surface, t),
     grain: a.grain + (b.grain - a.grain) * t,
+    translucent: (a.translucent ?? 0) + ((b.translucent ?? 0) - (a.translucent ?? 0)) * t,
   }
+}
+
+// ---- The neutral theme over the system's material (SB-24, SP-15) ----
+
+/**
+ * The see-through material a window can have behind the neutral theme: macOS vibrancy, or Mica on
+ * Windows 11 22H2 and later (Electron's `setBackgroundMaterial` needs that). Electron offers none on
+ * Linux, so there the neutral theme stays a solid grey.
+ */
+export type WindowMaterial = 'vibrancy' | 'mica' | 'none'
+
+/** Windows 11 22H2: the first build with a system backdrop. */
+const MICA_BUILD = 22621
+
+/** The material this OS offers: `platform` is Node's, `release` the OS version ('10.0.22631' on Windows). */
+export function systemMaterial(platform: string, release: string): WindowMaterial {
+  if (platform === 'darwin') return 'vibrancy'
+  if (platform === 'win32') return Number(release.split('.')[2] ?? 0) >= MICA_BUILD ? 'mica' : 'none'
+  return 'none'
+}
+
+/**
+ * How much of the neutral grey stays over the material: a veil that keeps text and icons readable
+ * however busy the desktop behind is.
+ */
+export const MATERIAL_VEIL = { light: 0.5, dark: 0.6 } as const
+
+/** A #rrggbb colour at `alpha` (opaque colours stay hex). */
+export function withAlpha(hex: string, alpha: number): string {
+  if (alpha >= 1) return hex
+  const { r, g, b } = hexToRgb(hex)
+  return `rgba(${r}, ${g}, ${b}, ${Math.round(clamp01(alpha) * 1000) / 1000})`
+}
+
+/**
+ * The sidebar and frame's three stops (SB-24): over a material (`material` true), the neutral theme
+ * lets it through under a light veil; a coloured theme stays solid; a blend between them is partly
+ * see-through.
+ */
+export function frameStops(p: Palette, material: boolean): [string, string, string] {
+  const stops: [string, string, string] = [p.frameTop, p.frameMid, p.frameBottom]
+  const through = material ? clamp01(p.translucent ?? 0) : 0
+  if (through <= 0) return stops
+  const alpha = 1 - through * (1 - (p.dark ? MATERIAL_VEIL.dark : MATERIAL_VEIL.light))
+  return stops.map((c) => withAlpha(c, alpha)) as [string, string, string]
 }
 
 function clamp01(v: number): number {

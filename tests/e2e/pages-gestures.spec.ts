@@ -197,3 +197,22 @@ test('[NV-09] a click in a frame from another site lets the frame open a pop-up 
   await expect.poll(popUps).toBe(1)
   expect((await state(app)).tabs[id]?.blockedPopups).toBeUndefined()
 })
+
+test('[NV-09] in a pop-up window, a click in a frame from another site lets that frame open a tab (D77)', async () => {
+  const { app } = orbit
+  // The tab opens a pop-up window whose page has a frame from another site; that frame opens a page.
+  const target = otherSite(fx, '/page/FromPopUp')
+  // Not the pop-up's own name (`popup`), which would load the page in the pop-up itself.
+  const inner = framedUrl('Inner', `/opener?to=${encodeURIComponent('/page/FromPopUp')}&as=another`)
+  const url = fx.url(`/opener?to=${encodeURIComponent(inner)}`)
+  const id = await newTab(app, url)
+  await waitTab(app, id, '/opener')
+  await (await tabPage(app, url)).locator('#open').click()
+  const popUp = await tabPage(app, inner)
+  await expect.poll(() => inFrame(app, inner, 'document.readyState')).toBe('complete')
+  const opened = async () => Object.values((await state(app)).tabs).filter((t) => t.url === target).length
+  expect(await opened()).toBe(0)
+  // A pop-up window's own opens become tabs, one per click or key in any of its frames (NV-09).
+  await popUp.frameLocator('#frame').locator('#open').click()
+  await expect.poll(opened).toBe(1)
+})

@@ -4,6 +4,8 @@
  * partition that every open private window shares and that is wiped when the last one closes.
  * Nothing private is ever written to disk: `withoutPrivate` is what the state file gets.
  */
+
+import { isBlankSpace, isBlankWindow } from './blank'
 import type {
   ContainerRef,
   Download,
@@ -59,23 +61,28 @@ export function isPrivateTab(state: OrbitState, tabId: TabId | undefined): boole
 }
 
 /**
- * Whether a window may show a tab: a private window shows only its own Space's tabs, and no other
- * window ever shows a private tab.
+ * Whether a window may show a tab: a private or blank window shows only its own Space's tabs, and
+ * no other window ever shows one of those (NV-11, TB-17).
  */
 export function windowMayShow(state: OrbitState, windowId: WindowId, tabId: TabId): boolean {
   const win = state.windows[windowId]
   const tab = state.tabs[tabId]
   if (!win || !tab) return false
-  if (isPrivateWindow(state, windowId)) return tab.spaceId === win.spaceId
-  return !isPrivateTab(state, tabId)
+  if (isPrivateWindow(state, windowId) || isBlankSpace(state, win.spaceId)) return tab.spaceId === win.spaceId
+  return !isPrivateTab(state, tabId) && !isBlankSpace(state, tab.spaceId)
 }
 
-const isPrivateContainer = (state: OrbitState, ref: ContainerRef) =>
-  ref.kind === 'favorites' ? isPrivateProfileId(ref.profileId) : isPrivateSpace(state, spaceOfContainer(state, ref))
+/** A container of a window of its own: a private profile's Favorites, a private or blank window's Space. */
+const isPrivateContainer = (state: OrbitState, ref: ContainerRef) => {
+  if (ref.kind === 'favorites') return isPrivateProfileId(ref.profileId)
+  const spaceId = spaceOfContainer(state, ref)
+  return isPrivateSpace(state, spaceId) || isBlankSpace(state, spaceId)
+}
 
 /**
- * Whether items may move into a container (NV-11, SB-25): a private window's tabs stay in its
- * Today (it has no pinned tabs, Favorites or folders), and nothing moves in from elsewhere.
+ * Whether items may move into a container (NV-11, SB-25, TB-17): a private or blank window's tabs
+ * stay in its Today (it has no pinned tabs, Favorites or folders), and nothing moves in from
+ * elsewhere (a tab dragged out to a blank window goes there as the window is made).
  */
 export function privateMoveAllowed(state: OrbitState, items: ItemId[], to: ContainerRef): boolean {
   const toPrivate = isPrivateContainer(state, to)
@@ -112,7 +119,8 @@ export function isLostPrivateTab(state: OrbitState, tab: Pick<Tab, 'profileId' |
 
 /**
  * Whether a closed tab may come back in a window (Reopen Closed Tab): a private tab only in its
- * own private window, a normal tab only in a normal window (NV-11).
+ * own private window, a blank window's tab only in that window while it is open (TB-17), any other
+ * tab only in a normal window (NV-11), where it goes back to its Space.
  */
 export function mayReopenIn(
   state: OrbitState,
@@ -121,7 +129,8 @@ export function mayReopenIn(
 ): boolean {
   const privateTab = isPrivateProfileId(tab.profileId) || isPrivateSpace(state, tab.spaceId)
   const win = windowId ? state.windows[windowId] : undefined
-  if (!privateTab) return !isPrivateWindow(state, windowId)
+  if (isBlankSpace(state, tab.spaceId)) return !!win && win.spaceId === tab.spaceId
+  if (!privateTab) return !isPrivateWindow(state, windowId) && !isBlankWindow(state, windowId)
   return !!win && win.spaceId === tab.spaceId && !isLostPrivateTab(state, tab)
 }
 

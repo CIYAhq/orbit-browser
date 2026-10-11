@@ -9,6 +9,7 @@ import { Favicon } from '../../ui/Favicon'
 import { CaptureIndicator } from '../media/CaptureIndicator'
 import { focusedPaneOf, lastFocusedPane, paneOrderKey } from '../split/selectors'
 import { pressItem } from './drag'
+import { menuAt } from './menu-at'
 import { clearSelection } from './ui-state'
 
 /**
@@ -92,7 +93,7 @@ export function SplitRow({
       }}
       onContextMenu={(e) => {
         e.preventDefault()
-        void invoke('split.contextMenu', { splitId })
+        void invoke('split.contextMenu', { splitId, at: menuAt(e, splitId) })
       }}
     >
       {renaming ? (

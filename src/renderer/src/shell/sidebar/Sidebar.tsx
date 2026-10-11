@@ -1,19 +1,24 @@
 import {
+  type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   useLayoutEffect,
   useRef,
 } from 'react'
+import { isBlankSpace } from '../../../../shared/blank'
 import { DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH } from '../../../../shared/defaults'
-import type { WindowState } from '../../../../shared/state'
+import type { SpaceId, WindowState } from '../../../../shared/state'
 import { invoke } from '../../api'
 import { DownloadsTray } from '../../downloads/DownloadsTray'
+import { importDroppedFile } from '../../import/sidebar'
 import { UpdateBanner } from '../../settings/UpdateBanner'
 import { useOrbit } from '../../store'
 import { PrivateSidebar } from '../chrome/PrivateSidebar'
 import { MediaTray } from '../media/MediaTray'
 import { SpaceStrip } from '../spaces/SpaceStrip'
 import { UndoToast } from '../spaces/UndoToast'
+import { dropLink, dropPlaceAt, endLinkDrag, isDragging, linkDragLeave, linkDragOver } from './drag'
+import { SidebarItems } from './SidebarItems'
 import { SpaceBar } from './SpaceBar'
 import { TopBar } from './TopBar'
 
@@ -22,25 +27,39 @@ import { TopBar } from './TopBar'
  * (Favorites, title row, pinned, Today; swipeable between Spaces), then the
  * Space switcher. Space content lives in ../spaces/. `floating` is the hidden
  * sidebar's card shown over the page (SB-12), which has no resize edge.
- * A private window's sidebar has only its own tabs under a "Private" label (SB-25).
+ * A private window's sidebar has only its own tabs under a "Private" label (SB-25); a blank
+ * window's has only its own tabs (TB-17).
  */
 export function Sidebar({ win, floating = false }: { win: WindowState; floating?: boolean }) {
   const exists = useOrbit((s) => !!s.spaces[win.spaceId])
+  const blank = useOrbit((s) => isBlankSpace(s, win.spaceId))
   if (!exists) return null
   const isPrivate = win.kind === 'private'
   return (
     <aside
       className={`sidebar${floating ? ' sidebar--floating' : ''}${isPrivate ? ' sidebar--private' : ''}`}
       data-testid="sidebar"
+      data-blank={blank || undefined}
       aria-hidden={!floating && !win.sidebar.visible}
-      onMouseUp={isPrivate ? undefined : onSideButtons}
+      onMouseUp={isPrivate || blank ? undefined : onSideButtons}
       onAuxClick={preventSideButtons}
+      onDragEnter={onLinkDragOver}
+      onDragOver={onLinkDragOver}
+      onDragLeave={linkDragLeave}
+      onDrop={(e) => onLinkDrop(e, win.spaceId)}
     >
       <TopBar win={win} floating={floating} />
       {isPrivate ? (
         <>
           <PrivateSidebar spaceId={win.spaceId} />
           {/* Downloads lane: the private window's own downloads, and only those (DL-03, DL-16). */}
+          <DownloadsTray win={win} />
+        </>
+      ) : blank ? (
+        <>
+          {/* Its own tabs, starting with none: no Spaces, pinned tabs or Favorites (TB-17). */}
+          <SidebarItems spaceId={win.spaceId} simple />
+          <MediaTray windowId={win.id} />
           <DownloadsTray win={win} />
         </>
       ) : (
@@ -59,6 +78,33 @@ export function Sidebar({ win, floating = false }: { win: WindowState; floating?
       {!floating && <ResizeHandle win={win} />}
     </aside>
   )
+}
+
+// ---- Links dragged in from a page open as new tabs where they're dropped (NV-08, TB-02) ----
+
+function onLinkDragOver(e: ReactDragEvent) {
+  if (isDragging()) return
+  const types = e.dataTransfer.types
+  const link = types.includes('text/uri-list') || types.includes('text/plain')
+  if (!link && !types.includes('Files')) return
+  e.preventDefault()
+  e.dataTransfer.dropEffect = 'copy'
+  // A file goes to import (IM-*), or opens at the top of Today: it opens no room.
+  if (!types.includes('Files')) linkDragOver(e.clientX, e.clientY)
+}
+
+function onLinkDrop(e: ReactDragEvent, spaceId: SpaceId) {
+  const uriList = e.dataTransfer.getData('text/uri-list')
+  const plain = e.dataTransfer.getData('text/plain')
+  const uri = uriList.split('\n').find((l) => l && !l.startsWith('#'))
+  const text = uri?.trim() || plain.trim()
+  if (importDroppedFile(e, text, spaceId, dropPlaceAt(e.clientX, e.clientY)) || !text) {
+    endLinkDrag()
+    return
+  }
+  e.preventDefault()
+  // What it opens, if anything, depends on where it lands (D87): `dropLink` asks `sidebarDropUrl`.
+  void dropLink(e.clientX, e.clientY, { uriList, text: plain }, spaceId)
 }
 
 /** Mouse back/forward buttons over the sidebar move between Spaces (SP-09). */

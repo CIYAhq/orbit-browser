@@ -1,11 +1,14 @@
 import { expect, test } from '@playwright/test'
-import { type Fixtures, launchOrbit, MOD, type Orbit, startFixtures, state, tabPage } from './helpers'
+import { type Fixtures, launchOrbit, MOD, type Orbit, startFixtures, state, tabPage, viewPage } from './helpers'
 import {
   act,
   activeId,
   center,
+  chooseRowMenu,
+  closeOverlay,
   cmd,
   liveTabs,
+  menuFor,
   newTab,
   PROFILE,
   row,
@@ -56,10 +59,11 @@ test('[TB-13][TB-06][TB-20] Cmd/Shift-click select several tabs; Cmd+W closes th
   expect(text).not.toContain('utm_source')
   // The menu offers group actions.
   await row(shell, c).click({ button: 'right' })
-  const labels = await tabsHook<string[]>(app, 'lastMenu')
+  const labels = await menuFor(app, c)
   expect(labels).toContain('Close 3 Tabs')
   expect(labels).toContain('New Folder with Tabs')
-  // Cmd+W closes all of them.
+  // Cmd+W closes all of them (once the menu is closed: while it is open, its keys are its own, KS-19).
+  await closeOverlay(app)
   await shell.keyboard.press(`${MOD}+W`)
   await expect.poll(async () => (await space(app)).today).toEqual([b])
   // Escape or a plain click clears a selection.
@@ -106,7 +110,8 @@ test('[TB-12][PN-08] rename by double-click survives navigation and relaunch; em
   await expect(row(shell, p).getByTestId('tab-title')).toHaveText('Mail / Inbox-next')
   // Emoji icon replaces the favicon.
   await row(shell, p).click({ button: 'right' })
-  expect(await tabsHook<boolean>(app, 'clickMenu', 'Change Icon…')).toBe(true)
+  await menuFor(app, p)
+  expect(await chooseRowMenu(app, 'Change Icon…')).toBe(true)
   await expect(shell.getByTestId('icon-picker')).toBeVisible()
   await shell.getByTestId('icon-choice').first().click()
   await expect(row(shell, p).locator('.tab-row__emoji')).toHaveText('⭐')
@@ -176,7 +181,8 @@ test('[TB-18][TD-05] undo walks back archive-below, a rename and a move; redo re
   expect((await space(app)).today).toEqual(moved)
   await cmd(app, 'tabs.rename', { tabId: top, title: 'Renamed' })
   await row(shell, top).click({ button: 'right' })
-  expect(await tabsHook<boolean>(app, 'clickMenu', 'Archive Tabs Below')).toBe(true)
+  await menuFor(app, top)
+  expect(await chooseRowMenu(app, 'Archive Tabs Below')).toBe(true)
   await expect.poll(async () => (await space(app)).today).toEqual([ids[3], ids[0]])
   // ⌘Z three times: archive-below, rename, move.
   await shell.keyboard.press(`${MOD}+Z`)
@@ -213,12 +219,14 @@ test('[PN-07][PN-04] edit the pinned URL inline, or replace it with the current 
   await (await tabPage(app, '/page/Start')).click('#next')
   await waitTab(app, p, '/page/Start-next')
   await row(shell, p).click({ button: 'right' })
-  expect(await tabsHook<boolean>(app, 'clickMenu', 'Pinned URL > Replace with Current URL')).toBe(true)
+  await menuFor(app, p)
+  expect(await chooseRowMenu(app, 'Pinned URL > Replace with Current URL')).toBe(true)
   await expect.poll(async () => (await tab(app, p))?.pinnedUrl).toContain('/page/Start-next')
   await expect(row(shell, p).getByTestId('tab-title')).toHaveText('Start-next')
   // Edit… opens an inline field with the pinned URL.
   await row(shell, p).click({ button: 'right' })
-  expect(await tabsHook<boolean>(app, 'clickMenu', 'Pinned URL > Edit…')).toBe(true)
+  await menuFor(app, p)
+  expect(await chooseRowMenu(app, 'Pinned URL > Edit…')).toBe(true)
   const field = shell.getByTestId('rename-field')
   await expect(field).toHaveValue(/\/page\/Start-next/)
   await field.fill(fx.url('/page/Home'))
@@ -262,7 +270,7 @@ test('[FV-07][FD-09][FD-06][FD-07][FD-10] Favorite and folder menus, nested fold
   const fav = await newTab(app, fx.url('/page/Fav'), { container: { kind: 'favorites', profileId: PROFILE } })
   await waitTab(app, fav, '/page/Fav')
   await shell.locator(`[data-fav-id="${fav}"]`).click({ button: 'right' })
-  const favMenu = await tabsHook<string[]>(app, 'lastMenu')
+  const favMenu = await menuFor(app, fav)
   for (const label of [
     'Remove from Favorites',
     'Reset to Pinned URL',
@@ -274,6 +282,7 @@ test('[FV-07][FD-09][FD-06][FD-07][FD-10] Favorite and folder menus, nested fold
   ]) {
     expect(favMenu).toContain(label)
   }
+  await closeOverlay(app)
   const inner = await newTab(app, fx.url('/page/Inner'), {
     container: { kind: 'pinned', spaceId: sp },
     activate: false,
@@ -298,7 +307,7 @@ test('[FV-07][FD-09][FD-06][FD-07][FD-10] Favorite and folder menus, nested fold
   await cmd(app, 'folders.setIcon', { folderId: outer, icon: '📚' })
   await expect(shell.locator(`[data-folder-id="${outer}"] .tab-row__emoji`).first()).toHaveText('📚')
   await shell.locator(`[data-folder-id="${outer}"] .folder-row`).first().click({ button: 'right' })
-  const folderMenu = await tabsHook<string[]>(app, 'lastMenu')
+  const folderMenu = await menuFor(app, outer)
   for (const label of [
     'Rename…',
     'Change Icon…',
@@ -309,13 +318,14 @@ test('[FV-07][FD-09][FD-06][FD-07][FD-10] Favorite and folder menus, nested fold
   ]) {
     expect(folderMenu).toContain(label)
   }
-  expect(await tabsHook<boolean>(app, 'clickMenu', 'Duplicate Folder')).toBe(true)
+  expect(await chooseRowMenu(app, 'Duplicate Folder')).toBe(true)
   await expect.poll(async () => (await space(app)).pinned.length).toBe(2)
   const copy = (await space(app)).pinned[1] as string
   expect((await state(app)).folders[copy]?.name).toBe('Outer copy')
   // Delete moves the contents to the Archive; undo restores the whole folder.
   await shell.locator(`[data-folder-id="${outer}"] .folder-row`).first().click({ button: 'right' })
-  expect(await tabsHook<boolean>(app, 'clickMenu', 'Delete Folder…')).toBe(true)
+  await menuFor(app, outer)
+  expect(await chooseRowMenu(app, 'Delete Folder…')).toBe(true)
   await expect.poll(async () => (await state(app)).folders[outer]).toBeUndefined()
   let s = await state(app)
   expect(s.tabs[inner]).toBeUndefined()
@@ -336,8 +346,11 @@ test('[TB-02] a link dropped on the sidebar and a pasted URL open as new Today t
     d.setData('text/uri-list', u)
     return d
   }, url)
-  await shell.getByTestId('sidebar-scroll').dispatchEvent('dragover', { dataTransfer: dt })
-  await shell.getByTestId('sidebar-scroll').dispatchEvent('drop', { dataTransfer: dt })
+  // At the top of Today: a dropped link opens where it is dropped (NV-08).
+  const top = await shell.getByTestId('new-tab-button').boundingBox()
+  const at = top ? { clientX: top.x + top.width / 2, clientY: top.y + top.height / 2 } : {}
+  await shell.getByTestId('sidebar-scroll').dispatchEvent('dragover', { dataTransfer: dt, ...at })
+  await shell.getByTestId('sidebar-scroll').dispatchEvent('drop', { dataTransfer: dt, ...at })
   await expect.poll(async () => (await space(app)).today.length).toBe(1)
   const dropped = (await space(app)).today[0] as string
   await waitTab(app, dropped, '/page/Dropped')
@@ -351,24 +364,36 @@ test('[TB-02] a link dropped on the sidebar and a pasted URL open as new Today t
 })
 
 test('[TB-05] Ctrl+Tab goes to the previous tab; holding Ctrl and tapping Tab walks back through recent tabs', async () => {
-  const { app, shell } = orbit
+  const { app } = orbit
   const a = await newTab(app, fx.url('/page/A'))
   await waitTab(app, a, '/page/A')
   const b = await newTab(app, fx.url('/page/B'))
   await waitTab(app, b, '/page/B')
   const c = await newTab(app, fx.url('/page/C'))
   await waitTab(app, c, '/page/C')
+  await cmd(app, 'tabs.focusPage', {})
+  await expect
+    .poll(() => app.evaluate(({ webContents }) => webContents.getFocusedWebContents()?.getURL()))
+    .toBe(fx.url('/page/C'))
+  // Each key goes to whatever has the keyboard, as a keyboard's do: from the first Tab on, that is
+  // the switcher's overlay (finish-tabs lane, TB-05).
+  const keys = (...events: [type: 'keyDown' | 'keyUp', keyCode: string, control: boolean][]) =>
+    app.evaluate(({ webContents }, list) => {
+      for (const [type, keyCode, control] of list)
+        webContents.getFocusedWebContents()?.sendInputEvent({ type, keyCode, modifiers: control ? ['control'] : [] })
+    }, events)
+  const tabKey: [type: 'keyDown' | 'keyUp', keyCode: string, control: boolean][] = [
+    ['keyDown', 'Tab', true],
+    ['keyUp', 'Tab', true],
+  ]
   // Quick tap and release: back to B.
-  await shell.keyboard.press('Control+Tab')
+  await keys(['keyDown', 'Control', true], ...tabKey, ['keyUp', 'Control', false])
   await expect.poll(() => activeId(app)).toBe(b)
   // Hold Control, Tab twice, release: A (C was used before A now that B is current).
-  await shell.keyboard.down('Control')
-  await shell.keyboard.press('Tab')
-  await shell.keyboard.press('Tab')
-  await shell.keyboard.up('Control')
+  await keys(['keyDown', 'Control', true], ...tabKey, ...tabKey, ['keyUp', 'Control', false])
   await expect.poll(() => activeId(app)).toBe(a)
   // Then a single tap returns to B, the tab used just before.
-  await shell.keyboard.press('Control+Tab')
+  await keys(['keyDown', 'Control', true], ...tabKey, ['keyUp', 'Control', false])
   await expect.poll(() => activeId(app)).toBe(b)
 })
 
@@ -607,7 +632,7 @@ test('[TB-07] recently closed tabs are listed newest first and any of them can b
 })
 
 test('[TB-02][TB-03] a Cmd/Ctrl-clicked link opens a background tab at the top of Today; with the sidebar hidden a toast says so', async () => {
-  const { app, shell } = orbit
+  const { app } = orbit
   const t = await newTab(app, fx.url('/page/Links'))
   await waitTab(app, t, '/page/Links')
   const page = await tabPage(app, '/page/Links')
@@ -616,11 +641,11 @@ test('[TB-02][TB-03] a Cmd/Ctrl-clicked link opens a background tab at the top o
   const bg = (await space(app)).today[0] as string
   expect(await activeId(app)).toBe(t)
   expect((await tab(app, bg))?.url).toContain('/page/Links-next')
-  // Sidebar hidden: the background open is announced.
+  // Sidebar hidden: the background open is announced, over the page (SB-13).
   await cmd(app, 'window.setSidebar', { visible: false })
   await page.click('#next', { modifiers: [MOD_KEY] })
   await expect.poll(async () => (await space(app)).today.length).toBe(3)
-  await expect(shell.getByTestId('toast').last()).toContainText('Opened in a new tab')
+  await expect((await viewPage(app, 'toasts')).getByTestId('toast').last()).toContainText('Opened in a new tab')
   expect(await activeId(app)).toBe(t)
 })
 

@@ -1307,8 +1307,9 @@ test('[SV-06] Open in Split View from a multi-selection makes one split in sideb
   const a = await openTab(orbit.app, 'Sel1')
   await run(orbit.app, 'tabs.setSelection', { tabIds: [c, a, b] })
   await run(orbit.app, 'tabs.contextMenu', { id: b, selection: [c, a, b] })
-  expect(await tabsHook<string[]>(orbit.app, 'lastMenu')).toContain('Open in Split View')
-  expect(await tabsHook<boolean>(orbit.app, 'clickMenu', 'Open in Split View')).toBe(true)
+  // The row menu in the overlay (tabs lane, TB-14).
+  expect((await tabsHook<{ labels: string[] }>(orbit.app, 'rowMenu'))?.labels).toContain('Open in Split View')
+  expect(await tabsHook<boolean>(orbit.app, 'chooseRowMenu', 'Open in Split View')).toBe(true)
   await expect(orbit.shell.getByTestId('split-row').getByTestId('split-segment')).toHaveCount(3)
   const split = await splitOf(orbit.app, a)
   expect(split && JSON.stringify(split.layout).match(/t-[a-z0-9]+/g)).toEqual([a, b, c])

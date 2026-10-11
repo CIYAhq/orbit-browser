@@ -2,7 +2,6 @@ import { ArrowDown, ArrowUp, ChevronDown, Plus } from 'lucide-react'
 import { AnimatePresence, cubicBezier, motion } from 'motion/react'
 import {
   memo,
-  type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -12,12 +11,10 @@ import {
   useState,
 } from 'react'
 import { isFolderId, isTabId } from '../../../../shared/ids'
-import { pageMayOpen } from '../../../../shared/link-routing'
 import type { Space, SpaceId } from '../../../../shared/state'
 import { containerItems, containerKey, locate, sectionOf, splitOfTab } from '../../../../shared/tree'
-import { engineForSpace, parseInput } from '../../../../shared/url'
-import { invoke, isMac, runAction } from '../../api'
-import { importDroppedFile, importPastedLinks, revealInSidebar } from '../../import/sidebar'
+import { invoke, runAction } from '../../api'
+import { importPastedLinks, revealInSidebar } from '../../import/sidebar'
 import { useShortcutLabel } from '../../keys/live'
 import { AT_ONCE, EASE, OrbitMotionConfig, reducedMotion, useReducedMotion } from '../../motion'
 import { activeTabId } from '../../selectors'
@@ -29,7 +26,8 @@ import { FolderSearch } from './FolderSearch'
 import { IconPicker } from './IconPicker'
 import { CHEVRON, ItemList, RevealBox, TabRow, useRowShift } from './ItemList'
 import { RowWindow, RowWindowContext } from './row-window'
-import { clearSelection, startRename, useDrag, useIconPicker, useKeyboardFocus, useSelection } from './ui-state'
+import { clearSelection, startRename, useIconPicker, useKeyboardFocus, useSelection } from './ui-state'
+import { sidebarUndoKey } from './undo-keys'
 
 /**
  * Everything between the address bar and the Space switcher (SB-02 regions 3–9):
@@ -103,8 +101,6 @@ export const SidebarItems = memo(function SidebarItems({
           role="tree"
           aria-label="Tabs"
           onKeyDown={onKeyDown}
-          onDragOver={onLinkDragOver}
-          onDrop={(e) => onLinkDrop(e, space.id)}
           onPaste={importPastedLinks}
           onContextMenu={(e) => {
             if (!e.defaultPrevented) onContextMenu?.(e)
@@ -309,34 +305,6 @@ function TodayBlock({ space, clear }: { space: Space; clear: boolean }) {
   )
 }
 
-// ---- Links dropped on the sidebar open as new tabs (TB-02) ----
-
-function onLinkDragOver(e: ReactDragEvent) {
-  if (useDrag.getState().phase !== 'idle') return
-  const types = e.dataTransfer.types
-  if (types.includes('text/uri-list') || types.includes('text/plain') || types.includes('Files')) {
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'copy'
-  }
-}
-
-function onLinkDrop(e: ReactDragEvent, spaceId: string) {
-  const uri = e.dataTransfer
-    .getData('text/uri-list')
-    .split('\n')
-    .find((l) => l && !l.startsWith('#'))
-  const text = uri?.trim() || e.dataTransfer.getData('text/plain').trim()
-  if (importDroppedFile(e, text, spaceId)) return
-  if (!text) return
-  e.preventDefault()
-  const parsed = parseInput(text, engineForSpace(getOrbitState(), spaceId))
-  // Where it was dragged from isn't known, and a web page may have offered it: a local file's
-  // address opens only when typed or pasted (D49). The engine gives no address for a file dragged
-  // from the system.
-  if (!pageMayOpen(undefined, parsed.url)) return
-  void invoke('tabs.create', { url: parsed.url, spaceId })
-}
-
 // ---- Messages from main (context menu items that need the sidebar) ----
 
 function useMainMessages(scrollRef: React.RefObject<HTMLDivElement | null>) {
@@ -369,32 +337,27 @@ function useMainMessages(scrollRef: React.RefObject<HTMLDivElement | null>) {
   }, [scrollRef])
 }
 
-/** ⌘Z with focus in Orbit's UI (not a text field) undoes the last sidebar change (TB-18). */
+/**
+ * ⌘Z with focus in Orbit's UI (not a text field) undoes the last sidebar change, ⌘⇧Z redoes it
+ * (TB-18): the keys as the keymap has them (KS-05).
+ */
 function useShellUndo() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null
-      if (target?.closest('input, textarea, [contenteditable="true"]')) return
+      const inField = !!target?.closest('input, textarea, [contenteditable="true"]')
       if (e.key === 'Escape') {
-        clearSelection()
+        if (!inField) clearSelection()
         return
       }
-      const mod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
-      if (mod && !e.altKey && e.key.toLowerCase() === 'z') {
-        e.preventDefault()
-        void invoke(e.shiftKey ? 'tabs.redo' : 'tabs.undo', {})
-      }
-    }
-    // Releasing Control settles a recent-tab switch (TB-05) when the sidebar has focus.
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'Control') void invoke('tabs.endRecentSwitch', {})
+      // A key that edits text (⌘Z) is a text field's own undo inside one (KS-16).
+      const undo = sidebarUndoKey(e)
+      if (!undo || (undo.outsideText && inField)) return
+      e.preventDefault()
+      void invoke(undo.redo ? 'tabs.redo' : 'tabs.undo', {})
     }
     window.addEventListener('keydown', onKey)
-    window.addEventListener('keyup', onKeyUp)
-    return () => {
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('keyup', onKeyUp)
-    }
+    return () => window.removeEventListener('keydown', onKey)
   }, [])
 }
 

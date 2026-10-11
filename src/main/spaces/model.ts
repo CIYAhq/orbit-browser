@@ -4,6 +4,7 @@
  * only be called inside store.update().
  */
 import { current, type Draft, isDraft } from 'immer'
+import { isBlankSpace } from '../../shared/blank'
 import { createProfile, createSpace, DEFAULT_PROFILE_ID, NEW_SPACE_PRESETS, THEME_PRESETS } from '../../shared/defaults'
 import { isFolderId, isSplitId, isTabId, newId } from '../../shared/ids'
 import { isPrivateSpace, isPrivateWindow } from '../../shared/private'
@@ -100,8 +101,9 @@ export function reorderSpaceInDraft(d: OrbitState, spaceId: SpaceId, index: numb
 export function switchSpaceInDraft(d: OrbitState, windowId: WindowId, spaceId: SpaceId): boolean {
   const win = d.windows[windowId]
   if (!win || !d.spaces[spaceId] || win.spaceId === spaceId) return false
-  // A private window keeps its own Space, and no other window shows one (NV-11).
+  // A private or blank window keeps its own Space, and no other window shows one (NV-11, TB-17).
   if (isPrivateWindow(d, windowId) || isPrivateSpace(d, spaceId)) return false
+  if (isBlankSpace(d, win.spaceId) || isBlankSpace(d, spaceId)) return false
   win.spaceId = spaceId
   // The Space's remembered tab may be on screen in another window: a page is live in one
   // window at a time, so the window that switched keeps it and the other picks again (TB-17).
@@ -310,6 +312,8 @@ export function assignProfileInDraft(d: OrbitState, spaceId: SpaceId, profileId:
 export function deleteProfileInDraft(d: OrbitState, profileId: ProfileId): { removed: TabId[] } | undefined {
   const profile = d.profiles[profileId]
   if (!profile || profileId === DEFAULT_PROFILE_ID || spacesOfProfile(d, profileId).length > 0) return undefined
+  // Nor while a blank window shows its pages (TB-17): they use its session.
+  if (Object.values(d.spaces).some((s) => s.blank && s.profileId === profileId)) return undefined
   const items = { tabs: [] as Tab[], folders: [] as Folder[], splits: [] as Split[] }
   for (const id of profile.favorites) collectItem(d, id, items)
   const removed = new Set(items.tabs.map((t) => t.id))
@@ -335,7 +339,9 @@ export function spacesOfProfile(state: OrbitState, profileId: ProfileId): SpaceI
 /** Brings every stored Space up to the current shape. Only writes fields that change. */
 export function normalizeSpacesInDraft(d: OrbitState): void {
   const fallbackProfile = d.profiles[DEFAULT_PROFILE_ID] ? DEFAULT_PROFILE_ID : Object.keys(d.profiles)[0]
-  d.spaceOrder.forEach((spaceId, i) => {
+  // Then blank windows' Spaces (TB-17), which the Space list leaves out.
+  const blank = Object.keys(d.spaces).filter((id) => d.spaces[id]?.blank && !d.spaceOrder.includes(id))
+  ;[...d.spaceOrder, ...blank].forEach((spaceId, i) => {
     const space = d.spaces[spaceId]
     if (!space) return
     // Total for any stored shape: a theme without a `colors` array is rewritten, never compared.

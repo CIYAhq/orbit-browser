@@ -334,7 +334,7 @@ function sampleMainThread(pid: number | undefined): string {
 }
 
 /** Finds an Orbit UI page (shell/overlay) by its ?view= query. */
-export async function viewPage(app: ElectronApplication, view: 'shell' | 'overlay'): Promise<Page> {
+export async function viewPage(app: ElectronApplication, view: 'shell' | 'overlay' | 'toasts'): Promise<Page> {
   const match = (p: Page) => p.url().includes(`view=${view}`)
   const deadline = Date.now() + 20_000
   while (Date.now() < deadline) {
