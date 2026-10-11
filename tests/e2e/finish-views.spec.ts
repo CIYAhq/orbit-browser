@@ -30,6 +30,7 @@ import {
 } from './nav-support'
 import { blockNetwork, clickInTab, findPage, type OrbitGlobal, overlayOf, startSites } from './peek-helpers'
 import { openSettings } from './settings-support'
+import { chooseRowMenu, closeOverlay, menuFor } from './tabs-support'
 
 /** Views lane follow-ups: the command bar, split view, Peek, Mini Windows and media. */
 
@@ -160,11 +161,11 @@ test("[SV-21][SV-22][SV-23] a split's icon replaces its panes' favicons on its r
   await expect(row.getByTestId('split-segment')).toHaveCount(2)
   const paneTitles = (await row.locator('.split-segment__title').allTextContents()).join(' | ')
 
-  // Right-click → Change Icon… → pick one: it stands in for the favicons; the titles stay.
-  await recordMenus(app)
+  // Right-click → Change Icon… → pick one: it stands in for the favicons; the titles stay. The row's
+  // menu is Orbit's own, in the overlay (TB-14).
   await row.click({ button: 'right' })
-  await expect.poll(() => shownMenu(app)).toContain('Change Icon…')
-  expect(await clickShownMenu(app, 'Change Icon…')).toBe(true)
+  expect(await menuFor(app, splitId)).toContain('Change Icon…')
+  expect(await chooseRowMenu(app, 'Change Icon…')).toBe(true)
   const picker = shell.getByTestId('icon-picker')
   await expect(picker).toBeVisible()
   await picker.getByTestId('icon-choice').first().click()
@@ -185,10 +186,9 @@ test("[SV-21][SV-22][SV-23] a split's icon replaces its panes' favicons on its r
   await expect(tile(orbit).getByTestId('split-icon')).toHaveText('⭐')
 
   // Remove icon: the panes' favicons come back.
-  await recordMenus(orbit.app)
   await tile(orbit).click({ button: 'right' })
-  await expect.poll(() => shownMenu(orbit.app)).toContain('Change Icon…')
-  expect(await clickShownMenu(orbit.app, 'Change Icon…')).toBe(true)
+  expect(await menuFor(orbit.app, splitId)).toContain('Change Icon…')
+  expect(await chooseRowMenu(orbit.app, 'Change Icon…')).toBe(true)
   await orbit.shell.getByTestId('icon-picker').getByRole('button', { name: 'Remove icon' }).click()
   await expect(tile(orbit).getByTestId('split-icon')).toHaveCount(0)
   await expect(tile(orbit).locator('.favicon')).toHaveCount(2)
@@ -206,23 +206,20 @@ test('[SV-22][TD-05] a split row in Today offers Archive Tabs Below: the items u
   const spaceId = (await state(app)).tabs[a]?.spaceId as string
   await expect.poll(async () => (await state(app)).spaces[spaceId]?.today).toEqual([above, splitId, below])
 
-  await recordMenus(app)
   const row = shell.locator(`[data-testid="split-row"][data-split-id="${splitId}"]`)
   await row.click({ button: 'right' })
-  await expect.poll(() => shownMenu(app)).toContain('Archive Tabs Below')
-  expect(await clickShownMenu(app, 'Archive Tabs Below')).toBe(true)
+  expect(await menuFor(app, splitId)).toContain('Archive Tabs Below')
+  expect(await chooseRowMenu(app, 'Archive Tabs Below')).toBe(true)
   await expect.poll(async () => (await state(app)).spaces[spaceId]?.today).toEqual([above, splitId])
   const s = await state(app)
   expect(s.tabs[below]).toBeUndefined()
   expect(s.splits[splitId]).toBeDefined()
 
   // Now the last item: there's nothing below it, so the item is there but can't be chosen.
-  await app.evaluate(() => {
-    ;(globalThis as unknown as { __shownMenu?: unknown }).__shownMenu = undefined
-  })
   await row.click({ button: 'right' })
-  await expect.poll(() => shownMenu(app)).toContain('Archive Tabs Below')
-  expect(await clickShownMenu(app, 'Archive Tabs Below')).toBe(false)
+  expect(await menuFor(app, splitId)).toContain('Archive Tabs Below')
+  expect(await chooseRowMenu(app, 'Archive Tabs Below')).toBe(false)
+  await closeOverlay(app)
 })
 
 test("[SV-21][FL-21] a split row is an item of the sidebar's tree with its own place in its list, so the rows around it count right (feel fix check N5)", async () => {
@@ -308,20 +305,17 @@ test('[SV-23][PN-04] a pinned split resets as one: every pane goes back to its o
   await wander()
 
   // The split's menu brings both back (once the row has left Today for the pinned section).
-  await recordMenus(app)
   const row = shell.locator(`[data-testid="split-row"][data-split-id="${splitId}"]`)
   await expect(row).toHaveCount(1)
   await row.click({ button: 'right' })
-  await expect.poll(() => shownMenu(app)).toContain('Reset to Pinned URLs')
-  expect(await clickShownMenu(app, 'Reset to Pinned URLs')).toBe(true)
+  expect(await menuFor(app, splitId)).toContain('Reset to Pinned URLs')
+  expect(await chooseRowMenu(app, 'Reset to Pinned URLs')).toBe(true)
   await expect.poll(urls).toEqual(home)
   // At home there's nothing to reset: the item is there but can't be chosen.
-  await app.evaluate(() => {
-    ;(globalThis as unknown as { __shownMenu?: unknown }).__shownMenu = undefined
-  })
   await row.click({ button: 'right' })
-  await expect.poll(() => shownMenu(app)).toContain('Reset to Pinned URLs')
-  expect(await clickShownMenu(app, 'Reset to Pinned URLs')).toBe(false)
+  expect(await menuFor(app, splitId)).toContain('Reset to Pinned URLs')
+  expect(await chooseRowMenu(app, 'Reset to Pinned URLs')).toBe(false)
+  await closeOverlay(app)
 
   // As a Favorite, its tile shows that its panes wandered off, and a double-click brings both back.
   const profileId = before.spaces[spaceId]?.profileId as string
