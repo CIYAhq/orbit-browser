@@ -2179,3 +2179,59 @@ test('[PR-10][ST-12][ST-20] Settings acts for the profile of the Space it is ope
     await run(app, 'settings.close')
   }
 })
+
+test('[SV-26][TB-08] two Today rows become one split row in place, the one above closing up into it; separating it slides the second row out from under the first, with the reorder spring', async () => {
+  const { app, shell } = orbit
+  const a = await newTab(app, fx.url('/page/A'))
+  const b = await newTab(app, fx.url('/page/B'))
+  await newTab(app, fx.url('/page/C'))
+  await settled(shell)
+  // Today, top to bottom: C, B, A.
+  const slots = '[data-list^="today:"] > [data-slot]'
+  const drawn = (x: Box | undefined): x is Box => !!x && x.height > 1 && x.opacity > 0.02
+  const firstDrawn = (frames: { lists: { slots?: Record<string, Box> } }[], key: string) =>
+    frames.findIndex((f) => drawn(f.lists.slots?.[key]))
+
+  // A joins B: one split row where they were.
+  let rec = await record(shell, { slots: { selector: slots, key: 'data-key' } })
+  const splitId = (await cmd(app, 'tabs.splitWith', { tabId: a, target: b, side: 'right' })) as string
+  expect(splitId).toBeTruthy()
+  let r = await rec.until(700)
+  const was = { a: r.frames[0]?.lists.slots?.[a] as Box, b: r.frames[0]?.lists.slots?.[b] as Box }
+  const shown = firstDrawn(r.frames, splitId)
+  expect(shown, 'the split row was drawn').toBeGreaterThanOrEqual(0)
+  const first = r.frames[shown]?.lists.slots?.[splitId] as Box
+  const last = r.frames.at(-1)?.lists.slots?.[splitId] as Box
+  expect(first.height, 'the split row is whole in its first frame').toBeGreaterThanOrEqual(last.height - 1)
+  expect(first.y, 'it starts no lower than the row whose room it takes').toBeLessThanOrEqual(was.a.y + 1)
+  expect(drawn(r.frames[shown]?.lists.slots?.[a]), 'that row is gone as it shows').toBe(false)
+  expect(Math.abs(last.y - was.b.y), 'it ends where the row above was').toBeLessThanOrEqual(1)
+  const closing = r.frames.map((f) => f.lists.slots?.[b]).filter(drawn)
+  for (const box of closing) expect(Math.abs(box.x - was.b.x), 'the row above stays in place').toBeLessThanOrEqual(1)
+  const merged = r.frames.findIndex(
+    (f, i) => i >= shown && Math.abs((f.lists.slots?.[splitId]?.y ?? -99) - last.y) <= 0.5,
+  )
+  const settle = (r.frames[merged]?.t ?? Number.NaN) - (r.frames[shown]?.t ?? Number.NaN)
+  note('SV-26', 'two rows into one split row: first drawn to settled', settle, '≈ 300 ms')
+
+  // Separate: B in the split row's place at once, A sliding down out from under it.
+  await settled(shell)
+  rec = await record(shell, { slots: { selector: slots, key: 'data-key' } })
+  await cmd(app, 'split.separate', { splitId })
+  r = await rec.until(700)
+  const split = r.frames[0]?.lists.slots?.[splitId] as Box
+  const bAt = firstDrawn(r.frames, b)
+  const aAt = firstDrawn(r.frames, a)
+  expect(bAt).toBeGreaterThanOrEqual(0)
+  expect(aAt).toBeGreaterThanOrEqual(0)
+  const end = { a: r.frames.at(-1)?.lists.slots?.[a] as Box, b: r.frames.at(-1)?.lists.slots?.[b] as Box }
+  const bFirst = r.frames[bAt]?.lists.slots?.[b] as Box
+  expect(bFirst.height, 'the first row is whole in its first frame').toBeGreaterThanOrEqual(end.b.height - 1)
+  expect(Math.abs(bFirst.y - split.y), 'in the split row’s place').toBeLessThanOrEqual(1)
+  const aFirst = r.frames[aAt]?.lists.slots?.[a] as Box
+  // Sliding down from there (a slow machine's first frame may come late in the slide).
+  const from = FRAME_SLACK > 1 ? 1 : end.a.height / 2
+  expect(aFirst.y, 'the second row starts under the first').toBeLessThan(end.a.y - from)
+  expect(end.a.y).toBeGreaterThan(end.b.y)
+  for (const f of r.frames.slice(Math.min(aAt, bAt))) expect(drawn(f.lists.slots?.[splitId])).toBe(false)
+})

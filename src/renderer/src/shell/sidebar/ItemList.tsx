@@ -104,7 +104,7 @@ const ROW_HEIGHT = 32
 const MAX_STAGGER_ROWS = 12
 
 /** What a row slot's enter and exit depend on. */
-type SlotMotion = { stagger?: boolean; index?: number; travel?: boolean } | undefined
+type SlotMotion = { stagger?: boolean; index?: number; travel?: boolean; spring?: boolean; merge?: boolean } | undefined
 
 /**
  * A row travelling to another section (FL-07) moves with the standard spring, and the room it
@@ -114,6 +114,8 @@ type SlotMotion = { stagger?: boolean; index?: number; travel?: boolean } | unde
 const TRAVEL_ROOM = { height: STANDARD, marginBottom: STANDARD, opacity: { duration: 0 } }
 /** Where a travelling row's room starts: none, the row itself drawn (it is on its way). */
 const TRAVEL_FROM = { height: 0, marginBottom: -LIST_GAP, opacity: 1 }
+/** A row sliding out of a split row it was a pane of opens its room with the reorder spring (SV-26). */
+const REORDER_ROOM = { height: ROW_SPRING, marginBottom: ROW_SPRING, opacity: { duration: 0 } }
 
 /**
  * Row enter/exit (FL-06, FL-09, FL-11): the row's height grows or collapses with the snappy
@@ -130,7 +132,9 @@ const rowVariants: Variants = {
     opacity: 1,
     // FL-06: the content fades in over the last 60 % of the growth.
     transition: c?.travel
-      ? TRAVEL_ROOM
+      ? c.spring
+        ? REORDER_ROOM
+        : TRAVEL_ROOM
       : { height: ROW_SPRING, marginBottom: ROW_SPRING, opacity: tween('quick', { delay: 0.07 }) },
   }),
   exit: (c: SlotMotion) => {
@@ -147,6 +151,11 @@ const rowVariants: Variants = {
       }
     }
     if (c?.travel) return { height: 0, marginBottom: -LIST_GAP, opacity: 0, transition: TRAVEL_ROOM }
+    // SV-26: a row joining a split row fades in place as its room closes up into it.
+    if (c?.merge) {
+      const close = { height: ROW_SPRING, marginBottom: ROW_SPRING, opacity: tween('quick', { exit: true }) }
+      return { height: 0, marginBottom: -LIST_GAP, opacity: 0, transition: close }
+    }
     // FL-09: a closing row collapses while it fades and slides; a Clear's rows (FL-11) start
     // collapsing a moment after their slide.
     const delay = c?.stagger ? Math.min(c.index ?? 0, MAX_STAGGER_ROWS) * 0.025 : 0
@@ -187,7 +196,50 @@ function claimEnterAnimation(): boolean {
  * (FL-07). Before the new state renders, remember where each arriving row is drawn now; the
  * row mounted in its new list starts there and springs into place.
  */
-const departed = new Map<string, { top: number; left: number; at: number }>()
+const departed = new Map<string, { top: number; left: number; at: number; spring?: boolean }>()
+
+/**
+ * Rows of a list becoming one split row there, or a split row becoming rows again (SV-26), move with
+ * the reorder spring (TB-08): the row taking the others' place is drawn whole from its first frame
+ * (`whole`), the row whose room it takes goes at once (`gone`), and the others fade as their room
+ * closes up into it (`into`), or slide out from under it (`departed`, with `spring`).
+ */
+const splitMotion = new Map<string, { kind: 'whole' | 'gone' | 'into'; at: number }>()
+
+/** Whether the row `id` mounting or leaving now moves this way (taken once). */
+function takeSplitMotion(id: string, kind: 'whole' | 'gone' | 'into'): boolean {
+  const m = splitMotion.get(id)
+  if (m?.kind !== kind) return false
+  splitMotion.delete(id)
+  return performance.now() - m.at < 250
+}
+
+/** Two rows or more of a list becoming a split row there, or one becoming them (SV-26). */
+function noteSplitRows(prev: OrbitState, next: OrbitState, old: ItemId[], items: ItemId[], now: number): void {
+  for (const id of items) {
+    if (!isSplitId(id) || old.includes(id)) continue
+    const rows = tabsInItem(next, id).filter((t) => old.includes(t) && !items.includes(t))
+    if (rows.length < 2) continue
+    // The split row is drawn where the lowest of them was; the ones above close up into it.
+    rows.sort((a, b) => old.indexOf(a) - old.indexOf(b))
+    splitMotion.set(id, { kind: 'whole', at: now })
+    for (const t of rows) splitMotion.set(t, { kind: t === rows.at(-1) ? 'gone' : 'into', at: now })
+  }
+  for (const id of old) {
+    if (!isSplitId(id) || items.includes(id)) continue
+    const rows = tabsInItem(prev, id).filter((t) => items.includes(t) && !old.includes(t))
+    const el = document.querySelector<HTMLElement>(`[data-slot][data-key="${id}"]:not([data-exiting])`)
+    if (rows.length < 2 || !el) continue
+    // The first is drawn in the split row's place; the others slide out from under it.
+    rows.sort((a, b) => items.indexOf(a) - items.indexOf(b))
+    const r = el.getBoundingClientRect()
+    splitMotion.set(id, { kind: 'gone', at: now })
+    for (const [i, t] of rows.entries()) {
+      if (i === 0) splitMotion.set(t, { kind: 'whole', at: now })
+      else departed.set(t, { top: r.top, left: r.left, at: now, spring: true })
+    }
+  }
+}
 /**
  * Rows moving to a place scrolled out of sight (FL-07): they appear there at once, since nothing
  * there is seen, and the list's scroll anchoring keeps the rows in sight still in that same frame.
@@ -220,6 +272,7 @@ useMirror.subscribe((next, prev) => {
   const now = performance.now()
   for (const [id, d] of departed) if (now - d.at > 1000) departed.delete(id)
   for (const [id, at] of arrivesUnseen) if (now - at > 1000) arrivesUnseen.delete(id)
+  for (const [id, m] of splitMotion) if (now - m.at > 1000) splitMotion.delete(id)
   for (const [key, items] of listsOf(next.state)) {
     const old = before.get(key)
     if (old === items) continue
@@ -227,6 +280,7 @@ useMirror.subscribe((next, prev) => {
     // or scrolled out of sight just leaves (FL-07: it collapses out in place, and nothing scrolls).
     const list = document.querySelector<HTMLElement>(`[data-list="${key}"]`)
     if (!list) continue
+    if (old && !reducedMotion()) noteSplitRows(prev.state, next.state, old, items, now)
     for (const id of items) {
       if (old?.includes(id)) continue
       const el = document.querySelector<HTMLElement>(`[data-slot][data-key="${id}"]:not([data-exiting])`)
@@ -408,7 +462,13 @@ function RowSlot({
   // Rows that arrive or leave through a drag appear/disappear at once (the ghost covers them). A
   // travelling row's room opens as it travels; the row itself is drawn whole all along.
   const [instant] = useState(
-    () => whole || hidden || reducedMotion() || takeUnseenArrival(id) || (!travel && !claimEnterAnimation()),
+    () =>
+      whole ||
+      takeSplitMotion(id, 'whole') ||
+      hidden ||
+      reducedMotion() ||
+      takeUnseenArrival(id) ||
+      (!travel && !claimEnterAnimation()),
   )
   const [growing, setGrowing] = useState(!instant && !travel)
   useLayoutEffect(() => {
@@ -422,8 +482,8 @@ function RowSlot({
     if (Math.abs(dy) < 1 && Math.abs(dx) < 1) return
     y.jump(dy)
     x.jump(dx)
-    const a = animate(y, 0, STANDARD)
-    const b = animate(x, 0, STANDARD)
+    const a = animate(y, 0, travel.spring ? ROW_SPRING : STANDARD)
+    const b = animate(x, 0, travel.spring ? ROW_SPRING : STANDARD)
     void Promise.all([a, b]).then(() => setFlying(false))
     return () => {
       a.stop()
@@ -437,7 +497,12 @@ function RowSlot({
     const gone = departed.get(id)
     return !!gone && performance.now() - gone.at < 250
   }, [present, id])
-  if (!present && hidden) return null
+  // Leaving into a split row (SV-26): its room goes at once, or closes up into it.
+  const merge = useMemo(
+    () => (present ? null : takeSplitMotion(id, 'gone') ? 'gone' : takeSplitMotion(id, 'into') ? 'into' : null),
+    [present, id],
+  )
+  if (!present && (hidden || merge === 'gone')) return null
   const order = present ? undefined : exitOrder.get(id)
   return (
     <motion.div
@@ -445,7 +510,13 @@ function RowSlot({
       className={`${className}${far ? ' is-far' : ''}${hidden || leaving ? ' is-drag-hidden' : ''}${flying ? ' is-travelling' : ''}${growing ? ' is-growing' : ''}${present ? '' : ' is-exiting'}${splitSide ? ` is-split-target is-split-${splitSide}` : ''}`}
       style={{ y, x }}
       variants={rowVariants}
-      custom={{ stagger: order !== undefined, index: order, travel: present ? !!travel : leaving }}
+      custom={{
+        stagger: order !== undefined,
+        index: order,
+        travel: present ? !!travel : leaving,
+        spring: present && !!travel?.spring,
+        merge: merge === 'into',
+      }}
       onAnimationComplete={(definition) => {
         if (!present) exitOrder.delete(id)
         else if (definition === 'shown' && growing) setGrowing(false)

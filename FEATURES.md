@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 295 built (61 partial) · 360 tested · 74 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 296 built (60 partial) · 360 tested · 74 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 160 | 173 |
-| P1 | 219 | 118 | 166 |
+| P1 | 219 | 119 | 166 |
 | P2 | 79 | 17 | 21 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -220,7 +220,7 @@ Spec: `spec/split-view.md`
 | SV-23 | Pinned and Favorite splits | P1 | ✅ | ✅ e2e+unit | ✅ | pinning keeps panes, sizes and orientation; drops onto pinned tabs stay pinned; each pane keeps its own pinned URL, and the split's menu (Reset to Pinned URLs) or a double-click on its Favorite tile brings every pane back (Reset Tab on one pane still resets that pane); a link to another site in either pane of a pinned or Favorite split opens a Peek over the split from that pane; Favorite splits show a combined tile (with the away dot when a pane wandered off), or the split's custom icon, and drag like tiles; a Favorite split keeps its focused pane across Spaces |
 | SV-24 | Splits persist | P0 | ✅ | ✅ e2e+unit | ✅ | panes, order, orientation, sizes and focused pane survive relaunch; a Today split closed or auto-archived as one unit restores from the Archive as one unit, with its layout and sizes |
 | SV-25 | Limits and edge cases | P1 | ✅ | ✅ e2e+unit | ✅ | fifth pane refused with a toast on every route; no split from an empty window; HTML full screen (core) fills the window, hides the strip and returns to the split |
-| SV-26 | Feel: create, resize, close | P1 | 🟡 partial | ✅ e2e+unit | – | springs for create/close/flip, closing card fades, 1:1 resize, drop indicator fades in and moves between halves at once (FL-18), frame colour until loaded, split row entrance; a pane added while a pane closes, or while a neighbour still grows back, grows in from its edge beside the neighbour (PR #19 review F10); the sidebar's row merge (two rows into one, and back on separate) isn't built: it's left to the finish-tabs lane |
+| SV-26 | Feel: create, resize, close | P1 | ✅ | ✅ e2e+unit | – | springs for create/close/flip, closing card fades, 1:1 resize, drop indicator fades in and moves between halves at once (FL-18), frame colour until loaded, split row entrance; a pane added while a pane closes, or while a neighbour still grows back, grows in from its edge beside the neighbour (PR #19 review F10); in the sidebar, rows of a list that become one split row there are replaced by it in place, the ones above closing up into it, and on separate the first row is drawn in its place while the others slide out from under it, with the reorder spring (TB-08); no haptic tick on macOS: Electron has no haptic API (a platform limit) |
 
 ## Page navigation, windows, links and page-level controls (prefix NV)
 
