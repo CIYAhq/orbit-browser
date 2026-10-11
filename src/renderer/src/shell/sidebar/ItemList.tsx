@@ -8,6 +8,7 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react'
@@ -50,8 +51,22 @@ export const REVEAL = { height: SNAPPY, opacity: tween('quick') }
 export const CONCEAL = { height: SNAPPY_EXIT, opacity: tween('quick', { exit: true }) }
 /** The gap between rows in a list (`.item-list`'s `gap`). */
 const LIST_GAP = 1
+/** A tab row's height (`--row-h`). */
+const ROW_HEIGHT = 32
 /** Rows beyond this many in a batch leave together (FL-11 caps the sweep at about 450 ms). */
 const MAX_STAGGER_ROWS = 12
+
+/** What a row slot's enter and exit depend on. */
+type SlotMotion = { stagger?: boolean; index?: number; travel?: boolean } | undefined
+
+/**
+ * A row travelling to another section (FL-07) moves with the standard spring, and the room it
+ * leaves and the room it takes close and open with that spring too: the rows around re-flow with
+ * it, and rows below both places stay put. The copy left behind is never drawn.
+ */
+const TRAVEL_ROOM = { height: STANDARD, marginBottom: STANDARD, opacity: { duration: 0 } }
+/** Where a travelling row's room starts: none, the row itself drawn (it is on its way). */
+const TRAVEL_FROM = { height: 0, marginBottom: -LIST_GAP, opacity: 1 }
 
 /**
  * Row enter/exit (FL-06, FL-09, FL-11): the row's height grows or collapses with the snappy
@@ -62,14 +77,16 @@ const rowVariants: Variants = {
   // A row with no height also gives back the list's 1 px gap beside it (`marginBottom`), so the rows
   // below move by its whole room with the spring, never by a last pixel when it leaves the DOM.
   hidden: { height: 0, marginBottom: -LIST_GAP, opacity: 0 },
-  shown: {
+  shown: (c: SlotMotion) => ({
     height: 'auto',
     marginBottom: 0,
     opacity: 1,
     // FL-06: the content fades in over the last 60 % of the growth.
-    transition: { height: ROW_SPRING, marginBottom: ROW_SPRING, opacity: tween('quick', { delay: 0.07 }) },
-  },
-  exit: (c: { stagger?: boolean; index?: number } | undefined) => {
+    transition: c?.travel
+      ? TRAVEL_ROOM
+      : { height: ROW_SPRING, marginBottom: ROW_SPRING, opacity: tween('quick', { delay: 0.07 }) },
+  }),
+  exit: (c: SlotMotion) => {
     if (reducedMotion()) {
       // FL-28: no slide and no stagger. Closing rows, or a whole Clear, fade out together, then
       // their room closes at once.
@@ -82,6 +99,7 @@ const rowVariants: Variants = {
         transition: { opacity: { duration: fade }, height: close, marginBottom: close },
       }
     }
+    if (c?.travel) return { height: 0, marginBottom: -LIST_GAP, opacity: 0, transition: TRAVEL_ROOM }
     // FL-09: a closing row collapses while it fades and slides; a Clear's rows (FL-11) start
     // collapsing a moment after their slide.
     const delay = c?.stagger ? Math.min(c.index ?? 0, MAX_STAGGER_ROWS) * 0.025 : 0
@@ -123,6 +141,18 @@ function claimEnterAnimation(): boolean {
  * row mounted in its new list starts there and springs into place.
  */
 const departed = new Map<string, { top: number; left: number; at: number }>()
+/**
+ * Rows moving to a place scrolled out of sight (FL-07): they appear there at once, since nothing
+ * there is seen, and the list's scroll anchoring keeps the rows in sight still in that same frame.
+ */
+const arrivesUnseen = new Map<string, number>()
+
+/** Whether the row `id` mounting now arrives out of sight (taken once). */
+function takeUnseenArrival(id: string): boolean {
+  const at = arrivesUnseen.get(id)
+  arrivesUnseen.delete(id)
+  return at !== undefined && performance.now() - at < 250
+}
 
 function listsOf(state: OrbitState): Map<string, ItemId[]> {
   const lists = new Map<string, ItemId[]>()
@@ -141,21 +171,42 @@ useMirror.subscribe((next, prev) => {
   const before = listsOf(prev.state)
   const now = performance.now()
   for (const [id, d] of departed) if (now - d.at > 1000) departed.delete(id)
+  for (const [id, at] of arrivesUnseen) if (now - at > 1000) arrivesUnseen.delete(id)
   for (const [key, items] of listsOf(next.state)) {
     const old = before.get(key)
     if (old === items) continue
     // Only lists on screen: a row moving somewhere not drawn (a collapsed folder, another Space)
-    // just leaves (FL-07: it collapses out in place).
-    if (!document.querySelector(`[data-list="${key}"]`)) continue
+    // or scrolled out of sight just leaves (FL-07: it collapses out in place, and nothing scrolls).
+    const list = document.querySelector<HTMLElement>(`[data-list="${key}"]`)
+    if (!list) continue
     for (const id of items) {
       if (old?.includes(id)) continue
       const el = document.querySelector<HTMLElement>(`[data-slot][data-key="${id}"]:not([data-exiting])`)
       if (!el || el.dataset.container === key) continue
+      if (!arrivesInSight(list, items, id)) {
+        arrivesUnseen.set(id, now)
+        continue
+      }
       const r = el.getBoundingClientRect()
       departed.set(id, { top: r.top, left: r.left, at: now })
     }
   }
 })
+
+/** Whether the row `id`, arriving in `list` (to be `items`), will be drawn within the sidebar's visible band. */
+function arrivesInSight(list: HTMLElement, items: ItemId[], id: ItemId): boolean {
+  const view = list.closest('[data-testid="sidebar-scroll"]')?.getBoundingClientRect()
+  if (!view) return true
+  const i = items.indexOf(id)
+  const slot = (k: ItemId | undefined) =>
+    k === undefined ? null : list.querySelector<HTMLElement>(`:scope > [data-slot][data-key="${k}"]`)
+  // Its top: the bottom of the row it follows, the top of the row it comes before, or the list's top.
+  const top =
+    slot(items[i - 1])?.getBoundingClientRect().bottom ??
+    slot(items[i + 1])?.getBoundingClientRect().top ??
+    list.getBoundingClientRect().top
+  return top + ROW_HEIGHT / 2 >= view.top && top + ROW_HEIGHT / 2 <= view.bottom
+}
 
 /** Rows leaving together, in list order (drives the cascade delay). */
 const exitOrder = new Map<string, number>()
@@ -297,9 +348,12 @@ function RowSlot({
     return d && !hidden && !reducedMotion() && performance.now() - d.at < 250 ? d : null
   })
   const [flying, setFlying] = useState(!!travel)
-  // Rows that arrive or leave through a drag appear/disappear at once (the ghost covers them).
-  const [instant] = useState(() => !!travel || hidden || reducedMotion() || !claimEnterAnimation())
-  const [growing, setGrowing] = useState(!instant)
+  // Rows that arrive or leave through a drag appear/disappear at once (the ghost covers them). A
+  // travelling row's room opens as it travels; the row itself is drawn whole all along.
+  const [instant] = useState(
+    () => hidden || reducedMotion() || takeUnseenArrival(id) || (!travel && !claimEnterAnimation()),
+  )
+  const [growing, setGrowing] = useState(!instant && !travel)
   useLayoutEffect(() => {
     if (!travel) return
     departed.delete(id)
@@ -319,10 +373,14 @@ function RowSlot({
       b.stop()
     }
   }, [travel, id, x, y])
+  // The copy left behind only makes room; the row itself is already travelling. Decided as it
+  // starts leaving: the row's arrival takes the record of where it was.
+  const leaving = useMemo(() => {
+    if (present) return false
+    const gone = departed.get(id)
+    return !!gone && performance.now() - gone.at < 250
+  }, [present, id])
   if (!present && hidden) return null
-  // The copy left behind only makes room; the row itself is already travelling.
-  const gone = departed.get(id)
-  const leaving = !present && !!gone && performance.now() - gone.at < 250
   const order = present ? undefined : exitOrder.get(id)
   return (
     <motion.div
@@ -330,12 +388,12 @@ function RowSlot({
       className={`${className}${far ? ' is-far' : ''}${hidden || leaving ? ' is-drag-hidden' : ''}${flying ? ' is-travelling' : ''}${growing ? ' is-growing' : ''}${present ? '' : ' is-exiting'}${splitSide ? ` is-split-target is-split-${splitSide}` : ''}`}
       style={{ y, x }}
       variants={rowVariants}
-      custom={{ stagger: order !== undefined, index: order }}
+      custom={{ stagger: order !== undefined, index: order, travel: present ? !!travel : leaving }}
       onAnimationComplete={(definition) => {
         if (!present) exitOrder.delete(id)
         else if (definition === 'shown' && growing) setGrowing(false)
       }}
-      initial={instant ? false : 'hidden'}
+      initial={travel ? TRAVEL_FROM : instant ? false : 'hidden'}
       animate="shown"
       exit="exit"
       onPointerDown={onPointerDown}

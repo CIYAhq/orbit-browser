@@ -420,8 +420,13 @@ function useAutoReveal(scrollRef: React.RefObject<HTMLDivElement | null>, select
       outside()?.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' }),
     )
     // Rows that were still growing in may have moved the target: settle on the final position,
-    // unless the user has started scrolling in the meantime (never fight the user).
-    const settle = setTimeout(() => outside()?.scrollIntoView({ block: 'nearest' }), 450)
+    // unless the user has started scrolling in the meantime (never fight the user), or the row has
+    // since moved to another section, e.g. pinned out of sight (FL-07: the list does not scroll).
+    const home = rowIn(scrollRef.current, active)?.dataset.container
+    const settle = setTimeout(() => {
+      const el = outside()
+      if (el && (home === undefined || el.dataset.container === home)) el.scrollIntoView({ block: 'nearest' })
+    }, 450)
     const scroll = scrollRef.current
     const userScroll = () => clearTimeout(settle)
     const inputs = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const

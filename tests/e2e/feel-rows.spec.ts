@@ -5,6 +5,7 @@
  */
 import { expect, type Page, test } from '@playwright/test'
 import {
+  type Box,
   bestOf,
   frameAfterWall,
   jumpRatio,
@@ -18,9 +19,20 @@ import {
   responseTo,
   rgba,
   series,
+  settledFrom,
   viewShown,
 } from './frames'
-import { type Fixtures, FRAME_SLACK, isMac, launchOrbit, MOD, type Orbit, startFixtures, viewPage } from './helpers'
+import {
+  type Fixtures,
+  FRAME_SLACK,
+  isMac,
+  launchOrbit,
+  MOD,
+  type Orbit,
+  startFixtures,
+  state,
+  viewPage,
+} from './helpers'
 import { pressInPage } from './nav-support'
 import { activeId, center, cmd, newTab, row, settled, space, waitTab } from './tabs-support'
 
@@ -334,6 +346,138 @@ test('[FL-09][FL-29] closing the second of five: the third is selected in the sa
   // The same frame as the row starts leaving, or before.
   expect((selected?.i ?? Number.POSITIVE_INFINITY) <= (leaving?.i ?? Number.POSITIVE_INFINITY)).toBe(true)
   expect(closed ? closed.t - t0 : Number.POSITIVE_INFINITY).toBeLessThanOrEqual(250 * FRAME_SLACK)
+})
+
+test('[FL-07] ⌘D on the third Today tab: it travels into the pinned section as the others re-flow; ⌘Z plays it back', async () => {
+  const { app, shell } = orbit
+  const ids = await blankTabs(5)
+  const third = ids[2] as string
+  await cmd(app, 'tabs.activate', { tabId: third })
+  await expect(row(shell, third)).toHaveClass(/is-active/)
+  await settled(shell)
+  const rowIn = (list: string) => `[data-testid="${list}"] [data-testid="tab-row"][data-tab-id="${third}"]`
+  const shown = (b: Box | null | undefined) => !!b && b.opacity > 0.5
+  /** Presses `key` and follows the row from one section to the other, and the rows and divider around it. */
+  async function travel(what: string, key: string, from: 'today' | 'pinned', to: 'today' | 'pinned') {
+    const rec = await record(shell, {
+      today: rowIn('today-list'),
+      pinned: rowIn('pinned-list'),
+      rows: { selector: TODAY_ROWS, key: 'data-tab-id' },
+      divider: '[data-testid="today-divider"]',
+    })
+    await shell.keyboard.press(key)
+    await expect.poll(async () => (await space(app)).pinned.includes(third)).toBe(to === 'pinned')
+    const r = await rec.until(900)
+    const press = r.inputs.find((i) => i.type === 'keydown' && i.key?.toLowerCase() === key.at(-1)?.toLowerCase())
+    const start = r.frames[0]?.els[from]
+    const end = r.frames.at(-1)?.els[to]
+    if (!press || !start || !end) throw new Error(`${what}: no key, or the row not drawn before or after`)
+    const after = r.frames.filter((f) => f.i >= press.frame)
+    // Never gone (popping out and in again), never drawn twice.
+    const gone = after.filter((f) => !shown(f.els.today) && !shown(f.els.pinned)).length
+    const twice = after.filter((f) => shown(f.els.today) && shown(f.els.pinned)).length
+    const arrived = after.find((f) => shown(f.els[to]))
+    const distance = Math.max(1, Math.abs(end.y - start.y))
+    const startsAt = arrived ? Math.abs((arrived.els[to]?.y ?? 0) - start.y) / distance : 1
+    const path = motionOf(series(r, to, (b) => b.y).filter((p) => p.t >= (arrived?.t ?? 0)))
+    const landed = settledFrom(r, (f) => Math.abs((f.els[to]?.y ?? Number.NaN) - end.y) <= 0.5)
+    const settle = landed ? landed.t - press.t : Number.POSITIVE_INFINITY
+    // The divider and the rows between the two places move by a row; the rows below both stay put.
+    const between = [ids[0], ids[1]].map((id) => motionOf(series(r, 'rows', (b) => b.y, id)))
+    between.push(motionOf(series(r, 'divider', (b) => b.y)))
+    const stepShare = Math.max(...between.map((m) => m.biggestStep))
+    const excursion = Math.max(
+      ...[ids[3], ids[4]].map((id) => {
+        const ys = series(r, 'rows', (b) => b.y, id)
+          .map((p) => p.v)
+          .filter((v) => !Number.isNaN(v))
+        return Math.max(...ys.map((v) => Math.abs(v - (ys[0] ?? v))))
+      }),
+    )
+    note('FL-07', `${what} → in its new slot (within 0.5 px)`, settle, '≈ 250 ms (standard spring)')
+    note('FL-07', `${what}: travel, first to last moving frame`, (path.end ?? 0) - (path.start ?? 0), '≈ 250 ms')
+    note('FL-07', `${what}: first frame in the new section, share of the way gone`, startsAt * 100, '≈ 0 %', '%')
+    note('FL-07', `${what}: frames with the row nowhere / twice`, gone + twice, '0', 'frames')
+    note('FL-07', `${what}: divider and rows above, largest step share`, stepShare * 100, '< 60 % (no jump)', '%')
+    note('FL-07', `${what}: rows below, furthest from their place`, excursion, '≈ 0 (they stay)', 'px')
+    expect(gone, `${what}: frames with the row nowhere`).toBe(0)
+    expect(twice, `${what}: frames with the row drawn twice`).toBe(0)
+    expect(startsAt, `${what}: the row starts from where it was`).toBeLessThanOrEqual(0.35)
+    expect(settle, `${what}: settled in its new slot`).toBeLessThanOrEqual(400 * FRAME_SLACK)
+    expect(stepShare, `${what}: the divider and the rows above move with a spring`).toBeLessThan(
+      FRAME_SLACK === 1 ? 0.6 : 0.95,
+    )
+    expect(excursion, `${what}: the rows below stay put`).toBeLessThanOrEqual(4)
+  }
+  await travel('⌘D', `${MOD}+D`, 'today', 'pinned')
+  await settled(shell)
+  await travel('⌘Z', `${MOD}+Z`, 'pinned', 'today')
+  expect((await space(app)).today).toEqual(ids)
+})
+
+test('[FL-07] pinned while the pinned section is out of sight, or moved to another Space: the row collapses out in place and nothing scrolls', async () => {
+  const { app, shell } = orbit
+  const ids = await blankTabs(30)
+  const scroll = shell.getByTestId('sidebar-scroll')
+  // Mid-list, with room below for both moves: at its end, a list that gets shorter has to pull the rows above
+  // down (its scroll range shrinks, as with any close), which is not the list scrolling after the row.
+  const room = await scroll.evaluate((el) => {
+    el.scrollTop = 300
+    return el.scrollHeight - el.clientHeight - el.scrollTop
+  })
+  expect(room, 'room below the visible band for two rows to leave').toBeGreaterThanOrEqual(2 * 32)
+  await settled(shell)
+  const view = await scroll.boundingBox()
+  if (!view) throw new Error('no sidebar')
+  const band = { top: view.y, bottom: view.y + view.height }
+  const pinnedEnd = await shell.getByTestId('pinned-list').evaluate((el) => el.getBoundingClientRect().bottom)
+  expect(pinnedEnd + 32, 'the pinned section, even a row longer, is out of sight').toBeLessThan(band.top)
+  // Two rows in the middle of the list's visible band, and the row above them.
+  const boxes = await Promise.all(ids.map((id) => row(shell, id).boundingBox()))
+  const k = boxes.findIndex((b) => !!b && b.y > view.y + view.height / 3)
+  const [above, first, second] = [ids[k - 1], ids[k], ids[k + 1]] as [string, string, string]
+  const other = await cmd<string>(app, 'spaces.create', { name: 'Elsewhere', activate: false })
+  /** Moves `id` (`how`), then checks that it left in place with the close motion while the rows above stayed. */
+  async function leavesInPlace(what: string, id: string, how: () => Promise<void>) {
+    await cmd(app, 'tabs.activate', { tabId: id })
+    await expect(row(shell, id)).toHaveClass(/is-active/)
+    await settled(shell)
+    const rec = await record(shell, {
+      slot: `[data-testid="today-list"] > [data-slot][data-key="${id}"]`,
+      row: `[data-testid="today-list"] [data-testid="tab-row"][data-tab-id="${id}"]`,
+      pinned: `[data-testid="pinned-list"] [data-testid="tab-row"][data-tab-id="${id}"]`,
+      above: `[data-testid="today-list"] [data-testid="tab-row"][data-tab-id="${above}"]`,
+    })
+    await how()
+    await expect.poll(async () => (await space(app)).today.includes(id)).toBe(false)
+    const r = await rec.until(800)
+    const height = motionOf(series(r, 'slot', (b) => b.height))
+    const x = motionOf(series(r, 'row', (b) => b.x))
+    const faded = r.frames.some((f) => (f.els.row?.opacity ?? 1) > 0.05 && (f.els.row?.opacity ?? 1) < 0.95)
+    const ys = series(r, 'above', (b) => b.y)
+      .map((p) => p.v)
+      .filter((v) => !Number.isNaN(v))
+    const scrolled = Math.max(...ys.map((v) => Math.abs(v - (ys[0] ?? v))))
+    const flew = r.frames.filter((f) => {
+      const b = f.els.pinned
+      return !!b && b.opacity > 0.05 && b.y + b.height > band.top && b.y < band.bottom
+    }).length
+    note('FL-07', `${what}: the row slides left as it leaves`, x.travel, '≈ 12 px (FL-09)', 'px')
+    note('FL-07', `${what}: its room, largest step share`, height.biggestStep * 100, '< 60 % (no jump)', '%')
+    note('FL-07', `${what}: the row above, furthest from its place`, scrolled, '0 (no scroll)', 'px')
+    expect(faded, `${what}: the row fades out where it was`).toBe(true)
+    expect(x.travel, `${what}: the row slides left as it leaves`).toBeGreaterThanOrEqual(6)
+    expect(height.travel, `${what}: its room closes`).toBeGreaterThan(30)
+    expect(height.biggestStep, `${what}: its room closes with a spring`).toBeLessThan(FRAME_SLACK === 1 ? 0.6 : 0.95)
+    expect(flew, `${what}: frames showing the row travelling through the list`).toBe(0)
+    expect(scrolled, `${what}: the rows above stay put`).toBeLessThanOrEqual(0.5)
+  }
+  await leavesInPlace('⌘D, the pinned section out of sight', first, () => shell.keyboard.press(`${MOD}+D`))
+  expect((await space(app)).pinned).toEqual([first])
+  await leavesInPlace('moved to another Space', second, () =>
+    cmd(app, 'tabs.moveToSpace', { ids: [second], spaceId: other, section: 'today' }),
+  )
+  expect((await state(app)).spaces[other]?.today).toEqual([second])
 })
 
 /** Whether a slot is leaving (data-exiting) in frame `i`: the classes don't say, so look at the DOM's order. */
