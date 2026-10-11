@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 277 built (79 partial) · 373 tested · 74 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 280 built (80 partial) · 374 tested · 74 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 152 | 173 |
-| P1 | 219 | 108 | 176 |
-| P2 | 79 | 17 | 24 |
+| P1 | 219 | 111 | 176 |
+| P2 | 79 | 17 | 25 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -437,7 +437,7 @@ Spec: `spec/boosts.md`
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
 | BO-01 | Create a site customization for the current site | P1 | ✅ | ✅ e2e+unit | – | New Tweak… from the command bar (also "customize", "customization", "site style"), the sidebar's + menu, the site controls panel, a paintbrush in the address field (shown on hover, in the accent colour once the site has a Tweak on) and the tab's menu (Tweak this Site…); none bound to a key. Opens the editor over the page with a new Tweak named after the host; a second one adds a second Tweak. A one-screen intro the first time only. Internal pages, error pages and a Peek take none: the entries are greyed or gone, or say why. Nothing reloads |
-| BO-02 | Editor panel: layout, live preview, close | P1 | 🟡 partial | ✅ e2e | – | a small view of its own over the page's top-right corner, sized to the panel, draggable by its title and kept inside the page; the page around it stays live. Every change shows at once and is saved; Esc, the close button and Done close it and give the page the keyboard back; the site controls' › and Edit Tweak reopen it as it was. Another page of the site keeps it open; another site or tab closes it; it steps aside for a Peek or full screen. No request names the site. Controls so far: size (BO-08); the rest come with their rows |
+| BO-02 | Editor panel: layout, live preview, close | P1 | 🟡 partial | ✅ e2e | – | a small view of its own over the page's top-right corner, sized to the panel, draggable by its title and kept inside the page; the page around it stays live. Every change shows at once and is saved; Esc, the close button and Done close it and give the page the keyboard back; the site controls' › and Edit Tweak reopen it as it was. Another page of the site keeps it open; another site or tab closes it; it steps aside for a Peek or full screen. No request names the site. Controls so far: size (BO-08), the code area (BO-11, which widens the panel to the left) and "Also apply to subdomains" (BO-17); the rest come with their rows |
 | BO-03 | Colour wheel (theme tint) | P1 | – | ✅ unit | – |  |
 | BO-04 | Invert lightness ("make this site dark") | P1 | – | ✅ unit | – |  |
 | BO-05 | Advanced colour sliders | P2 | – | ✅ unit | – |  |
@@ -446,17 +446,17 @@ Spec: `spec/boosts.md`
 | BO-08 | Page size (zoom) control | P1 | – | ✅ e2e+unit | – |  |
 | BO-09 | Text case control | P2 | – | ✅ unit | – |  |
 | BO-10 | Hide-element mode | P1 | – | ✅ unit | – |  |
-| BO-11 | Code editor: custom CSS and JavaScript per site | P1 | – | ✅ unit | – |  |
+| BO-11 | Code editor: custom CSS and JavaScript per site | P1 | ✅ | ✅ e2e+unit | – | the { } button opens a code area with CSS and JavaScript tabs, empty to start. CSS applies as it is typed (about 90 ms from the keystroke to the page's frame, measured) and is saved as typed, sent before the panel closes; a reload keeps it. JavaScript runs in the page's own world once per load at document ready, from main; Run now runs it at once, Reload page loads the page again. The editor: monospace, syntax colouring (text only, never markup), line numbers, the platform's undo (⌘Z / Ctrl+Z through Orbit's key handling), Tab and ⇧Tab indent and outdent, Enter keeps the indentation. Errors, thrown or syntax, go to the page's console; no dialog, nothing in main. JavaScript from elsewhere stays off until Allow on this device, and editing it doesn't allow it. A JS badge in the site controls list and the code tab (the Library's list comes with BO-15) |
 | BO-12 | Name, rename and reset all edits | P1 | – | – | – |  |
 | BO-13 | Shuffle (random style) | P2 | – | – | – |  |
-| BO-14 | Enable / disable a customization (per site) | P1 | – | ✅ unit | – |  |
+| BO-14 | Enable / disable a customization (per site) | P1 | ✅ | ✅ e2e+unit | – | the site controls panel lists the site's Tweaks by name with a paintbrush, coloured when on and grey when off; the name turns one off or on at once, without a reload, each on its own, keeping all its settings; the › opens it in the editor. The address field's paintbrush shows in the accent colour while one is on and grey when all are off, and turns them all off or on |
 | BO-15 | Manage all customizations (list view in the Library) | P1 | – | – | – |  |
 | BO-16 | Global on/off switch for all customizations | P1 | – | ✅ unit | – |  |
-| BO-17 | Scope: which pages a customization applies to | P1 | – | ✅ unit | – |  |
-| BO-18 | How customizations apply on page load (timing, safety) | P1 | 🟡 partial | ✅ e2e+unit | – | the page preload asks main for the site's sheets before the page's first paint (D40), so no frame shows the page without its Tweak (frame-capture test on a slow page's hard reload and first visit); main swaps in its own copies at document ready. Survives reloads, back and forward, a reopened tab, a woken tab and a restart. JavaScript runs from main once per load at document ready, main frame only, where allowed (its editor comes with BO-11); the Space colours come with BO-19 |
+| BO-17 | Scope: which pages a customization applies to | P1 | ✅ | ✅ e2e+unit | – | a Tweak is for its host's pages: any path, query and in-page navigation, not another host, the parent domain or a subdomain. "Also apply to subdomains" (off by default, at the panel's foot) brings in subdomains' open pages at once; it isn't offered for an address by number and is fixed while the page is on a subdomain it brings in. Every profile gets the same Tweaks; in a private window the CSS applies and the JavaScript runs only once "Also run in private windows" is ticked. Matching is a map lookup per label of the host |
+| BO-18 | How customizations apply on page load (timing, safety) | P1 | 🟡 partial | ✅ e2e+unit | – | the page preload asks main for the site's sheets before the page's first paint (D40), so no frame shows the page without its Tweak (frame-capture test on a slow page's hard reload and first visit); main swaps in its own copies at document ready. Survives reloads, back and forward, a reopened tab, a woken tab and a restart. JavaScript runs from main once per load at document ready, main frame only, where allowed (BO-11, BO-17): not again on an in-page navigation, never in a frame from another site; the Space colours come with BO-19 |
 | BO-19 | Use Space theme colours inside customization CSS | P2 | – | ✅ unit | – |  |
-| BO-20 | Sharing customizations and the customization gallery | P2 | – | – | – |  |
-| BO-21 | Customization commands in the command bar | P1 | – | ✅ e2e | – |  |
+| BO-20 | Sharing customizations and the customization gallery | P2 | – | ✅ e2e | – |  |
+| BO-21 | Customization commands in the command bar | P1 | 🟡 partial | ✅ e2e | – | in the command bar, none bound to a key: New Tweak… (also "customize", "customization", "site style"), Edit Tweak (the site's one in the editor; with several, the site controls list them to pick from; with none, a note says so), Turn Off and Turn On Tweaks for This Site (with a note). View Tweaks comes with BO-15, Export Tweak… with BO-20 |
 | BO-22 | Legacy code-only customization builder | OOS | ⛔ out of scope | – | – | the spec leaves it out |
 
 ## Chrome extension support

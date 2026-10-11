@@ -249,7 +249,8 @@ export interface TweakPatch {
 
 /**
  * Applies a checked edit to a Tweak (a draft in a store update). Values out of range are clamped,
- * values of the wrong type ignored. JavaScript written here is JavaScript allowed here (BO-11).
+ * values of the wrong type ignored. An edit of the JavaScript never allows it: JavaScript that came
+ * from elsewhere stays off until the user allows it on this device (BO-11, BO-18).
  * True when something changed.
  */
 export function applyTweakPatch(tweak: Tweak, patch: TweakPatch, now: number): boolean {
@@ -263,13 +264,7 @@ export function applyTweakPatch(tweak: Tweak, patch: TweakPatch, now: number): b
   if (typeof patch.name === 'string') set('name', patch.name.trim().slice(0, TWEAK_LIMITS.name) || tweak.host)
   if (typeof patch.enabled === 'boolean') set('enabled', patch.enabled)
   if (typeof patch.css === 'string') set('css', patch.css.slice(0, TWEAK_LIMITS.code))
-  if (typeof patch.js === 'string') {
-    const js = patch.js.slice(0, TWEAK_LIMITS.code)
-    if (js !== tweak.js) {
-      set('js', js)
-      set('jsAllowed', true)
-    }
-  }
+  if (typeof patch.js === 'string') set('js', patch.js.slice(0, TWEAK_LIMITS.code))
   if (typeof patch.subdomains === 'boolean') set('subdomains', patch.subdomains)
   if (typeof patch.jsAllowed === 'boolean') set('jsAllowed', patch.jsAllowed)
   if (typeof patch.jsInPrivate === 'boolean') set('jsInPrivate', patch.jsInPrivate)
@@ -347,6 +342,9 @@ export function tweakIndex(tweaks: Record<string, Tweak>): Map<string, Tweak[]> 
 }
 
 const isIpHost = (host: string) => host.includes(':') || /^\d+(\.\d+){3}$/.test(host)
+
+/** Whether a host can have subdomains: not an address by number (BO-17). */
+export const subdomainsPossible = (host: string): boolean => !isIpHost(host)
 
 /** Whether a Tweak applies to pages of a host (its own, or a subdomain when it says so). */
 export function tweakAppliesTo(tweak: Tweak, host: string | null): boolean {

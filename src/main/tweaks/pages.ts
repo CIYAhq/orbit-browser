@@ -1,7 +1,7 @@
 import { type IpcMainEvent, ipcMain, type Session, type WebContents } from 'electron'
 import { isPrivateProfileId } from '../../shared/private'
 import { PAGE_CHANNEL } from '../../shared/site'
-import type { OrbitState, ProfileId, TabId } from '../../shared/state'
+import type { OrbitState, ProfileId, TabId, Tweak } from '../../shared/state'
 import {
   enabledTweaksFor,
   type SheetOptions,
@@ -156,14 +156,20 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
     }
   }
 
+  /**
+   * A Tweak's JavaScript may run in a page: it has some, the user allowed it on this device, and
+   * in a private window allowed it there too (BO-11, BO-17, BO-18).
+   */
+  const mayRun = (record: PageRecord, tweak: Tweak): boolean =>
+    !!tweak.js.trim() && tweak.jsAllowed && (tweak.jsInPrivate || !isPrivateProfileId(profileOf(record.contents)))
+
   /** Runs the JavaScript of a page's Tweaks once per load, where allowed (BO-11, BO-17, BO-18). */
   const runScripts = (record: PageRecord) => {
     if (record.scripted || !current(record)) return
     record.scripted = true
     const state = store.state
-    const inPrivate = isPrivateProfileId(profileOf(record.contents))
     for (const tweak of enabledTweaksFor(state.tweaks, state.settings, record.host)) {
-      if (!tweak.js.trim() || !tweak.jsAllowed || (inPrivate && !tweak.jsInPrivate)) continue
+      if (!mayRun(record, tweak)) continue
       // A script error goes to the page's console; a rejection here is only that (D28).
       record.contents.mainFrame.executeJavaScript(tweakScript(tweak)).catch(() => {})
     }
@@ -263,9 +269,9 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
     hostOf: (tabId) => recordOf(tabId)?.host ?? null,
     runNow: (tabId, tweakId) => {
       const record = recordOf(tabId)
-      const tweak = store.state.tweaks[tweakId]
-      if (!record || !tweak?.js.trim() || !tweak.jsAllowed) return false
-      if (isPrivateProfileId(profileOf(record.contents)) && !tweak.jsInPrivate) return false
+      const state = store.state
+      const tweak = record && enabledTweaksFor(state.tweaks, state.settings, record.host).find((t) => t.id === tweakId)
+      if (!record || !tweak || !mayRun(record, tweak)) return false
       record.contents.mainFrame.executeJavaScript(tweakScript(tweak)).catch(() => {})
       return true
     },

@@ -112,6 +112,8 @@ export function registerTweaks(ctx: MainContext): void {
     return true
   })
 
+  commands.register('tweaks.runNow', ({ id, tabId }) => pages.runNow(tabId, id))
+
   commands.register('tweaks.setEnabled', ({ id, enabled }) => {
     if (typeof enabled !== 'boolean') return
     store.update((draft) => {

@@ -52,6 +52,12 @@ export interface TweakCommands {
   'tweaks.edit': { args: { id: string; tabId?: TabId }; result: boolean }
   /** Changes a Tweak (the editor's controls, BO-02 to BO-12): checked, saved as it is made. */
   'tweaks.update': { args: { id: string; patch: TweakPatch }; result: boolean }
+  /**
+   * Runs a Tweak's JavaScript in a tab's page now (BO-11's "Run now"): only where it would run on a
+   * load (the Tweak on and for the page's site, allowed on this device, in a private window only if
+   * allowed there). False where it didn't run.
+   */
+  'tweaks.runNow': { args: { id: string; tabId: TabId }; result: boolean }
   /** Turns a Tweak on or off (BO-14, BO-15). */
   'tweaks.setEnabled': { args: { id: string; enabled: boolean }; result: void }
   /** Deletes a Tweak (BO-15): its styles leave open pages at once. */

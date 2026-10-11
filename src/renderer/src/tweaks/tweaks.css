@@ -13,7 +13,8 @@ html[data-view="tweak"] body {
   inset: 0;
   padding: 8px;
   display: flex;
-  justify-content: flex-start;
+  /* Main keeps the view's right edge where it was as the panel widens or narrows (BO-11). */
+  justify-content: flex-end;
   align-items: flex-start;
   color: var(--text, #1c1c1f);
   font-size: 13px;

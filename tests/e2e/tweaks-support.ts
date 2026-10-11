@@ -8,7 +8,8 @@ import { expect } from '@playwright/test'
 import type { TweakEditorInfo } from '../../src/main/tweaks/editor'
 import type { TweakTestHooks } from '../../src/main/tweaks/index'
 import type { Tweak } from '../../src/shared/state'
-import { listenInRange, state } from './helpers'
+import { listenInRange, state, tabPage } from './helpers'
+import { newTab, waitTab } from './tabs-support'
 
 export interface TweakFixtures {
   port: number
@@ -41,6 +42,7 @@ const BLOCK_COLORS = ['#1f5fd6', '#18a058', '#c2410c', '#7c3aed']
  * - `/page/<name>?bg=…`: a plain page: a heading, a link to `/page/<name>-next` (`#next`), a
  *   button that counts its clicks (`#count`, `window.__clicks`), a text field (`#field`) and a tall
  *   area. `window.__first` is what its first frame showed (FIRST_FRAME).
+ * - `/framed/<name>?other=<url>`: a page with a frame (`#inner`) showing another address.
  * - `/slow/<name>?bg=…&ms=…`: sends its heading and a coloured block (`#block`, a new colour on each
  *   load) at once, and the rest of the page `ms` later (600 by default): it paints before the
  *   document is ready, as a page from a slow server does.
@@ -62,6 +64,16 @@ export async function startTweakFixtures(base = 3370): Promise<TweakFixtures> {
 <p><button id="count" onclick="window.__clicks = (window.__clicks || 0) + 1; this.textContent = 'Clicked ' + window.__clicks">Count</button></p>
 <p><input id="field" aria-label="Field"></p>
 <div style="height:2400px"></div></body></html>`,
+      )
+      return
+    }
+    if (u.pathname.startsWith('/framed/')) {
+      // A page with a frame from another address (`other`), as a site embeds another's (BO-18).
+      res.writeHead(200, ok)
+      res.end(
+        `${head(name, bg)}<body>${FIRST_FRAME}<h1 id="title">${name}</h1>
+<iframe id="inner" title="Inner" src="${(u.searchParams.get('other') ?? '').replace(/"/g, '&quot;')}" style="width:400px;height:200px"></iframe>
+</body></html>`,
       )
       return
     }
@@ -124,6 +136,22 @@ export async function editorPage(app: ElectronApplication): Promise<Page> {
     await new Promise((r) => setTimeout(r, 50))
   }
   throw new Error('No Tweak editor view')
+}
+
+/** The editor panel's view in one window (each window has its own). */
+export async function editorPageOf(app: ElectronApplication, windowId: string): Promise<Page> {
+  const deadline = Date.now() + 20_000
+  while (Date.now() < deadline) {
+    for (const p of app.windows()) {
+      if (!p.url().includes('view=tweak')) continue
+      const id = await p
+        .evaluate(() => (window as unknown as { orbit?: { windowId?: string } }).orbit?.windowId)
+        .catch(() => undefined)
+      if (id === windowId) return p
+    }
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  throw new Error(`No Tweak editor view in window ${windowId}`)
 }
 
 /** Waits until the editor panel is in its window, sized and with its page laid out. */
@@ -200,4 +228,51 @@ export async function recordFrames(
 export function near(a: string, b: string, tolerance = 6): boolean {
   const ch = (s: string, i: number) => Number.parseInt(s.slice(1 + 2 * i, 3 + 2 * i), 16)
   return [0, 1, 2].every((i) => Math.abs(ch(a, i) - ch(b, i)) <= tolerance)
+}
+
+/** A tab on fixture page `path` (on `host`), loaded, and its page. */
+export async function openFixture(
+  app: ElectronApplication,
+  fx: TweakFixtures,
+  path: string,
+  host?: string,
+): Promise<{ tabId: string; page: Page }> {
+  const tabId = await newTab(app, fx.url(path, host))
+  const part = path.split('?')[0] as string
+  await waitTab(app, tabId, part)
+  return { tabId, page: await tabPage(app, part) }
+}
+
+/** The editor's state in main, polled until it is open on a Tweak (and placed), or closed. */
+export async function waitEditor(app: ElectronApplication, open: boolean): Promise<void> {
+  if (open) await waitEditorShown(app)
+  else await expect.poll(async () => (await editorInfo(app)).open).toBe(false)
+}
+
+/** The Tweak the open editor shows. */
+export async function edited(app: ElectronApplication): Promise<Tweak> {
+  const info = await editorInfo(app)
+  const tweak = info.tweakId ? (await state(app)).tweaks[info.tweakId] : undefined
+  if (!tweak) throw new Error('the editor shows no Tweak')
+  return tweak
+}
+
+/** The page's root zoom now (BO-08's size is a zoom on the root). */
+export const zoomOf = (page: Page): Promise<string> =>
+  page.evaluate(() => getComputedStyle(document.documentElement).zoom)
+
+/** The page body's background colour now. */
+export const bgOf = (page: Page): Promise<string> =>
+  page.evaluate(() => getComputedStyle(document.body).backgroundColor).catch(() => '')
+
+/** Marks a page's document, to tell whether it was replaced (a reload or a navigation). */
+export const mark = (page: Page): Promise<unknown> => page.evaluate(() => Object.assign(window, { __mark: 1 }))
+export const marked = (page: Page): Promise<boolean> =>
+  page.evaluate(() => (window as unknown as { __mark?: number }).__mark === 1).catch(() => false)
+
+/** Waits until a page's document is a new one that has painted (its first frame was noted). */
+export async function newDocument(page: Page): Promise<void> {
+  await expect
+    .poll(async () => !(await marked(page)) && !!(await firstFrame(page).catch(() => undefined)), { timeout: 15_000 })
+    .toBe(true)
 }

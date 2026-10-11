@@ -43,6 +43,7 @@ function TweakRows({ tabId, info, close }: SiteSectionProps) {
               <button
                 type="button"
                 className="tweak-site-row__toggle"
+                data-testid="site-tweak-toggle"
                 role="switch"
                 aria-checked={tweak.enabled}
                 title={tweak.enabled ? 'Turn this Tweak off' : 'Turn this Tweak on'}

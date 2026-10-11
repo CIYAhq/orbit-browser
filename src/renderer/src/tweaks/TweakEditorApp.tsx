@@ -1,11 +1,15 @@
-import { Paintbrush, X } from 'lucide-react'
+import { Braces, Paintbrush, X } from 'lucide-react'
 import { type CSSProperties, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { TWEAK_EDITOR, type TweakEditorState } from '../../../shared/commands/tweaks'
 import type { Tweak } from '../../../shared/state'
+import { subdomainsPossible } from '../../../shared/tweaks'
 import { invoke } from '../api'
 import { useOrbit, useWindow } from '../store'
 import { paletteVars, usePalette } from '../theme'
+import { CodeArea } from './CodeArea'
+import { flushTweakEdits, updateTweak } from './edit'
 import { SizeControl } from './SizeControl'
+import './code.css'
 import './tweaks.css'
 
 /**
@@ -51,19 +55,22 @@ function TweakPanel({ state, tweak, intro }: { state: TweakEditorState; tweak: T
   const head = useRef<HTMLElement>(null)
   const content = useRef<HTMLDivElement>(null)
   const foot = useRef<HTMLElement>(null)
+  // The code area (BO-11) widens the panel; a Tweak with code opens with it.
+  const [code, setCode] = useState(() => !!(tweak.css.trim() || tweak.js.trim()))
+  const width = code && !intro ? TWEAK_EDITOR.wideWidth : TWEAK_EDITOR.width
 
   // Main sizes the view to the panel: its natural height, whatever room the view has now.
   useLayoutEffect(() => {
     const parts = [head.current, content.current, foot.current]
     const report = () => {
       const height = parts.reduce((sum, el) => sum + (el?.offsetHeight ?? 0), 0) + 2
-      void invoke('tweaks.editorLayout', { width: TWEAK_EDITOR.width, height })
+      void invoke('tweaks.editorLayout', { width, height })
     }
     report()
     const observer = new ResizeObserver(report)
     for (const el of parts) if (el) observer.observe(el)
     return () => observer.disconnect()
-  }, [])
+  }, [width])
 
   // Each opening starts with the keyboard in the panel (KS-19), and so does the controls' first
   // showing after the intro: its button is gone, and the keyboard would be nowhere.
@@ -77,13 +84,13 @@ function TweakPanel({ state, tweak, intro }: { state: TweakEditorState; tweak: T
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return
       e.preventDefault()
-      void invoke('tweaks.closeEditor', {})
+      closeEditor()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const close = () => void invoke('tweaks.closeEditor', {})
+  const close = closeEditor
   const drag = useDrag()
 
   return (
@@ -94,7 +101,7 @@ function TweakPanel({ state, tweak, intro }: { state: TweakEditorState; tweak: T
       data-tweak={tweak.id}
       aria-label={`Tweak: ${tweak.name}`}
       tabIndex={-1}
-      style={{ width: TWEAK_EDITOR.width }}
+      style={{ width }}
     >
       <header ref={head} className="tweak-panel__head" {...drag}>
         <span className="tweak-panel__badge" aria-hidden>
@@ -119,14 +126,24 @@ function TweakPanel({ state, tweak, intro }: { state: TweakEditorState; tweak: T
       </header>
       <div className="tweak-panel__body">
         <div ref={content} className="tweak-panel__content">
-          {intro ? <Intro host={state.host ?? tweak.host} /> : <Controls tweak={tweak} />}
+          {intro ? (
+            <Intro host={state.host ?? tweak.host} />
+          ) : (
+            <>
+              <Controls tweak={tweak} code={code} onCode={() => setCode(!code)} />
+              {code && <CodeArea tweak={tweak} state={state} />}
+            </>
+          )}
         </div>
       </div>
       <footer ref={foot} className="tweak-panel__foot">
         {!intro && (
-          <button type="button" className="tweak-button is-primary" data-testid="tweak-done" onClick={close}>
-            Done
-          </button>
+          <>
+            <Scope tweak={tweak} host={state.host} />
+            <button type="button" className="tweak-button is-primary" data-testid="tweak-done" onClick={close}>
+              Done
+            </button>
+          </>
         )}
       </footer>
     </section>
@@ -160,11 +177,56 @@ function Intro({ host }: { host: string }) {
   )
 }
 
-function Controls({ tweak }: { tweak: Tweak }) {
+/** Closes the panel, once the code still being typed is saved (BO-02, BO-11). */
+function closeEditor(): void {
+  flushTweakEdits()
+  void invoke('tweaks.closeEditor', {})
+}
+
+function Controls({ tweak, code, onCode }: { tweak: Tweak; code: boolean; onCode: () => void }) {
   return (
-    <Row label="Size">
-      <SizeControl tweak={tweak} />
-    </Row>
+    <>
+      <Row label="Size">
+        <SizeControl tweak={tweak} />
+      </Row>
+      <Row label="Code">
+        <button
+          type="button"
+          className="tweak-tool"
+          data-testid="tweak-code-button"
+          aria-pressed={code}
+          aria-label="CSS and JavaScript"
+          title={code ? 'Hide the code' : 'CSS and JavaScript'}
+          onClick={onCode}
+        >
+          <Braces size={15} />
+        </button>
+      </Row>
+    </>
+  )
+}
+
+/**
+ * Which pages the Tweak is for (BO-17): its site's, and with the box ticked its subdomains' too.
+ * Not offered for an address by number; fixed while the page is on a subdomain the box brings in.
+ */
+function Scope({ tweak, host }: { tweak: Tweak; host: string | null }) {
+  if (!subdomainsPossible(tweak.host)) return <span className="tweak-panel__spacer" />
+  const viaParent = !!host && host !== tweak.host
+  return (
+    <label
+      className="tweak-check tweak-panel__spacer"
+      title={viaParent ? `This page is on a subdomain of ${tweak.host}` : `Pages on any subdomain of ${tweak.host} too`}
+    >
+      <input
+        type="checkbox"
+        data-testid="tweak-subdomains"
+        checked={tweak.subdomains}
+        disabled={viaParent}
+        onChange={(e) => updateTweak(tweak.id, { subdomains: e.currentTarget.checked })}
+      />
+      <span>Also apply to subdomains</span>
+    </label>
   )
 }
 

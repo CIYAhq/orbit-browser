@@ -8,17 +8,24 @@ import { clickInPage, focusedUrl, pressInPage } from './nav-support'
 import { remoteRequests } from './settings-support'
 import { act, cmd, newTab, tabsHook, waitTab } from './tabs-support'
 import {
+  edited,
   editorInfo,
   editorPage,
   firstFrame,
+  mark,
+  marked,
   near,
+  newDocument,
+  openFixture,
   pageTweaks,
   recordFrames,
   SLOW_BLOCKS,
   startTweakFixtures,
   type TweakFixtures,
   tweakList,
+  waitEditor,
   waitEditorShown,
+  zoomOf,
 } from './tweaks-support'
 
 /** Tweaks (BO-*): per-site restyling, kept on this device. Feature IDs lead each title. */
@@ -38,41 +45,7 @@ test.afterEach(async () => {
 })
 
 /** A tab on fixture page `path` (on `host`), loaded. */
-async function openPage(app: ElectronApplication, path: string, host?: string): Promise<{ tabId: string; page: Page }> {
-  const tabId = await newTab(app, fx.url(path, host))
-  const part = path.split('?')[0] as string
-  await waitTab(app, tabId, part)
-  return { tabId, page: await tabPage(app, part) }
-}
-
-/** The editor's state in main, polled until it is open on a Tweak (and placed), or closed. */
-async function waitEditor(app: ElectronApplication, open: boolean): Promise<void> {
-  if (open) await waitEditorShown(app)
-  else await expect.poll(async () => (await editorInfo(app)).open).toBe(false)
-}
-
-/** The Tweak the open editor shows. */
-async function edited(app: ElectronApplication) {
-  const info = await editorInfo(app)
-  const tweak = info.tweakId ? (await state(app)).tweaks[info.tweakId] : undefined
-  if (!tweak) throw new Error('the editor shows no Tweak')
-  return tweak
-}
-
-/** The page's root zoom now (BO-08's size is a zoom on the root). */
-const zoomOf = (page: Page) => page.evaluate(() => getComputedStyle(document.documentElement).zoom)
-
-/** Marks a page's document, to tell whether it was replaced (a reload or a navigation). */
-const mark = (page: Page) => page.evaluate(() => Object.assign(window, { __mark: 1 }))
-const marked = (page: Page) =>
-  page.evaluate(() => (window as unknown as { __mark?: number }).__mark === 1).catch(() => false)
-
-/** Waits until a page's document is a new one that has painted (its first frame was noted). */
-async function newDocument(page: Page): Promise<void> {
-  await expect
-    .poll(async () => !(await marked(page)) && !!(await firstFrame(page).catch(() => undefined)), { timeout: 15_000 })
-    .toBe(true)
-}
+const openPage = (app: ElectronApplication, path: string, host?: string) => openFixture(app, fx, path, host)
 
 test('[BO-01][BO-21] every entry point makes a Tweak for the shown site and opens the editor on it, named after the site; the intro shows once; nothing reloads', async () => {
   orbit = await launchOrbit()

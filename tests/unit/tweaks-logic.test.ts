@@ -18,6 +18,7 @@ import {
   normalizeTweak,
   normalizeTweaks,
   runChain,
+  subdomainsPossible,
   tweakAppliesTo,
   tweakHostOf,
   tweakIndex,
@@ -90,6 +91,9 @@ describe('[BO-17] which pages a Tweak applies to', () => {
     expect(tweakAppliesTo(t, 'badexample.com')).toBe(false)
     const ip = tweak('b', '0.0.1', { subdomains: true })
     expect(tweaksFor(record(ip), '127.0.0.1')).toEqual([])
+    expect(subdomainsPossible('example.com')).toBe(true)
+    expect(subdomainsPossible('127.0.0.1')).toBe(false)
+    expect(subdomainsPossible('[::1]')).toBe(false)
   })
 
   it('finds a host’s Tweaks through an index built once per collection, oldest first', () => {
@@ -175,7 +179,7 @@ describe('[BO-01][BO-18] the saved Tweak', () => {
     expect(state.settings.tweakIntroSeen).toBe(false)
   })
 
-  it('takes edits checked: clamped, typed, and JavaScript written here is allowed here', () => {
+  it('takes edits checked: clamped and typed; editing JavaScript never allows it (BO-11, BO-18)', () => {
     const t = { ...newTweak('t', 'example.com', 1), jsAllowed: false }
     expect(applyTweakPatch(t, { style: { size: 999, hue: 'red' as unknown as number } }, 5)).toBe(true)
     expect(t.style.size).toBe(150)
@@ -184,6 +188,9 @@ describe('[BO-01][BO-18] the saved Tweak', () => {
     expect(applyTweakPatch(t, { style: { size: 150 } }, 9)).toBe(false)
     expect(t.updatedAt).toBe(5)
     applyTweakPatch(t, { js: 'document.title = "x"' }, 10)
+    expect(t.js).toBe('document.title = "x"')
+    expect(t.jsAllowed).toBe(false)
+    applyTweakPatch(t, { jsAllowed: true }, 10)
     expect(t.jsAllowed).toBe(true)
     applyTweakPatch(t, { name: '   ' }, 11)
     expect(t.name).toBe('example.com')
