@@ -1,5 +1,11 @@
 import { type BrowserWindow, Menu, type MenuItemConstructorOptions, type Referrer, type WebContents } from 'electron'
-import { framesMayOpen, pageMayOpen } from '../../shared/link-routing'
+import {
+  type AltClickFound,
+  altClickOpens,
+  framesMayOpen,
+  isOpenableLink,
+  pageMayOpen,
+} from '../../shared/link-routing'
 import { type PageReferrer, popupTitle, referrerPolicyName, shownTabId } from '../../shared/nav'
 import type { TabId, WindowId } from '../../shared/state'
 import { sectionOf } from '../../shared/tree'
@@ -60,10 +66,8 @@ const linkAt = (x: number, y: number) => `(() => {
   return isFrame(el) || el.shadowRoot ? { frame: true } : null
 })()`
 
-interface PageLink {
-  href?: string
+interface PageLink extends AltClickFound {
   policy?: string
-  frame?: boolean
 }
 
 /** An ⌥-click Orbit took over: the engine's download for the same link is cancelled when it comes. */
@@ -73,9 +77,6 @@ interface AltClick {
   /** Not opened yet (a link inside a frame): the download, when it comes, opens the split. */
   split: boolean
 }
-
-/** Links Orbit opens: web and file pages (not script, data or blob URLs). */
-const openable = (url: string | undefined): url is string => !!url && /^(https?|file):/i.test(url)
 
 const withoutHash = (url: string) => url.split('#')[0] ?? url
 
@@ -133,7 +134,7 @@ export function registerLinks(ctx: MainContext, deps: LinksDeps): LinksTestHooks
   // ---- ⇧-click: a new window (NV-08). Peek's own hook comes first and takes it when it's on. ----
   ctx.hooks.windowOpen.push((openerTabId, details) => {
     if (details.disposition !== 'new-window' || details.features) return undefined
-    if (!openable(details.url)) return undefined
+    if (!isOpenableLink(details.url)) return undefined
     const from = { tabId: openerTabId, windowId: windows.windowOfTab(openerTabId) }
     const load = { httpReferrer: details.referrer }
     // The engine leaves the link to the browser: the page opens it itself (review B-F1).
@@ -177,18 +178,14 @@ export function registerLinks(ctx: MainContext, deps: LinksDeps): LinksTestHooks
     }
     if (contents.isDestroyed()) return
     const until = Date.now() + ALT_CLICK_DOWNLOAD_MS
-    // A local file opens from a page that is a local file too, never from a web page (D49).
+    // A local file opens from a page that is a local file too, never from a web page or a frame (D49).
     const page = contents.getURL()
-    if (found?.href) {
-      if (!openable(found.href) || !pageMayOpen(page, found.href)) return
-      altClicks.set(tabId, { url: found.href, until, split: false })
-      // Sent with the page as referrer, as the link's policy or the page's allows (review B-F1).
-      openInSplit(tabId, found.href, { url: page, policy: referrerPolicyName(found.policy) })
-    } else if (found?.frame && openable(fallback) && pageMayOpen(undefined, fallback)) {
-      // A link in a frame: the engine's download of it says which, and opens the split. The frame
-      // counts as a web page, whatever the page is: a local file opens from no frame (round 2, F2).
-      altClicks.set(tabId, { url: fallback, until, split: true })
-    }
+    const opens = altClickOpens(page, found, fallback)
+    if (!opens) return
+    altClicks.set(tabId, { url: opens.url, until, split: opens.split })
+    // A link in a frame waits for the engine's download of it, which says which and opens the split.
+    // Sent with the page as referrer, as the link's policy or the page's allows (review B-F1).
+    if (!opens.split) openInSplit(tabId, opens.url, { url: page, policy: referrerPolicyName(found?.policy) })
   }
 
   ctx.hooks.tabCreated.push((tabId, contents) => {

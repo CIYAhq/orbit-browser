@@ -1,0 +1,139 @@
+import { app } from 'electron'
+import { authDialog } from '../../shared/pages'
+import { countPdfPages } from '../../shared/print'
+import type { TabId, WindowId } from '../../shared/state'
+import type { MainContext } from '../context'
+import type { TabOps } from '../tabs/ops'
+import { type PageDialogInfo, type PageDialogs$, registerDialogs } from './dialogs'
+import { type FullScreenInfo, registerFullScreen } from './fullscreen'
+import { registerHistoryPage } from './history'
+import { type LeaveInfo, registerLeave } from './leave'
+import { type AppLinkOutcome, findSystemApp, findTestApp, launchInApp, registerOtherApps } from './other-apps'
+import { deliverPrint, type PrintInfo, type PrintRecord, registerPrint, systemPrinters, testPrinters } from './print'
+import { registerSavePage } from './save-page'
+import { LOAD_TIMEOUT_MS, type PageScreenInfo, registerScreens } from './screens'
+import { registerSwipe, type SwipeInfo } from './swipe'
+import { registerViewSource } from './view-source'
+
+/** Test-only handle (ORBIT_E2E=1): globalThis.__orbitPages. */
+export interface PagesTestHooks {
+  /** Every page's dialog on show or waiting to (the first of each page's). */
+  dialogs: () => PageDialogInfo[]
+  /** What Orbit knows of a tab's page about its leave-page warning. */
+  leave: (tabId: TabId) => LeaveInfo | null
+  /** Every page's error or crash screen (NV-13, NV-14). */
+  screens: () => PageScreenInfo[]
+  /** Links Orbit opened in another app, oldest first (NV-19): test runs never start one. */
+  launched: string[]
+  /** Links to other apps that pages followed, oldest first, and what came of each (NV-19). */
+  appLinks: { url: string; outcome: AppLinkOutcome }[]
+  /** A window's full screen (NV-20). */
+  fullScreen: (windowId: WindowId) => FullScreenInfo
+  /** Every page's print dialog (NV-07). */
+  print: () => PrintInfo[]
+  /** Print jobs, oldest first (NV-07): test runs never print or save one. */
+  printed: PrintRecord[]
+  /** A window's two-finger swipe over a page, and its arrow (NV-02). */
+  swipe: (windowId: WindowId) => SwipeInfo
+}
+
+/**
+ * The pages lane: what a page does beyond loading. Page dialogs (NV-24): a page's alert, confirm and
+ * prompt, the leave-page warning and HTTP sign-in, in Orbit's own dialog over that page. Error and
+ * crash screens (NV-13, NV-14): what the page's area shows when its page couldn't load, crashed or
+ * stopped responding. Links that open other apps (NV-19): asked about over the page. Window full
+ * screen (NV-20): the sidebar hidden, and Esc in the page. Print (NV-07): Orbit's print dialog over
+ * the page. View source (DT-04): the page's source in a new tab. Save Page As… (NV-21): the page
+ * saved where the save dialog says. Two-finger swipe (NV-02): back and
+ * forward over the page, with its arrow. History (AR-10): the profile's visits as a page in a tab.
+ */
+export function registerPages(ctx: MainContext, ops: TabOps): void {
+  const dialogs = registerDialogs(ctx)
+  const leave = registerLeave(ctx, ops, dialogs)
+  registerSignIn(dialogs)
+  // Tests give a navigation's first answer less time (ORBIT_E2E_LOAD_TIMEOUT_MS).
+  const testTimeout = ctx.e2e ? Number(process.env.ORBIT_E2E_LOAD_TIMEOUT_MS) : Number.NaN
+  const fullScreen = registerFullScreen(ctx)
+  const screens = registerScreens(ctx, ops, dialogs, fullScreen, testTimeout > 0 ? testTimeout : LOAD_TIMEOUT_MS)
+  // Test runs record each launch instead, and take the OS's apps from ORBIT_E2E_APPS.
+  const launched: string[] = []
+  const appLinks: PagesTestHooks['appLinks'] = []
+  registerOtherApps(
+    ctx,
+    dialogs,
+    ctx.e2e
+      ? {
+          launch: async (url) => {
+            launched.push(url)
+          },
+          findApp: findTestApp(process.env.ORBIT_E2E_APPS),
+          note: (url, outcome) => {
+            appLinks.push({ url, outcome })
+          },
+        }
+      : { launch: launchInApp, findApp: findSystemApp },
+  )
+  // Test runs record each print job instead, and take the printers from ORBIT_E2E_PRINTERS.
+  const printed: PrintRecord[] = []
+  const print = registerPrint(
+    ctx,
+    ctx.e2e
+      ? {
+          deliver: async (page, job) => {
+            const url = page.isDestroyed() ? '' : page.getURL()
+            if (job.kind === 'printer') printed.push({ kind: 'printer', url, options: job.options })
+            else {
+              const pages = countPdfPages(job.data.toString('latin1'))
+              printed.push({ kind: 'pdf', url, name: job.name, bytes: job.data.length, pages })
+            }
+            return { ok: true }
+          },
+          printers: testPrinters(process.env.ORBIT_E2E_PRINTERS),
+        }
+      : { deliver: deliverPrint, printers: systemPrinters },
+  )
+
+  registerViewSource(ctx)
+  registerSavePage(ctx)
+  const swipe = registerSwipe(ctx)
+  registerHistoryPage(ctx)
+
+  if (ctx.e2e) {
+    const hooks: PagesTestHooks = {
+      dialogs: () => dialogs.info(),
+      leave: (tabId) => {
+        const page = ctx.tabs.contents(tabId)
+        return page ? leave.info(page) : null
+      },
+      screens: () => screens.info(),
+      launched,
+      appLinks,
+      fullScreen: (windowId) => fullScreen.info(windowId),
+      print: () => print.info(),
+      printed,
+      swipe: (windowId) => swipe.info(windowId),
+    }
+    ;(globalThis as unknown as { __orbitPages: PagesTestHooks }).__orbitPages = hooks
+  }
+}
+
+/**
+ * HTTP sign-in (Basic and Digest, NV-24): a server or a proxy asks for a username and password, and
+ * Orbit asks the user over the page that asked. Cancel (or the page going) sends none, and the page
+ * gets the server's answer to that.
+ */
+function registerSignIn(dialogs: PageDialogs$): void {
+  app.on('login', (event, page, details, authInfo, callback) => {
+    // Without a page to ask over (a request of Orbit's own, a utility process): no sign-in.
+    if (!page || page.isDestroyed() || !dialogs.hostable(page)) return
+    event.preventDefault()
+    void dialogs.open(page, authDialog(authInfo, details.url)).then((answer) => {
+      try {
+        if (answer?.ok) callback(answer.user ?? '', answer.password ?? '')
+        else callback()
+      } catch {
+        // The request went meanwhile.
+      }
+    })
+  })
+}

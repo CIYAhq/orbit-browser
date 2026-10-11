@@ -348,9 +348,10 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
     // Esc stops a loading page (NV-04), unless the page uses it: the page gets the key first, and
     // Orbit stops the load once the page's preload says no handler took it (D59, keys lane). An
     // open overlay (command bar, find bar, Peek) holds keyboard focus and takes Esc before the page
-    // could see it (KS-19).
-    contents.on('before-input-event', (_event, input) => {
-      if (input.type !== 'keyDown' || input.key !== 'Escape') return
+    // could see it (KS-19). An Esc that left full screen (NV-20, src/main/pages/fullscreen.ts) is
+    // taken from the page: it stops nothing.
+    contents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown' || input.key !== 'Escape' || event.defaultPrevented) return
       if (input.meta || input.control || input.alt || input.shift) return
       if (!store.state.tabs[tabId]?.loading) return
       const windowId = windows.windowOfTab(tabId)
