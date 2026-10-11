@@ -97,6 +97,8 @@ export type RendererView =
   | 'screen'
   /** Pages lane: the print dialog over a page (NV-07). */
   | 'print'
+  /** Pages lane: the arrow a two-finger swipe over a page slides in (NV-02). */
+  | 'swipe'
 
 /** The API the preload exposes on `window.orbit` to Orbit's own UI renderers. */
 export interface OrbitBridge {

@@ -16,6 +16,7 @@ import type { FullScreenInfo } from '../../src/main/pages/fullscreen'
 import type { LeaveInfo } from '../../src/main/pages/leave'
 import type { PrintInfo, PrintRecord } from '../../src/main/pages/print'
 import type { PageScreenInfo } from '../../src/main/pages/screens'
+import type { SwipeInfo } from '../../src/main/pages/swipe'
 import { listenInRange, tabPage } from './helpers'
 
 export interface PagesFixtures {
@@ -59,6 +60,8 @@ const html = (title: string, body: string, head = '') => `<!doctype html>
  * - `/print`: a few pages long, with a field (`#field`), a button that calls `window.print()`
  *   (`#print`), and `window.__print`: its `beforeprint` and `afterprint` events, whether `print()`
  *   returned, and how many times the tab has loaded it (`loads`).
+ * - `/swipe`: a strip that scrolls sideways (`#strip`, scrolled to its middle), and an area that uses
+ *   the wheel itself (`#grab`, preventDefault), as a map does.
  *
  * Every page has an icon (PAGE_ICON). `port` listens on that port only (a server back on the port
  * it left).
@@ -225,6 +228,21 @@ document.getElementById('print').addEventListener('click', () => {
       )
       return
     }
+    if (u.pathname === '/swipe') {
+      send(
+        html(
+          'Swipe',
+          `<h1>Swipe</h1>
+<div id="strip" style="overflow-x:auto;width:400px;height:140px"><div style="width:3000px;height:120px;background:linear-gradient(90deg,#c9c2b6,#7d766a)"></div></div>
+<div id="grab" style="width:400px;height:140px;margin-top:16px;background:#d8d2c8"></div>
+<script>
+document.getElementById('strip').scrollLeft = 1000
+document.getElementById('grab').addEventListener('wheel', (e) => e.preventDefault(), { passive: false })
+</script>`,
+        ),
+      )
+      return
+    }
     if (u.pathname.startsWith('/page/')) {
       const name = decodeURIComponent(u.pathname.slice('/page/'.length))
       send(html(name, `<h1 id="title">${name}</h1><div id="area"></div>`))
@@ -375,6 +393,7 @@ type PagesGlobal = {
     fullScreen: (windowId: string) => FullScreenInfo
     print: () => PrintInfo[]
     printed: PrintRecord[]
+    swipe: (windowId: string) => SwipeInfo
   }
 }
 
@@ -650,4 +669,51 @@ export async function printPage(app: ElectronApplication, id: number): Promise<P
     await new Promise((r) => setTimeout(r, 100))
   }
   throw new Error(`no print view shows dialog ${id}`)
+}
+
+/** A window's two-finger swipe over a page and its arrow (NV-02). */
+export function swipeInfo(app: ElectronApplication, windowId: string): Promise<SwipeInfo> {
+  return app.evaluate((_e, id) => (globalThis as unknown as PagesGlobal).__orbitPages.swipe(id), windowId)
+}
+
+/**
+ * A two-finger horizontal swipe over the page showing `url`, at `x`, `y` (page coordinates): one
+ * trackpad scroll event for each of `deltas` (px, as the page's `WheelEvent.deltaX` reads them: a
+ * negative one scrolls toward the left, which is back), sent at once through the browser process,
+ * as the trackpad's are. Returns the window's swipe as soon as main has heard all of them, before
+ * the fingers count as lifted (RELEASE_GAP_MS after the last), or null if it didn't in time.
+ */
+export function swipeOverPage(
+  app: ElectronApplication,
+  windowId: string,
+  url: string,
+  at: { x: number; y: number },
+  deltas: number[],
+): Promise<SwipeInfo | null> {
+  return app.evaluate(
+    async ({ webContents }, { windowId, url, at, deltas }) => {
+      const page = webContents.getAllWebContents().find((w) => w.getURL() === url)
+      const hooks = (globalThis as unknown as PagesGlobal).__orbitPages
+      for (const d of deltas) {
+        page?.sendInputEvent({
+          type: 'mouseWheel',
+          x: at.x,
+          y: at.y,
+          deltaX: -d,
+          deltaY: 0,
+          hasPreciseScrollingDeltas: true,
+          canScroll: true,
+        })
+      }
+      const total = Math.abs(deltas.reduce((a, b) => a + b, 0))
+      const deadline = Date.now() + 1000
+      while (Date.now() < deadline) {
+        const info = hooks.swipe(windowId)
+        if (info.tabId && info.travel >= Math.min(total, 112) - 0.5) return info
+        await new Promise((r) => setTimeout(r, 2))
+      }
+      return null
+    },
+    { windowId, url, at, deltas },
+  )
 }

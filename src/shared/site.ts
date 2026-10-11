@@ -217,6 +217,12 @@ export const PAGE_CHANNEL = {
    * page, for a tab's or a pop-up's main frame only (src/main/pages/print.ts).
    */
   print: 'orbit-page:print',
+  /**
+   * send('move', direction, travel) and send('end', direction, commit): a two-finger swipe over the
+   * page that the page doesn't take (NV-02, src/preload/swipe.ts). Main shows the arrow and goes back
+   * or forward, for a main frame of a page in a window's page card only (src/main/pages/swipe.ts).
+   */
+  swipe: 'orbit-page:swipe',
 } as const
 
 /** A tab comes forward for its notifications' clicks at most this often (a flood can't stall the shell). */

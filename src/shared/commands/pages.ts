@@ -1,7 +1,8 @@
 import type { PageDialogAnswer, PageDialogContent, PageScreenAction, PageScreenContent } from '../pages'
 import type { PrintContent, PrintSettings } from '../print'
+import type { SwipeArrow } from '../swipe'
 
-/** Owned by the pages lane: what a page asks of the user (NV-24), what shows when it fails (NV-13, NV-14), print (NV-07). */
+/** Owned by the pages lane: what a page asks of the user (NV-24), what shows when it fails (NV-13, NV-14), print (NV-07), the swipe's arrow (NV-02). */
 export interface PagesCommands {
   /** A page dialog view's content: the dialog it shows now, or null (the view asks when it loads). */
   'pages.dialogContent': { args: Record<string, never>; result: PageDialogContent | null }
@@ -17,4 +18,6 @@ export interface PagesCommands {
   'pages.printChange': { args: { dialog: number; settings: Partial<PrintSettings> }; result: void }
   /** Print (or Save) with the dialog's settings, or close it (`ok: false`). */
   'pages.printAnswer': { args: { dialog: number; ok: boolean }; result: void }
+  /** A swipe arrow view's arrow (NV-02): the swipe over its window's page now, or null. */
+  'pages.swipeArrow': { args: Record<string, never>; result: SwipeArrow | null }
 }

@@ -13,7 +13,8 @@
  * main frame of one, and only there, this gives the bridge Orbit's UI has (D53), and patches
  * nothing. See `exposeInternalPage`.
  *
- * In every page's main frame, it also tells main whether the page used an Esc (D59, `watchEscape`).
+ * In every page's main frame, it also tells main whether the page used an Esc (D59, `watchEscape`),
+ * and of a two-finger swipe the page doesn't take (NV-02, `watchSwipe`).
  *
  * In a web page's main frame, the page's `alert`, `confirm` and `prompt` ask main, which shows
  * Orbit's dialog over that page only (NV-24): Electron has no `prompt`, and shows the others as
@@ -23,9 +24,11 @@
  * the leave-page warning (`exposeLeave`).
  */
 import { contextBridge, ipcRenderer } from 'electron'
+import { isWheelNotch } from '../renderer/src/shell/spaces/physics'
 import type { OrbitBridge, StatePatch } from '../shared/rpc'
 import { PAGE_CHANNEL } from '../shared/site'
 import type { OrbitState } from '../shared/state'
+import { HistorySwipe, RELEASE_GAP_MS, type SwipeUpdate, scrollsToward } from './swipe'
 
 type StateOf = (name: string) => string | null
 
@@ -405,6 +408,42 @@ function watchEscape(): void {
 }
 
 watchEscape()
+
+/**
+ * Two-finger swipe back and forward over the page (NV-02): a trusted horizontal trackpad scroll that
+ * nothing under the pointer can scroll that way, and that no handler of the page used
+ * (preventDefault), tells main how far it has gone, then whether it was let go with the arrow fully
+ * in (`HistorySwipe`). A mouse wheel's notches and ⌃-scrolls (a pinch) never do. Runs in this
+ * preload's own world, after the page's handlers: nothing is added to the page.
+ */
+function watchSwipe(): void {
+  if (window.top !== window) return
+  const swipe = new HistorySwipe()
+  let lifted: ReturnType<typeof setTimeout> | undefined
+  const tell = (update: SwipeUpdate | undefined) => {
+    if (!update) return
+    const value = update.kind === 'move' ? update.travel : update.commit
+    ipcRenderer.send(PAGE_CHANNEL.swipe, update.kind, update.direction, value)
+  }
+  window.addEventListener(
+    'wheel',
+    (event) => {
+      if (!event.isTrusted || event.ctrlKey || event.deltaMode !== 0) return
+      const { deltaX, deltaY, target, timeStamp } = event
+      const wheelDeltaX = (event as WheelEvent & { wheelDeltaX?: number }).wheelDeltaX
+      if (isWheelNotch({ deltaMode: 0, deltaX, deltaY, wheelDeltaX })) return
+      // After the whole dispatch: the page's handlers have all run.
+      setTimeout(() => {
+        tell(swipe.push(deltaX, deltaY, timeStamp, (side) => event.defaultPrevented || scrollsToward(target, side)))
+        clearTimeout(lifted)
+        lifted = setTimeout(() => tell(swipe.release()), RELEASE_GAP_MS)
+      }, 0)
+    },
+    { capture: true, passive: true },
+  )
+}
+
+watchSwipe()
 
 if (location.protocol === 'orbit:') {
   // An internal page. Main says no (null) to anything but a tab's main frame showing one.

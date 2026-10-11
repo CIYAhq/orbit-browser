@@ -71,6 +71,19 @@ async function boot(): Promise<void> {
     )
     return
   }
+  // The arrow a two-finger swipe over a page slides in (pages lane, NV-02).
+  if (view === 'swipe') {
+    const app = import('./pages/SwipeApp')
+    await initStore()
+    document.documentElement.dataset.view = view
+    const { SwipeApp } = await app
+    createRoot(document.getElementById('root') as HTMLElement).render(
+      <StrictMode>
+        <SwipeApp />
+      </StrictMode>,
+    )
+    return
+  }
   // An internal page (DT-13): Orbit's UI in a normal tab. Keys go to it as to any page.
   if (view === 'internal') {
     const app = import('./internal/InternalApp')

@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 244 built (86 partial) · 335 tested · 0 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 245 built (86 partial) · 336 tested · 0 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 141 | 168 |
-| P1 | 219 | 88 | 150 |
+| P1 | 219 | 89 | 151 |
 | P2 | 79 | 15 | 17 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -229,7 +229,7 @@ Spec: `spec/navigation.md`
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
 | NV-01 | Back and forward | P0 | ✅ | ✅ e2e+unit | – | buttons and keys (Cmd+Left/Right only outside text fields), history menu with favicons that closes on tab switch, Cmd/middle-click opens the entry in a background tab with its history; mouse side buttons are Chromium's; Backspace inert |
-| NV-02 | Trackpad two-finger swipe back/forward | P1 | – | – | – |  |
+| NV-02 | Trackpad two-finger swipe back/forward | P1 | ✅ | ✅ e2e+unit | – | a horizontal two-finger swipe over the page goes back or forward: an arrow slides in from that edge of the page's card, following the fingers 1:1, fills once it's fully in (112 px), and letting go then goes as Back and Forward do; let go sooner, it fades and nothing happens. Only with somewhere to go, and on macOS only with the system's Swipe between pages on. The page gets the swipe first: while what's under the pointer (or around it) can still scroll that way, or the page uses the wheel (preventDefault), the swipe is the page's until the fingers lift, so it navigates only at the scroll edge. Over the sidebar the same swipe switches Space (SP-08) and never navigates. Windows and Linux: wherever the touchpad scrolls smoothly (pixel deltas); a mouse wheel's notches never navigate. Recognition follows the Space swipe (FL-13): 9 px decide the axis, and the fingers have lifted after a 90 ms pause or when the OS momentum starts. Limits: Electron reports no scroll phases, so the page preload watches the page's wheel events in its own world (D40 use orbit-page:swipe); the swipe goes by the scroll's direction, so with macOS's natural scrolling off a swipe right is forward; a swipe that starts over a frame of the page stays the frame's (frames get no preload); the arrow's small view takes the wheel if the pointer is right over it. Tests use synthetic trackpad scrolls; the real gesture, with momentum, is unverified on macOS (person-check) |
 | NV-03 | Reload and hard reload | P0 | ✅ | ✅ e2e+unit | – | Cmd/Ctrl+R, F5; hard reload Cmd+Shift+R, Ctrl+Shift+R, Shift+F5, Ctrl+F5; Cmd/middle-click Reload duplicates with history; keyboard focus goes to the page |
 | NV-04 | Stop loading | P1 | ✅ | ✅ e2e+unit | – | Esc in the page while loading (overlays take it first; a page that uses Esc keeps it and goes on loading, D59), Cmd+. on macOS, double-click Reload, Stop (x) state; a typed address, Back/Forward or Reload shows where it is going at once and stays when stopped; the loading indicator goes |
 | NV-05 | Find in page | P0 | ✅ | ✅ e2e+unit | – | floating bar over the active page's top-right corner; finds as you type, n/m count, No matches; Enter/Cmd+G/F3 next, Shift+Enter/Shift+Cmd+G/Shift+F3 previous, buttons; Esc closes and keeps the match selected; per tab (hidden on switch, back with text and place); starts from the selection, else the last search; IME commits; keys typed for the bar before it has the keyboard (a new window's first moments, a busy bar) wait up to 5 s and then go into it in order, text as text (any character); it takes the keyboard when it shows, even later than that; shortcuts and IME composition are not held; Cmd+J jumps to the selection (macOS); Edit > Find menu; does nothing while a Peek is open, so the keyboard stays in it (finding in a Peek is PK-11) |
