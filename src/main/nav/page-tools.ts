@@ -9,9 +9,10 @@ import {
   zoomPercent,
   zoomStep,
 } from '../../shared/nav'
+import type { Rect } from '../../shared/rpc'
 import type { TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
-import { setPageZoom } from '../peek/page-actions'
+import { peekPageOf, setPageZoom } from '../peek/page-actions'
 import type { CallContext } from '../registry'
 import { activeTabOf } from '../windows'
 import { NAV_WORLD } from './focus'
@@ -174,8 +175,23 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
   const activeOf = (windowId: WindowId | undefined): TabId | null =>
     windowId ? activeTabOf(store.state, windowId) : null
 
-  const findState = (windowId: WindowId): FindState => {
+  /**
+   * The page find acts on in a window, and where it is: an open Peek's page, over its card (PK-11),
+   * else the active tab's. None while a Peek is on its way in or out, or covers the window.
+   */
+  const targetOf = (windowId: WindowId | undefined): { tabId: TabId; page?: Rect; peek: boolean } | null => {
+    if (!windowId) return null
+    if (peekShown(store.state, windowId)) {
+      const peek = peekPageOf(windowId)
+      return peek ? { tabId: peek.tabId, page: peek.card, peek: true } : null
+    }
     const tabId = activeOf(windowId)
+    return tabId ? { tabId, page: windows.tabViewBounds(tabId), peek: false } : null
+  }
+  const targetTab = (windowId: WindowId | undefined): TabId | null => targetOf(windowId)?.tabId ?? null
+
+  const findState = (windowId: WindowId): FindState => {
+    const tabId = targetTab(windowId)
     const s = tabId ? finds.get(tabId) : undefined
     if (!tabId || !s) return { ...CLOSED, tabId }
     const { open, query, active, matches, searched, focus } = s
@@ -197,7 +213,8 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
     const t = tools.get(windowId)
     const find = findState(windowId)
     const zoom = t?.zoom ?? null
-    const page = find.tabId ? windows.tabViewBounds(find.tabId) : undefined
+    const target = targetOf(windowId)
+    const page = target?.page
     if (!(find.open || zoom) || !page || windows.inHtmlFullscreen(windowId)) {
       // Nothing is under the pointer once the view has gone.
       if (t) t.hovered = false
@@ -214,7 +231,10 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
       state.sent = json
       contents.send('orbit:pageTools', payload)
     }
-    return windows.showTools(windowId, toolsBounds(page, find.open, !!zoom)) ? 'placed' : 'loading'
+    // Over a Peek's card they go above its page (PK-11).
+    return windows.showTools(windowId, toolsBounds(page, find.open, !!zoom), { top: !!target?.peek })
+      ? 'placed'
+      : 'loading'
   }
 
   // ---------- Keys typed before the find bar can take them (round 2 fix check, F4) ----------
@@ -340,7 +360,14 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
 
   const refreshTab = (tabId: TabId) => {
     const windowId = windows.windowOfTab(tabId)
-    if (windowId && activeOf(windowId) === tabId) refresh(windowId)
+    if (windowId && targetTab(windowId) === tabId) refresh(windowId)
+  }
+  /** Lays a window's page tools out again when they show something, or may have to. */
+  const refreshShown = (windowId: WindowId) => {
+    const tabId = targetTab(windowId)
+    if (tools.get(windowId)?.zoom || (tabId && finds.get(tabId)?.open) || windows.toolsInfo(windowId).placed) {
+      refresh(windowId)
+    }
   }
 
   // ---------- Find in page (NV-05) ----------
@@ -389,16 +416,16 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
   }
 
   /**
-   * Find acts on the window's page, not on one a Peek or the Library covers: while either is open,
-   * ⌘F, ⌘G and F3 do nothing here and the keyboard stays where it is (review A-M3, fix check A M2;
-   * finding in the Peek is PK-11's, the Library's ⌘F searches it).
+   * Find acts on the page on screen: an open Peek's (PK-11), else the window's, never one the Peek
+   * or the Library covers: while the Library is open, ⌘F, ⌘G and F3 do nothing here and the
+   * keyboard stays where it is (review A-M3, fix check A M2; the Library's ⌘F searches it).
    */
   const findable = (windowId: WindowId | undefined): windowId is WindowId =>
-    !!windowId && !peekShown(store.state, windowId) && !windows.hasPageCover(windowId)
+    !!windowId && !windows.hasPageCover(windowId) && targetOf(windowId) !== null
 
   /** ⌘F: the bar opens (or its text is selected again), starting from the page's selection or the tab's last search. */
   const openFind = (windowId: WindowId | undefined) => {
-    const tabId = activeOf(windowId)
+    const tabId = targetTab(windowId)
     const contents = pageOf(tabId)
     if (!findable(windowId) || !tabId || !contents) return
     const s = sessionOf(tabId)
@@ -419,13 +446,13 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
         if (!text || text === s.query || !s.open || s.edits !== edits || finds.get(tabId) !== s) return
         s.query = text
         search(contents, s, true)
-        if (activeOf(windowId) === tabId) focusBar(windowId, tabId, s)
+        if (targetTab(windowId) === tabId) focusBar(windowId, tabId, s)
       })
       .catch(() => {})
   }
 
   const step = (windowId: WindowId | undefined, forward: boolean) => {
-    const tabId = activeOf(windowId)
+    const tabId = targetTab(windowId)
     const contents = pageOf(tabId)
     if (!findable(windowId) || !tabId || !contents) return
     const s = finds.get(tabId)
@@ -445,7 +472,8 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
   }
 
   const closeFind = (windowId: WindowId | undefined) => {
-    const tabId = activeOf(windowId)
+    const target = targetOf(windowId)
+    const tabId = target?.tabId
     const s = tabId ? finds.get(tabId) : undefined
     if (!windowId || !tabId || !s?.open) return
     dropKeys(windowId)
@@ -453,12 +481,14 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
     clearMatches(s)
     pageOf(tabId)?.stopFindInPage('keepSelection')
     refresh(windowId)
-    windows.focusActiveTab(windowId)
+    // The keyboard goes back to the page that was searched: the Peek's stays open (PK-11).
+    if (target.peek) pageOf(tabId)?.focus()
+    else windows.focusActiveTab(windowId)
   }
 
   actions.register('page.find', (c) => openFind(windowOf(c)))
   actions.register('page.jumpToSelection', (c) => {
-    void pageOf(activeOf(windowOf(c)))
+    void pageOf(targetTab(windowOf(c)))
       ?.executeJavaScriptInIsolatedWorld(NAV_WORLD, [{ code: JUMP_TO_SELECTION }])
       .catch(() => {})
   })
@@ -467,7 +497,7 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
 
   commands.register('find.update', ({ query }, c) => {
     const windowId = windowOf(c)
-    const tabId = activeOf(windowId)
+    const tabId = targetTab(windowId)
     const contents = pageOf(tabId)
     if (!windowId || !tabId || !contents) return
     const s = sessionOf(tabId)
@@ -583,11 +613,18 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
 
   // The tools follow the active page: tab switches, resizes, splits and full screen.
   windows.onLayout((windowId) => {
-    const t = tools.get(windowId)
-    const tabId = activeOf(windowId)
     // Keys held for another tab's bar aren't for this one.
-    if (held.get(windowId)?.tabId !== tabId) dropKeys(windowId)
-    if (t?.zoom || (tabId && finds.get(tabId)?.open) || windows.toolsInfo(windowId).placed) refresh(windowId)
+    if (held.get(windowId)?.tabId !== targetTab(windowId)) dropKeys(windowId)
+    refreshShown(windowId)
+  })
+  // A Peek opening, closing or becoming a tab changes the page find acts on (PK-11).
+  store.subscribe((next, prev) => {
+    if (next.windows === prev.windows) return
+    for (const [windowId, win] of Object.entries(next.windows)) {
+      if (win.overlay === prev.windows[windowId]?.overlay) continue
+      if (held.get(windowId) && held.get(windowId)?.tabId !== targetTab(windowId)) dropKeys(windowId)
+      refreshShown(windowId)
+    }
   })
 
   // The page tools' page has loaded, so they can go into the window (round 2 fix check, M3): the zoom
@@ -599,7 +636,7 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
       clearTimeout(t.zoomTimer)
       t.zoomTimer = setTimeout(() => hideZoom(windowId), ZOOM_INDICATOR_MS)
     }
-    const tabId = activeOf(windowId)
+    const tabId = targetTab(windowId)
     const s = tabId ? finds.get(tabId) : undefined
     const h = held.get(windowId)
     if (!s?.open || h?.tabId !== tabId) {
@@ -624,6 +661,14 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
       s.searched = true
       refreshTab(tabId)
     })
+    // A Peek's page in full screen covers its card, and the find bar with it (PK-11).
+    const onFullscreen = () =>
+      setImmediate(() => {
+        const windowId = windows.windowOfTab(tabId)
+        if (windowId && store.state.tabs[tabId]?.floating === 'peek') refreshShown(windowId)
+      })
+    contents.on('enter-html-full-screen', onFullscreen)
+    contents.on('leave-html-full-screen', onFullscreen)
     contents.on('did-navigate', () => {
       // A new page: the old matches are gone (the bar stays open with its text).
       allowPinch(contents)
@@ -641,7 +686,7 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
     contents.once('destroyed', () => {
       const s = finds.get(tabId)
       finds.delete(tabId)
-      if (s?.open) for (const windowId of windows.ids()) if (activeOf(windowId) === tabId) refresh(windowId)
+      if (s?.open) for (const windowId of windows.ids()) if (targetTab(windowId) === tabId) refresh(windowId)
     })
   })
 

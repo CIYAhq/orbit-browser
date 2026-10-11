@@ -1,5 +1,7 @@
 import { clipboard, type WebContents } from 'electron'
 import { sameZoom, zoomPercent, zoomStep } from '../../shared/nav'
+import type { Rect } from '../../shared/rpc'
+import type { TabId, WindowId } from '../../shared/state'
 import { cleanUrl, markdownLink } from '../../shared/tabs'
 import { fallbackTitle } from '../../shared/url'
 import { runDevtoolsAction } from '../devtools/control'
@@ -18,6 +20,24 @@ let pageZoom: PageZoom = (contents, direction) => {
 /** Page zoom (NV-06) zooms a Peek's or a Mini Window's page as it zooms a tab's (review A-F4). */
 export function setPageZoom(zoom: PageZoom): void {
   pageZoom = zoom
+}
+
+/** The page of a window's open Peek and its card's place (window coordinates). */
+export interface PeekPage {
+  tabId: TabId
+  card: Rect
+}
+
+let peekPages: (windowId: WindowId) => PeekPage | undefined = () => undefined
+
+/** The Peek says which page it shows, so find in page acts on it while it is open (PK-11). */
+export function setPeekPages(pages: (windowId: WindowId) => PeekPage | undefined): void {
+  peekPages = pages
+}
+
+/** The page a window's Peek shows while it is open and settled in its card; undefined otherwise. */
+export function peekPageOf(windowId: WindowId): PeekPage | undefined {
+  return peekPages(windowId)
 }
 
 /**

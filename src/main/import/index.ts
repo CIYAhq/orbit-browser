@@ -22,6 +22,7 @@ import {
 import type { WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import type { HistoryService } from '../history'
+import { withDialog } from '../media/dialog-watch'
 import type { CallContext } from '../registry'
 import { type FoundSource, findSources, inspectProfile, publicSource } from './browsers'
 import { removeScratch, setCopyStep, setScratchFolder, withScratch } from './copy'
@@ -188,7 +189,9 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
         { name: 'All files', extensions: ['*'] },
       ],
     }
-    const picked = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options)
+    const picked = parent
+      ? await withDialog(parent, dialog.showOpenDialog(parent, options))
+      : await dialog.showOpenDialog(options)
     const path = picked.canceled ? undefined : picked.filePaths[0]
     if (!path) return null
     const name = basename(path)
@@ -335,7 +338,9 @@ export function registerImport(ctx: MainContext, history: HistoryService): void 
       defaultPath: join(app.getPath('documents'), 'Orbit pinned items.html'),
       filters: [{ name: 'Bookmarks', extensions: ['html'] }],
     }
-    const picked = parent ? await dialog.showSaveDialog(parent, options) : await dialog.showSaveDialog(options)
+    const picked = parent
+      ? await withDialog(parent, dialog.showSaveDialog(parent, options))
+      : await dialog.showSaveDialog(options)
     if (picked.canceled || !picked.filePath) return null
     const nodes = pinnedExport(store.state, { profileId, includeToday: includeToday === true })
     await writeFile(picked.filePath, writeBookmarksHtml(nodes), 'utf8')

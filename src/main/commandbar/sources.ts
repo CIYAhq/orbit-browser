@@ -4,10 +4,21 @@
  * the previous documents, and a state change only rebuilds what changed.
  */
 import { ACTIONS, formatAccelerator, shortcutsFor } from '../../shared/actions'
+import { SETTINGS_ACTIONS } from '../../shared/commands/settings'
 import { isFolderId, isSplitId, isTabId } from '../../shared/ids'
 import { keymapVersion } from '../../shared/keymap'
-import type { ArchivedTab, FolderId, ItemId, OrbitState, ProfileId, SpaceId, Tab, TabId } from '../../shared/state'
-import { splitLeaves } from '../../shared/tree'
+import { paneOrder } from '../../shared/split'
+import type {
+  ArchivedTab,
+  FolderId,
+  ItemId,
+  OrbitState,
+  ProfileId,
+  SpaceId,
+  SplitId,
+  Tab,
+  TabId,
+} from '../../shared/state'
 import { type ArchiveSource, archiveSource } from '../archive/inbox'
 import { hostOf, urlKeyOf } from '../history/store'
 import { isUnplacedImportTab, unplacedImportVersion } from '../import/unplaced'
@@ -18,7 +29,8 @@ type Section = 'favorite' | 'pinned' | 'today'
 
 interface Layout {
   section: Map<TabId, Section>
-  split: Map<TabId, TabId[]>
+  /** Each split pane's split, with every pane in order. */
+  split: Map<TabId, { id: SplitId; leaves: TabId[] }>
   folders: FolderDoc[]
 }
 
@@ -27,6 +39,11 @@ export const ARCHIVE_DOCS_MAX = 5000
 
 /** Actions the bar never lists (they open the bar itself). */
 const NOT_IN_BAR = new Set(['tab.new', 'url.edit'])
+/**
+ * Settings sections and common settings (CB-05, ST-02): the settings lane lists one action per
+ * section of its registry (src/renderer/src/settings/registry.ts) in SETTINGS_ACTIONS.
+ */
+const SETTINGS_IDS = new Set(['app.settings', ...SETTINGS_ACTIONS.map((a) => a.id)])
 /** Actions that work without a current tab even though their id says otherwise. */
 const NO_TAB_NEEDED = new Set([
   'tab.reopenClosed',
@@ -74,6 +91,23 @@ export class SourceCache {
     if (sameRefs(refs, this.tabsRef)) return this.tabDocs
     this.tabsRef = refs
     const docs: TabDoc[] = []
+    // A split is one result (SV-21): each pane's doc carries the split's title and favicons.
+    const splits = new Map<SplitId, Pick<TabDoc, 'splitId' | 'splitTitle' | 'splitNameLower' | 'splitFavicons'>>()
+    const splitOf = (id: SplitId, leaves: TabId[]) => {
+      let info = splits.get(id)
+      if (!info) {
+        const name = state.splits[id]?.name
+        const titles = leaves.map((t) => state.tabs[t]?.customTitle ?? state.tabs[t]?.title ?? '')
+        info = {
+          splitId: id,
+          splitTitle: name ?? titles.join(' | '),
+          ...(name ? { splitNameLower: name.toLowerCase() } : {}),
+          splitFavicons: leaves.map((t) => state.tabs[t]?.favicon ?? null),
+        }
+        splits.set(id, info)
+      }
+      return info
+    }
     for (const tab of Object.values(state.tabs)) {
       if (isUnplacedImportTab(tab.id) && !layout.section.has(tab.id)) continue
       let doc = this.tabDocCache.get(tab)
@@ -81,10 +115,8 @@ export class SourceCache {
         doc = makeTabDoc(tab, layout.section.get(tab.id))
         this.tabDocCache.set(tab, doc)
       }
-      const leaves = layout.split.get(tab.id)
-      if (leaves) {
-        doc = { ...doc, splitFavicons: leaves.map((id) => state.tabs[id]?.favicon ?? null) }
-      }
+      const split = layout.split.get(tab.id)
+      if (split) doc = { ...doc, ...splitOf(split.id, split.leaves) }
       docs.push(doc)
     }
     this.tabDocs = docs
@@ -169,6 +201,7 @@ export class SourceCache {
         keywords: [a.category.toLowerCase(), ...(a.keywords ?? []).map((k) => k.toLowerCase())],
         initials: initials(titleLower),
         needsTab: actionNeedsTab(a.id, a.category),
+        ...(SETTINGS_IDS.has(a.id) ? { settings: true } : {}),
       }
     })
     return this.actionDocs
@@ -193,7 +226,7 @@ export class SourceCache {
     if (sameRefs(refs, this.layoutRefs)) return this.layout
     this.layoutRefs = refs
     const section = new Map<TabId, Section>()
-    const split = new Map<TabId, TabId[]>()
+    const split = new Map<TabId, { id: SplitId; leaves: TabId[] }>()
     const folders: FolderDoc[] = []
     const seenFolders = new Set<FolderId>()
     const visit = (id: ItemId, sec: Section, depth: number, spaceId?: SpaceId) => {
@@ -210,10 +243,11 @@ export class SourceCache {
       } else if (isSplitId(id)) {
         const s = state.splits[id]
         if (!s) return
-        const leaves = splitLeaves(s.layout)
+        // In reading order, as the split's sidebar row shows its panes (SV-21).
+        const leaves = paneOrder(s.layout)
         for (const tabId of leaves) {
           section.set(tabId, sec)
-          split.set(tabId, leaves)
+          split.set(tabId, { id, leaves })
         }
       }
     }

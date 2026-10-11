@@ -1,8 +1,13 @@
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { app, BrowserWindow, globalShortcut, Menu, nativeTheme, screen, type WebContents } from 'electron'
 import { toElectronAccelerator } from '../../shared/actions'
 import { createWindowState } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
 import { routeFor } from '../../shared/link-routing'
+import { EASE } from '../../shared/motion'
+import { findTextFromSelection } from '../../shared/nav'
+import { cubicBezier } from '../../shared/pip'
 import { isPrivateTab } from '../../shared/private'
 import type { Rect } from '../../shared/rpc'
 import type { OrbitState, ProfileId, SpaceId, TabId, WindowId } from '../../shared/state'
@@ -11,12 +16,15 @@ import { insertItem, removeItem, sectionOf } from '../../shared/tree'
 import { engineForWindow, parseInput, siteOf } from '../../shared/url'
 import type { MainContext } from '../context'
 import { reducedMotion } from '../motion'
+import { NAV_WORLD } from '../nav/focus'
 import { archiveFloating, floatingTab, keepFloatingPagesOutOfTabClose } from '../peek/floating'
 import { runPageAction } from '../peek/page-actions'
 import type { CallContext } from '../registry'
 import { activateInDraft, detachFromSplit, reselectAway, todayInsertIndex } from '../tabs/model'
 import { activeTabOf, loadRenderer, rendererEntry, uiWebPreferences } from '../windows'
+import { writeDesktopEntry } from './desktop-entry'
 import { miniSwitchIn, NEW_MINI_SWITCH, systemWideShortcut, TOGGLE_MINIS_SWITCH } from './switches'
+import { registerTrayButton } from './tray'
 
 /**
  * Mini Windows (MW-*): small, separate windows holding one page, for links from other apps and
@@ -43,6 +51,31 @@ interface Mini {
   moved?: boolean
   /** The page is in HTML fullscreen: its view covers the window. */
   fullscreen?: boolean
+  /** The command bar over the page is open (CB-23): it takes ⌘W and ⌘L first (KS-19). */
+  bar?: boolean
+  /** The page's view is hidden behind the bar's still image of it (CB-23). */
+  pageHidden?: boolean
+  /**
+   * The open grow (MW-04): waiting for the UI to take its starting size (`ready`), then growing;
+   * the page's view sits out the grow (`pageOut`) and joins at full size when it ends.
+   */
+  grow?: { ready?: (ms: number | null) => void; pageOut: boolean }
+  /** Find in the page (NV-05): its field is in the top bar. */
+  find?: MiniFind
+}
+
+interface MiniFind {
+  open: boolean
+  query: string
+  /** The latest find request: results of older ones are ignored. */
+  request: number
+}
+
+/** What the find field shows of a search (`mini:find-result`). */
+interface MiniFindResult {
+  matches: number
+  active: number
+  searched: boolean
 }
 
 /** Layout of the mini renderer (kept in step with mini.css): top bar height and card inset. */
@@ -54,6 +87,15 @@ const CASCADE = 24
 const isMac = process.platform === 'darwin'
 /** Window opacity animations exist on macOS and Windows only. */
 const canFade = isMac || process.platform === 'win32'
+/**
+ * The open grow (MW-04): the window's content starts at this scale. The OS window itself is not
+ * resized (that would lay the page out again every frame): its UI grows in its own layer.
+ */
+const GROW_FROM = 0.92
+/** How long main waits for the UI to take its starting size before showing the window anyway. */
+const GROW_READY_WAIT_MS = 100
+/** When a Linux folder build checks its desktop entry (MW-14), after launch. */
+const DESKTOP_ENTRY_DELAY_MS = 3000
 
 interface MiniApi {
   open(url?: string): WindowId | undefined
@@ -134,8 +176,18 @@ export function registerMiniWindow(ctx: MainContext): void {
   windows.addFloatingOwner((tabId) => miniOfTab(tabId)?.id)
   keepFloatingPagesOutOfTabClose(ctx)
 
+  /** Windows whose UI is up and listening (`mini.mounted`). */
+  const mounted = new Set<WindowId>()
+  /** What main sent a UI before it was up, in order: a key can reach a new window's page first. */
+  const outbox = new Map<WindowId, [string, unknown][]>()
   const send = (mini: Mini, channel: string, payload: unknown = {}) => {
-    if (!mini.win.isDestroyed()) mini.win.webContents.send(`orbit:${channel}`, payload)
+    if (mini.win.isDestroyed()) return
+    // The open grow is heard from the moment the UI's code loads (grow.ts); the rest waits for it.
+    if (channel !== 'mini:grow' && !mounted.has(mini.id)) {
+      outbox.set(mini.id, [...(outbox.get(mini.id) ?? []), [channel, payload]])
+      return
+    }
+    mini.win.webContents.send(`orbit:${channel}`, payload)
   }
 
   // ---- Profiles and Spaces ----
@@ -192,6 +244,24 @@ export function registerMiniWindow(ctx: MainContext): void {
     })
     windows.registerUi(win.webContents, id)
     windows.attachShortcuts(win.webContents)
+    windows.reloadUiOnCrash(win.webContents, 'mini')
+    win.once('closed', () => {
+      mounted.delete(id)
+      outbox.delete(id)
+    })
+    // The UI loads again (a reload, or after a crash): what main sends waits until it is up, and
+    // what only the old UI showed goes: the bar over the page and the find field. Only a load that
+    // commits counts: one that will-navigate cancels leaves the old UI up (D74).
+    let loads = 0
+    win.webContents.on('render-process-gone', () => mounted.delete(id))
+    win.webContents.on('did-navigate', () => {
+      mounted.delete(id)
+      const mini = loads++ > 0 ? minis.get(id) : undefined
+      if (mini) {
+        uncover(mini)
+        closeFind(mini, true)
+      }
+    })
     // Orbit's own UI never navigates away or opens windows.
     win.webContents.on('will-navigate', (event, url) => {
       const entry = rendererEntry()
@@ -242,9 +312,20 @@ export function registerMiniWindow(ctx: MainContext): void {
     if (!view) return
     view.setBounds(roundRect(cardRect(mini)))
     view.setBorderRadius(MINI_RADIUS)
-    view.setVisible(true)
+    // While the window grows open the page waits out of sight, then joins at full size (MW-04).
+    view.setVisible(!mini.grow)
+    if (mini.grow) mini.grow.pageOut = true
     mini.win.contentView.addChildView(view)
     if (mini.win.isFocused()) view.webContents.focus()
+  }
+
+  /** The bar over the page is gone: the page's view comes back from behind its still image (CB-23). */
+  const uncover = (mini: Mini) => {
+    mini.bar = false
+    if (!mini.pageHidden) return
+    mini.pageHidden = false
+    const view = mini.tabId ? tabs.get(mini.tabId) : undefined
+    view?.setVisible(true)
   }
 
   const detachPage = (mini: Mini) => {
@@ -257,7 +338,9 @@ export function registerMiniWindow(ctx: MainContext): void {
     }
   }
 
-  const fadeIn = (win: BrowserWindow) => {
+  // The window fades in on the curve its UI grows on (the snappy token, FL-01), so the two move as one.
+  const fadeEase = cubicBezier(...EASE.snappy)
+  const fadeIn = (win: BrowserWindow, ms: number) => {
     if (!canFade || reducedMotion(ctx)) {
       win.show()
       return
@@ -267,10 +350,61 @@ export function registerMiniWindow(ctx: MainContext): void {
     const start = Date.now()
     const timer = setInterval(() => {
       if (win.isDestroyed()) return clearInterval(timer)
-      const t = Math.min(1, (Date.now() - start) / 180)
-      win.setOpacity(1 - (1 - t) ** 3)
+      const t = Math.min(1, (Date.now() - start) / ms)
+      win.setOpacity(fadeEase(t))
       if (t >= 1) clearInterval(timer)
     }, 12)
+  }
+
+  /**
+   * Shows a Mini Window with a quick scale-and-fade rather than the OS's own animation (MW-04):
+   * its UI grows from 92% to full size in its own layer as the window fades in (where windows can
+   * fade; elsewhere the UI fades too). The page's native view can't scale, so it sits out the
+   * grow and joins at full size when it ends; it has been loading all along (MW-15). `shown` runs
+   * once the window is on screen.
+   */
+  const growOpen = (mini: Mini, shown: () => void) => {
+    const win = mini.win
+    if (reducedMotion(ctx)) {
+      win.show()
+      shown()
+      return
+    }
+    const view = mini.tabId ? tabs.get(mini.tabId) : undefined
+    const pageOut = !!view && !mini.pageHidden && !mini.fullscreen
+    if (pageOut) view?.setVisible(false)
+    const grow: NonNullable<Mini['grow']> = { pageOut }
+    mini.grow = grow
+    const end = () => {
+      if (mini.grow !== grow) return
+      mini.grow = undefined
+      const page = mini.tabId ? tabs.get(mini.tabId) : undefined
+      if (!grow.pageOut || !page || win.isDestroyed() || mini.pageHidden || mini.fullscreen) return
+      page.setVisible(true)
+      // A hidden view can't take the keyboard: the page gets it now, unless the bar or find has it.
+      if (win.isFocused() && !mini.bar && !mini.find?.open) page.webContents.focus()
+    }
+    const start = (ms: number | null) => {
+      if (grow.ready !== start) return
+      grow.ready = undefined
+      clearTimeout(wait)
+      if (win.isDestroyed()) return
+      if (ms === null) {
+        // The UI didn't answer in time (still starting): the window shows without the grow.
+        send(mini, 'mini:grow', { phase: 'cancel' })
+        win.show()
+        shown()
+        end()
+        return
+      }
+      fadeIn(win, ms)
+      shown()
+      send(mini, 'mini:grow', { phase: 'run' })
+      setTimeout(end, ms)
+    }
+    grow.ready = start
+    const wait = setTimeout(() => start(null), GROW_READY_WAIT_MS)
+    send(mini, 'mini:grow', { phase: 'prepare', scale: GROW_FROM, fade: !canFade })
   }
 
   /**
@@ -317,9 +451,10 @@ export function registerMiniWindow(ctx: MainContext): void {
       win.setAlwaysOnTop(true, 'floating')
       win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     }
-    fadeIn(win)
-    win.focus()
-    if (overFullscreen) setTimeout(() => !win.isDestroyed() && win.setVisibleOnAllWorkspaces(false), 300)
+    growOpen(mini, () => {
+      win.focus()
+      if (overFullscreen) setTimeout(() => !win.isDestroyed() && win.setVisibleOnAllWorkspaces(false), 300)
+    })
   }
 
   /** Closes idle Mini Windows after the set time, archiving their page; never while media plays (MW-09). */
@@ -346,8 +481,10 @@ export function registerMiniWindow(ctx: MainContext): void {
       mini.focused = true
       mini.lastActive = Date.now()
       clearTimeout(mini.archiveTimer)
+      // The page takes the keyboard, unless the bar or the find field has it: the window can come
+      // to the front a moment after ⌘F opened the field (a busy machine).
       const contents = mini.tabId ? tabs.contents(mini.tabId) : undefined
-      if (contents) contents.focus()
+      if (contents && !mini.bar && !mini.find?.open) contents.focus()
     })
     win.on('blur', () => {
       mini.focused = false
@@ -532,6 +669,7 @@ export function registerMiniWindow(ctx: MainContext): void {
     // The main window takes the page's view: it leaves the Mini Window first. The page is the
     // main window's from here on, while this window shrinks and fades out showing its old bar.
     send(mini, 'mini:leaving')
+    uncover(mini)
     detachPage(mini)
     mini.moved = true
     mini.tabId = undefined
@@ -573,6 +711,7 @@ export function registerMiniWindow(ctx: MainContext): void {
     if (!tabId || !tab || !state.profiles[profileId] || tab.profileId === profileId) return
     const url = tabs.contents(tabId)?.getURL() || tab.url
     const spaceId = spaceForProfile(state, profileId)
+    uncover(mini)
     detachPage(mini)
     tabs.savedHistory.delete(tabId)
     tabs.sleep(tabId)
@@ -602,6 +741,79 @@ export function registerMiniWindow(ctx: MainContext): void {
       else m.win.showInactive()
     }
     if (!anyVisible) open.at(-1)?.win.focus()
+  }
+
+  // ---- Find in page (NV-05) ----
+
+  const pageContents = (mini: Mini): WebContents | undefined => {
+    const contents = mini.tabId ? tabs.contents(mini.tabId) : undefined
+    return contents && !contents.isDestroyed() ? contents : undefined
+  }
+  const findResult = (mini: Mini, result: MiniFindResult) => send(mini, 'mini:find-result', result)
+
+  /** Searches the page for `query` from the start (a new text), or for its next match forward or back. */
+  const search = (mini: Mini, query: string, opts: { next?: boolean; forward?: boolean } = {}) => {
+    const contents = pageContents(mini)
+    const f = mini.find
+    if (!contents || !f?.open) return
+    const fresh = query !== f.query || !opts.next || f.request === 0
+    f.query = query
+    if (!query) {
+      f.request = 0
+      contents.stopFindInPage('clearSelection')
+      findResult(mini, { matches: 0, active: 0, searched: false })
+      return
+    }
+    try {
+      f.request = contents.findInPage(query, { forward: opts.forward ?? true, findNext: fresh })
+    } catch {
+      f.request = 0
+    }
+  }
+
+  /**
+   * ⌘F: the find field opens in the top bar with the keyboard, on the page's selected text, else
+   * this window's last search (NV-05).
+   */
+  const openFind = (mini: Mini) => {
+    const contents = pageContents(mini)
+    if (!contents || mini.win.isDestroyed()) return
+    if (!mini.find) mini.find = { open: false, query: '', request: 0 }
+    const f = mini.find
+    const reopened = !f.open
+    f.open = true
+    mini.win.webContents.focus()
+    send(mini, 'mini:find', { query: f.query })
+    if (reopened && f.query) search(mini, f.query)
+    contents
+      .executeJavaScriptInIsolatedWorld(NAV_WORLD, [{ code: 'String(getSelection() || "")' }])
+      .then((selected: unknown) => {
+        const text = typeof selected === 'string' ? findTextFromSelection(selected) : ''
+        // The field takes it unless something was typed there meanwhile.
+        if (text && text !== f.query && f.open && mini.find === f)
+          send(mini, 'mini:find', { query: text, selection: true })
+      })
+      .catch(() => {})
+  }
+
+  /** ⌘G, F3, Enter: the next match (or the previous); with the field closed it opens on the last search. */
+  const stepFind = (mini: Mini, forward: boolean) => {
+    const f = mini.find
+    if (!f?.open || !f.query) {
+      openFind(mini)
+      return
+    }
+    search(mini, f.query, { next: true, forward })
+  }
+
+  const closeFind = (mini: Mini, keepFocus = false) => {
+    const f = mini.find
+    if (!f?.open) return
+    f.open = false
+    f.request = 0
+    const contents = pageContents(mini)
+    contents?.stopFindInPage('keepSelection')
+    if (!keepFocus) contents?.focus()
   }
 
   // ---- Commands, events, actions ----
@@ -649,11 +861,47 @@ export function registerMiniWindow(ctx: MainContext): void {
     if (items.length === 0) return
     Menu.buildFromTemplate(items).popup({ window: mini.win, x: Math.round(x), y: Math.round(y) })
   })
-  // Esc in the address field: the keyboard goes back to the page, which had it before ⌘L (KS-16, KS-20).
+  // The bar over the page closed (Esc, ⌘W, ⌘L, a choice): the keyboard goes back to the page, which
+  // had it before ⌘L (KS-16, KS-20). The page shows again first, so it can take the keyboard.
   commands.register('mini.focusPage', (_args, c) => {
     const mini = miniOf(c)
+    if (mini) uncover(mini)
     const contents = mini?.tabId ? tabs.contents(mini.tabId) : undefined
     if (contents && !contents.isDestroyed()) contents.focus()
+  })
+  // CB-23: the bar over the page. Its list covers the page: the renderer draws a still image of
+  // the page on the card, then main hides the page's view until the bar closes.
+  commands.register('mini.bar', async ({ open }, c) => {
+    const mini = miniOf(c)
+    if (!mini) return null
+    if (!open) {
+      uncover(mini)
+      return null
+    }
+    mini.bar = true
+    const view = mini.tabId ? tabs.get(mini.tabId) : undefined
+    if (!view || view.webContents.isDestroyed() || mini.fullscreen) return null
+    try {
+      const image = await view.webContents.capturePage()
+      return image.isEmpty() ? null : `data:image/jpeg;base64,${image.toJPEG(85).toString('base64')}`
+    } catch {
+      return null
+    }
+  })
+  commands.register('mini.hidePage', (_args, c) => {
+    const mini = miniOf(c)
+    const view = mini?.tabId ? tabs.get(mini.tabId) : undefined
+    if (!mini?.bar || !view || mini.fullscreen) return
+    view.setVisible(false)
+    mini.pageHidden = true
+  })
+  commands.register('mini.find', ({ query, next, forward }, c) => {
+    const mini = miniOf(c)
+    if (mini) search(mini, query, { next, forward })
+  })
+  commands.register('mini.findClose', ({ keepFocus }, c) => {
+    const mini = miniOf(c)
+    if (mini) closeFind(mini, keepFocus)
   })
   commands.register('mini.control', ({ op }, c) => {
     const mini = miniOf(c)
@@ -670,6 +918,20 @@ export function registerMiniWindow(ctx: MainContext): void {
     mini.rect = rect
     const view = mini.tabId ? tabs.get(mini.tabId) : undefined
     if (view && !mini.fullscreen) view.setBounds(roundRect(rect))
+  })
+  // The UI is up: what was sent before goes now (a spare's UI is up before it becomes a Mini Window).
+  ctx.events.on('mini.mounted', (_args, { windowId }) => {
+    if (!windowId) return
+    mounted.add(windowId)
+    const held = outbox.get(windowId) ?? []
+    outbox.delete(windowId)
+    const mini = minis.get(windowId)
+    if (mini) for (const [channel, payload] of held) send(mini, channel, payload)
+  })
+  // The UI took the grow's starting size: the window shows and grows (MW-04).
+  ctx.events.on('mini.growReady', ({ ms }, { windowId }) => {
+    const ready = minis.get(windowId ?? '')?.grow?.ready
+    if (ready) ready(Number.isFinite(ms) && ms > 0 ? Math.min(ms, 1000) : null)
   })
 
   actions.register('window.newMini', () => {
@@ -696,6 +958,12 @@ export function registerMiniWindow(ctx: MainContext): void {
   actions.intercept((id, c) => {
     const mini = miniOf(c)
     if (!mini) return false
+    // KS-19: the bar over the page takes ⌘W and ⌘L first, as the main window's bar does: each
+    // closes it (CB-23).
+    if (mini.bar && (id === 'tab.close' || id === 'url.edit')) {
+      send(mini, 'mini:close-bar')
+      return true
+    }
     switch (id) {
       case 'tab.close':
       case 'window.close':
@@ -708,7 +976,10 @@ export function registerMiniWindow(ctx: MainContext): void {
         if (mini.tabId) send(mini, 'mini:choose-space')
         return true
       case 'url.edit':
-        // The keyboard goes to the address field too: the page had it (KS-20, keys lane).
+        // The keyboard goes to the address field too: the page had it (KS-20, keys lane). Over a
+        // page the bar counts as open from now, before the UI says so: the window's focus or the
+        // end of its open grow (MW-04) arriving meanwhile leaves the keyboard in the bar.
+        if (mini.tabId) mini.bar = true
         if (!mini.win.isDestroyed()) mini.win.webContents.focus()
         send(mini, 'mini:edit-url')
         return true
@@ -718,6 +989,14 @@ export function registerMiniWindow(ctx: MainContext): void {
         void actions.run('tab.new', { windowId: mainId })
         return true
       }
+      // Find in the page, with its field in the top bar (NV-05; keys review F3).
+      case 'page.find':
+        openFind(mini)
+        return true
+      case 'page.findNext':
+      case 'page.findPrevious':
+        stepFind(mini, id === 'page.findNext')
+        return true
     }
     if (APP_ACTIONS.has(id) || id === 'mini.toggleAll') return false
     const contents = mini.tabId ? tabs.contents(mini.tabId) : undefined
@@ -727,6 +1006,18 @@ export function registerMiniWindow(ctx: MainContext): void {
 
   // Pages in a Mini Window: a video's fullscreen covers the window (MW-12).
   ctx.hooks.tabCreated.push((tabId, contents: WebContents) => {
+    contents.on('found-in-page', (_event, result) => {
+      const mini = miniOfTab(tabId)
+      if (!mini?.find?.open || result.requestId !== mini.find.request) return
+      findResult(mini, { matches: result.matches, active: result.activeMatchOrdinal, searched: true })
+    })
+    // A new page: the old matches are gone (the field stays open with its text).
+    contents.on('did-navigate', () => {
+      const mini = miniOfTab(tabId)
+      if (!mini?.find?.open) return
+      mini.find.request = 0
+      findResult(mini, { matches: 0, active: 0, searched: false })
+    })
     // A page that closes itself (window.close()) closes its Mini Window.
     contents.once('destroyed', () => {
       const mini = miniOfTab(tabId)
@@ -816,6 +1107,20 @@ export function registerMiniWindow(ctx: MainContext): void {
       task(TOGGLE_MINIS_SWITCH, 'Show/Hide All Mini Windows', 'Show or hide every open Mini Window'),
     ])
   }
+  // Linux launchers: the same two entries as launcher actions, in the desktop entry a folder build
+  // writes for itself (MW-14). A moment after launch, off the start-up path.
+  if (process.platform === 'linux' && app.isPackaged && !ctx.e2e) {
+    setTimeout(() => {
+      const icon = join(process.resourcesPath, 'icon.png')
+      writeDesktopEntry({
+        env: process.env,
+        home: app.getPath('home'),
+        appName: app.name,
+        execPath: process.execPath,
+        icon: existsSync(icon) ? icon : undefined,
+      }).catch((err) => console.error('[mini] could not write the desktop entry', err))
+    }, DESKTOP_ENTRY_DELAY_MS)
+  }
   const onSwitch = (argv: readonly string[]) => {
     const which = miniSwitchIn(argv)
     if (which === 'new') open()
@@ -824,6 +1129,9 @@ export function registerMiniWindow(ctx: MainContext): void {
   app.on('second-instance', (_event, argv) => onSwitch(argv))
   // Launched from the jump list while Orbit was not running.
   if (miniSwitchIn(process.argv)) setImmediate(() => onSwitch(process.argv))
+
+  // The menu-bar or tray button, when Settings turns it on (MW-13).
+  registerTrayButton(ctx, { open: () => open(), toggleAll })
 
   // macOS dock menu: a blank Mini Window, and show/hide them all (MW-08).
   if (isMac) {

@@ -13,16 +13,30 @@
  * process makes the borrowed view a little taller than the page area, and the page's `resize`
  * when the view is placed back in its window puts the video back before that frame is drawn.
  *
+ * Media inside frames (embedded players, MD-01, MD-09): the same script runs in each frame of the
+ * tab that has media elements, in the frame's own world (Electron runs scripts in a frame only
+ * there, and frames get no preload, D40). There it sits on a randomly named, hidden, frozen
+ * property instead of `__orbitMedia`. A video in a frame floats through its frame elements: each
+ * frame on the way lifts the frame element holding it (`liftFrame`) to the player's corner at the
+ * borrowed view's size, so every frame on the way has that size, and the video lifts in its own
+ * frame as usual. A frame learns its new size only when its parent lays it out, after the events
+ * of that frame: there the video also goes back from a ResizeObserver, which runs before the frame
+ * is drawn.
+ *
  * Reports follow `AgentSnapshot` in src/shared/media.ts.
  */
 
 /** Isolated world for the media script (the tabs runtime uses 999, the fullscreen fix 1001). */
 export const MEDIA_WORLD = 1010
 
-/** Installs the script once per document; returns the first report either way. */
-export const AGENT_SOURCE = `(() => {
+/**
+ * The script, installed on `handle` (an expression for the property that holds it); `define`
+ * installs `api` there; `frame` for a frame's page. Installs once per document; returns the first
+ * report either way.
+ */
+const agentScript = (handle: string, define: string, frame: boolean) => `(() => {
   const w = window
-  if (w.__orbitMedia) return w.__orbitMedia.state()
+  if (${handle}) return ${handle}.state()
   let version = 1
   let waiter = null
   let timer = 0
@@ -41,14 +55,20 @@ export const AGENT_SOURCE = `(() => {
     const r = m.getBoundingClientRect()
     return r.width * r.height
   }
+  // A video's size as laid out, at most its document's viewport (the frame's, in a frame).
+  const shownArea = (m) => {
+    const r = m.getBoundingClientRect()
+    return Math.min(r.width, innerWidth) * Math.min(r.height, innerHeight)
+  }
   const seekable = (m) => Number.isFinite(m.duration) && m.duration > 0 && m.seekable.length > 0
   const seekEnd = (m) => Math.min(m.duration, m.seekable.end(m.seekable.length - 1))
   const clamp = (n, lo, hi) => Math.min(Math.max(n, lo), hi)
 
   // The media the controls act on: the video in Orbit's player; else playing first, then
-  // audible, then the last one played, then the largest video.
-  function main() {
-    if (lift) return lift.v
+  // audible, then the last one played, then the largest video. Its score lets the main process
+  // pick one across the tab's frames (the player's video scores highest).
+  function ranked() {
+    if (lift && !lift.frame) return { m: lift.v, s: 100 }
     let best = null
     let bestScore = -1
     for (const m of list()) {
@@ -64,8 +84,9 @@ export const AGENT_SOURCE = `(() => {
         bestScore = s
       }
     }
-    return best
+    return { m: best, s: best ? bestScore : 0 }
   }
+  const main = () => ranked().m
 
   // The page's main video for automatic picture-in-picture (MD-01): the largest playing, unmuted,
   // visible video. Muted decorative loops and hidden players don't count. In a call (the page
@@ -172,7 +193,9 @@ export const AGENT_SOURCE = `(() => {
   }
 
   function state() {
-    const m = main()
+    const { m, s } = ranked()
+    const held = lift && !lift.frame ? lift : null
+    const pv = pipVideo()
     let playing = false
     let active = false
     for (const x of list()) {
@@ -182,11 +205,13 @@ export const AGENT_SOURCE = `(() => {
     }
     let title = ''
     let artist = ''
+    let artwork = ''
     try {
       const md = navigator.mediaSession && navigator.mediaSession.metadata
       if (md) {
         title = String(md.title || '').slice(0, 200)
         artist = String(md.artist || '').slice(0, 200)
+        artwork = pickArtwork(md.artwork)
       }
     } catch {}
     const tracks = localTracks()
@@ -198,12 +223,16 @@ export const AGENT_SOURCE = `(() => {
       active,
       controllable: !!m,
       video: !!(m && frames(m)),
-      pip: !!document.pictureInPictureElement || !!lift,
-      player: !!lift,
-      aspect: lift && frames(lift.v) ? lift.v.videoWidth / lift.v.videoHeight : 0,
-      pipCandidate: !!pipVideo(),
+      pip: !!document.pictureInPictureElement || !!held,
+      player: !!held,
+      aspect: held && frames(held.v) ? held.v.videoWidth / held.v.videoHeight : 0,
+      pipCandidate: !!pv,
+      score: s,
+      pipArea: pv ? Math.round(shownArea(pv)) : 0,
+      resumable: pausedByOrbit.some((x) => x.isConnected),
       title,
       artist,
+      artwork,
       seekable: !!(m && seekable(m)),
       ended: !!(m && m.ended),
       time: timeOf(m),
@@ -213,6 +242,24 @@ export const AGENT_SOURCE = `(() => {
       camera: cams.length > 0,
       cameraOff: cams.length > 0 && cams.every((t) => !t.enabled),
     }
+  }
+
+  // The Media Session's artwork for the sidebar controller (MD-09): the smallest image of at
+  // least 64 px, else the largest; web and data: images only.
+  function pickArtwork(list) {
+    let best = ''
+    let bestRank = -1
+    for (const a of list || []) {
+      const src = String((a && a.src) || '')
+      if (!/^(https?:|data:image\\/)/.test(src) || src.length > 8192) continue
+      const size = Math.max(0, ...String(a.sizes || '').split(/\\s+/).map((s) => parseInt(s, 10) || 0))
+      const rank = size >= 64 ? 1e5 - size : size
+      if (rank > bestRank) {
+        best = src
+        bestRank = rank
+      }
+    }
+    return best
   }
 
   function bump(now) {
@@ -245,10 +292,12 @@ export const AGENT_SOURCE = `(() => {
     )
   }
 
-  // A finished video leaves picture-in-picture and doesn't replay (MD-07).
+  // A finished video leaves picture-in-picture and doesn't replay (MD-07). Only the engine's own
+  // events count: a page can dispatch a fake one, but it can't make it trusted (D71).
   document.addEventListener(
     'ended',
     (e) => {
+      if (!e.isTrusted) return
       if (e.target === document.pictureInPictureElement && !e.target.loop) exitPip()
       // Orbit's player closes first (main hides the window, then puts the video back).
       if (lift && e.target === lift.v && !lift.v.loop) endPip('ended')
@@ -264,9 +313,11 @@ export const AGENT_SOURCE = `(() => {
   // How the engine's own picture-in-picture ended (MD-07). Its × pauses a file-backed video right
   // after leaving and its "Back to tab" doesn't, which tells the two apart. × keeps the media
   // playing as audio (it then shows in the sidebar). A live stream can't tell them apart: treated as ×.
+  // A page's own fake leave is ignored: "back" would select its tab and raise the window (D71).
   document.addEventListener(
     'leavepictureinpicture',
     (e) => {
+      if (!e.isTrusted) return
       const v = e.target
       if (orbitExit) {
         orbitExit = false
@@ -287,6 +338,9 @@ export const AGENT_SOURCE = `(() => {
         if (done) return
         done = true
         v.removeEventListener('pause', onPause)
+        // Still showing here: the page moved its picture-in-picture to another of its videos.
+        // Nothing ended, and nothing comes forward (D74).
+        if (document.pictureInPictureElement) return
         endPip('back')
       }, 300)
       v.addEventListener('pause', onPause, { once: true })
@@ -307,12 +361,28 @@ export const AGENT_SOURCE = `(() => {
 
   // The engine's own picture-in-picture window, used while the tab stays on screen (MD-02).
   // auto: only the page's main playing, unmuted video (MD-01); otherwise any video with frames.
-  async function pip(on, auto) {
+  // dry: only says whether there is one to show.
+  async function pip(on, auto, dry) {
     if (!on) return exitPip()
     const m = main()
     const v = pipVideo() || (!auto && m && frames(m) && !m.disablePictureInPicture ? m : null)
-    if (!v) return false
+    if (!v || dry) return !!v
     if (document.pictureInPictureElement === v) return true
+    try {
+      await v.requestPictureInPicture()
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  // The page's own menu on a video in a frame (MD-02): the video under the point (CSS px of this
+  // frame's page), else the frame's main video.
+  async function pipAt(on, x, y) {
+    if (!on) return exitPip()
+    const el = Number.isFinite(x) && Number.isFinite(y) ? document.elementFromPoint(x, y) : null
+    const v = el && (el.tagName === 'VIDEO' ? el : el.closest('video'))
+    if (!v || !frames(v)) return pip(true, false)
     try {
       await v.requestPictureInPicture()
       return true
@@ -325,8 +395,9 @@ export const AGENT_SOURCE = `(() => {
 
   const LIFT = 'data-orbit-pip'
   // The lift's rules weigh three ids more than the attribute: a page's own !important rules on its
-  // video (say '#player video{width:100%!important}') must not win over them.
-  const LIFTED = 'video[' + LIFT + ']:not(#_):not(#_):not(#_)'
+  // video (say '#player video{width:100%!important}') must not win over them. The lifted element
+  // is the video, or the frame element on the way to it ({ frame: true }, never the player's video).
+  const LIFTED = '[' + LIFT + ']:not(#_):not(#_):not(#_)'
   let lift = null
   let chosen = null
   let removal = null
@@ -350,7 +421,7 @@ export const AGENT_SOURCE = `(() => {
   async function probe(o) {
     const was = document.pictureInPictureElement
     if (was) await exitPip()
-    const v = lift ? lift.v : was && was.isConnected && frames(was) ? was : choose(o)
+    const v = lift && !lift.frame ? lift.v : was && was.isConnected && frames(was) ? was : choose(o)
     chosen = v
     if (!v) return { ok: false }
     const r = v.getBoundingClientRect()
@@ -390,12 +461,14 @@ export const AGENT_SOURCE = `(() => {
   // Nothing changes on screen until the page has that size: the tab may still be drawn in its
   // window for a frame or two after leaving it, and must look the same there.
   function liftVideo(o) {
+    if (lift && lift.frame) return false
     const v = lift ? lift.v : chosen
     if (!v || !v.isConnected) return false
     if (!lift) lift = { v, w: o.from.w, h: o.from.h, ms: 0, scale: 1, tx: 0, ty: 0, armW: 0, armH: 0, shown: false }
     if (o.arm) {
       lift.armW = o.arm.w
       lift.armH = o.arm.h
+      watchSize()
     }
     lift.w = o.from.w
     lift.h = o.from.h
@@ -414,6 +487,55 @@ export const AGENT_SOURCE = `(() => {
   }
 
   const armed = () => Math.abs(innerWidth - lift.armW) <= 2 && Math.abs(innerHeight - lift.armH) <= 2
+
+  // ---- Videos in frames (MD-01, MD-09) ----
+
+  // This frame's place among its parent's frames (window.frames order); -1 for the top or when
+  // the parent can't see it (a frame in a shadow tree).
+  function index() {
+    try {
+      const p = w.parent
+      if (!p || p === w) return -1
+      for (let i = 0; i < p.length; i++) if (p[i] === w) return i
+    } catch {}
+    return -1
+  }
+
+  // The frame element of this document's child frame number idx.
+  function frameElement(idx) {
+    const win = w[idx]
+    if (!win) return null
+    for (const el of document.querySelectorAll('iframe, frame, object')) if (el.contentWindow === win) return el
+    return null
+  }
+
+  // Where that frame's page starts in this one's viewport (CSS px), and whether it is in view.
+  function frameBox(idx) {
+    const el = frameElement(idx)
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    const cs = getComputedStyle(el)
+    return {
+      x: r.left + el.clientLeft + (parseFloat(cs.paddingLeft) || 0),
+      y: r.top + el.clientTop + (parseFloat(cs.paddingTop) || 0),
+      visible: r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth,
+    }
+  }
+
+  // On the way to a video in a frame: holds that frame's element over this page at the player's
+  // size (arm, CSS px), so the frame's page has that size too. Shows once this page has it.
+  function liftFrame(idx, arm) {
+    const el = frameElement(idx)
+    if (!el || !arm || !(arm.w > 0) || !(arm.h > 0)) return false
+    if (lift && lift.v !== el) return false
+    if (!lift) lift = { v: el, frame: true, w: 0, h: 0, ms: 0, scale: 1, tx: 0, ty: 0, armW: 0, armH: 0, shown: false }
+    lift.w = lift.armW = arm.w
+    lift.h = lift.armH = arm.h
+    watchSize()
+    if (!lift.shown && armed()) show()
+    paint()
+    return true
+  }
 
   function show() {
     const l = lift
@@ -478,6 +600,7 @@ export const AGENT_SOURCE = `(() => {
     const l = lift
     lift = null
     chosen = null
+    unwatchSize()
     if (removal) removal.disconnect()
     removal = null
     if (!l.shown) {
@@ -517,15 +640,49 @@ export const AGENT_SOURCE = `(() => {
     } else if (lift.shown) drop()
   }, true)
 
+  // Back in its place, a frame's page gets its new size only when its parent lays it out, after
+  // that frame's events: its resize event comes with the next frame, after one is drawn with the
+  // video still lifted (main's own drop is in time only when main isn't busy). So while armed it
+  // also watches an element as big as its viewport, and its root element: a ResizeObserver runs
+  // after layout and before the frame is drawn. With the root seen to change first, the page's
+  // own observers of what moves as the video goes back hear of it in the same frame. (The tab's
+  // own page gets its resize event in time.)
+  const sizes =
+    ${frame} && typeof ResizeObserver === 'function'
+      ? new ResizeObserver(() => {
+          if (lift && lift.armW && lift.shown && !armed()) drop()
+        })
+      : null
+  let sizer = null
+  function watchSize() {
+    const root = document.documentElement
+    if (!sizes || sizer || !root) return
+    sizer = document.createElement('div')
+    const fill = { position: 'fixed', inset: '0', visibility: 'hidden', 'pointer-events': 'none', contain: 'strict' }
+    for (const k in fill) sizer.style.setProperty(k, fill[k], 'important')
+    root.appendChild(sizer)
+    sizes.observe(root)
+    sizes.observe(sizer)
+  }
+  function unwatchSize() {
+    if (!sizer) return
+    sizes.disconnect()
+    sizer.remove()
+    sizer = null
+  }
+
   // ---- Controls ----
 
   function control(action, value) {
-    if (lift) return controlOne(lift.v, action, value)
+    if (lift && !lift.frame) return controlOne(lift.v, action, value)
     const all = list()
     if (action === 'pause' || (action === 'toggle' && all.some(running))) {
-      pausedByOrbit = all.filter(running)
-      for (const x of pausedByOrbit) x.pause()
-      return pausedByOrbit.length > 0
+      // Nothing playing here (another frame of the tab was): what Orbit paused before stays.
+      const now = all.filter(running)
+      if (now.length === 0) return false
+      pausedByOrbit = now
+      for (const x of now) x.pause()
+      return true
     }
     const m = main()
     if (action === 'play' || action === 'toggle') {
@@ -588,7 +745,7 @@ export const AGENT_SOURCE = `(() => {
     return true
   }
 
-  w.__orbitMedia = {
+  const api = {
     state,
     refresh: bump,
     next(v) {
@@ -601,6 +758,7 @@ export const AGENT_SOURCE = `(() => {
     },
     control,
     pip,
+    pipAt,
     call,
     probe,
     lift: liftVideo,
@@ -608,6 +766,25 @@ export const AGENT_SOURCE = `(() => {
     zoom: zoomVideo,
     drop,
     lifted: () => !!lift,
+    index,
+    frameBox,
+    liftFrame,
   }
+  ${define}
   return state()
 })()`
+
+/** The script for the tab's own page, in Orbit's isolated world, as `window.__orbitMedia`. */
+export const AGENT_SOURCE = agentScript('w.__orbitMedia', 'w.__orbitMedia = api', false)
+
+/**
+ * The script for a frame of the tab, in the frame's own world: on the hidden, read-only property
+ * `key` (random for each run of Orbit). Unless `anyFrame` (a frame on the way to a video), only
+ * where the frame has media elements; elsewhere it returns null and installs nothing.
+ */
+export function frameAgentSource(key: string, anyFrame = false): string {
+  const handle = `w[${JSON.stringify(key)}]`
+  const define = `Object.defineProperty(w, ${JSON.stringify(key)}, { value: Object.freeze(api) })`
+  const script = agentScript(handle, define, true)
+  return anyFrame ? script : `(() => document.querySelector('video, audio') ? ${script} : null)()`
+}

@@ -207,12 +207,13 @@ function normalizeDownloads(state: OrbitState): void {
 }
 
 /**
- * Peek and Mini Window settings (PK-12, MW-04, MW-09, MW-10, ST-09): a malformed value falls back
+ * Peek and Mini Window settings (PK-12, MW-04, MW-09, MW-10, MW-13, ST-09): a malformed value falls back
  * to its default, and a rule, choice or remembered profile whose Space or profile is gone is dropped.
  */
 function normalizeLinkSettings(state: OrbitState): void {
   const s = state.settings
   if (typeof s.peekShiftClick !== 'boolean') s.peekShiftClick = DEFAULT_SETTINGS.peekShiftClick
+  if (typeof s.miniWindowTrayButton !== 'boolean') s.miniWindowTrayButton = DEFAULT_SETTINGS.miniWindowTrayButton
   const rules: unknown[] = Array.isArray(s.linkRules) ? s.linkRules : []
   s.linkRules = rules.filter(
     (r): r is OrbitState['settings']['linkRules'][number] =>
@@ -318,6 +319,7 @@ function normalizeEntities(state: OrbitState, base: OrbitState): void {
       split.id = id
       split.layout = layout
       split.createdAt = time(split.createdAt)
+      if (typeof split.icon !== 'string' || !split.icon) delete split.icon
     }
   }
   for (const [id, t] of Object.entries(state.tabs)) {

@@ -73,6 +73,7 @@ describe('which links open in Peek', () => {
   it('[PK-12] with the toggles off, pinned links open as Today tabs and Shift-click is the default', () => {
     const off = { ...on, peekExternalLinks: false, peekShiftClick: false }
     expect(decideLink('navigate', pinned, 'https://other.org/page', off)).toEqual({ to: 'tab' })
+    expect(decideLink('navigate', favorite, 'https://other.org/page', off)).toEqual({ to: 'tab' })
     expect(decideLink('navigate', pinned, 'https://mail.example.com/x', off)).toEqual({ to: 'default' })
     expect(decideLink('shift', today, 'https://other.org/page', off)).toEqual({ to: 'default' })
   })

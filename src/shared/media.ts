@@ -29,6 +29,8 @@ export interface AgentSnapshot {
   pipCandidate: boolean
   title: string
   artist: string
+  /** The Media Session's artwork (a web or data: image URL), '' when none (MD-09). */
+  artwork: string
   /** The main media has a finite length. */
   seekable: boolean
   /** The main media played to its end. */
@@ -41,6 +43,12 @@ export interface AgentSnapshot {
   micMuted: boolean
   camera: boolean
   cameraOff: boolean
+  /** How much the main media is the one to control (0 when none; the player's video scores highest). */
+  score: number
+  /** Size of the automatic picture-in-picture video (CSS px², at most the document's viewport); 0 when none. */
+  pipArea: number
+  /** Orbit paused media here that "play" resumes. */
+  resumable: boolean
 }
 
 /** Where playback was at time `at` (ms since the epoch). */
@@ -159,6 +167,109 @@ export function normalizeMediaSettings(settings: Settings, now: number): void {
   settings.pipPlacement = normalizePlacement(settings.pipPlacement) ?? { ...DEFAULT_PIP_PLACEMENT }
 }
 
+const PIP_END_REASONS: readonly PipEndReason[] = ['orbit', 'ended', 'close', 'back', 'gone']
+
+/**
+ * Reads a report from the page script. A frame's script runs where the frame's page can reach it
+ * (D67), so nothing in a report is taken on trust: wrong types become "nothing", numbers are
+ * bounded and text is cut short. Null when it isn't a report at all.
+ */
+export function parseSnapshot(raw: unknown): AgentSnapshot | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const num = (x: unknown, lo: number, hi: number): number =>
+    typeof x === 'number' && Number.isFinite(x) ? Math.min(Math.max(x, lo), hi) : lo
+  const text = (x: unknown): string => (typeof x === 'string' ? x.slice(0, 200) : '')
+  if (typeof r.v !== 'number' || !Number.isFinite(r.v)) return null
+  const yes = (k: string) => r[k] === true
+  const t = r.time && typeof r.time === 'object' ? (r.time as Record<string, unknown>) : null
+  const e = r.pipEnd && typeof r.pipEnd === 'object' ? (r.pipEnd as Record<string, unknown>) : null
+  return {
+    v: r.v,
+    playing: yes('playing'),
+    active: yes('active'),
+    controllable: yes('controllable'),
+    video: yes('video'),
+    pip: yes('pip'),
+    player: yes('player'),
+    aspect: num(r.aspect, 0, 100),
+    pipCandidate: yes('pipCandidate'),
+    title: text(r.title),
+    artist: text(r.artist),
+    artwork:
+      typeof r.artwork === 'string' && r.artwork.length <= 8192 && /^(https?:|data:image\/)/.test(r.artwork)
+        ? r.artwork
+        : '',
+    seekable: yes('seekable'),
+    ended: yes('ended'),
+    time: t
+      ? {
+          position: num(t.position, 0, 1e9),
+          duration: num(t.duration, 0, 1e9),
+          rate: num(t.rate, 0, 16) || 1,
+          paused: t.paused === true,
+          live: t.live === true,
+          at: num(t.at, 0, Number.MAX_SAFE_INTEGER),
+        }
+      : null,
+    pipEnd:
+      e && typeof e.n === 'number' && Number.isInteger(e.n) && PIP_END_REASONS.includes(e.reason as PipEndReason)
+        ? { n: e.n, reason: e.reason as PipEndReason }
+        : null,
+    mic: yes('mic'),
+    micMuted: yes('micMuted'),
+    camera: yes('camera'),
+    cameraOff: yes('cameraOff'),
+    score: num(r.score, 0, 100),
+    pipArea: num(r.pipArea, 0, 1e8),
+    resumable: yes('resumable'),
+  }
+}
+
+/**
+ * The media to show and control in a tab that has it in several documents: its own page first,
+ * then its frames (embedded players, MD-01, MD-09). The best-scoring one is the tab's main media
+ * (the player's video when there is one); anything playing, in picture-in-picture or in a call in
+ * any of them counts for the tab. The ending marks stay with each report (`pipEnd` is null here).
+ */
+export function combineSnapshots(parts: readonly AgentSnapshot[]): AgentSnapshot | undefined {
+  const first = parts[0]
+  if (!first) return undefined
+  let main = first
+  for (const p of parts) if (p.score > main.score) main = p
+  const any = (k: 'playing' | 'active' | 'controllable' | 'pip' | 'player' | 'pipCandidate' | 'resumable') =>
+    parts.some((p) => p[k])
+  const mics = parts.filter((p) => p.mic)
+  const cameras = parts.filter((p) => p.camera)
+  const held = parts.find((p) => p.player)
+  const named = main.title || main.artwork ? main : (parts.find((p) => p.title || p.artwork) ?? main)
+  return {
+    v: parts.reduce((sum, p) => sum + p.v, 0),
+    playing: any('playing'),
+    active: any('active'),
+    controllable: any('controllable'),
+    video: main.video,
+    pip: any('pip'),
+    player: any('player'),
+    aspect: held?.aspect ?? 0,
+    pipCandidate: any('pipCandidate'),
+    title: named.title,
+    artist: named.artist,
+    artwork: named.artwork,
+    seekable: main.seekable,
+    ended: main.ended,
+    time: main.time,
+    pipEnd: null,
+    mic: mics.length > 0,
+    micMuted: mics.length > 0 && mics.every((p) => p.micMuted),
+    camera: cameras.length > 0,
+    cameraOff: cameras.length > 0 && cameras.every((p) => p.cameraOff),
+    score: main.score,
+    pipArea: Math.max(...parts.map((p) => p.pipArea)),
+    resumable: any('resumable'),
+  }
+}
+
 /** A fresh media record before the page script has reported. */
 export function emptyMedia(): TabMedia {
   return {
@@ -260,13 +371,14 @@ export function shouldAutoPip(
 
 /**
  * Media keeps a tab alive (MD-12, TB-16, TD-02): playing (muted or not), in picture-in-picture,
- * or using the camera or microphone. Such tabs never sleep, auto-archive or clear.
+ * using the camera or microphone, or sharing a screen Orbit's chooser granted (`screenGranted`; the
+ * page's own count never does, D69). Such tabs never sleep, auto-archive or clear.
  */
 export function isMediaBusy(tab: Pick<Tab, 'audible' | 'media'> | undefined): boolean {
   if (!tab) return false
   if (tab.audible) return true
   const m = tab.media
-  return !!m && (m.playing || m.active || m.pip || !!m.mic || !!m.camera)
+  return !!m && (m.playing || m.active || m.pip || !!m.mic || !!m.camera || !!m.screenGranted)
 }
 
 /** Anything playing anywhere (updates wait for it, MD-12). */

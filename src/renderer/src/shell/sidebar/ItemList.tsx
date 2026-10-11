@@ -927,7 +927,7 @@ const SplitSlot = memo(function SplitSlot({
         if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) pressItem(e, splitId, 'list')
       }}
     >
-      <SplitRow splitId={splitId} depth={depth} />
+      <SplitRow splitId={splitId} depth={depth} index={index} size={size} />
     </RowSlot>
   )
 })
