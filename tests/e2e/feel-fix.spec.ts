@@ -8,6 +8,7 @@ import { note } from './frames'
 import {
   action,
   type Fixtures,
+  FRAME_SLACK,
   isMac,
   launchOrbit,
   MOD,
@@ -669,4 +670,88 @@ test('[AR-02][FL-24][DL-10] the Library made ahead of its first open draws nothi
     firstOpen: [],
     laterOpen: [],
   })
+})
+
+test('[AR-02][FL-24] a closed Library leaves the window once its page has drawn itself faded out, even when its page draws late; not on a timer', async () => {
+  const { app } = orbit
+  await run(app, 'library.open', { section: 'archive' })
+  let lib: Page | undefined
+  await expect
+    .poll(() => {
+      lib = app.windows().find((p) => p.url().includes('view=library'))
+      return !!lib
+    })
+    .toBe(true)
+  const page = lib as Page
+  await expect(page.getByTestId('library')).toHaveAttribute('data-open', 'true')
+  const opacity = () =>
+    page.evaluate(() => Number(getComputedStyle(document.querySelector('.library') as Element).opacity))
+  await expect.poll(opacity).toBe(1)
+  // Main: when the Library's view hides (main's clock).
+  await app.evaluate(() => {
+    const g = globalThis as unknown as {
+      __orbit: { ctx: { windows: { get(id: string): Electron.BrowserWindow | undefined; ids(): string[] } } }
+      __feelLibraryHidden?: number
+    }
+    const ctx = g.__orbit.ctx
+    const win = ctx.windows.get(ctx.windows.ids()[0] as string)
+    const view = win?.contentView.children.find((v) =>
+      (v as Electron.WebContentsView).webContents?.getURL().includes('view=library'),
+    )
+    if (!view) throw new Error('no Library view')
+    g.__feelLibraryHidden = 0
+    const setVisible = view.setVisible.bind(view)
+    view.setVisible = (visible: boolean) => {
+      if (!visible && !g.__feelLibraryHidden) g.__feelLibraryHidden = performance.timeOrigin + performance.now()
+      setVisible(visible)
+    }
+  })
+  // The page: the opacity of each frame it draws; and, 50 ms into its fade, it falls 250 ms behind
+  // (as on a loaded machine), so the fade's last frames come late.
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      __feelLibraryFrames: { wall: number; opacity: number }[]
+      orbit: { on(channel: string, listener: (payload: unknown) => void): () => void }
+    }
+    const el = document.querySelector('.library') as Element
+    w.__feelLibraryFrames = []
+    const tick = () => {
+      w.__feelLibraryFrames.push({
+        wall: performance.timeOrigin + performance.now(),
+        opacity: Number(getComputedStyle(el).opacity),
+      })
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+    w.orbit.on('library:hide', () => {
+      setTimeout(() => {
+        const end = performance.now() + 250
+        while (performance.now() < end) {}
+      }, 50)
+    })
+  })
+  const closedAt = await app.evaluate(() => performance.timeOrigin + performance.now())
+  await run(app, 'library.close', {})
+  await expect
+    .poll(() =>
+      app.evaluate(() => (globalThis as unknown as { __feelLibraryHidden?: number }).__feelLibraryHidden ?? 0),
+    )
+    .toBeGreaterThan(0)
+  const hidden = await app.evaluate(
+    () => (globalThis as unknown as { __feelLibraryHidden: number }).__feelLibraryHidden,
+  )
+  const frames = await page.evaluate(
+    () => (window as unknown as { __feelLibraryFrames: { wall: number; opacity: number }[] }).__feelLibraryFrames,
+  )
+  const before = frames.filter((f) => f.wall <= hidden)
+  const last = before.at(-1)
+  const faded = frames.find((f) => f.wall >= closedAt && f.opacity === 0)
+  console.info(
+    `[feel] FL-24 Library close: view hidden ${(hidden - closedAt).toFixed(0)} ms after the close; the last frame before, at opacity ${last?.opacity.toFixed(2)}; the first at 0, ${faded ? `${(faded.wall - closedAt).toFixed(0)} ms` : 'none'}`,
+  )
+  // The last frame the page drew before its view left was the fade's end…
+  expect(last?.opacity).toBe(0)
+  // …and the view left as soon as the page had drawn it (two frames to say so), not on a timer.
+  expect(faded).toBeDefined()
+  expect(hidden - (faded?.wall ?? 0)).toBeLessThanOrEqual(150 * FRAME_SLACK)
 })
