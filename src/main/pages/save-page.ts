@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { app, dialog, type WebContents } from 'electron'
 import type { MainContext } from '../context'
+import { withDialog } from '../media/dialog-watch'
 import { saveFormat, savesComplete } from '../nav/page-menu'
 import { setPageEntries } from './entry'
 
@@ -35,7 +36,9 @@ export function registerSavePage(ctx: MainContext): void {
     const options = complete
       ? { defaultPath: `${name}.html`, filters: [html, single] }
       : { defaultPath: `${name}.mhtml`, filters: [single, html] }
-    const asked = win && !win.isDestroyed() ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options)
+    // The picture-in-picture player keeps clear of it (MD-06).
+    const asked =
+      win && !win.isDestroyed() ? withDialog(win, dialog.showSaveDialog(win, options)) : dialog.showSaveDialog(options)
     void asked.then(({ canceled, filePath }) => {
       if (canceled || !filePath || page.isDestroyed()) return
       // Asked again: the page may have changed while the dialog was open.

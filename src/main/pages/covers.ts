@@ -2,6 +2,7 @@ import { webContents as allContents, BrowserWindow, type WebContents, WebContent
 import type { Rect, RendererView } from '../../shared/rpc'
 import type { WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
+import { withDialog } from '../media/dialog-watch'
 import { activeTabOf, loadRenderer, rendererEntry, uiWebPreferences, viewContents } from '../windows'
 
 /**
@@ -33,6 +34,8 @@ interface Cover {
   sent?: number
   /** The view is in its window, over the page. */
   onScreen: boolean
+  /** While it is: ends the dialog-watch note that its window shows a dialog (MD-06). */
+  unnote?: () => void
   off: () => void
 }
 
@@ -66,6 +69,9 @@ export interface PageCovers<C extends CoverContent> {
  *
  * A main window's views are made when first needed and kept for the next cover; a Peek's, a Mini
  * Window's or a pop-up's view is its own and is closed when the cover goes.
+ *
+ * While a cover is on screen, its window counts as showing a dialog (src/main/media/dialog-watch.ts),
+ * so the picture-in-picture player keeps clear of it (MD-06).
  */
 export function createCovers<C extends CoverContent>(
   ctx: MainContext,
@@ -144,6 +150,13 @@ export function createCovers<C extends CoverContent>(
     )
   }
 
+  /** The cover left the screen: its window no longer shows it as a dialog (MD-06). */
+  const unnote = (c: Cover) => {
+    const end = c.unnote
+    c.unnote = undefined
+    end?.()
+  }
+
   const hasKeyboard = (view: WebContentsView | undefined) => {
     const contents = viewContents(view)
     return !!contents && allContents.getFocusedWebContents() === contents
@@ -182,6 +195,7 @@ export function createCovers<C extends CoverContent>(
         if (c.view !== view) continue
         c.ready = false
         c.onScreen = false
+        unnote(c)
       }
     })
   }
@@ -246,6 +260,7 @@ export function createCovers<C extends CoverContent>(
     const view = c.view
     const host = c.host
     c.onScreen = false
+    unnote(c)
     if (!view || !host || !viewContents(view)) return
     const had = hasKeyboard(view)
     if (host.kind === 'tab' && host.windowId) windows.hideUiView(host.windowId, view)
@@ -356,6 +371,16 @@ export function createCovers<C extends CoverContent>(
       if (!view.getVisible()) view.setVisible(true)
     }
     c.onScreen = true
+    if (!c.unnote) {
+      let end = () => {}
+      void withDialog(
+        host.win,
+        new Promise<void>((resolve) => {
+          end = resolve
+        }),
+      )
+      c.unnote = end
+    }
     if (!appearing || !pageIsCurrent(c, host)) return
     const focused = allContents.getFocusedWebContents() ?? null
     if (opts.mayTakeKeyboard && !opts.mayTakeKeyboard(page, focused)) return

@@ -42,6 +42,23 @@ const html = (title: string, body: string, head = '') => `<!doctype html>
 #area{height:600px;background:#e8e2d8}</style></head><body>${body}</body></html>`
 
 /**
+ * A video that plays with sound as it loads, drawn on a canvas (no media file): the body's
+ * `data-state` is `playing` once it plays. Leaving its tab floats it in Orbit's player (MD-01).
+ */
+const VIDEO = `<video id="v" width="320" height="180" playsinline></video>
+<canvas id="c" width="320" height="180" style="position:absolute;left:-9999px"></canvas>
+<script>
+const c = document.getElementById('c'), g = c.getContext('2d'); let n = 0
+setInterval(() => { g.fillStyle = 'hsl(' + (n++ * 9 % 360) + ',70%,50%)'; g.fillRect(0, 0, 320, 180) }, 40)
+const stream = c.captureStream(25)
+const ac = new AudioContext(), osc = ac.createOscillator(), gain = ac.createGain(); gain.gain.value = 0.05
+const dest = ac.createMediaStreamDestination(); osc.connect(gain).connect(dest); osc.start()
+stream.addTrack(dest.stream.getAudioTracks()[0])
+const v = document.getElementById('v'); v.srcObject = stream
+v.play().then(() => { document.body.dataset.state = 'playing' })
+</script>`
+
+/**
  * - `/ask?kind=alert|confirm|prompt&msg=…&value=…&on=click|load`: asks once (on a click of `#ask`, or
  *   as soon as it loads) and writes what the call returned to `#result` (JSON) and the title.
  * - `/warn`: warns before it goes (`beforeunload`), with a link (`#away`), a form (`#form`) and an
@@ -52,6 +69,7 @@ const html = (title: string, body: string, head = '') => `<!doctype html>
  *   returned to `/beacon?at=…&r=…` (JSON); a link (`#away`) and an area to click (`#area`).
  * - `/auth`: HTTP Basic sign-in (AUTH_USER, AUTH_PASSWORD).
  * - `/page/<name>`: a plain page.
+ * - `/video/<name>`: a page whose video plays with sound as it loads (`VIDEO`).
  * - `/opener?to=…`: opens `to` in a pop-up window on a click of `#open`.
  * - `/upload?to=…`: a form (`#form`) that posts to `to`.
  * - `/apps?frame=…`: links to other apps (NV-19): `#mail` (mailto:), `#call` (tel:), `#mail-tab`
@@ -308,6 +326,11 @@ document.getElementById('grab').addEventListener('wheel', (e) => e.preventDefaul
     if (u.pathname.startsWith('/page/')) {
       const name = decodeURIComponent(u.pathname.slice('/page/'.length))
       send(html(name, `<h1 id="title">${name}</h1><div id="area"></div>`))
+      return
+    }
+    if (u.pathname.startsWith('/video/')) {
+      const name = decodeURIComponent(u.pathname.slice('/video/'.length))
+      send(html(name, VIDEO))
       return
     }
     if (u.pathname === '/apps') {

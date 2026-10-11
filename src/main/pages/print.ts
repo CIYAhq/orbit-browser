@@ -21,6 +21,7 @@ import type { Rect } from '../../shared/rpc'
 import { PAGE_CHANNEL } from '../../shared/site'
 import type { TabId } from '../../shared/state'
 import type { MainContext } from '../context'
+import { withDialog } from '../media/dialog-watch'
 import { createCovers, type HostKind } from './covers'
 import { setPageEntries } from './entry'
 
@@ -57,7 +58,10 @@ export const deliverPrint: DeliverPrint = async (page, job) => {
     filters: [{ name: 'PDF', extensions: ['pdf'] }],
   }
   const win = BrowserWindow.fromWebContents(page)
-  const { canceled, filePath } = await (win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options))
+  // The picture-in-picture player keeps clear of it (MD-06).
+  const { canceled, filePath } = await (win
+    ? withDialog(win, dialog.showSaveDialog(win, options))
+    : dialog.showSaveDialog(options))
   if (canceled || !filePath) return { ok: false }
   await writeFile(filePath, job.data)
   return { ok: true }
