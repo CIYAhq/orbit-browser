@@ -71,6 +71,8 @@ export interface PeekEvents {
    * the grow takes `ms`.
    */
   'mini.growReady': { ms: number }
+  /** A Mini Window's card shows the still of its page that `mini:leaving` brought (MW-15): the page can leave. */
+  'mini.stillShown': Record<string, never>
   /** A Mini Window's UI is up and listening: what main held for it until now is sent. */
   'mini.mounted': Record<string, never>
 }
