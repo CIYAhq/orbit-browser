@@ -821,6 +821,10 @@ test('[FL-26][TB-05] holding ⌃, each Tab moves the highlight to the next recen
   const shownB = await viewShown(app, b)
   const shownA = await viewShown(app, a)
   const rec = await record(shell, { rows: { selector: TODAY_ROWS, key: 'data-tab-id', classes: true } })
+  // A hand presses Tab again only after it saw the last one: each press waits until the shell has
+  // drawn a frame with the highlight where the last one put it.
+  const drawn = () =>
+    shell.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
   await keyEvents([
     ['keyDown', 'Control', ['control']],
     ['keyDown', 'Tab', ['control']],
@@ -828,12 +832,14 @@ test('[FL-26][TB-05] holding ⌃, each Tab moves the highlight to the next recen
   ])
   await expect.poll(() => activeId(app)).toBe(b)
   await expect(row(shell, b)).toHaveClass(/is-active/)
+  await drawn()
   await keyEvents([
     ['keyDown', 'Tab', ['control']],
     ['keyUp', 'Tab', ['control']],
   ])
   await expect.poll(() => activeId(app)).toBe(a)
   await expect(row(shell, a)).toHaveClass(/is-active/)
+  await drawn()
   await keyEvents([['keyUp', 'Control', []]])
   // A few frames after letting go: nothing should change in them.
   await shell.evaluate(() => new Promise((done) => setTimeout(done, 300)))
@@ -845,13 +851,17 @@ test('[FL-26][TB-05] holding ⌃, each Tab moves the highlight to the next recen
   if (!release) throw new Error('letting go of Control never reached main')
   const lit = (tabId: string) => (f: (typeof r.frames)[number]) =>
     !!f.lists.rows?.[tabId]?.classes?.includes('is-active')
-  const step = (press: { wall: number }, tabId: string) => {
+  // Each highlight is the first frame it shows in after the one before. Frames are counted from the
+  // first frame drawn after main had the key, on clocks of two processes: a highlight drawn in a frame
+  // begun just before the key reads as that first frame.
+  const step = (press: { wall: number }, tabId: string, after: number) => {
+    const frame = r.frames.find((f) => f.i >= after && lit(tabId)(f))
+    if (!frame) return { at: undefined, frames: undefined, ms: undefined }
     const from = frameAfterWall(r, press.wall)
-    const frame = r.frames.find((f) => f.i >= from && lit(tabId)(f))
-    return { frames: frame ? frame.i - from + 1 : undefined, ms: frame ? frame.t - (press.wall - r.wall0) : undefined }
+    return { at: frame.i, frames: Math.max(1, frame.i - from + 1), ms: frame.t - (press.wall - r.wall0) }
   }
-  const first = step(tabs[0] as { wall: number }, b)
-  const second = step(tabs[1] as { wall: number }, a)
+  const first = step(tabs[0] as { wall: number }, b, 0)
+  const second = step(tabs[1] as { wall: number }, a, (first.at ?? r.frames.length) + 1)
   const pageB = (await shownB()).find((w) => w >= (tabs[0]?.wall ?? 0))
   const pageA = (await shownA()).find((w) => w >= (tabs[1]?.wall ?? 0))
   // After letting go: the highlight stays on A in every frame, and no other row lights.

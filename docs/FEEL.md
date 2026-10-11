@@ -29,7 +29,7 @@
   - P0 rows (FL-01 to 06, 09, 10, 13, 14, 16, 17, 21, 28, 29): `8c5849f`, which is `main` at `70b3f9d` plus the feel specs. Three runs on 2026-10-10 at load 6–9.
   - P1 rows (FL-07, 08, 11, 12, 15, 18, 20, 22, 25) and FL-19: `1920500`, the lane after its P0 fixes and before any P1 change, run with the P1 specs. Three runs on 2026-10-11 at load 3–4 (FL-19 at load 2).
   - FL-22's Before is read from the old toast code (a 220 ms CSS keyframe, toasts 6 px apart, removed after 2.2 s), because the test doesn't run on the old toasts.
-- **After:** the lane's app code at `5416e5c`. Three runs on 2026-10-11 at load 3–4.5. FL-19 ran at load 0.7–1. FL-03's leave row ran at load 5, after its poll was made finer. FL-26 ran on the lane merged with `main` at `332fb99`, which has the keys lane's switcher, at load 6.5–7.6.
+- **After:** the lane's app code at `5416e5c`. Three runs on 2026-10-11 at load 3–4.5. FL-19 ran at load 0.7–1. FL-03's leave row ran at load 5, after its poll was made finer. FL-26 ran nine times on the lane merged with `main` at `592096b`, which has the keys lane's switcher, at load 2.5–5.6.
 - A blank Before cell has one of three causes:
   - the row's test came with its fix;
   - on the old build the test failed an earlier check and stopped before the row (FL-07's ⌘Z and other-Space rows, FL-12's closing);
@@ -152,9 +152,9 @@
 | FL-25 | Folder search: click → first drawn / first frame scale | 1 frame / ≈ 0.97 | **gap**: 2 frames / 0.98 | 1 frame / 0.99 |
 | FL-25 | Click → fully open | ≈ 150 ms (snappy) | 131 ms (130–136) | 120 ms (117–127) |
 | FL-25 | Escape → gone / frames closing | ≈ 90–130 ms / ≥ 2 | **gap**: 9 ms (6–15) / 0 | 84 ms (82–92) / 5 |
-| FL-26 | Holding ⌃: Tab → the previous tab highlighted (its sidebar row: the switcher has no list yet) | 1 frame (at once) |  | 8 ms (2–23), 1 frame |
-| FL-26 | … a second Tab → the next tab highlighted | 1 frame |  | 5 ms (0–8), 1 frame |
-| FL-26 | … each Tab → that tab's page shown | when ⌃ is let go (TB-05) |  | **gap**: 8 ms (6–9) after the first Tab, 2 ms (1–2) after the second |
+| FL-26 | Holding ⌃: Tab → the previous tab highlighted (its sidebar row: the switcher has no list yet) | 1 frame (at once) |  | **gap**: 16 ms (7–35), 2 frames |
+| FL-26 | … a second Tab → the next tab highlighted | 1 frame |  | 10 ms (3–26), 1 frame |
+| FL-26 | … each Tab → that tab's page shown | when ⌃ is let go (TB-05) |  | **gap**: 8 ms (6–12) after the first Tab, 1 ms (1–2) after the second |
 | FL-26 | Letting go of ⌃ → frames that change the highlight | 0 (the page switches in that frame) |  | 0 |
 | FL-26 | The switcher's list: shown after the second Tab / its fade | 1 frame, or after a 150 ms hold / ≤ 100 ms, no slide |  | **gap**: not built (TB-05) |
 | FL-27 | Window loses focus (main’s blur) → sidebar starts dimming | at once |  | 20 ms (16–43) |
@@ -219,7 +219,7 @@
 - **FL-23:** audited, not changed. The pill shows at 150 ms, and never for a fast load.
 - **FL-25:** the folder search popover now shows in its first frame and closes with the quick fade. Before, it took 2 frames to show and was gone at once.
 - **FL-26:** audited, not changed. The recent-tab switcher has no list on screen yet (TB-05 is partial), so there is no overlay to time.
-  - Holding ⌃, each Tab selects its tab at once: its sidebar row lights in the first frame after main has the key, and its page shows a few ms later.
+  - Holding ⌃, each Tab selects its tab at once and its page shows a few ms later. The row lights in the first frame after main has the key for every Tab but the first of a hold, which took 2 frames at the median (1–3 over nine runs).
   - FL-26 and TB-05 switch the page when ⌃ is let go, with the list showing the highlight until then. That needs the list, which is TB-05's to build.
 - **FL-27:** audited, not changed.
   - Main's blur reaches the shell over IPC, so the dimming starts 1–3 frames later.
