@@ -6,8 +6,8 @@ import type { CloseTabsOptions, TabOps } from '../tabs/ops'
 import { isActivation } from '../tabs/runtime'
 import type { PageDialogs$ } from './dialogs'
 
-/** How long Orbit waits for a page to say whether it would warn: a busy page doesn't. */
-export const PROBE_MS = 250
+/** How long Orbit waits for the page preload to say which navigation a warning stopped. */
+const ASK_MS = 250
 /** After Leave, the warning of the navigation Orbit starts again goes through within this time. */
 const ALLOW_MS = 5_000
 /**
@@ -19,10 +19,11 @@ const ALLOW_RETRY_MS = 10_000
 const STARTED_MS = 10_000
 /** A pop-up's window began closing: its page's warning comes within this time. */
 const CLOSING_MS = 5_000
+/** A window whose pages went is closing: its tabs are asleep once it has, or after this time. */
+const WINDOW_CLOSE_MS = 2_000
 /** The page preload's own world, where it answers main (`__orbitLeave`, src/preload/page.ts). */
 const PRELOAD_WORLD = 999
 
-const PROBE = `typeof __orbitLeave === 'object' ? __orbitLeave.probe() : false`
 const STOPPED = `typeof __orbitLeave === 'object' ? __orbitLeave.stopped() : ''`
 const REDO = `typeof __orbitLeave === 'object' ? __orbitLeave.redo() : false`
 
@@ -37,14 +38,18 @@ type Stopped = Started | 'page' | 'close'
 
 /** What Orbit knows of one page about its leave-page warning. */
 interface LeavePage {
-  /** User gestures that reached the page: a page without one never warns (Chromium's rule). */
+  /**
+   * User gestures that reached the page's current document: a page without one never warns
+   * (Chromium's rule), so Orbit closes it without asking the engine.
+   */
   gestures: number
   /** Main-frame documents so far. */
   doc: number
-  /** The page warned in this document: auto-archive and sleep leave it alone. */
-  warnedDoc?: number
-  /** The last time Orbit asked whether the page would warn: the answer, and what it saw. */
-  probed?: { gestures: number; doc: number; warns: boolean }
+  /**
+   * Auto-archive or sleep tried to let the page go, and it warned: they leave it until it navigates
+   * or gets a new user gesture (D73).
+   */
+  refused?: { doc: number; gestures: number }
   /** The user chose Leave: the page's next warning goes through until then. */
   allowUntil: number
   /** The navigation Orbit started last, until it starts or a warning stops it. */
@@ -56,15 +61,16 @@ interface LeavePage {
 }
 
 export interface LeaveInfo {
+  /** User gestures in the page's current document. */
   gestures: number
-  /** The page warned in its current document. */
-  warned: boolean
+  /** Auto-archive and sleep found the page warning, and leave it until it navigates or gets a new gesture. */
+  refused: boolean
   /** The page's next warning goes through (the user chose Leave). */
   allowed: boolean
 }
 
 export interface PageLeave {
-  /** Whether Orbit may let a live tab's page go without asking: auto-archive and sleep (ops.mayDiscard). */
+  /** Whether auto-archive and sleep may try to let a live tab's page go (ops.mayDiscard). */
   mayDiscard(tabId: TabId): boolean
   /** Tests: what Orbit knows of a page. */
   info(page: WebContents): LeaveInfo | null
@@ -74,30 +80,32 @@ export interface PageLeave {
  * The leave-page warning (NV-24): "Leave site? Changes you made may not be saved" when closing or
  * navigating away from a page that asks for it (`beforeunload`), in Orbit's own dialog over the page.
  *
- * - **Navigations.** The engine runs the page's `beforeunload`, and where Chromium would ask (the
- *   page has had a user gesture and cancels the event), Electron says so (`will-prevent-unload`) and
- *   stops the navigation unless told there and then to go on. So Orbit goes on only where the user
- *   just chose Leave; otherwise it asks, and on Leave starts the navigation again: one Orbit started
- *   (the address field, Back, Reload…) from here, one the page started (a link, a form, `location`,
- *   its own reload) from the page preload. A page's own Back and a frame's own navigation can't be
- *   started again: the user's next try within ALLOW_RETRY_MS goes through.
- * - **Closing a tab or a window.** The engine runs no `beforeunload` when Orbit closes a page, so
- *   Orbit asks the page (`__orbitLeave.probe()` in the preload's world) when it has had a gesture, and
- *   for each page that would warn shows its tab and asks there. Cancel keeps that tab (or the
- *   window). Quitting doesn't ask.
+ * - **Navigations.** The engine runs the `beforeunload` of every frame, and where Chromium would ask
+ *   (a frame that has had a user gesture cancels the event), Electron says so (`will-prevent-unload`)
+ *   and stops the navigation unless told there and then to go on. So Orbit goes on only where the
+ *   user just chose Leave; otherwise it asks, and on Leave starts the navigation again: one Orbit
+ *   started (the address field, Back, Reload…) from here, one the page started (a link, a form,
+ *   `location`, its own reload) from the page preload. A page's own Back and a frame's own
+ *   navigation can't be started again: the user's next try within ALLOW_RETRY_MS goes through.
+ * - **Closing a tab, a window or a Space** closes each page through the engine (D73): every frame's
+ *   `beforeunload` runs, as when Chromium closes a tab, and a page that warns stays. Orbit shows its
+ *   tab and asks there; Leave closes it, Cancel keeps that tab (or the window, or the Space). A page
+ *   without a user gesture in its document closes at once: it can't warn (the engine itself would
+ *   let its main frame warn on a close). Quitting doesn't ask.
  * - **A pop-up's window.** Closing it runs the page's `beforeunload` as a navigation does.
- * - **Auto-archive and sleep** never discard a page that would warn: they leave it until the user
- *   closes it (`mayDiscard`).
+ * - **Auto-archive and sleep** let a page go the same way (D73), and keep it, without asking, when
+ *   the engine says it warned; they leave it until it navigates or gets a new user gesture.
  *
- * A page's own alert, confirm or prompt goes as soon as Orbit navigates the page: the page can't
- * answer its warning while it waits for one.
+ * Orbit runs no page's `beforeunload` of its own: only the engine does, once a close, an archive or
+ * a sleep has started. A page's own alert, confirm or prompt goes as soon as Orbit navigates the
+ * page: the page can't answer its warning while it waits for one.
  */
 export function registerLeave(ctx: MainContext, ops: TabOps, dialogs: PageDialogs$): PageLeave {
   const { store, tabs, windows } = ctx
   const pages = new Map<number, LeavePage>()
   /** Windows the user agreed to close (the next 'close' goes through). */
   const confirmedWindows = new Set<WindowId>()
-  /** Windows and tabs Orbit is asking about now. */
+  /** Windows and tabs Orbit is letting go now. */
   const guardingWindows = new Set<WindowId>()
   const guardingTabs = new Set<TabId>()
 
@@ -110,12 +118,18 @@ export function registerLeave(ctx: MainContext, ops: TabOps, dialogs: PageDialog
     return p
   }
 
-  /** Whether a page could warn now: Chromium's warning needs a user gesture in the page first. */
+  /**
+   * Whether a page could warn now: Chromium's warning needs a user gesture in the page first, and a
+   * page waiting on its own alert, confirm or prompt goes with it.
+   */
   const mayWarn = (page: WebContents | undefined): page is WebContents =>
     !!page && !page.isDestroyed() && (pages.get(page.id)?.gestures ?? 0) > 0 && !dialogs.pending(page, 'script')
 
+  const isRefused = (p: LeavePage | undefined): boolean =>
+    !!p?.refused && p.refused.doc === p.doc && p.refused.gestures === p.gestures
+
   /** Runs one of the preload's answers in its world; `fallback` when the page is gone or too busy. */
-  const ask = <T>(page: WebContents, code: string, fallback: T, timeout = PROBE_MS): Promise<T> => {
+  const ask = <T>(page: WebContents, code: string, fallback: T, timeout = ASK_MS): Promise<T> => {
     if (page.isDestroyed()) return Promise.resolve(fallback)
     return new Promise<T>((resolve) => {
       const timer = setTimeout(() => resolve(fallback), timeout)
@@ -132,16 +146,8 @@ export function registerLeave(ctx: MainContext, ops: TabOps, dialogs: PageDialog
     })
   }
 
-  /** Whether the page would warn if it went now. */
-  const probe = async (page: WebContents): Promise<boolean> => {
-    if (!mayWarn(page)) return false
-    const p = stateOf(page)
-    const seen = { gestures: p.gestures, doc: p.doc }
-    const warns = (await ask(page, PROBE, false)) === true
-    p.probed = { ...seen, warns }
-    if (warns) p.warnedDoc = seen.doc
-    return warns
-  }
+  /** Closes a tab's page through the engine (D73): true once it's gone, false if a frame warned. */
+  const unload = (tabId: TabId): Promise<boolean> => new Promise((resolve) => tabs.unload(tabId, resolve))
 
   /** Puts a tab's page on screen, so its dialog shows: its window shows the tab. */
   const reveal = (tabId: TabId) => {
@@ -150,7 +156,7 @@ export function registerLeave(ctx: MainContext, ops: TabOps, dialogs: PageDialog
     if (windowId) ops.activate(windowId, tabId)
   }
 
-  /** "Leave site?" over a tab about to close: true to close it. */
+  /** "Leave site?" over a tab whose page stayed when Orbit closed it: true to close it. */
   const askToClose = async (tabId: TabId): Promise<boolean> => {
     const page = tabs.contents(tabId)
     if (!page) return true
@@ -159,6 +165,29 @@ export function registerLeave(ctx: MainContext, ops: TabOps, dialogs: PageDialog
     // The page went meanwhile: nothing is left to keep.
     if (!answer && page.isDestroyed()) return true
     return answer?.ok === true
+  }
+
+  /**
+   * Lets tabs' pages go through the engine, all at once, and asks over each that stayed, one at a
+   * time (D73): false as soon as the user keeps one (Cancel). The pages that went are in `gone`:
+   * their tabs are the caller's to close or put to sleep.
+   */
+  const letGo = async (tabIds: TabId[], gone: TabId[]): Promise<boolean> => {
+    const went = await Promise.all(tabIds.map(unload))
+    for (const [i, tabId] of tabIds.entries()) if (went[i]) gone.push(tabId)
+    for (const [i, tabId] of tabIds.entries()) {
+      if (went[i] || !store.state.tabs[tabId]) continue
+      if (!(await askToClose(tabId))) return false
+    }
+    return true
+  }
+
+  /** Auto-archive or sleep found the page warning: not again until it navigates or gets a new gesture. */
+  const refuse = (tabId: TabId) => {
+    const page = tabs.contents(tabId)
+    if (!page) return
+    const p = stateOf(page)
+    p.refused = { doc: p.doc, gestures: p.gestures }
   }
 
   // ---- Navigations ----
@@ -248,11 +277,19 @@ export function registerLeave(ctx: MainContext, ops: TabOps, dialogs: PageDialog
       if (!details.isSameDocument) dialogs.dismiss(page, 'all')
     })
     page.on('did-navigate', () => {
+      // A new document: no gesture has reached it yet.
       p.doc++
+      p.gestures = 0
     })
     page.on('will-prevent-unload', (event) => {
       if (windows.isUi(page)) return
-      p.warnedDoc = p.doc
+      // A close Orbit started through the engine (D73): the page stays, and that close asks (or,
+      // for auto-archive and sleep, leaves it).
+      const tabId = tabs.tabIdFor(page)
+      if (tabId && tabs.isUnloading(tabId)) {
+        tabs.kept(tabId)
+        return
+      }
       const now = Date.now()
       if (now <= p.allowUntil) {
         p.allowUntil = 0
@@ -284,7 +321,10 @@ export function registerLeave(ctx: MainContext, ops: TabOps, dialogs: PageDialog
 
   // ---- Closing tabs ----
 
-  /** Closes tabs once each page that would warn was asked about: Cancel keeps that tab. */
+  /**
+   * Closes tabs once each page that may warn was let go through the engine: one that warns stays,
+   * and Orbit asks over it (Cancel keeps that tab), or, for auto-archive, keeps it without asking.
+   */
   const closeAsking = async (
     tabIds: TabId[],
     asking: TabId[],
@@ -294,26 +334,47 @@ export function registerLeave(ctx: MainContext, ops: TabOps, dialogs: PageDialog
     for (const id of asking) guardingTabs.add(id)
     const keep = new Set<TabId>()
     try {
-      const warns = await Promise.all(asking.map((id) => probe(tabs.contents(id) as WebContents)))
+      const went = await Promise.all(asking.map(unload))
       for (const [i, tabId] of asking.entries()) {
-        if (warns[i] && store.state.tabs[tabId] && !(await askToClose(tabId))) keep.add(tabId)
+        if (went[i] || !store.state.tabs[tabId]) continue
+        if (opts.idle) {
+          refuse(tabId)
+          keep.add(tabId)
+        } else if (!(await askToClose(tabId))) keep.add(tabId)
       }
     } finally {
       for (const id of asking) guardingTabs.delete(id)
     }
+    if (windows.quitting) return
     const closing = tabIds.filter((id) => !keep.has(id) && store.state.tabs[id])
     if (closing.length > 0) ops.closeTabs(closing, reason, { ...opts, confirmed: true })
   }
 
   ops.closeGuard = (tabIds, reason, opts) => {
-    // Orbit's own closes (a private window's tabs, a download's empty tab) go: auto-archive asks mayDiscard.
-    if (reason === 'auto') return false
+    // Orbit's own closes (a private window's tabs, a download's empty tab) go; auto-archive (`idle`)
+    // lets its pages go through the engine.
+    if (reason === 'auto' && !opts.idle) return false
     const ids = [...new Set(tabIds)]
-    // Asked about already: that answer closes it.
+    // Being let go already: that answer closes it.
     if (ids.some((id) => guardingTabs.has(id))) return true
     const asking = ids.filter((id) => mayWarn(tabs.contents(id)))
     if (asking.length === 0) return false
     void closeAsking(ids, asking, reason, opts)
+    return true
+  }
+
+  // ---- Auto-sleep ----
+
+  ops.sleepGuard = (tabId) => {
+    if (guardingTabs.has(tabId)) return true
+    if (!mayWarn(tabs.contents(tabId))) return false
+    guardingTabs.add(tabId)
+    void unload(tabId).then((gone) => {
+      guardingTabs.delete(tabId)
+      if (windows.quitting) return
+      if (gone) tabs.sleep(tabId)
+      else refuse(tabId)
+    })
     return true
   }
 
@@ -326,28 +387,60 @@ export function registerLeave(ctx: MainContext, ops: TabOps, dialogs: PageDialog
       if (confirmedWindows.delete(windowId)) return
       const asking = tabs
         .liveTabIds()
-        .filter((id) => windows.windowOfTab(id) === windowId && mayWarn(tabs.contents(id)))
+        .filter((id) => windows.windowOfTab(id) === windowId && !guardingTabs.has(id) && mayWarn(tabs.contents(id)))
       if (asking.length === 0) return
       event.preventDefault()
       if (guardingWindows.has(windowId)) return
       guardingWindows.add(windowId)
       void (async () => {
+        const gone: TabId[] = []
+        let closes = false
+        for (const id of asking) guardingTabs.add(id)
         try {
-          const warns = await Promise.all(asking.map((id) => probe(tabs.contents(id) as WebContents)))
-          for (const [i, tabId] of asking.entries()) {
-            // Cancel keeps the window open.
-            if (warns[i] && store.state.tabs[tabId] && !(await askToClose(tabId))) return
-          }
-          if (win.isDestroyed()) return
-          confirmedWindows.add(windowId)
-          win.close()
+          closes = await letGo(asking, gone)
         } finally {
+          for (const id of asking) guardingTabs.delete(id)
           guardingWindows.delete(windowId)
         }
+        if (windows.quitting) return
+        const sleep = () => {
+          for (const id of gone) tabs.sleep(id)
+        }
+        // Cancel keeps the window: the pages that went are asleep, and show again when their tab does.
+        if (!closes || win.isDestroyed()) {
+          sleep()
+          return
+        }
+        // Their tabs sleep once the window has gone (before, the window would load them again), or
+        // if it stays (another guard kept it).
+        const timer = setTimeout(sleep, WINDOW_CLOSE_MS)
+        win.once('closed', () => {
+          clearTimeout(timer)
+          sleep()
+        })
+        confirmedWindows.add(windowId)
+        win.close()
       })()
     })
     win.once('closed', () => confirmedWindows.delete(windowId))
   })
+
+  // ---- Deleting a Space ----
+
+  tabs.letGo = async (tabIds) => {
+    const asking = [...new Set(tabIds)].filter((id) => !guardingTabs.has(id) && mayWarn(tabs.contents(id)))
+    if (asking.length === 0) return true
+    const gone: TabId[] = []
+    for (const id of asking) guardingTabs.add(id)
+    try {
+      const goes = await letGo(asking, gone)
+      // Cancel keeps the Space: the pages that went are asleep.
+      if (!goes) for (const id of gone) tabs.sleep(id)
+      return goes && !windows.quitting
+    } finally {
+      for (const id of asking) guardingTabs.delete(id)
+    }
+  }
 
   // ---- Auto-archive and sleep ----
 
@@ -357,19 +450,13 @@ export function registerLeave(ctx: MainContext, ops: TabOps, dialogs: PageDialog
       if (!page) return true
       // A page waiting on the user (its dialog, or a sign-in) waits for them.
       if (dialogs.pending(page, 'all')) return false
-      if (!mayWarn(page)) return true
-      const p = stateOf(page)
-      // It warned in this document: it stays until the user closes it (NV-24).
-      if (p.warnedDoc === p.doc) return false
-      if (p.probed && p.probed.doc === p.doc && p.probed.gestures === p.gestures) return !p.probed.warns
-      // Unknown since the page's last gesture: ask it now, and decide on the next pass.
-      void probe(page)
-      return false
+      // Being let go already, or it warned when last tried (D73).
+      return !guardingTabs.has(tabId) && !isRefused(pages.get(page.id))
     },
     info(page) {
       const p = pages.get(page.id)
       if (!p) return null
-      return { gestures: p.gestures, warned: p.warnedDoc === p.doc, allowed: Date.now() <= p.allowUntil }
+      return { gestures: p.gestures, refused: isRefused(p), allowed: Date.now() <= p.allowUntil }
     },
   }
   ops.mayDiscard = (tabId) => service.mayDiscard(tabId)

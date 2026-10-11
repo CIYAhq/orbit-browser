@@ -156,6 +156,11 @@ export class TabRuntime {
   onUndoShortcut?: (tabId: TabId, redo: boolean) => void
   /** A page closed itself (window.close()); treated like closing the tab (TB-06). */
   onPageClosed?: (tabId: TabId) => void
+  /**
+   * Lets tabs' pages go once each that warns before it goes was asked about (NV-24, pages lane):
+   * false when the user keeps one (Cancel). Deleting a Space asks it first.
+   */
+  letGo?: (tabIds: TabId[]) => Promise<boolean>
   /** Control was released in a page (ends recent-tab switching, TB-05). */
   onControlUp?: () => void
   /** Recent-tab switching in a window (TB-05): whether it is going on, and closing its highlighted tab (W, KS-06). */
@@ -171,6 +176,8 @@ export class TabRuntime {
   allowsPopups?: (tabId: TabId) => boolean
   /** Last user gesture per tab, for the pop-up rule (NV-09). */
   private gestures = new Map<TabId, { at: number; used: boolean }>()
+  /** Pages `unload` is closing through the engine: their history, and who waits for the answer. */
+  private unloading = new Map<TabId, { contentsId: number; saved?: SavedHistory; answer: (gone: boolean) => void }>()
   /** Links pages were asked to open, by the asking page's contents id (`openFromPage`). */
   private pageOpens = new Map<number, PageOpen[]>()
   /** Options for a tab's first load, used once: the page a link came from (review B-F1). */
@@ -352,10 +359,23 @@ export class TabRuntime {
       this.pageOpens.delete(contents.id)
       this.gestures.delete(tabId)
       this.wantedFavicon.delete(tabId)
-      if (this.views.get(tabId) !== view) return
-      // Destroyed outside sleep()/destroy(): the page closed itself (window.close()).
+      const asked = this.unloading.get(tabId)
+      const unloaded = asked?.contentsId === contents.id ? asked : undefined
+      if (unloaded) this.unloading.delete(tabId)
+      if (this.views.get(tabId) !== view) {
+        // Slept or closed by Orbit meanwhile: gone all the same.
+        unloaded?.answer(true)
+        return
+      }
       this.views.delete(tabId)
       this.ctx.windows.detachView(tabId, view)
+      if (unloaded) {
+        // Closed through the engine (unload()): the caller closes the tab or puts it to sleep.
+        if (unloaded.saved) this.savedHistory.set(tabId, unloaded.saved)
+        unloaded.answer(true)
+        return
+      }
+      // Destroyed outside sleep(), destroy() and unload(): the page closed itself (window.close()).
       this.update(tabId, { asleep: true, loading: false, audible: false })
       if (!this.ctx.windows.quitting) this.onPageClosed?.(tabId)
     })
@@ -366,7 +386,11 @@ export class TabRuntime {
   /** Puts a tab to sleep: remembers its history and frees its renderer. */
   sleep(tabId: TabId): void {
     const view = this.views.get(tabId)
-    if (!view) return
+    if (!view) {
+      // Its page has gone already (unload()): the tab is asleep.
+      this.update(tabId, { asleep: true, loading: false, audible: false })
+      return
+    }
     const contents = liveContents(view)
     if (contents) {
       const entries = contents.navigationHistory.getAllEntries()
@@ -392,6 +416,51 @@ export class TabRuntime {
     this.views.delete(tabId)
     this.ctx.windows.detachView(tabId, view)
     liveContents(view)?.close()
+  }
+
+  /**
+   * Closes a tab's page through the engine (`close({ waitForBeforeUnload: true })`), which first
+   * runs the `beforeunload` of every frame, as Chromium's closing a tab does (NV-24, D73). A frame
+   * that warns makes the engine say so (`will-prevent-unload`) and keep the page unless told there
+   * to go on; `kept` then ends the wait with `then(false)`. Once the page has gone, `then(true)`:
+   * its history is kept, and the tab is the caller's to close or put to sleep (`sleep`).
+   */
+  unload(tabId: TabId, then: (gone: boolean) => void): void {
+    const contents = this.contents(tabId)
+    if (!contents) {
+      then(true)
+      return
+    }
+    const asked = this.unloading.get(tabId)
+    if (asked) {
+      // Asked already: both hear the one answer.
+      const first = asked.answer
+      asked.answer = (gone) => {
+        first(gone)
+        then(gone)
+      }
+      return
+    }
+    const entries = contents.navigationHistory.getAllEntries()
+    this.unloading.set(tabId, {
+      contentsId: contents.id,
+      ...(entries.length > 0 ? { saved: { entries, index: contents.navigationHistory.getActiveIndex() } } : {}),
+      answer: then,
+    })
+    contents.close({ waitForBeforeUnload: true })
+  }
+
+  /** Whether `unload` is waiting on a tab's page. */
+  isUnloading(tabId: TabId): boolean {
+    return this.unloading.has(tabId)
+  }
+
+  /** The engine kept a page `unload` was closing (a frame warned): `then(false)`. */
+  kept(tabId: TabId): void {
+    const asked = this.unloading.get(tabId)
+    if (!asked) return
+    this.unloading.delete(tabId)
+    asked.answer(false)
   }
 
   /**

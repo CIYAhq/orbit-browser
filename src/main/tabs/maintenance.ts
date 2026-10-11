@@ -65,17 +65,18 @@ export class TabMaintenance {
 
   /** One pass: archive idle Today items, then put idle background tabs to sleep. */
   run(now = this.now()): { archived: ItemId[]; slept: TabId[] } {
-    // A page that would warn before it goes stays until the user closes it (NV-24).
+    // A page that warns before it goes stays, and isn't tried again until it navigates or gets a
+    // new user gesture (NV-24).
     const mayGo = (tabId: TabId) => this.ops.mayDiscard?.(tabId) ?? true
     const archived = autoArchiveCandidates(this.ctx.store.state, now).filter((id) =>
       tabsInItem(this.ctx.store.state, id).every(mayGo),
     )
     if (archived.length > 0) {
       const tabIds = archived.flatMap((id) => tabsInItem(this.ctx.store.state, id))
-      this.ops.closeTabs(tabIds, 'auto', { undoLabel: false })
+      this.ops.closeTabs(tabIds, 'auto', { undoLabel: false, idle: true })
     }
     const slept = sleepCandidates(this.ctx.store.state, now, this.ctx.tabs.liveTabIds()).filter(mayGo)
-    for (const id of slept) this.ctx.tabs.sleep(id)
+    for (const id of slept) if (!this.ops.sleepGuard?.(id)) this.ctx.tabs.sleep(id)
     return { archived, slept }
   }
 }

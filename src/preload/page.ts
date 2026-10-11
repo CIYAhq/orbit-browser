@@ -149,11 +149,10 @@ function patchPage(stateOf: StateOf, clicked: () => void, ask: AskDialog, print:
   const asText = (args: unknown[], at: number, optional: boolean): string =>
     args.length <= at || (optional && args[at] === undefined) ? '' : `${args[at]}`
   // The engine shows no dialog while the page is going: in its `beforeunload`, `pagehide` or
-  // `unload` handlers (Orbit's probe of `beforeunload` too). Orbit tells from the event the page's
-  // handler runs for, read through the engine's own getters (the page can't hide it), and adds no
-  // listener of its own: with a `beforeunload` listener the engine would ask every page before each
-  // navigation, so a busy page would hold up Back (D60), and an `unload` one would keep every page
-  // out of the back-forward cache.
+  // `unload` handlers. Orbit tells from the event the page's handler runs for, read through the
+  // engine's own getters (the page can't hide it), and adds no listener of its own: with a
+  // `beforeunload` listener the engine would ask every page before each navigation, so a busy page
+  // would hold up Back (D60), and an `unload` one would keep every page out of the back-forward cache.
   const currentEvent = describe(window, 'event')?.get
   const eventType = describe(Event.prototype, 'type')?.get
   const going = (): boolean => {
@@ -205,11 +204,7 @@ const printDialog = () => {
   ipcRenderer.send(PAGE_CHANNEL.print)
 }
 
-/** Set while Orbit probes the page's `beforeunload` (`exposeLeave`): the page's dialogs are ignored then. */
-let dismissing = false
-
 const askDialog: AskDialog = (kind, message, value) => {
-  if (dismissing) return null
   try {
     return ipcRenderer.sendSync(PAGE_CHANNEL.dialog, kind, message, value)
   } catch {
@@ -232,11 +227,6 @@ interface StoppedNavigation {
  * The leave-page warning (NV-24), asked from main in this preload's own world, where the page can't
  * see or replace it (src/main/pages/leave.ts): `globalThis.__orbitLeave` there.
  *
- * - `probe()`: whether the page would warn before it goes, where Orbit closes or discards a page
- *   itself (closing a tab or a window, auto-archive), since the engine runs the real `beforeunload`
- *   only for navigations. As Chromium, only a page that has had a user gesture warns, and only if
- *   its handlers cancel the event or set a `returnValue`. The handlers see an untrusted event, and
- *   their dialogs are ignored, as during the real one.
  * - `stopped()`: what the page's own navigation that a warning just stopped was (`reload`, `push`,
  *   `replace`, `traverse`), or "" when there is none this frame knows of. A navigation is known
  *   here from the Navigation API's `navigate` event, which comes in the same task as the
@@ -283,19 +273,6 @@ function exposeLeave(): void {
   nav?.addEventListener('navigatesuccess', () => {
     starting = null
   })
-  const probe = (): boolean => {
-    if (!navigator.userActivation?.hasBeenActive) return false
-    const event = document.createEvent('BeforeUnloadEvent')
-    event.initEvent('beforeunload', false, true)
-    const was = dismissing
-    dismissing = true
-    try {
-      window.dispatchEvent(event)
-    } finally {
-      dismissing = was
-    }
-    return event.defaultPrevented || (typeof event.returnValue === 'string' && event.returnValue !== '')
-  }
   const redo = (): boolean => {
     const again = stopped
     stopped = null
@@ -317,7 +294,6 @@ function exposeLeave(): void {
   }
   Object.defineProperty(globalThis, '__orbitLeave', {
     value: Object.freeze({
-      probe,
       stopped: () => {
         const last = starting
         starting = null

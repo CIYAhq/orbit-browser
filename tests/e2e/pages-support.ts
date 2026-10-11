@@ -18,6 +18,7 @@ import type { PrintInfo, PrintRecord } from '../../src/main/pages/print'
 import type { PageScreenInfo } from '../../src/main/pages/screens'
 import type { SwipeInfo } from '../../src/main/pages/swipe'
 import { listenInRange, tabPage } from './helpers'
+import { clickInPage } from './nav-support'
 
 export interface PagesFixtures {
   port: number
@@ -44,7 +45,9 @@ const html = (title: string, body: string, head = '') => `<!doctype html>
  * - `/ask?kind=alert|confirm|prompt&msg=…&value=…&on=click|load`: asks once (on a click of `#ask`, or
  *   as soon as it loads) and writes what the call returned to `#result` (JSON) and the title.
  * - `/warn`: warns before it goes (`beforeunload`), with a link (`#away`), a form (`#form`) and an
- *   area to click for a user gesture (`#area`).
+ *   area to click for a user gesture (`#area`); `window.__clicks` counts the presses it got.
+ * - `/framed?src=…`: a page with a frame (`#frame`, 520 × 320) loading `src` (`/warn` by default)
+ *   and an area of its own (`#area`).
  * - `/going`: asks `confirm` in its `beforeunload` and `prompt` in its `pagehide`, and sends what they
  *   returned to `/beacon?at=…&r=…` (JSON); a link (`#away`) and an area to click (`#area`).
  * - `/auth`: HTTP Basic sign-in (AUTH_USER, AUTH_PASSWORD).
@@ -141,7 +144,8 @@ ${on === 'load' ? "addEventListener('load', () => setTimeout(ask, 0))" : ''}
           `<p><a id="away" href="/page/Away">Away</a></p>
 <form id="form" method="post" action="/posted"><input name="note" value="draft"><button id="send">Send</button></form>
 <div id="area"></div>
-<script>addEventListener('beforeunload', (e) => { e.preventDefault() })</script>`,
+<script>addEventListener('beforeunload', (e) => { e.preventDefault() })
+addEventListener('pointerdown', () => { window.__clicks = (window.__clicks || 0) + 1 })</script>`,
         ),
       )
       return
@@ -239,6 +243,16 @@ document.getElementById('print').addEventListener('click', () => {
 document.getElementById('strip').scrollLeft = 1000
 document.getElementById('grab').addEventListener('wheel', (e) => e.preventDefault(), { passive: false })
 </script>`,
+        ),
+      )
+      return
+    }
+    if (u.pathname === '/framed') {
+      const src = u.searchParams.get('src') ?? '/warn'
+      send(
+        html(
+          'Framed',
+          `<h1>Framed</h1><iframe id="frame" src="${src}" width="520" height="320"></iframe><div id="area"></div>`,
         ),
       )
       return
@@ -387,7 +401,6 @@ type PagesGlobal = {
   __orbitPages: {
     dialogs: () => PageDialogInfo[]
     leave: (tabId: string) => LeaveInfo | null
-    mayDiscard: (tabId: string) => boolean
     screens: () => PageScreenInfo[]
     launched: string[]
     fullScreen: (windowId: string) => FullScreenInfo
@@ -448,12 +461,30 @@ export async function waitDialog(
   return found as PageDialogInfo
 }
 
-export function leaveInfo(app: ElectronApplication, tabId: string): Promise<LeaveInfo | null> {
-  return app.evaluate((_e, id) => (globalThis as unknown as PagesGlobal).__orbitPages.leave(id), tabId)
+/** Runs a script in the frame (`#frame`) of the page whose URL is `url`; null when there's none yet. */
+export function inFrame(app: ElectronApplication, url: string, code: string): Promise<unknown> {
+  return app.evaluate(
+    async ({ webContents }, [u, c]) => {
+      const frame = webContents.getAllWebContents().find((w) => w.getURL() === u)?.mainFrame.frames[0]
+      return frame ? frame.executeJavaScript(c).catch(() => null) : null
+    },
+    [url, code] as const,
+  )
 }
 
-export function mayDiscard(app: ElectronApplication, tabId: string): Promise<boolean> {
-  return app.evaluate((_e, id) => (globalThis as unknown as PagesGlobal).__orbitPages.mayDiscard(id), tabId)
+/**
+ * Clicks in the middle of a `/framed` page's frame, a `/warn` page, the way a person does (through
+ * the browser process), once the frame has loaded, and waits until the frame got the press.
+ */
+export async function clickInFrame(app: ElectronApplication, url: string): Promise<void> {
+  await expect.poll(() => inFrame(app, url, 'document.readyState')).toBe('complete')
+  const before = Number(await inFrame(app, url, 'window.__clicks || 0'))
+  await clickInPage(app, url, '#frame')
+  await expect.poll(async () => Number(await inFrame(app, url, 'window.__clicks || 0'))).toBeGreaterThan(before)
+}
+
+export function leaveInfo(app: ElectronApplication, tabId: string): Promise<LeaveInfo | null> {
+  return app.evaluate((_e, id) => (globalThis as unknown as PagesGlobal).__orbitPages.leave(id), tabId)
 }
 
 /** The dialog view (a Playwright page) showing the dialog with this id. */

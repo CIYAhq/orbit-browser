@@ -21,8 +21,6 @@ export interface PagesTestHooks {
   dialogs: () => PageDialogInfo[]
   /** What Orbit knows of a tab's page about its leave-page warning. */
   leave: (tabId: TabId) => LeaveInfo | null
-  /** Whether auto-archive and sleep may let a tab's page go (NV-24). */
-  mayDiscard: (tabId: TabId) => boolean
   /** Every page's error or crash screen (NV-13, NV-14). */
   screens: () => PageScreenInfo[]
   /** Links Orbit opened in another app, oldest first (NV-19): test runs never start one. */
@@ -101,7 +99,6 @@ export function registerPages(ctx: MainContext, ops: TabOps): void {
         const page = ctx.tabs.contents(tabId)
         return page ? leave.info(page) : null
       },
-      mayDiscard: (tabId) => leave.mayDiscard(tabId),
       screens: () => screens.info(),
       launched,
       fullScreen: (windowId) => fullScreen.info(windowId),

@@ -1,19 +1,20 @@
 import { expect, test } from '@playwright/test'
-import { action, launchOrbit, type Orbit } from './helpers'
-import { clickInPage, closeWindow, cmdIn } from './nav-support'
+import { action, isMac, launchOrbit, type Orbit, state } from './helpers'
+import { clickInPage, closeWindow, cmdIn, pressInPage, windowState } from './nav-support'
 import {
   AUTH_PASSWORD,
   AUTH_USER,
   clickClosing,
+  clickInFrame,
   dialogPage,
+  inFrame,
   leaveInfo,
-  mayDiscard,
   type PagesFixtures,
   pageDialogs,
   startPagesFixtures,
   waitDialog,
 } from './pages-support'
-import { act, activeId, cmd, liveTabs, newTab, row, tab, tabsHook, waitTab } from './tabs-support'
+import { act, activeId, cmd, liveTabs, newTab, row, space, tab, tabsHook, waitTab } from './tabs-support'
 
 let fx: PagesFixtures
 let orbit: Orbit
@@ -32,6 +33,9 @@ test.afterEach(async () => {
 })
 
 type Rect = { x: number; y: number; width: number; height: number }
+
+/** ⌘ on macOS, Ctrl elsewhere, for pressInPage. */
+const MOD_KEY = isMac ? 'meta' : 'control'
 
 /** Runs a script in the page whose URL is `url`, without waiting on what it starts. */
 function inPage(app: Orbit['app'], url: string, code: string): Promise<unknown> {
@@ -236,6 +240,26 @@ async function warningTab(app: Orbit['app'], opts: { windowId?: string } = {}): 
   return id
 }
 
+/**
+ * Opens `/framed` (its frame is a `/warn` page) in a new tab and clicks in the frame: the frame warns
+ * before the page goes. `name` tells the pages apart.
+ */
+async function framedTab(app: Orbit['app'], name: string, opts: { windowId?: string } = {}) {
+  const url = fx.url(`/framed?name=${name}`)
+  const id = opts.windowId ? await cmdIn<string>(app, opts.windowId, 'tabs.create', { url }) : await newTab(app, url)
+  await waitTab(app, id, '/framed')
+  await clickInFrame(app, url)
+  await expect.poll(async () => (await leaveInfo(app, id))?.gestures ?? 0).toBeGreaterThan(0)
+  return { id, url }
+}
+
+/** Answers the leave-page dialog that shows next, over whichever tab; returns that tab. */
+async function answerNextLeave(app: Orbit['app'], tabIds: string[], choice: 'ok' | 'cancel'): Promise<string> {
+  const d = await waitDialog(app, (x) => !!x.tabId && tabIds.includes(x.tabId) && x.onScreen && x.kind === 'leave')
+  await answerLeave(app, d.tabId as string, choice)
+  return d.tabId as string
+}
+
 /** Answers the leave-page dialog over a tab's page. */
 async function answerLeave(app: Orbit['app'], tabId: string, choice: 'ok' | 'cancel', kind = 'leave') {
   const d = await waitDialog(app, (x) => x.tabId === tabId && x.onScreen && x.kind === kind)
@@ -310,8 +334,8 @@ test('[NV-24][KS-16] a page’s confirm or prompt while it goes is ignored, as t
   await expect.poll(() => beacons('pagehide')).toEqual([`POST /beacon?at=pagehide&r=null`])
   expect(await pageDialogs(app)).toEqual([])
 
-  // Closing a tab Orbit asks whether the page would warn: its beforeunload runs, and its confirm is
-  // ignored there too.
+  // Closing a tab closes the page through the engine (D73): its beforeunload runs, and its confirm
+  // is ignored there too.
   const closing = await newTab(app, url)
   await waitTab(app, closing, '/going')
   await clickInPage(app, url, '#area')
@@ -369,7 +393,21 @@ test('[NV-24] closing a tab whose page warns asks over it: Cancel keeps the tab,
   expect(await tab(app, untouched)).toBeUndefined()
 })
 
-test('[NV-24] closing a window with a page that warns asks first: Cancel keeps the window, Leave closes it', async () => {
+test('[NV-24][KS-08] ⌘W (Ctrl+W) on a page whose frame warns asks too: Cancel keeps the tab and its page as they were, Leave closes it', async () => {
+  const { app } = orbit
+  const { id, url } = await framedTab(app, 'Close')
+  await inFrame(app, url, `document.querySelector('input').value = 'typed'`)
+  await pressInPage(app, url, 'W', [MOD_KEY])
+  await answerLeave(app, id, 'cancel')
+  expect(await tab(app, id)).toBeTruthy()
+  expect(await liveTabs(app)).toContain(id)
+  expect(await inFrame(app, url, `document.querySelector('input').value`)).toBe('typed')
+  await pressInPage(app, url, 'W', [MOD_KEY])
+  await answerLeave(app, id, 'ok')
+  await expect.poll(async () => await tab(app, id)).toBeUndefined()
+})
+
+test('[NV-24] closing a window with pages that warn, from the page or a frame, asks over each: Cancel keeps the window, Leave on each closes it', async () => {
   const { app } = orbit
   const ids = () =>
     app.evaluate(() => (globalThis as unknown as { __orbit: { windowIds: () => string[] } }).__orbit.windowIds())
@@ -383,21 +421,61 @@ test('[NV-24] closing a window with a page that warns asks first: Cancel keeps t
     })
     .not.toBe('')
   const warn = await warningTab(app, { windowId })
+  const framed = (await framedTab(app, 'Window', { windowId })).id
   await closeWindow(app, windowId)
-  await answerLeave(app, warn, 'cancel')
+  await answerNextLeave(app, [warn, framed], 'cancel')
   expect(await ids()).toContain(windowId)
   expect(await tab(app, warn)).toBeTruthy()
+  expect(await tab(app, framed)).toBeTruthy()
+  expect(await liveTabs(app)).toEqual(expect.arrayContaining([warn, framed]))
+  expect(await pageDialogs(app)).toEqual([])
+
   await closeWindow(app, windowId)
-  await answerLeave(app, warn, 'ok')
+  const first = await answerNextLeave(app, [warn, framed], 'ok')
+  expect(await ids()).toContain(windowId)
+  await answerNextLeave(app, [first === warn ? framed : warn], 'ok')
   await expect.poll(ids).not.toContain(windowId)
 })
 
-test('[NV-24][TD-01][TB-16] auto-archive and sleep leave a page that warns, or one waiting on its dialog, until the user closes it', async () => {
+test('[NV-24][SP-12] deleting a Space with pages that warn, from the page or a frame, asks over each: Cancel keeps the Space, Leave on each deletes it', async () => {
+  const { app } = orbit
+  const home = (await space(app)).id
+  const spaceId = await cmd<string>(app, 'spaces.create', { name: 'Drafts' })
+  await expect.poll(async () => (await windowState(app)).spaceId).toBe(spaceId)
+  const warn = await warningTab(app)
+  const framed = (await framedTab(app, 'Space')).id
+  await cmd(app, 'spaces.switch', { spaceId: home })
+  await expect.poll(async () => (await windowState(app)).spaceId).toBe(home)
+
+  // Each page shows (its Space with it) as it asks.
+  const deleting = cmd<boolean>(app, 'spaces.delete', { spaceId })
+  await answerNextLeave(app, [warn, framed], 'cancel')
+  expect(await deleting).toBe(false)
+  expect((await state(app)).spaces[spaceId]).toBeTruthy()
+  expect(await liveTabs(app)).toEqual(expect.arrayContaining([warn, framed]))
+
+  const again = cmd<boolean>(app, 'spaces.delete', { spaceId })
+  const first = await answerNextLeave(app, [warn, framed], 'ok')
+  await answerNextLeave(app, [first === warn ? framed : warn], 'ok')
+  expect(await again).toBe(true)
+  expect((await state(app)).spaces[spaceId]).toBeUndefined()
+  expect(await tab(app, warn)).toBeUndefined()
+  expect(await tab(app, framed)).toBeUndefined()
+})
+
+test('[NV-24][TD-01] auto-archive keeps a page that warns, from the page or a frame, or one waiting on its dialog, without asking', async () => {
   const { app } = orbit
   const warn = await warningTab(app)
+  const framed = (await framedTab(app, 'Archive')).id
   const askUrl = fx.url('/ask?kind=confirm&msg=Still%20there%3F')
   const asking = await newTab(app, askUrl)
   await waitTab(app, asking, '/ask')
+  // A page someone used that doesn't warn, and one nobody touched: both go.
+  const used = fx.url('/page/Used')
+  const touched = await newTab(app, used)
+  await waitTab(app, touched, '/page/Used')
+  await clickInPage(app, used, '#area')
+  await expect.poll(async () => (await leaveInfo(app, touched))?.gestures ?? 0).toBeGreaterThan(0)
   const plain = await newTab(app, fx.url('/page/Plain'))
   await waitTab(app, plain, '/page/Plain')
   const shown = await newTab(app, fx.url('/page/Shown'))
@@ -406,21 +484,63 @@ test('[NV-24][TD-01][TB-16] auto-archive and sleep leave a page that warns, or o
   await waitDialog(app, (d) => d.tabId === asking)
 
   const later = Date.now() + 13 * 3600_000
-  // The first pass asks the page; every pass after leaves it.
-  for (const pass of [1, 2]) {
-    const r = await tabsHook<{ archived: string[]; slept: string[] }>(app, 'maintenance', later + pass)
-    expect(r.archived).not.toContain(warn)
-    expect(r.archived).not.toContain(asking)
-    expect(r.slept).not.toContain(warn)
-    expect(r.slept).not.toContain(asking)
-    if (pass === 1) expect(r.archived).toContain(plain)
+  const first = await tabsHook<{ archived: string[]; slept: string[] }>(app, 'maintenance', later)
+  expect(first.archived).not.toContain(asking)
+  await expect.poll(async () => (await leaveInfo(app, framed))?.refused).toBe(true)
+  await expect.poll(async () => (await leaveInfo(app, warn))?.refused).toBe(true)
+  await expect.poll(async () => [await tab(app, touched), await tab(app, plain)]).toEqual([undefined, undefined])
+  // Not asked again until it navigates or gets a new gesture.
+  const second = await tabsHook<{ archived: string[]; slept: string[] }>(app, 'maintenance', later + 1)
+  for (const id of [warn, framed, asking]) {
+    expect(second.archived).not.toContain(id)
+    expect(second.slept).not.toContain(id)
   }
-  expect(await mayDiscard(app, warn)).toBe(false)
-  expect(await mayDiscard(app, asking)).toBe(false)
-  expect(await tab(app, plain)).toBeUndefined()
-  expect(await tab(app, warn)).toBeTruthy()
-  expect(await tab(app, asking)).toBeTruthy()
-  expect(await liveTabs(app)).toEqual(expect.arrayContaining([warn, asking]))
+  expect(await liveTabs(app)).toEqual(expect.arrayContaining([warn, framed, asking]))
+  expect((await pageDialogs(app)).map((d) => d.tabId)).toEqual([asking])
+})
+
+test('[NV-24][TB-16] sleep keeps a page that warns, from the page or a frame, awake without asking, until it navigates or gets a new gesture', async () => {
+  const { app } = orbit
+  const warn = await warningTab(app)
+  const { id: framed, url: framedUrl } = await framedTab(app, 'Sleep')
+  const used = fx.url('/page/Used')
+  const touched = await newTab(app, used)
+  await waitTab(app, touched, '/page/Used')
+  await clickInPage(app, used, '#area')
+  await expect.poll(async () => (await leaveInfo(app, touched))?.gestures ?? 0).toBeGreaterThan(0)
+  const shown = await newTab(app, fx.url('/page/Shown'))
+  await waitTab(app, shown, '/page/Shown')
+
+  // Past the sleep time, before the archive time.
+  const later = Date.now() + 3600_000
+  const first = await tabsHook<{ archived: string[]; slept: string[] }>(app, 'maintenance', later)
+  expect(first.archived).toEqual([])
+  await expect.poll(async () => (await leaveInfo(app, framed))?.refused).toBe(true)
+  await expect.poll(async () => (await leaveInfo(app, warn))?.refused).toBe(true)
+  await expect.poll(async () => (await tab(app, touched))?.asleep).toBe(true)
+  expect(await liveTabs(app)).toEqual(expect.arrayContaining([warn, framed]))
+  expect((await tab(app, framed))?.asleep).toBe(false)
+  expect(await pageDialogs(app)).toEqual([])
+  const second = await tabsHook<{ archived: string[]; slept: string[] }>(app, 'maintenance', later + 1)
+  expect(second.slept).not.toContain(warn)
+  expect(second.slept).not.toContain(framed)
+
+  // A new gesture: the next pass asks the page again, and it still warns.
+  await clickInFrame(app, framedUrl)
+  await expect.poll(async () => (await leaveInfo(app, framed))?.refused).toBe(false)
+  const third = await tabsHook<{ archived: string[]; slept: string[] }>(app, 'maintenance', later + 2)
+  expect(third.slept).toContain(framed)
+  await expect.poll(async () => (await leaveInfo(app, framed))?.refused).toBe(true)
+  expect(await liveTabs(app)).toContain(framed)
+  // Gone elsewhere (the user chose Leave): it may sleep.
+  await cmd(app, 'tabs.activate', { tabId: warn })
+  await cmd(app, 'tabs.navigate', { tabId: warn, url: fx.url('/page/Away') })
+  await answerLeave(app, warn, 'ok')
+  await waitTab(app, warn, '/page/Away')
+  await cmd(app, 'tabs.activate', { tabId: shown })
+  await tabsHook(app, 'maintenance', later + 3)
+  await expect.poll(async () => (await tab(app, warn))?.asleep).toBe(true)
+  expect(await pageDialogs(app)).toEqual([])
 })
 
 test('[NV-24] HTTP sign-in asks over the page: Cancel gets the server’s refusal, Sign in signs in', async () => {
