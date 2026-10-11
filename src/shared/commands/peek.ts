@@ -59,8 +59,11 @@ export interface PeekCommands {
 }
 
 export interface PeekEvents {
-  /** Where the overlay draws the Peek card this frame (page-area coordinates), so its page view follows. */
-  'peek.frame': { nonce: number; rect: Rect; radius: number; visible: boolean }
+  /**
+   * The overlay's Peek card came to rest (`shown`: its page view shows on it) or started to move (a
+   * drag or swipe: the view waits out of sight while the card shows a still of the page, PK-06).
+   */
+  'peek.page': { nonce: number; shown: boolean }
   /** Where a Mini Window's page card is (window coordinates, DIP). */
   'mini.layout': { rect: Rect; radius: number }
   /**

@@ -6,13 +6,11 @@ import {
   type Box,
   dismissesOnRelease,
   draggedCard,
-  FRAME_RADIUS,
   lerpBox,
   PEEK_CLOSE_MS,
   PEEK_CLOSE_SCALE,
   PEEK_EXPAND_SPRING,
   PEEK_OPEN_SPRING,
-  PEEK_RADIUS,
   peekCard,
   peekStart,
   releaseVelocity,
@@ -40,16 +38,15 @@ const HANDLE_HIT_H = 30
 /** A trackpad swipe has ended when no wheel event came for this long. */
 const WHEEL_END_MS = 120
 
-/** One drawn frame of the card: where it is, its corners, and how visible the chrome and dim are. */
+/** One drawn frame of the card: where it is, and how visible it, its chrome and the dim are. */
 interface Frame {
   rect: Box
-  radius: number
   /** Opacity of the backdrop dim. */
   dim: number
-  /** Opacity of the card's shadow/placeholder and of the buttons. */
+  /** Opacity of the card's shadow and of the buttons and handle. */
   chrome: number
-  /** Whether the page view shows (it hides near the end of a close while the placeholder fades). */
-  page: boolean
+  /** Opacity of the card itself: the page's still, or its colour until there is one. */
+  sheet: number
 }
 
 /** A drag of the handle or a two-finger swipe that the card is following (PK-06). */
@@ -67,17 +64,25 @@ interface Drag {
 }
 
 /**
- * Animates the Peek card. Each frame moves the chrome in the DOM and sends the same rect to main,
- * which moves the page's native view in step (FL-19, PK-06). Every phase starts from wherever the
- * card is, so a new phase retargets smoothly instead of jumping (FL-01).
+ * Animates the Peek card with transform and opacity only (FL-01). The card is laid out once at its
+ * size at rest, and shows a still of the page (PK-06): main keeps the page's native view out of
+ * sight while the card moves, and puts it on the card when the card comes to rest, so the page is
+ * laid out at its size once and never every frame. Every phase starts from wherever the card is, so
+ * a new phase retargets smoothly instead of jumping (FL-01).
  */
 class PeekAnimator {
   overlay!: PeekOverlay
   backdrop: HTMLElement | null = null
   card: HTMLElement | null = null
+  shadow: HTMLElement | null = null
+  still: HTMLImageElement | null = null
   controls: HTMLElement | null = null
   handle: HTMLElement | null = null
   private frame: Frame | null = null
+  /** The card's size at rest, which its elements are laid out at. */
+  private base: Box | null = null
+  /** Whether main was last told to show the page on the card. */
+  private pageShown = false
   private raf = 0
   private drag: Drag | null = null
   /** A drag or swipe let go past the threshold: the card is already leaving. */
@@ -100,14 +105,31 @@ class PeekAnimator {
 
   draw(f: Frame): void {
     this.frame = f
-    const { rect, radius } = f
+    const { rect } = f
+    const base = peekCard(this.area())
+    if (!this.base || this.base.width !== base.width || this.base.height !== base.height) {
+      this.base = base
+      for (const el of [this.card, this.shadow]) {
+        if (!el) continue
+        el.style.width = `${base.width}px`
+        el.style.height = `${base.height}px`
+      }
+    }
+    // The card at rest, moved and scaled to this frame's box.
+    const sx = rect.width / base.width
+    const sy = rect.height / base.height
+    const transform = `translate(${rect.x}px, ${rect.y}px) scale(${sx}, ${sy})`
     if (this.card) {
-      const style = this.card.style
-      style.transform = `translate(${rect.x}px, ${rect.y}px)`
-      style.width = `${rect.width}px`
-      style.height = `${rect.height}px`
-      style.borderRadius = `${radius}px`
-      style.opacity = String(f.chrome)
+      this.card.style.transform = transform
+      this.card.style.opacity = String(f.sheet)
+    }
+    // The still keeps the page's proportions, scaled alike both ways to cover the card, which crops
+    // it (a split's pane is narrower than the card).
+    const cover = Math.max(sx, sy)
+    if (this.still && sx > 0 && sy > 0) this.still.style.transform = `scale(${cover / sx}, ${cover / sy})`
+    if (this.shadow) {
+      this.shadow.style.transform = transform
+      this.shadow.style.opacity = String(f.chrome)
     }
     if (this.backdrop) this.backdrop.style.opacity = String(f.dim)
     const chromeOpacity = String(Math.max(0, f.chrome * 2 - 1))
@@ -123,7 +145,37 @@ class PeekAnimator {
       style.height = `${height}px`
       style.opacity = chromeOpacity
     }
-    window.orbit.send('peek.frame', { nonce: this.overlay.nonce, rect, radius, visible: f.page })
+  }
+
+  /**
+   * Tells main whether the page shows on the card (it is at rest) or waits out of sight (the card
+   * moves). `force` says it even when nothing changed: a drag takes the page over from main.
+   */
+  private showPage(shown: boolean, force = false): void {
+    if (this.pageShown === shown && !force) return
+    this.pageShown = shown
+    window.orbit.send('peek.page', { nonce: this.overlay.nonce, shown })
+  }
+
+  /** A new still of the page: the card shows it once it is decoded, so it never shows half drawn. */
+  setStill(url: string): void {
+    const still = this.still
+    if (!still) return
+    const next = new Image()
+    next.src = url
+    next.decode().then(
+      () => {
+        if (this.still !== still) return
+        still.src = url
+        still.dataset.ready = 'true'
+      },
+      () => {},
+    )
+  }
+
+  /** The card came to rest: the page shows on it. */
+  private atRest(): void {
+    this.showPage(true)
   }
 
   /** The page area changed while open: the card takes its new place at once. */
@@ -145,26 +197,31 @@ class PeekAnimator {
 
     if (phase === 'open') {
       if (reduced) {
+        // At its place from the start: the page shows on it while the dim fades in.
+        this.draw({ rect: card, dim: 0, chrome: 1, sheet: 1 })
+        this.atRest()
         this.tween(
           FADE_MS,
-          (t) => this.draw({ rect: card, radius: PEEK_RADIUS, dim: t, chrome: 1, page: true }),
+          (t) => this.draw({ rect: card, dim: t, chrome: 1, sheet: 1 }),
           () => perfMark('peek:opened'),
         )
         return
       }
       const from = this.frame?.rect ?? peekStart(card, a, this.overlay.origin)
-      this.draw({ rect: from, radius: PEEK_RADIUS, dim: 0, chrome: 1, page: true })
+      this.draw({ rect: from, dim: 0, chrome: 1, sheet: 1 })
       this.spring(
         PEEK_OPEN_SPRING,
         (p, elapsed) =>
           this.draw({
             rect: lerpBox(from, card, p),
-            radius: PEEK_RADIUS,
             dim: Math.min(1, elapsed / 200),
             chrome: 1,
-            page: true,
+            sheet: 1,
           }),
-        () => perfMark('peek:opened'),
+        () => {
+          this.atRest()
+          perfMark('peek:opened')
+        },
       )
       return
     }
@@ -174,11 +231,13 @@ class PeekAnimator {
       return
     }
 
-    // Expanding into a tab (the whole page area) or sliding into a split's right pane.
-    const start = this.frame ?? { rect: card, radius: PEEK_RADIUS, dim: 1, chrome: 1, page: true }
+    // Expanding into a tab (the whole page area) or sliding into a split's right pane: the card,
+    // showing the page's still, grows there while main lays the page out at that size, out of sight.
+    const start = this.frame ?? { rect: card, dim: 1, chrome: 1, sheet: 1 }
     const target = phase === 'splitting' ? splitTarget(a) : { x: 0, y: 0, width: a.width, height: a.height }
+    this.pageShown = false
     if (reduced) {
-      this.draw({ rect: target, radius: FRAME_RADIUS, dim: 0, chrome: 0, page: true })
+      this.draw({ rect: target, dim: 0, chrome: 0, sheet: 1 })
       settled()
       return
     }
@@ -188,10 +247,9 @@ class PeekAnimator {
         const q = Math.min(1, p)
         this.draw({
           rect: lerpBox(start.rect, target, p),
-          radius: start.radius + (FRAME_RADIUS - start.radius) * q,
           dim: start.dim * (1 - q),
           chrome: Math.max(0, start.chrome * (1 - q * 1.6)),
-          page: true,
+          sheet: 1,
         })
       },
       settled,
@@ -207,22 +265,22 @@ class PeekAnimator {
   /**
    * The close (FL-19): a slight shrink and fade, or under reduced motion a fade (FL-28). After a
    * drag the card keeps going down at the speed it was let go (velocity carries over, FL-01).
-   * The page view can't fade: it leaves part way and the card underneath, painted in the page's
-   * colour, finishes the fade.
+   * The page view can't fade: it goes at once (main hides it), and the card shows its still.
    */
   private close(velocity: number, dragged: boolean): void {
-    const start = this.frame ?? {
-      rect: peekCard(this.area()),
-      radius: PEEK_RADIUS,
-      dim: 1,
-      chrome: 1,
-      page: true,
-    }
+    const start = this.frame ?? { rect: peekCard(this.area()), dim: 1, chrome: 1, sheet: 1 }
     const settled = this.settler()
+    this.pageShown = false
     if (reducedMotion()) {
       this.tween(
         FADE_MS,
-        (t) => this.draw({ rect: start.rect, radius: start.radius, dim: start.dim * (1 - t), chrome: 0, page: false }),
+        (t) =>
+          this.draw({
+            rect: start.rect,
+            dim: start.dim * (1 - t),
+            chrome: start.chrome * (1 - t),
+            sheet: start.sheet * (1 - t),
+          }),
         settled,
       )
       return
@@ -236,10 +294,9 @@ class PeekAnimator {
       (e) =>
         this.draw({
           rect: lerpBox(start.rect, to, e),
-          radius: start.radius,
           dim: start.dim * (1 - e),
           chrome: start.chrome * (1 - e),
-          page: e < 0.45,
+          sheet: start.sheet * (1 - e),
         }),
       settled,
     )
@@ -256,8 +313,10 @@ class PeekAnimator {
   private beginDrag(pointerY?: number, t = performance.now()): Drag | null {
     if (this.drag) return this.drag
     if ((this.overlay.phase ?? 'open') !== 'open' || this.leaving) return null
-    // Interrupts the open spring wherever it is (FL-01).
+    // Interrupts the open spring wherever it is (FL-01). The page waits out of sight while the
+    // card, showing its still, follows the input.
     this.stop()
+    this.showPage(false, true)
     const f = this.frame
     this.drag = {
       base: f?.rect ?? peekCard(this.area()),
@@ -277,7 +336,7 @@ class PeekAnimator {
     const restHeight = peekCard(this.area()).height
     const rect = draggedCard(d.base, offset, restHeight)
     const progress = Math.max(0, Math.min(1, (rect.y - d.base.y) / restHeight))
-    this.draw({ rect, radius: PEEK_RADIUS, dim: d.dim * (1 - 0.6 * progress), chrome: 1 - 0.4 * progress, page: true })
+    this.draw({ rect, dim: d.dim * (1 - 0.6 * progress), chrome: 1 - 0.4 * progress, sheet: 1 })
   }
 
   /** Let go: past the threshold (or flicked) the card leaves; otherwise it springs back. */
@@ -311,19 +370,19 @@ class PeekAnimator {
       const q = Math.min(1, p)
       this.draw({
         rect: lerpBox(from.rect, card, p),
-        radius: PEEK_RADIUS,
         dim: from.dim + (1 - from.dim) * q,
         chrome: from.chrome + (1 - from.chrome) * q,
-        page: true,
+        sheet: 1,
       })
     }
+    const back = () => this.atRest()
     if (reducedMotion()) {
-      this.tween(FADE_MS, step)
+      this.tween(FADE_MS, step, back)
       return
     }
     // In spring units (0 → 1 is the whole way back); moving down is moving away.
     const v0 = Math.abs(offset) > 1 ? Math.max(-30, Math.min(30, -velocity / Math.abs(offset))) : 0
-    this.spring(PEEK_OPEN_SPRING, step, undefined, v0)
+    this.spring(PEEK_OPEN_SPRING, step, back, v0)
   }
 
   pointerDown(clientY: number, t: number): boolean {
@@ -409,6 +468,8 @@ export function PeekLayer({ overlay }: { overlay: PeekOverlay }) {
   useKeymap()
   const backdropRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
+  const shadowRef = useRef<HTMLDivElement>(null)
+  const stillRef = useRef<HTMLImageElement>(null)
   const controlsRef = useRef<HTMLDivElement>(null)
   const handleRef = useRef<HTMLDivElement>(null)
   const [animator] = useState(() => new PeekAnimator())
@@ -419,12 +480,25 @@ export function PeekLayer({ overlay }: { overlay: PeekOverlay }) {
   useLayoutEffect(() => {
     animator.backdrop = backdropRef.current
     animator.card = cardRef.current
+    animator.shadow = shadowRef.current
+    animator.still = stillRef.current
     animator.controls = controlsRef.current
     animator.handle = handleRef.current
     return () => animator.dispose()
   }, [animator])
 
   useLayoutEffect(() => animator.play(phase), [animator, phase])
+
+  // Stills of the page, for the card to show while the page's view is out of sight (PK-06).
+  const nonce = overlay.nonce
+  useEffect(
+    () =>
+      window.orbit.on('peek:still', (payload) => {
+        const still = payload as { nonce: number; url: string }
+        if (still.nonce === nonce) animator.setStill(still.url)
+      }),
+    [animator, nonce],
+  )
 
   const width = overlay.area?.width
   const height = overlay.area?.height
@@ -453,12 +527,15 @@ export function PeekLayer({ overlay }: { overlay: PeekOverlay }) {
         }}
         onWheel={(e) => animator.wheel(e.deltaY, e.deltaMode, e.ctrlKey, e.timeStamp)}
       />
+      <div ref={shadowRef} className="peek__shadow" />
       <div
         ref={cardRef}
         className="peek__card"
         data-testid="peek-card"
         style={phase === 'closing' && overlay.background ? { background: overlay.background } : undefined}
-      />
+      >
+        <img ref={stillRef} className="peek__still" data-testid="peek-still" alt="" draggable={false} />
+      </div>
       {/* Drag the handle (or swipe) down to dismiss; let go early and the card springs back (PK-06). */}
       <div
         ref={handleRef}
