@@ -425,6 +425,15 @@ async function leave(app: ElectronApplication): Promise<string> {
   return id
 }
 
+/** Selects a quiet tab put right above `tabId` in Today: closing it selects `tabId` again (TB-06). */
+async function leaveAbove(app: ElectronApplication, tabId: string): Promise<string> {
+  const s = await state(app)
+  const today = s.spaces[s.tabs[tabId]?.spaceId as string]?.today ?? []
+  const id = await cmd<string>(app, 'tabs.create', { url: fx.url('/page/Other/Quiet'), index: today.indexOf(tabId) })
+  await waitTab(app, id, '/page/Other')
+  return id
+}
+
 /** The engine's own picture-in-picture window shows a video of the page. */
 const enginePip = (p: Page | Frame) => p.evaluate(() => !!document.pictureInPictureElement)
 /** The id of the page's video that floats in Orbit's player ('' when none). */
@@ -663,8 +672,10 @@ const boxOf = (b: Box): Box => ({ x: b.x, y: b.y, width: b.width, height: b.heig
 
 /**
  * From now on, notes in the main process each moment a tab's view comes to show in a main window:
- * in it, visible, and under no other visible page's view that overlaps it (system clock, ms). Each
- * change is looked at once the task that made it is done, as the window would draw it.
+ * in it, visible, more of it than a corner pixel inside the window (out of sight, a view waits with
+ * all of it but that pixel outside), and under no other visible page's view that overlaps it
+ * (system clock, ms). Each change is looked at once the task that made it is done, as the window
+ * would draw it.
  */
 async function watchShown(app: ElectronApplication, tabId: string): Promise<void> {
   await app.evaluate(({ BrowserWindow }, id) => {
@@ -690,6 +701,10 @@ async function watchShown(app: ElectronApplication, tabId: string): Promise<void
         if (i < 0 || !view.getVisible()) continue
         const pages = views()
         const box = view.getBounds()
+        const [width = 0, height = 0] = win.getContentSize()
+        const across = Math.min(box.x + box.width, width) - Math.max(box.x, 0)
+        const down = Math.min(box.y + box.height, height) - Math.max(box.y, 0)
+        if (across <= 1 || down <= 1) continue
         shown = !children
           .slice(i + 1)
           .some((c) => pages.has(c as View) && c.getVisible() && overlaps(c.getBounds(), box))
@@ -1047,21 +1062,62 @@ test('[MD-04] a live stream shows a live badge instead of a seekable bar', async
   await expect(pip.getByTestId('pip-play')).toBeVisible()
 })
 
-/** The two ways back from the player: selecting the tab again, and the player's Back to tab (MD-07). */
-function waysBack(app: ElectronApplication, pip: Page, tabId: string): [string, () => Promise<unknown>][] {
+/** A way back to the video's tab from the player (MD-07), after its own way away from the tab. */
+interface WayBack {
+  way: string
+  /** Leaves the video's tab: its video then plays in the player. */
+  away: () => Promise<unknown>
+  back: () => Promise<unknown>
+}
+
+/**
+ * The ways back from the player (MD-01, MD-07): selecting the tab again, and the player's Back to
+ * tab, from a quiet tab selected over it; ⌘W on a quiet tab right above it, so that it comes next
+ * (TB-06); and selecting it from an empty Space, alone and then in a split with a quiet tab. In the
+ * last three no page the window showed stays over its view while it comes back: the closed tab's
+ * view is gone, an empty Space shows none, and a split's other pane sits beside it.
+ */
+function waysBack(app: ElectronApplication, pip: Page, tabId: string): WayBack[] {
+  const select = () => cmd(app, 'tabs.activate', { tabId })
+  const emptySpace = () => cmd(app, 'spaces.create', { name: 'Empty' })
   return [
-    ['selecting the tab', () => cmd(app, 'tabs.activate', { tabId })],
-    [
-      'Back to tab',
-      async () => {
+    { way: 'selecting the tab', away: () => leave(app), back: select },
+    {
+      way: 'Back to tab',
+      away: () => leave(app),
+      back: async () => {
         await pip.getByTestId('pip').hover({ position: { x: 40, y: 60 } })
         await pip.getByTestId('pip-back').click()
       },
-    ],
+    },
+    { way: '⌘W on the tab over it', away: () => leaveAbove(app, tabId), back: () => act(app, 'tab.archive') },
+    { way: 'selecting it from an empty Space', away: emptySpace, back: select },
+    {
+      way: 'selecting its split from an empty Space',
+      away: async () => {
+        const other = await newTab(app, fx.url('/page/Other/Quiet'), { activate: false })
+        const full = (await tabView(app, tabId))?.bounds.width ?? 0
+        await cmd(app, 'split.create', { tabIds: [tabId, other], focus: tabId })
+        await waitTab(app, other, '/page/Other')
+        // The split at rest, the video's pane on the left.
+        let last = ''
+        await expect
+          .poll(async () => {
+            const box = (await tabView(app, tabId))?.bounds
+            const was = last
+            last = JSON.stringify(box)
+            return last === was && (box?.width ?? full) < full * 0.7 && !!(await tabView(app, other))?.visible
+          })
+          .toBe(true)
+        await emptySpace()
+      },
+      back: select,
+    },
   ]
 }
 
-test('[MD-01][MD-07] back from the player, by selecting the tab or Back to tab, the page shows in its window only once it has drawn its own layout there: never a frame of its player layout', async () => {
+test('[MD-01][MD-07] back from the player, by selecting the tab, Back to tab, ⌘W on the tab over it, or from an empty Space (alone or in a split), the page shows in its window only once it has drawn its own layout there: never a frame of its player layout', async () => {
+  test.setTimeout(120_000)
   orbit = await launchOrbit()
   const { app } = orbit
   // A page slow to lay out at its new size: its first frame back comes well after the view does.
@@ -1069,12 +1125,12 @@ test('[MD-01][MD-07] back from the player, by selecting the tab or Back to tab, 
   await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
   const pip = await pipPage(app)
   const results: { way: string; shown: number[]; drawn: number | undefined; blank: Frames }[] = []
-  for (const [way, go] of waysBack(app, pip, v.id)) {
-    await leave(app)
+  for (const { way, away, back } of waysBack(app, pip, v.id)) {
+    await away()
     await expectPlayer(app, v.id)
     await recordFrames(v.page)
     await watchShown(app, v.id)
-    await go()
+    await back()
     await expect.poll(() => activeId(app)).toBe(v.id)
     await expectNoPlayer(app)
     await expect.poll(() => floated(v.page)).toBe('')
@@ -1123,14 +1179,14 @@ test('[MD-01][MD-07] on screen, back from the player the page area shows no fram
   await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
   const pip = await pipPage(app)
   const results: { way: string; frames: number; dark: number[]; empty: number[] }[] = []
-  for (const [way, go] of waysBack(app, pip, v.id)) {
-    await leave(app)
+  for (const { way, away, back } of waysBack(app, pip, v.id)) {
+    await away()
     const corner = (await expectPlayer(app, v.id)).bounds as Box
     const grab = grabScreen(bin as string, display)
     try {
       await expect.poll(() => grab.frames.length).toBeGreaterThan(4)
       const from = grab.frames.length
-      await go()
+      await back()
       await expect.poll(() => activeId(app)).toBe(v.id)
       await expectNoPlayer(app)
       await expect.poll(() => floated(v.page)).toBe('')

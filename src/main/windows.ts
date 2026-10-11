@@ -113,8 +113,8 @@ interface WindowRecord {
    */
   cover?: WebContentsView
   /**
-   * Pages no longer wanted that stay shown, where they were, over a view held out of sight until
-   * its page has drawn (holdArrivals); they hide once it shows.
+   * Pages no longer wanted that stay shown, where they were, while a view is held out of sight
+   * until its page has drawn (holdArrivals); they hide once it shows.
    */
   lingering: Set<TabId>
 }
@@ -241,7 +241,7 @@ export class WindowManager {
   private selfClosed = new Set<TabId>()
   private floatingOwners: ((tabId: TabId) => WindowId | undefined)[] = []
   private arrivalHolds: ((tabId: TabId, view: WebContentsView) => Promise<unknown> | undefined)[] = []
-  /** Views held out of sight under their window's pages (holdArrivals). */
+  /** Views held out of sight at their window's corner (holdArrivals). */
   private held = new Map<TabId, { view: WebContentsView; windowId: WindowId; timer: ReturnType<typeof setTimeout> }>()
   /**
    * Views that stay above the page tools wherever either goes: a page's own dialog or print dialog
@@ -317,8 +317,11 @@ export class WindowManager {
    * A feature that lends a tab's view to a window of its own (the floating player) can hold it out
    * of sight when it comes back into a window: until the promise it returns settles, or HOLD_MS.
    * A view whose size changed shows the last frame its page drew until the page draws at the new
-   * size, so meanwhile it sits at its place under the pages the window showed, which stay (MD-01:
-   * never a frame of the player's layout in the page area).
+   * size, so meanwhile it waits at its pane's size with all of it but its corner pixel outside the
+   * window (outOfSight()), where its page lays out and draws; then it moves into its pane, at the
+   * same size. The pages the window showed stay, and take clicks, until then (MD-01: no frame of
+   * the player's layout in the page area, if the page draws within HOLD_MS). A view hidden, or
+   * wholly outside the window, would draw nothing.
    */
   holdArrivals(hold: (tabId: TabId, view: WebContentsView) => Promise<unknown> | undefined): void {
     this.arrivalHolds.push(hold)
@@ -655,8 +658,11 @@ export class WindowManager {
    */
   tabViewBounds(tabId: TabId): Rect | undefined {
     const entry = this.attached.get(tabId)
-    if (!entry || !this.records.get(entry.windowId)?.visible.has(tabId)) return undefined
-    const view = entry.view.getBounds()
+    const rec = entry && this.records.get(entry.windowId)
+    if (!entry || !rec?.visible.has(tabId)) return undefined
+    // A view held out of sight (holdArrivals) is laid out at its pane, where it shows next.
+    const pane = this.held.get(tabId)?.view === entry.view ? rec.panes.find((p) => p.tabId === tabId) : undefined
+    const view = pane ? roundRect(pane.rect) : entry.view.getBounds()
     const page = this.devtoolsPages.get(tabId)
     return page ? pageInView(view, page) : view
   }
@@ -718,25 +724,25 @@ export class WindowManager {
       const view = this.ensureView(pane.tabId)
       if (!view) continue
       this.attach(rec, pane.tabId, view)
-      view.setBounds(roundRect(pane.rect))
+      const rect = roundRect(pane.rect)
+      view.setBounds(this.held.get(pane.tabId)?.view === view ? this.outOfSight(rec, rect) : rect)
       view.setBorderRadius(corner)
       rec.corners.set(pane.tabId, corner)
       view.setVisible(true)
       // A tab whose page crashed while in the background shows its crash screen when it is shown
       // again, until the user reloads it (NV-14: the pages lane's screen over the page).
     }
-    // While a view coming back is held out of sight (holdArrivals), the pages shown before stay over it.
-    const holding = [...this.held.values()].filter((h) => h.windowId === rec.id)
+    // While a view coming back is held out of sight (holdArrivals), the pages shown before stay.
+    const holding = [...this.held.values()].some((h) => h.windowId === rec.id)
     for (const tabId of new Set([...rec.visible, ...rec.lingering])) {
       rec.lingering.delete(tabId)
       if (wanted.has(tabId)) continue
       // Only hide what this window holds: the view may have moved to another window since.
       const entry = this.attached.get(tabId)
       if (entry?.windowId !== rec.id) continue
-      if (holding.length > 0) rec.lingering.add(tabId)
+      if (holding) rec.lingering.add(tabId)
       else entry.view.setVisible(false)
     }
-    for (const hold of holding) this.placeUnder(rec, hold.view)
     rec.visible = wanted
     if (panes.length === 1) rec.lastSingleRect = panes[0]?.rect
     if (rec.htmlFullscreen) this.layoutHtmlFullscreen(rec, wanted)
@@ -1348,19 +1354,14 @@ export class WindowManager {
     this.held.delete(tabId)
   }
 
-  /** Puts a held view under the window's other shown pages, if it isn't already. */
-  private placeUnder(rec: WindowRecord, view: WebContentsView): void {
-    const parent = rec.win.contentView
-    const children = parent.children
-    const at = children.indexOf(view)
-    let floor = -1
-    for (const entry of this.attached.values()) {
-      if (entry.windowId !== rec.id || entry.view === view || !entry.view.getVisible()) continue
-      const i = children.indexOf(entry.view)
-      if (i >= 0 && (floor < 0 || i < floor)) floor = i
-    }
-    if (at < 0 || floor < 0 || at < floor) return
-    parent.addChildView(view, floor)
+  /**
+   * Where a held view waits (holdArrivals): at its pane's size, with all of it but its top-left
+   * pixel outside the window's bottom-right corner, as the overlay warms up (CB-22) and a Peek's
+   * page waits (PK-06). Its page lays out and draws there, and the hold's end only moves it.
+   */
+  private outOfSight(rec: WindowRecord, rect: Rect): Rect {
+    const [width = 0, height = 0] = rec.win.getContentSize()
+    return { x: width - 1, y: height - 1, width: rect.width, height: rect.height }
   }
 
   /** Follows a tab's live web contents: fullscreen requests, and pages that close themselves. */
