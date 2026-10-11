@@ -8,6 +8,7 @@ import { registerDownloads } from './downloads'
 import { registerExtensions } from './extensions'
 import { registerHistory } from './history'
 import { registerImport } from './import'
+import { registerKeys } from './keys'
 import { registerMedia } from './media'
 import { registerMiniWindow } from './miniwindow'
 import { registerNav } from './nav'
@@ -21,6 +22,8 @@ import { registerUpdates } from './updates'
 
 /** Every feature module registers its commands, actions and hooks here, in dependency order. */
 export function registerFeatures(ctx: MainContext): void {
+  // First: the user's key bindings, so whatever reads a shortcut as it registers reads theirs (KS-01).
+  registerKeys(ctx)
   registerCore(ctx)
   const { ops } = registerTabs(ctx)
   registerNav(ctx, ops)

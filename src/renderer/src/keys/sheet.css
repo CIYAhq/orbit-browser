@@ -1,0 +1,194 @@
+/*
+ * The keyboard shortcut sheet (OB-12) in the overlay: a card centred over the window, in the
+ * Space's colours, that opens with the popover timing (a fade and 0.97 → 1).
+ */
+
+.ks-sheet-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(10, 10, 14, 0.12);
+  pointer-events: none;
+}
+
+.ks-sheet {
+  --sheet-bg: color-mix(in srgb, var(--frame-top, #fff) 14%, rgba(255, 255, 255, 0.98));
+  --sheet-text: #1c1c1f;
+  --sheet-muted: rgba(28, 28, 31, 0.55);
+  --sheet-line: rgba(0, 0, 0, 0.07);
+  --sheet-kbd: rgba(0, 0, 0, 0.055);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: min(720px, 100%);
+  max-height: 100%;
+  border-radius: 13px;
+  background: var(--sheet-bg);
+  color: var(--sheet-text);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.16),
+    0 22px 56px rgba(0, 0, 0, 0.24),
+    0 4px 14px rgba(0, 0, 0, 0.1);
+  font-size: 13px;
+  line-height: 1.35;
+  outline: none;
+  user-select: none;
+  pointer-events: auto;
+  animation: ks-sheet-in 150ms var(--ease-out, ease-out);
+}
+
+.ks-sheet--dark {
+  --sheet-bg: color-mix(in srgb, var(--frame-top, #000) 26%, rgba(30, 30, 34, 0.98));
+  --sheet-text: #f2f2f4;
+  --sheet-muted: rgba(242, 242, 244, 0.55);
+  --sheet-line: rgba(255, 255, 255, 0.08);
+  --sheet-kbd: rgba(255, 255, 255, 0.09);
+  box-shadow:
+    0 0 0 0.5px rgba(255, 255, 255, 0.12),
+    0 22px 56px rgba(0, 0, 0, 0.5),
+    0 4px 14px rgba(0, 0, 0, 0.3);
+}
+
+@keyframes ks-sheet-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ks-sheet {
+    animation: none;
+  }
+}
+
+.ks-sheet__head {
+  position: relative;
+  padding: 14px 44px 12px 18px;
+  border-bottom: 1px solid var(--sheet-line);
+}
+
+.ks-sheet__head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.ks-sheet__close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--sheet-muted);
+}
+
+.ks-sheet__close:hover {
+  background: var(--sheet-kbd);
+  color: var(--sheet-text);
+}
+
+.ks-sheet__groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 28px;
+  padding: 12px 18px 14px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+@media (max-width: 560px) {
+  .ks-sheet__groups {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.ks-sheet__group h3 {
+  margin: 6px 0 4px;
+  color: var(--sheet-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.ks-sheet__group dl {
+  margin: 0;
+}
+
+.ks-sheet__row {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 26px;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--sheet-line);
+}
+
+.ks-sheet__row:last-child {
+  border-bottom: 0;
+}
+
+/* A long title wraps rather than hiding words; the keys keep their width up to 70% of the row. */
+.ks-sheet__row dt {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ks-sheet__row dd {
+  flex: none;
+  max-width: 70%;
+  margin: 0;
+  text-align: right;
+}
+
+.ks-sheet__row kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--sheet-kbd);
+  color: var(--sheet-text);
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ks-sheet__none {
+  color: var(--sheet-muted);
+  font-size: 12px;
+}
+
+.ks-sheet__foot {
+  padding: 10px 18px 14px;
+  border-top: 1px solid var(--sheet-line);
+}
+
+.ks-sheet__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent, #5865d8);
+  font: inherit;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.ks-sheet__link:hover {
+  text-decoration: underline;
+}
+
+.ks-sheet__link:focus-visible,
+.ks-sheet__close:focus-visible {
+  outline: 2px solid var(--accent, #5865d8);
+  outline-offset: 2px;
+}

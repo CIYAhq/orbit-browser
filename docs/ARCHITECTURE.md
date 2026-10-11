@@ -38,6 +38,25 @@ BrowserWindow (frameless; hiddenInset traffic lights on macOS)
 - **Keyboard shortcuts** are matched in main via `before-input-event` on every Orbit-owned web contents **and** every tab, so they work whatever has focus. The renderer has a fallback (`src/renderer/src/shortcuts.ts`). The final shortcut set follows `spec/shortcuts.md` (KS-*). Remapping (ST-08) layers user overrides over the defaults.
 - **Hooks** (`MainContext.hooks`) let features plug into tab creation, navigation and `window.open` without editing core files (Peek and Mini Window take over link opens this way).
 
+### Keys: routing, pages and the keyboard (`src/main/keys/`)
+
+- **Router order.** `WindowManager.attachShortcuts` (`src/main/windows.ts`) asks the keys lane's `keyRouter` (`src/main/keys/router.ts`) about each key press, in this order:
+  1. `record`: while Settings → Shortcuts listens for a new binding in that window, the press is reported (`keys.recorded`) and runs nothing (ST-08).
+  2. `switcherKey`: while the recent-tab switcher is up (⌃Tab held), ⌃W closes the highlighted tab and ⌃` steps back (KS-06, TB-05, D60).
+  3. `actionForInput`, then `actionIn`: the action the binding runs where it was pressed (⌘O opens a file outside a Peek or Mini Window, KS-12).
+  4. No action, or none registered: `runOutsideText` (on macOS ⌘← and ⌘→ go back and forward only outside text fields, KS-16).
+  5. `leaveToPage`: keys a page may use go to it first (below).
+  6. Otherwise the key is kept from the page (`preventDefault`) and the action runs, with `repeat` for a held key. Interceptors (private and Mini Windows, the shortcut sheet, DevTools) may answer it there instead.
+- **Pages first** (KS-02, KS-16). An action that prefers websites, and Back and Forward in a text field, go to the page first. The **page watcher** (`page-keys.ts`) is a script in isolated world 1020 of each tab's main frame, installed at `dom-ready`. For each trusted key-down it notes, once every handler of the page has run, whether one called `preventDefault` and whether a text field had focus. Its answers mean:
+  - `{ seen: true, prevented, inField }`: what the page did;
+  - `{ seen: false }`: the press didn't reach it within 200 ms, so a handler of the page that ran first stopped it;
+  - nothing within 250 ms (`ANSWER_WAIT_MS`: a busy renderer, or a page Orbit can't script): the page left the key alone, and the action runs (D60).
+
+  Electron runs no isolated-world script while a main frame loads, so a page on its way can't answer; Orbit takes the keys at once then.
+- **Focus mirror** (`page-focus.ts`, D60). Main knows before a press where the keyboard is in each tab's page: a script in the page's own world says whether a text field, the page, a frame inside it, or nothing there has it, and says it again when focus moves. The frame inside the page that has the keyboard (`contents.focusedFrame`) is followed too, and notes the presses Orbit may ask about. So Back and Forward run at once outside text fields, however busy the page, and a press in a frame is judged by that frame.
+- **Esc on a loading page** (KS-19, D59, `escape.ts`): the page gets Esc first. The page preload says whether a handler used it, and Orbit stops the load only if none did.
+- **No web contents takes the keyboard on navigation** (`KEEP_KEYBOARD`, `focus.ts`, KS-16). Electron focuses a web contents each time its page commits a navigation unless `focusOnNavigation` is off, even a page behind another tab. Every web contents Orbit makes for its windows spreads `KEEP_KEYBOARD` into its `webPreferences`: tab views, Orbit's own views, and pop-ups through `overrideBrowserWindowOptions`. Orbit gives a page the keyboard itself when the user selects, opens or clicks it. A lane that makes or shows a page does the same.
+
 ## 4. Tabs: lifecycle, sleeping, layout
 
 - A tab exists in state whether or not it is **awake**. `TabRuntime.ensure(tabId)` creates its `WebContentsView` lazily (sandboxed, per-profile session) and restores saved navigation history if the tab slept. `sleep(tabId)` saves history and closes the renderer process. That's how memory per idle tab stays low (TB-16). Sleeping is driven by `settings.sleepAfterMs`. Favorites stay warm (FV-08) and audible/visible tabs never sleep.
@@ -80,6 +99,7 @@ src/main/            main process
   media/             PiP, mini player                               lane: peek-mini (media)
   tweaks/ extensions/                                               lane: tweaks-extensions
   history/           browsing-history store (per-profile JSONL + index) lane: commandbar (query API used by archive)
+  keys/              keymap, key router, page watcher, focus mirror  lane: keys
   archive/                                                          lane: archive-persistence
   settings/ import/ downloads/ updates/                             lane: settings-import
 src/shared/          types and pure logic shared by main+renderer (state, tree, url, theme, actions, commands/<area>.ts per lane)
@@ -124,6 +144,9 @@ Sandboxed, context-isolated renderers everywhere. No Node in pages. Pages get on
 - `orbit-page:permission` (NV-15): a synchronous read of how a permission reads for the sending frame's own origin and profile ("prompt" while the user hasn't decided). Read-only.
 - `orbit-page:notification-click` (NV-15): a trusted click on one of the page's notifications. Main brings the tab forward only for a site allowed to show notifications, and at most once per `NOTIFICATION_CLICK_GAP_MS` per tab.
 - `orbit-page:internal-*` (DT-13, D53): Orbit's internal pages only. In the main frame of an `orbit:` page, which is Orbit's own UI, the preload patches nothing and gives `window.orbit`: the store's state and changes, and the commands listed for that page (`INTERNAL_PAGE_COMMANDS`), with no events. Main answers only a tab's main frame showing an `orbit:` page. In a web page it does nothing.
+- `orbit-page:escape` (KS-19, D59): one bit after a trusted Esc reaches the main frame, sent once every handler of the page has run: whether one called `preventDefault`. The listener is in the preload's own world. Main reads the bit only while it waits after an Esc in a loading tab with no overlay open (at most 250 ms; no answer counts as not used), only from that tab's main frame, and only for a press still waiting: a bit with none waiting does nothing. A page that always uses Esc can keep Esc from stopping its load; the Stop button still stops it.
+
+Main also runs scripts in pages, as media, Peek and nav do: the keys lane's page watcher in isolated world 1020, and its focus mirror in the page's own world (`src/main/keys/page-focus.ts`), which leaves nothing behind in the page. What they say is the page's own word: main checks each answer's shape, and an answer can only change what that page's own keys do.
 
 The UI's `orbit:*` IPC accepts registered Orbit UI senders only. UI renderers can't navigate or open windows. Permission prompts are per origin. Tweak JS (user-authored, per site) is injected only through `webFrame.executeJavaScript` in an isolated world, never with Node. Extensions use Electron's built-in extension support plus Orbit's own (MIT) API shims (D3: no GPL dependency).
 

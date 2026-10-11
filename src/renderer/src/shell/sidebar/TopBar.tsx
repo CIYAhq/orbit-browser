@@ -1,6 +1,7 @@
 import { PanelLeft } from 'lucide-react'
 import type { WindowState } from '../../../../shared/state'
 import { isMac, runAction } from '../../api'
+import { useKeymap } from '../../keys/live'
 import { Address } from '../chrome/Address'
 import { NavButtons } from '../chrome/NavButtons'
 import { PermissionPrompt, useActivePrompt } from '../chrome/PermissionPrompt'
@@ -15,6 +16,8 @@ import '../chrome/chrome.css'
  * A site's permission prompt hangs under the address display (NV-15).
  */
 export function TopBar({ win, floating = false }: { win: WindowState; floating?: boolean }) {
+  // The tooltips follow remapped shortcuts (KS-18).
+  useKeymap()
   const prompt = useActivePrompt(win.id)
   return (
     <div className={`topbar${isMac ? ' topbar--mac' : ''}${prompt ? ' has-prompt' : ''}`} data-testid="topbar">

@@ -24,6 +24,8 @@ import {
 } from '../../shared/tree'
 import { engineForWindow, parseInput } from '../../shared/url'
 import type { MainContext } from '../context'
+import { KEEP_KEYBOARD } from '../keys/focus'
+import { TAB_MENU_KEYS, withKeyHints } from '../keys/menu-hints'
 import type { CallContext } from '../registry'
 import { tabSplitMenuItems } from '../split/menu'
 import { TabMaintenance } from './maintenance'
@@ -372,7 +374,9 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     const windowId = windowOf(c)
     const state = store.state
     const mo = menuOps(windowId)
-    const all = isFolderId(id) ? folderMenu(state, id, mo) : isTabId(id) ? tabMenu(state, id, selection, mo) : []
+    // Keys lane: an item that a key also does shows the key (KS-18).
+    const forTab = (tabId: TabId) => withKeyHints(tabMenu(state, tabId, selection, mo), TAB_MENU_KEYS)
+    const all = isFolderId(id) ? folderMenu(state, id, mo) : isTabId(id) ? forTab(id) : []
     // Private windows have no pinned tabs, Favorites, folders or other Spaces (NV-11, SB-25).
     const items = isTabId(id) && isPrivateTab(state, id) ? privateTabMenu(all) : all
     if (items.length === 0) return
@@ -465,6 +469,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
       return {
         action: 'allow',
         outlivesOpener: true,
+        overrideBrowserWindowOptions: { webPreferences: KEEP_KEYBOARD },
         createWindow: (options) => {
           const windowId = windows.windowOfTab(openerTabId) ?? windows.focusedWindowId()
           const spaceId = windowId ? ops.spaceOfWindow(windowId) : opener.spaceId
@@ -682,6 +687,25 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   actions.register('tab.recent', stepRecent(1))
   actions.register('tab.recentBack', stepRecent(-1))
   tabs.onControlUp = endRecent
+  // W, with Control still held, closes the highlighted tab; the next one in the switcher takes its
+  // place and switching goes on (TB-05, keys lane KS-06).
+  tabs.recentSwitch = {
+    active: (windowId) => recent?.windowId === windowId,
+    closeHighlighted: (windowId) => {
+      const r = recent
+      if (!r || r.windowId !== windowId) return
+      const closing = r.order[r.index]
+      if (!closing) return
+      r.order.splice(r.index, 1)
+      r.times.delete(closing)
+      if (r.index >= r.order.length) r.index = 0
+      ops.closeTabs([closing], 'closed')
+      const next = r.order[r.index]
+      if (next && store.state.tabs[next]) ops.activate(windowId, next)
+      if (r.timer) clearTimeout(r.timer)
+      r.timer = setTimeout(endRecent, 1500)
+    },
+  }
   commands.register('tabs.endRecentSwitch', () => endRecent())
   for (let n = 1; n <= 9; n++) {
     actions.register(`tab.goto.${n}`, (c) => {

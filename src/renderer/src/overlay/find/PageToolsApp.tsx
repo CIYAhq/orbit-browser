@@ -2,6 +2,7 @@ import { ChevronDown, ChevronUp, X } from 'lucide-react'
 import { type CSSProperties, useEffect, useRef, useState } from 'react'
 import type { FindState, ZoomIndicator } from '../../../../shared/nav'
 import { invoke, runAction } from '../../api'
+import { useKeymap } from '../../keys/live'
 import { withShortcut } from '../../shell/chrome/shortcut-label'
 import { useWindow } from '../../store'
 import { paletteVars, usePalette } from '../../theme'
@@ -55,6 +56,8 @@ export function PageToolsApp() {
 }
 
 function FindBar({ state }: { state: FindState }) {
+  // The tooltips follow remapped shortcuts (KS-18).
+  useKeymap()
   const input = useRef<HTMLInputElement>(null)
   const composing = useRef(false)
   const [empty, setEmpty] = useState(state.query === '')
@@ -176,6 +179,8 @@ function FindBar({ state }: { state: FindState }) {
 }
 
 function ZoomPill({ zoom }: { zoom: ZoomIndicator }) {
+  // The tooltips follow remapped shortcuts (KS-18).
+  useKeymap()
   return (
     <div
       className="zoom-pill"
