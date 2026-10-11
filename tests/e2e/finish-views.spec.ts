@@ -1,7 +1,9 @@
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
+import { paneOrder } from '../../src/shared/split'
 import {
   activeTabId,
   type Fixtures,
+  FRAME_SLACK,
   launchOrbit,
   MOD,
   type Orbit,
@@ -229,4 +231,108 @@ test('[CB-13][SV-19][SV-17] Close Split from the command bar closes the whole sp
   const tabs = (await state(app)).tabs
   expect(tabs[a]).toBeUndefined()
   expect(tabs[b]).toBeUndefined()
+})
+
+// ---- Split view: a pane that grows in (SV-26) ----
+
+/** What the in-page sampler records about a pane growing in (as split.spec's SV-26 test). */
+type Growth = { insertedAt: number; ticks: number; samples: { t: number; w: number }[]; done: boolean }
+
+/** Starts sampling the card width of `tabId`'s pane every frame, timed from when it enters the page. */
+async function sampleGrowth(shell: Page, tabId: string): Promise<void> {
+  await shell.evaluate((id) => {
+    const probe: Growth = { insertedAt: 0, ticks: 0, samples: [], done: false }
+    ;(window as unknown as { __growth: Growth }).__growth = probe
+    const started = performance.now()
+    const card = () => document.querySelector<HTMLElement>(`[data-testid="split-pane"][data-tab-id="${id}"]`)
+    const seen = new MutationObserver(() => {
+      if (!card()) return
+      probe.insertedAt = performance.now()
+      seen.disconnect()
+    })
+    seen.observe(document.body, { subtree: true, childList: true })
+    const tick = () => {
+      probe.ticks++
+      const now = performance.now()
+      const el = card()
+      if (el && probe.insertedAt) probe.samples.push({ t: now - probe.insertedAt, w: el.getBoundingClientRect().width })
+      if (probe.insertedAt ? now - probe.insertedAt > 900 : now - started > 8000) probe.done = true
+      else requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  }, tabId)
+}
+
+async function growth(shell: Page): Promise<Growth> {
+  const probe = () => shell.evaluate(() => (window as unknown as { __growth: Growth }).__growth)
+  await expect.poll(async () => (await probe()).done).toBe(true)
+  const result = await probe()
+  expect(result.insertedAt, `the new pane never appeared (${result.ticks} frames)`).toBeGreaterThan(0)
+  return result
+}
+
+/** Waits until the split's pane cards stop moving. */
+async function settledPanes(shell: Page, count: number): Promise<void> {
+  const widths = () =>
+    shell.evaluate(async () => {
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+      return [...document.querySelectorAll('[data-testid="split-pane"]')].map((el) =>
+        Math.round(el.getBoundingClientRect().width),
+      )
+    })
+  await expect
+    .poll(async () => {
+      const a = await widths()
+      const b = await widths()
+      return a.length === count && a.join() === b.join()
+    })
+    .toBe(true)
+}
+
+test('[SV-26] a pane added while its neighbour still grows back from a close grows in too (PR #19 review F10)', async () => {
+  const { app, shell } = orbit
+  // As in split.spec's SV-26 test, the shape is checked on frames that came in time; a starved
+  // renderer gets up to three rounds (D46).
+  const rounds: string[] = []
+  for (let round = 1; round <= 3; round++) {
+    const ids = [await newTab(`Left${round}`), await newTab(`Middle${round}`), await newTab(`Right${round}`)]
+    const splitId = (await run(app, 'split.create', { tabIds: ids })) as string
+    const layout = (await state(app)).splits[splitId]?.layout
+    if (!layout) throw new Error('no split')
+    const [, middle, right] = paneOrder(layout)
+    await settledPanes(shell, 3)
+    const added = (await run(app, 'tabs.create', { url: fx.url(`/page/Added${round}`), activate: false })) as string
+    await sampleGrowth(shell, added)
+    // The right pane closes and a new one takes its place beside the middle one in the same moment:
+    // the closing pane still covers that place, and the middle one hasn't grown into it yet.
+    await app.evaluate(
+      async (_e, [closing, adding, target]) => {
+        const h = (
+          globalThis as unknown as {
+            __orbit: { run: (n: string, a: unknown, w?: string) => unknown; windowIds: () => string[] }
+          }
+        ).__orbit
+        const w = h.windowIds()[0]
+        await Promise.all([
+          h.run('split.closePane', { tabId: closing }, w),
+          h.run('split.addTab', { tabId: adding, target, side: 'right' }, w),
+        ])
+      },
+      [right, added, middle] as const,
+    )
+    const { samples } = await growth(shell)
+    const final = samples[samples.length - 1]?.w ?? 0
+    expect(final).toBeGreaterThan(100)
+    const early = samples.filter((s) => s.t <= 100)
+    if (FRAME_SLACK === 1 && early.length === 0) {
+      rounds.push(`round ${round}: no frame by 100 ms`)
+      await run(app, 'split.close', { splitId })
+      continue
+    }
+    // It starts as a sliver and grows over several frames, instead of appearing at full size.
+    if (FRAME_SLACK === 1) expect(early[0]?.w).toBeLessThan(final * 0.8)
+    expect(samples.filter((s) => s.w > 1 && s.w < final - 1).length).toBeGreaterThan(0)
+    return
+  }
+  throw new Error(`frames never came in time to show the grow-in (${rounds.join('; ')})`)
 })
