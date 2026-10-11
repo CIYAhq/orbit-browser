@@ -1,14 +1,17 @@
-import { type ElectronApplication, expect, test } from '@playwright/test'
-import { isMac, launchOrbit, MOD, type Orbit, run, state, tabPage, viewPage } from './helpers'
+import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
+import { action, isMac, launchOrbit, MOD, type Orbit, run, state, tabPage, viewPage } from './helpers'
 import { choosePageMenu, clickInPage, focusedUrl, pageMenu, pressInPage } from './nav-support'
 import {
+  dialogPage,
   type PagesFixtures,
   PRINTERS_ENV,
   pageBounds,
+  pageDialogs,
   printDialogs,
   printedJobs,
   printPage,
   startPagesFixtures,
+  waitDialog,
   waitPrint,
 } from './pages-support'
 import { newTab, tab, waitTab } from './tabs-support'
@@ -333,4 +336,45 @@ test('[NV-07] the page’s print() while a dialog ⌘P opened shows returns at o
     index: 1,
   })
   expect(await printedJobs(app)).toEqual([])
+})
+
+test('[NV-07][NV-24][FL-28] with Orbit’s Reduce Motion on, the print dialog and the page’s own dialogs show in place, with no animation', async () => {
+  const { app } = orbit
+  const { tabId } = await printTab(app)
+  /** Whether a dialog's view has reduced motion, and the animation its card runs as it shows. */
+  const card = async (view: Page, testId: string) => ({
+    reduced: await view.locator('html').evaluate((html) => html.classList.contains('reduce-motion')),
+    animation: await view.getByTestId(testId).evaluate((el) => getComputedStyle(el).animationName),
+  })
+  /** Opens the page's confirm, then the print dialog, and checks each card while it shows. */
+  const check = async (reduced: boolean) => {
+    await app.evaluate(
+      ({ webContents }, u) =>
+        webContents
+          .getAllWebContents()
+          .find((w) => w.getURL() === u)
+          ?.executeJavaScript('setTimeout(() => confirm("Sure?"), 0); 0'),
+      fx.url('/print'),
+    )
+    const asked = await waitDialog(app, (d) => d.tabId === tabId && d.onScreen)
+    const view = await dialogPage(app, asked.id)
+    await expect
+      .poll(() => card(view, 'page-dialog'))
+      .toEqual({ reduced, animation: reduced ? 'none' : 'page-dialog-in' })
+    await view.getByTestId('page-dialog-cancel').click()
+    await expect.poll(() => pageDialogs(app)).toEqual([])
+    await pressInPage(app, '/print', 'P', [MOD_KEY])
+    const print = await waitPrint(app)
+    const printView = await printPage(app, print.dialog)
+    await expect
+      .poll(() => card(printView, 'print-dialog'))
+      .toEqual({ reduced, animation: reduced ? 'none' : 'page-print-in' })
+    await pressEscape(app)
+    await expect.poll(() => printDialogs(app)).toEqual([])
+  }
+  // Off, with a system that asks for nothing: each card fades and scales in.
+  await check(false)
+  await action(app, 'app.toggleReduceMotion')
+  await expect.poll(async () => (await state(app)).settings.reduceMotion).toBe(true)
+  await check(true)
 })
