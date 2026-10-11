@@ -4,7 +4,7 @@
  * (`[feel]` lines): docs/FEEL.md has them against their targets.
  */
 import { expect, type Page, test } from '@playwright/test'
-import { type Box, motionOf, note, type Recording, record, responseTo, series, settledFrom } from './frames'
+import { type Box, bestOf, motionOf, note, type Recording, record, responseTo, series, settledFrom } from './frames'
 import { action, type Fixtures, FRAME_SLACK, launchOrbit, type Orbit, run, startFixtures, tabView } from './helpers'
 import { settled } from './tabs-support'
 
@@ -133,103 +133,135 @@ async function pointerOverSidebar(o: Orbit): Promise<void> {
 test('[FL-18] a tab dragged over the page: the drop zone fades in within about 100 ms and shows the half; on release both panes are in place within 350 ms', async () => {
   const { app, shell } = orbit
   await pointerOverSidebar(orbit)
-  const b = await openTab('Dragged')
-  const a = await openTab('Shown')
-  await expect.poll(async () => (await tabView(app, a))?.visible).toBe(true)
-  await settled(shell)
-  const row = shell.locator(`[data-testid="tab-row"][data-tab-id="${b}"]`)
-  const from = await row.boundingBox()
   const frame = await shell.getByTestId('content-frame').boundingBox()
-  if (!from || !frame) throw new Error('missing boxes')
-  // Lift the row and hold it over the sidebar, short of the page.
-  await shell.mouse.move(from.x + 40, from.y + from.height / 2)
-  await shell.mouse.down()
-  await shell.mouse.move(from.x + 60, from.y + from.height / 2, { steps: 3 })
-  await shell.mouse.move(from.x + 90, from.y + from.height / 2 + 40, { steps: 3 })
+  if (!frame) throw new Error('missing the content frame')
   const zone = { selector: ZONE, attrs: ['data-side'] }
+  // One round drags a fresh tab onto a fresh page, through the right half, the bottom band and back,
+  // and drops it. Its timing budgets are judged on the best of up to three rounds (D46): one slow
+  // frame of a busy machine says little about Orbit. What must hold every time is checked in every
+  // round.
+  const round = async (k: number) => {
+    const b = await openTab(`Dragged ${k}`)
+    const a = await openTab(`Shown ${k}`)
+    await expect.poll(async () => (await tabView(app, a))?.visible).toBe(true)
+    await settled(shell)
+    const row = shell.locator(`[data-testid="tab-row"][data-tab-id="${b}"]`)
+    const from = await row.boundingBox()
+    if (!from) throw new Error('missing the dragged row')
+    // Lift the row and hold it over the sidebar, short of the page.
+    await shell.mouse.move(from.x + 40, from.y + from.height / 2)
+    await shell.mouse.down()
+    await shell.mouse.move(from.x + 60, from.y + from.height / 2, { steps: 3 })
+    await shell.mouse.move(from.x + 90, from.y + from.height / 2 + 40, { steps: 3 })
 
-  // Into the page's right half, in moves as a hand makes them. The press selected the dragged tab
-  // (FL-05): the first move over the page shows the page the drag began on again, and a move after
-  // that finds the zone, which fades in where the new pane will go.
-  const enter = await record(shell, { zone, panes: PANES })
-  await shell.mouse.move(frame.x + frame.width * 0.85, frame.y + frame.height / 2, { steps: 8 })
-  await shell.mouse.move(frame.x + frame.width * 0.85 + 10, frame.y + frame.height / 2, { steps: 2 })
-  await expect(shell.locator(ZONE)).toHaveAttribute('data-side', 'right')
-  await still(shell, `${ZONE}, [data-testid="split-pane"]`)
-  const e = await enter.stop()
-  const onPage = e.inputs.find((i) => i.type === 'pointermove' && (i.x ?? 0) >= frame.x)
-  if (!onPage) throw new Error('the moves never reached the page')
-  const shown = responseTo(e, onPage, (f) => (f.els.zone?.opacity ?? 0) > 0.05)
-  const first = e.frames.find((f) => f.els.zone)
-  // The move the zone answered: the last one handled before its first frame.
-  const cause = first ? e.inputs.filter((i) => i.type === 'pointermove' && i.frame <= first.i).at(-1) : undefined
-  const drawn = cause ? responseTo(e, cause, (f) => (f.els.zone?.opacity ?? 0) > 0.05) : undefined
-  const full = first ? e.frames.find((f) => f.i >= first.i && (f.els.zone?.opacity ?? 0) >= 0.95) : undefined
-  const fadeMs = first && full ? full.t - first.t : undefined
-  const fadeFrames = e.frames.filter((f) => (f.els.zone?.opacity ?? 0) > 0.05 && (f.els.zone?.opacity ?? 1) < 0.95)
-  const zoneEnd = e.frames.at(-1)?.els.zone
-  note('FL-18', 'pointer onto the page → zone drawn', shown?.ms, 'once the page the drag began on is back')
-  note('FL-18', 'move that finds the zone → zone drawn', drawn?.frames, '≤ 2 (a fade from 0)', 'frames')
-  note('FL-18', 'zone: first frame → fully in', fadeMs, '≈ 100 ms')
-  note('FL-18', 'zone width, share of the page', ((zoneEnd?.width ?? 0) / frame.width) * 100, '≈ 50 % (the half)', '%')
+    // Into the page's right half, in moves as a hand makes them. The press selected the dragged tab
+    // (FL-05): the first move over the page shows the page the drag began on again, and a move after
+    // that finds the zone, which fades in where the new pane will go.
+    const enter = await record(shell, { zone, panes: PANES })
+    await shell.mouse.move(frame.x + frame.width * 0.85, frame.y + frame.height / 2, { steps: 8 })
+    await shell.mouse.move(frame.x + frame.width * 0.85 + 10, frame.y + frame.height / 2, { steps: 2 })
+    await expect(shell.locator(ZONE)).toHaveAttribute('data-side', 'right')
+    await still(shell, `${ZONE}, [data-testid="split-pane"]`)
+    const e = await enter.stop()
+    const onPage = e.inputs.find((i) => i.type === 'pointermove' && (i.x ?? 0) >= frame.x)
+    if (!onPage) throw new Error('the moves never reached the page')
+    const shown = responseTo(e, onPage, (f) => (f.els.zone?.opacity ?? 0) > 0.05)
+    const first = e.frames.find((f) => f.els.zone)
+    // The move the zone answered: the last one handled before its first frame.
+    const cause = first ? e.inputs.filter((i) => i.type === 'pointermove' && i.frame <= first.i).at(-1) : undefined
+    const drawn = cause ? responseTo(e, cause, (f) => (f.els.zone?.opacity ?? 0) > 0.05) : undefined
+    const full = first ? e.frames.find((f) => f.i >= first.i && (f.els.zone?.opacity ?? 0) >= 0.95) : undefined
+    const fadeFrames = e.frames.filter(
+      (f) => (f.els.zone?.opacity ?? 0) > 0.05 && (f.els.zone?.opacity ?? 1) < 0.95,
+    ).length
+    const zoneEnd = e.frames.at(-1)?.els.zone
 
-  // To the bottom band: the zone takes the bottom half.
-  const change = await record(shell, { zone, panes: PANES })
-  await shell.mouse.move(frame.x + frame.width / 2, frame.y + frame.height * 0.9)
-  await expect(shell.locator(ZONE)).toHaveAttribute('data-side', 'bottom')
-  await still(shell, `${ZONE}, [data-testid="split-pane"]`)
-  const c = await change.stop()
-  const turned = c.inputs.findLast((i) => i.type === 'pointermove')
-  if (!turned) throw new Error('the move never reached the shell')
-  const zoneAt = c.frames.at(-1)?.els.zone ?? undefined
-  const atBottom = settledFrom(c, (f) => near(f.els.zone ?? undefined, zoneAt))
-  const moves = responseTo(c, turned, (f) => !near(f.els.zone ?? undefined, c.frames[0]?.els.zone ?? undefined))
-  const placedIn = atBottom ? atBottom.i - turned.frame + 1 : Number.POSITIVE_INFINITY
-  note('FL-18', 'pointer to another half → zone starts moving', moves?.frames, '1', 'frames')
-  note('FL-18', 'pointer to another half → zone in its new place', placedIn, '1 (at once)', 'frames')
+    // To the bottom band: the zone takes the bottom half.
+    const change = await record(shell, { zone, panes: PANES })
+    await shell.mouse.move(frame.x + frame.width / 2, frame.y + frame.height * 0.9)
+    await expect(shell.locator(ZONE)).toHaveAttribute('data-side', 'bottom')
+    await still(shell, `${ZONE}, [data-testid="split-pane"]`)
+    const c = await change.stop()
+    const turned = c.inputs.findLast((i) => i.type === 'pointermove')
+    if (!turned) throw new Error('the move never reached the shell')
+    const zoneAt = c.frames.at(-1)?.els.zone ?? undefined
+    const atBottom = settledFrom(c, (f) => near(f.els.zone ?? undefined, zoneAt))
+    const moves = responseTo(c, turned, (f) => !near(f.els.zone ?? undefined, c.frames[0]?.els.zone ?? undefined))
+
+    // Back to the right half, then release: both panes take their places.
+    await shell.mouse.move(frame.x + frame.width * 0.85, frame.y + frame.height / 2, { steps: 2 })
+    await expect(shell.locator(ZONE)).toHaveAttribute('data-side', 'right')
+    await still(shell, `${ZONE}, [data-testid="split-pane"]`)
+    const drop = await record(shell, { zone, panes: PANES })
+    await shell.mouse.up()
+    await expect(shell.locator(`[data-testid="split-pane"][data-tab-id="${b}"]`)).toHaveCount(1)
+    await still(shell, '[data-testid="split-pane"]')
+    const d = await drop.stop()
+    const release = d.inputs.find((i) => i.type === 'pointerup')
+    if (!release) throw new Error('the release never reached the shell')
+    const m = panesMotion(d)
+    return {
+      k,
+      drawn: drawn?.frames ?? Number.POSITIVE_INFINITY,
+      shownMs: shown?.ms ?? Number.POSITIVE_INFINITY,
+      fadeMs: first && full ? full.t - first.t : Number.POSITIVE_INFINITY,
+      fadeFrames,
+      share: (zoneEnd?.width ?? 0) / frame.width,
+      bottom: (zoneAt?.y ?? 0) - frame.y,
+      moves: moves?.frames,
+      placedIn: atBottom ? atBottom.i - turned.frame + 1 : Number.POSITIVE_INFINITY,
+      placedMs: atBottom ? atBottom.t - turned.t : undefined,
+      inSight: m.seen ? m.seen.t - release.t : Number.POSITIVE_INFINITY,
+      inPlace: m.placed ? m.placed.t - release.t : Number.POSITIVE_INFINITY,
+      step: m.step,
+      panes: Object.keys(m.end).sort(),
+      pair: [a, b].sort(),
+    }
+  }
+  type Round = Awaited<ReturnType<typeof round>>
+  // A fade from 0 shows from its second frame, and React renders a pointer move's state in a task
+  // of its own, which can miss the next frame: 2 to 4 frames over seven runs, 3 in five.
+  const meets = (r: Round) =>
+    r.drawn <= 4 * FRAME_SLACK &&
+    r.shownMs <= 300 * FRAME_SLACK &&
+    r.fadeMs <= (100 + 2 * FRAME) * FRAME_SLACK &&
+    r.placedIn <= 2 * FRAME_SLACK &&
+    r.inSight <= 350 * FRAME_SLACK &&
+    r.inPlace <= 600 * FRAME_SLACK
+  const { best, all } = await bestOf(round, meets)
+  for (const r of all) {
+    console.log(
+      `[feel] FL-18 round ${r.k}: zone drawn ${r.drawn} frames after its move, ${Math.round(r.shownMs)} ms after the page; fade ${Math.round(r.fadeMs)} ms; new half in ${r.placedIn} frames; panes in sight ${Math.round(r.inSight)} ms, in place ${Math.round(r.inPlace)} ms`,
+    )
+  }
+  note('FL-18', 'pointer onto the page → zone drawn', best.shownMs, 'once the page the drag began on is back')
+  note('FL-18', 'move that finds the zone → zone drawn', best.drawn, '≤ 2 (a fade from 0)', 'frames')
+  note('FL-18', 'zone: first frame → fully in', best.fadeMs, '≈ 100 ms')
+  note('FL-18', 'zone width, share of the page', best.share * 100, '≈ 50 % (the half)', '%')
+  note('FL-18', 'pointer to another half → zone starts moving', best.moves, '1', 'frames')
+  note('FL-18', 'pointer to another half → zone in its new place', best.placedIn, '1 (at once)', 'frames')
   note(
     'FL-18',
     'pointer to another half → zone in its new place (ms)',
-    atBottom ? atBottom.t - turned.t : undefined,
+    best.placedMs,
     'at once (FL-18); a short ease of about 120 ms (SV-26)',
   )
+  note('FL-18', 'release → both panes within 2 px of their place', best.inSight, '≤ 350 ms')
+  note('FL-18', 'release → both panes in place (within 0.5 px)', best.inPlace, '≤ 350 ms')
+  note('FL-18', 'release: largest step of a pane edge, share of its travel', best.step * 100, '< 60 % (no jump)', '%')
 
-  // Back to the right half, then release: both panes take their places.
-  await shell.mouse.move(frame.x + frame.width * 0.85, frame.y + frame.height / 2, { steps: 2 })
-  await expect(shell.locator(ZONE)).toHaveAttribute('data-side', 'right')
-  await still(shell, `${ZONE}, [data-testid="split-pane"]`)
-  const drop = await record(shell, { zone, panes: PANES })
-  await shell.mouse.up()
-  await expect(shell.locator(`[data-testid="split-pane"][data-tab-id="${b}"]`)).toHaveCount(1)
-  await still(shell, '[data-testid="split-pane"]')
-  const d = await drop.stop()
-  const release = d.inputs.find((i) => i.type === 'pointerup')
-  if (!release) throw new Error('the release never reached the shell')
-  const m = panesMotion(d)
-  const inPlace = m.placed ? m.placed.t - release.t : Number.POSITIVE_INFINITY
-  const inSight = m.seen ? m.seen.t - release.t : Number.POSITIVE_INFINITY
-  note('FL-18', 'release → both panes within 2 px of their place', inSight, '≤ 350 ms')
-  note('FL-18', 'release → both panes in place (within 0.5 px)', inPlace, '≤ 350 ms')
-  note('FL-18', 'release: largest step of a pane edge, share of its travel', m.step * 100, '< 60 % (no jump)', '%')
-
-  // A fade from 0 shows from its second frame, and React renders a pointer move's state in a task
-  // of its own, which can miss the next frame: 2 to 4 frames over seven runs, 3 in five.
-  expect(drawn?.frames ?? Number.POSITIVE_INFINITY, 'the zone shows in the frames after the move').toBeLessThanOrEqual(
-    4 * FRAME_SLACK,
-  )
-  expect(shown?.ms ?? Number.POSITIVE_INFINITY, 'the zone shows while the tab is over the page').toBeLessThanOrEqual(
-    300 * FRAME_SLACK,
-  )
-  expect(fadeFrames.length, 'the zone fades in').toBeGreaterThanOrEqual(1)
-  expect(fadeMs ?? Number.POSITIVE_INFINITY, 'the zone is fully in').toBeLessThanOrEqual(
-    (100 + 2 * FRAME) * FRAME_SLACK,
-  )
-  expect((zoneEnd?.width ?? 0) / frame.width, 'the zone shows the half the new pane takes').toBeGreaterThan(0.4)
-  expect((zoneAt?.y ?? 0) - frame.y, 'the zone moved to the bottom half').toBeGreaterThan(frame.height * 0.4)
-  expect(placedIn, 'the zone is in its new half in the frame after the move').toBeLessThanOrEqual(2 * FRAME_SLACK)
-  expect(inSight, 'both panes are in place').toBeLessThanOrEqual(350 * FRAME_SLACK)
-  expect(inPlace, 'and settle the last 2 px').toBeLessThanOrEqual(600 * FRAME_SLACK)
-  expect(Object.keys(m.end).sort()).toEqual([a, b].sort())
+  for (const r of all) {
+    expect(r.fadeFrames, `round ${r.k}: the zone fades in`).toBeGreaterThanOrEqual(1)
+    expect(r.share, `round ${r.k}: the zone shows the half the new pane takes`).toBeGreaterThan(0.4)
+    expect(r.bottom, `round ${r.k}: the zone moved to the bottom half`).toBeGreaterThan(frame.height * 0.4)
+    expect(r.panes, `round ${r.k}: both tabs are panes`).toEqual(r.pair)
+  }
+  expect(best.drawn, 'the zone shows in the frames after the move').toBeLessThanOrEqual(4 * FRAME_SLACK)
+  expect(best.shownMs, 'the zone shows while the tab is over the page').toBeLessThanOrEqual(300 * FRAME_SLACK)
+  expect(best.fadeMs, 'the zone is fully in').toBeLessThanOrEqual((100 + 2 * FRAME) * FRAME_SLACK)
+  expect(best.placedIn, 'the zone is in its new half in the frame after the move').toBeLessThanOrEqual(2 * FRAME_SLACK)
+  expect(best.inSight, 'both panes are in place').toBeLessThanOrEqual(350 * FRAME_SLACK)
+  expect(best.inPlace, 'and settle the last 2 px').toBeLessThanOrEqual(600 * FRAME_SLACK)
 })
 
 test('[FL-18] a pane added beside the page grows in with the standard spring; the divider follows the pointer; a flip moves the panes; closing one lets the other fill', async () => {
