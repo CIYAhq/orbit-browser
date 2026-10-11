@@ -24,6 +24,7 @@ import {
 } from './helpers'
 import { clickInPage, closeWindow, flushState, pressInPage, uiPageOf, windowList } from './nav-support'
 import { dialogPage, leaveInfo, pageDialogs, startInTab, startPagesFixtures, waitDialog } from './pages-support'
+import { findPage, mainWindow, overlayOf, pressInTab, startSites } from './peek-helpers'
 import { openSettings } from './settings-support'
 import {
   act,
@@ -2103,5 +2104,60 @@ test('[NV-24][FL-09] ⌘W on a busy page with a leave listener shows the next ta
     await expect.poll(async () => (await tabView(app, next as string))?.visible).toBe(true)
   } finally {
     await pages.close()
+  }
+})
+
+test('[PN-05][PK-02][PK-03][PK-07][PK-12] in a Favorite, a same-site link stays in it and another site’s opens a Peek over it, which ⌘O makes a Today tab; with previews off it opens a Today tab, and Shift-click, under its own setting, still previews', async () => {
+  const { app } = orbit
+  const sites = await startSites()
+  try {
+    const win = await mainWindow(app)
+    const profileId = (await state(app)).spaces[win.spaceId]?.profileId as string
+    const container = { kind: 'favorites', profileId }
+    const fav = (await run(app, 'tabs.create', { url: sites.url('/site/Fav'), container })) as string
+    await run(app, 'tabs.activate', { tabId: fav })
+    const page = await findPage(app, '/site/Fav')
+    await expect(page.locator('#title')).toBeVisible()
+    const today = async () => (await state(app)).spaces[win.spaceId]?.today ?? []
+    const peekOpen = async () => {
+      await expect.poll(async () => (await overlayOf(app)).kind).toBe('peek')
+      const o = await overlayOf(app)
+      return o.kind === 'peek' ? o : undefined
+    }
+
+    // The same site navigates in the Favorite, like an app.
+    await page.locator('#same').click()
+    await expect.poll(async () => (await state(app)).tabs[fav]?.url).toBe(sites.url('/site/Fav-Same'))
+    expect((await overlayOf(app)).kind).toBe('none')
+    // Another site opens a Peek over it, and the Favorite keeps its page.
+    await page.locator('#other').click({ noWaitAfter: true })
+    const peek = await peekOpen()
+    expect(peek?.sourceTabId).toBe(fav)
+    expect((await state(app)).tabs[peek?.tabId as string]?.url).toBe(sites.other('/site/Other'))
+    // ⌘O: a selected Today tab, at the top of Today.
+    await pressInTab(app, peek?.tabId as string, 'Mod+O')
+    await expect.poll(async () => (await overlayOf(app)).kind).toBe('none')
+    expect((await mainWindow(app)).activeTab[win.spaceId]).toBe(peek?.tabId)
+    expect((await today())[0]).toBe(peek?.tabId)
+    expect((await state(app)).tabs[fav]?.url).toBe(sites.url('/site/Fav-Same'))
+
+    // Previews off (Links settings): another site opens a Today tab instead. (Clicks from here on
+    // go through the browser's input: Playwright waits forever on a page whose link navigation
+    // Orbit cancelled.)
+    await run(app, 'settings.update', { peekExternalLinks: false })
+    await run(app, 'tabs.activate', { tabId: fav })
+    await clickInPage(app, '/site/Fav-Same', '#other')
+    await expect.poll(async () => (await today()).length).toBe(2)
+    expect((await state(app)).tabs[(await today())[0] as string]?.url).toBe(sites.other('/site/Other'))
+    expect((await overlayOf(app)).kind).toBe('none')
+    expect((await state(app)).tabs[fav]?.url).toBe(sites.url('/site/Fav-Same'))
+    // Shift-click has its own setting: still on, it previews any link, the same site's too.
+    await run(app, 'tabs.activate', { tabId: fav })
+    await clickInPage(app, '/site/Fav-Same', '#next', ['shift'])
+    const shifted = await peekOpen()
+    expect(shifted?.sourceTabId).toBe(fav)
+    expect((await state(app)).tabs[shifted?.tabId as string]?.url).toBe(sites.url('/site/Fav-Same-Next'))
+  } finally {
+    await sites.close()
   }
 })

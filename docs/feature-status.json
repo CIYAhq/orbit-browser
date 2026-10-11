@@ -45,6 +45,7 @@
   "PN-02": {"built": "yes", "note": "Cmd+D, drag above/below divider, menu, Pin to [Space] command"},
   "PN-03": {"built": "yes", "note": "breadcrumb 'Pinned / Current', redirects count as home, hover shows reset glyph and hint"},
   "PN-04": {"built": "yes", "note": "favicon click resets, Cmd/Ctrl-click keeps the page as a Today tab, Reset Tab action"},
+  "PN-05": {"built": "yes", "note": "the same site navigates in a pinned tab or Favorite; another site opens a Peek over it (PK-01, PK-02), which ⌘O makes a selected Today tab (PK-07) and Open in Split View splits (PK-08), and a click outside, ×, ⌘W or Esc closes it back to the tab (PK-09); with “Open links from pinned tabs in Peek” off (Links settings, PK-12), another site opens a Today tab; Shift-click previews any link under its own setting (PK-03); a meeting link opens a new tab (PK-04)"},
   "PN-06": {"built": "yes", "note": "close unloads and resets, unpin, Delete from Sidebar (archived, undoable)"},
   "PN-07": {"built": "yes", "note": "Pinned URL > Replace with Current / Edit (inline field)"},
   "PN-08": {"built": "yes", "note": "custom name kept through resets; breadcrumb 'Name / page'"},

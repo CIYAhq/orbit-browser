@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 294 built (60 partial) · 358 tested · 74 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 295 built (60 partial) · 359 tested · 74 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 160 | 173 |
-| P1 | 219 | 117 | 164 |
+| P1 | 219 | 118 | 165 |
 | P2 | 79 | 17 | 21 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -81,7 +81,7 @@ Spec: `spec/tabs.md`
 | PN-02 | Pin and unpin | P0 | ✅ | ✅ e2e | – | Cmd+D, drag above/below divider, menu, Pin to [Space] command |
 | PN-03 | Pinned URL memory and the "navigated away" indicator | P0 | ✅ | ✅ e2e+unit | – | breadcrumb 'Pinned / Current', redirects count as home, hover shows reset glyph and hint |
 | PN-04 | Reset a pinned tab to its pinned URL | P0 | ✅ | ✅ e2e | – | favicon click resets, Cmd/Ctrl-click keeps the page as a Today tab, Reset Tab action |
-| PN-05 | Links clicked inside pinned tabs and Favorites | P1 | – | – | – |  |
+| PN-05 | Links clicked inside pinned tabs and Favorites | P1 | ✅ | ✅ e2e+unit | – | the same site navigates in a pinned tab or Favorite; another site opens a Peek over it (PK-01, PK-02), which ⌘O makes a selected Today tab (PK-07) and Open in Split View splits (PK-08), and a click outside, ×, ⌘W or Esc closes it back to the tab (PK-09); with “Open links from pinned tabs in Peek” off (Links settings, PK-12), another site opens a Today tab; Shift-click previews any link under its own setting (PK-03); a meeting link opens a new tab (PK-04) |
 | PN-06 | Closing a pinned tab vs unpinning vs deleting | P0 | ✅ | ✅ e2e | – | close unloads and resets, unpin, Delete from Sidebar (archived, undoable) |
 | PN-07 | Edit the pinned URL | P1 | ✅ | ✅ e2e | – | Pinned URL > Replace with Current / Edit (inline field) |
 | PN-08 | Rename pinned tabs | P1 | ✅ | ✅ e2e | – | custom name kept through resets; breadcrumb 'Name / page' |
