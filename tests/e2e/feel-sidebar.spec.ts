@@ -184,10 +184,11 @@ test('[FL-03][FL-29] the left edge brings the hidden sidebar fully in within 250
   )
   expect(viewAfter).toEqual(viewBefore)
   expect((await state(app)).tabs[id]?.url).toBe(before)
-  // Away over the page: gone within 1 s.
+  // Away over the page: gone within 1 s. Polled every frame or so: the default steps (100, 250, 500 ms) only tell
+  // whether it went before 350 or before 850 ms.
   const left = Date.now()
   await pageMouse(app, '/page/Under', 'mouseMove', 700, 300)
-  await expect.poll(async () => (await floatingInfo(app)).placed, { timeout: 5000 }).toBe(false)
+  await expect.poll(async () => (await floatingInfo(app)).placed, { timeout: 5000, intervals: [16] }).toBe(false)
   const goneMs = Date.now() - left
   note('FL-03', 'pointer leaves → overlay gone (polled)', goneMs, '≤ 1000 ms (300–500 ms dwell + quick out)')
   expect(inMs ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(250 * FRAME_SLACK)
