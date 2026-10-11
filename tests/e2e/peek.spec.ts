@@ -457,6 +457,55 @@ test("[PK-06] the Peek's stills of its page go to the overlay, which shows them,
   expect(channels.filter((c) => c.includes('peek:still'))).toEqual([])
 })
 
+/** Checks `ok` every 50 ms for `ms`: it must hold each time. */
+async function holdsFor(ms: number, ok: () => Promise<boolean>, what: string): Promise<void> {
+  const end = Date.now() + ms
+  while (Date.now() < end) {
+    expect(await ok(), what).toBe(true)
+    await new Promise((r) => setTimeout(r, 50))
+  }
+}
+
+test('[PK-06] a Peek whose page crashes, or fails to load, drops its still: its card closes in its own colour; a page loaded again gives it one', async () => {
+  const STILL = { card: { selector: '[data-testid="peek-card"]' }, still: { selector: '[data-testid="peek-still"]' } }
+  for (const how of ['crashes', 'fails to load'] as const) {
+    const { source, peekTab } = await openPeekFromPinned(how === 'crashes' ? '/site/Crashes' : '/site/Fails')
+    const overlay = await viewPage(orbit.app, 'overlay')
+    const still = overlay.getByTestId('peek-still')
+    const ready = async () => (await still.getAttribute('data-ready')) === 'true'
+    await stillReady(overlay)
+    const breakIt = async () => {
+      if (how === 'crashes') {
+        await orbit.app.evaluate(
+          (_e, id) => (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id)?.forcefullyCrashRenderer(),
+          peekTab,
+        )
+      } else {
+        await run(orbit.app, 'tabs.navigate', { tabId: peekTab, url: 'http://nonexistent.invalid/' })
+      }
+      // Orbit's screen for it shows over the page (NV-13, NV-14), and the card has no still.
+      await expect.poll(async () => (await state(orbit.app)).tabs[peekTab]?.error, how).toBeTruthy()
+      await expect.poll(ready, `${how}: the still goes`).toBe(false)
+      // Nor does one of the blank page come after the load ends (a still follows a load by 200 ms).
+      await holdsFor(600, async () => !(await ready()), `${how}: no still comes back`)
+    }
+    await breakIt()
+    // Loaded again, the page gives the card stills again.
+    if (how === 'crashes') await run(orbit.app, 'tabs.reload', { tabId: peekTab })
+    else await run(orbit.app, 'tabs.navigate', { tabId: peekTab, url: sites.other('/site/Second') })
+    await stillReady(overlay)
+    await breakIt()
+    // The close: the card fades in its own colour, with no still in any frame.
+    const rec = await record(overlay, STILL, { maxMs: 3000 })
+    await run(orbit.app, 'peek.close', {})
+    await expectClosed(source, peekTab)
+    const frames = (await rec.stop()).frames
+    expect(frames.filter((f) => (f.els.card?.opacity ?? 0) > 0).length, `${how}: the card shows`).toBeGreaterThan(0)
+    expect(frames.filter((f) => (f.els.still?.opacity ?? 0) > 0).length, `${how}: frames with a still`).toBe(0)
+  }
+  expect(orbit.takeUncaught()).toBe('')
+})
+
 test('[PK-10] ⌘Z right after closing, or ⌘⇧T, reopens the Peek at the same page', async () => {
   const { source, peekTab } = await openPeekFromPinned()
   // Navigate inside the Peek first: the reopened Peek comes back on that page, with its history.

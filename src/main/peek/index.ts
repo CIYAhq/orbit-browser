@@ -267,13 +267,21 @@ export function registerPeek(ctx: MainContext): void {
     if (!view.getVisible()) view.setVisible(true)
   }
 
+  /**
+   * The page crashed, or its main frame failed to load (the tab's error, until it loads again):
+   * Orbit's screen shows over its view, and a still would be of a page that has gone, or of a blank
+   * one. The overlay drops the one it has (dropStill), so a card that moves or fades shows its own
+   * colour (PK-06), and none is taken meanwhile.
+   */
+  const broken = (s: Session) => !!store.state.tabs[s.tabId]?.error
+
   /** Takes a still of the page and gives it to the overlay, for the card to show while the view is out of sight. */
   const takeStill = async (s: Session) => {
     const contents = s.view?.webContents
-    if (!contents || contents.isDestroyed() || s.fullscreen || s.phase !== 'open' || !s.shown) return
+    if (!contents || contents.isDestroyed() || broken(s) || s.fullscreen || s.phase !== 'open' || !s.shown) return
     try {
       const image = await contents.capturePage()
-      if (sessions.get(s.windowId) !== s || s.phase !== 'open' || image.isEmpty()) return
+      if (sessions.get(s.windowId) !== s || s.phase !== 'open' || broken(s) || image.isEmpty()) return
       const url = `data:image/jpeg;base64,${image.toJPEG(85).toString('base64')}`
       windows.sendToOverlay(s.windowId, 'peek:still', { nonce: s.nonce, url })
     } catch {
@@ -284,6 +292,12 @@ export function registerPeek(ctx: MainContext): void {
   const stillSoon = (s: Session, ms: number) => {
     clearTimeout(s.stillTimer)
     s.stillTimer = setTimeout(() => void takeStill(s), ms)
+  }
+
+  /** The page shows an error now (broken()): the card drops its still and shows its own colour. */
+  const dropStill = (s: Session) => {
+    clearTimeout(s.stillTimer)
+    windows.sendToOverlay(s.windowId, 'peek:still', { nonce: s.nonce, url: '' })
   }
 
   // ---- Closing, expanding, splitting ----
@@ -670,6 +684,8 @@ export function registerPeek(ctx: MainContext): void {
       if (s.phase === 'open' && activeTabOf(next, s.windowId) !== s.sourceTabId) {
         queueMicrotask(() => closePeek(s.windowId, { animate: false }))
       }
+      const error = next.tabs[s.tabId]?.error
+      if (error && error !== prev.tabs[s.tabId]?.error) dropStill(s)
     }
   })
 

@@ -87,6 +87,8 @@ class PeekAnimator {
   private drag: Drag | null = null
   /** A drag or swipe let go past the threshold: the card is already leaving. */
   private leaving = false
+  /** How many stills main has sent: only the last one asked for shows. */
+  private stillAsked = 0
 
   area(): { width: number; height: number } {
     const a = this.overlay.area
@@ -157,15 +159,25 @@ class PeekAnimator {
     window.orbit.send('peek.page', { nonce: this.overlay.nonce, shown })
   }
 
-  /** A new still of the page: the card shows it once it is decoded, so it never shows half drawn. */
+  /**
+   * A new still of the page: the card shows it once it is decoded, so it never shows half drawn. No
+   * still (`''`: the page crashed or failed to load) drops the one it has, and the card shows its own
+   * colour. A decode that ends after a later still was asked for is left.
+   */
   setStill(url: string): void {
     const still = this.still
     if (!still) return
+    const asked = ++this.stillAsked
+    if (!url) {
+      delete still.dataset.ready
+      still.removeAttribute('src')
+      return
+    }
     const next = new Image()
     next.src = url
     next.decode().then(
       () => {
-        if (this.still !== still) return
+        if (this.still !== still || this.stillAsked !== asked) return
         still.src = url
         still.dataset.ready = 'true'
       },
