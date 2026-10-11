@@ -951,7 +951,10 @@ export function registerMiniWindow(ctx: MainContext): void {
         if (mini.tabId) send(mini, 'mini:choose-space')
         return true
       case 'url.edit':
-        // The keyboard goes to the address field too: the page had it (KS-20, keys lane).
+        // The keyboard goes to the address field too: the page had it (KS-20, keys lane). Over a
+        // page the bar counts as open from now, before the UI says so: the window's focus or the
+        // end of its open grow (MW-04) arriving meanwhile leaves the keyboard in the bar.
+        if (mini.tabId) mini.bar = true
         if (!mini.win.isDestroyed()) mini.win.webContents.focus()
         send(mini, 'mini:edit-url')
         return true

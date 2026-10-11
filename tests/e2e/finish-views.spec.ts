@@ -601,6 +601,9 @@ function miniPage(windowId: string): Promise<{ tabId: string | null; url: string
   }, windowId)
 }
 
+/** The test hook that runs an action in a window, as `action()` does, for use inside an evaluate. */
+type Action = (id: string, windowId?: string) => Promise<void>
+
 /** Where the keyboard is: the address of the focused web contents. */
 function focusedUrl(): Promise<string | undefined> {
   return orbit.app.evaluate(({ webContents }) => webContents.getFocusedWebContents()?.getURL())
@@ -697,6 +700,25 @@ test("[CB-23][KS-19][MW-03] the bar over a Mini Window's page takes its keys fir
   await expect.poll(async () => (await miniPage(id)).visible).toBe(true)
   await expect.poll(focusedUrl).toBe(url)
   expect((await state(app)).windows[id]).toBeDefined()
+  // ⌘L just before the window's focus comes in (late on a busy machine, as can the end of its open
+  // grow): the bar opens and keeps the keyboard; the page doesn't take it back.
+  await app.evaluate(async ({ BrowserWindow }, wid) => {
+    const hooks = (globalThis as unknown as { __orbit: OrbitGlobal['__orbit'] & { action: Action } }).__orbit
+    await hooks.action('url.edit', wid)
+    BrowserWindow.getAllWindows()
+      .find(
+        (b) =>
+          !b.isDestroyed() &&
+          hooks.ctx.windows.isUi(b.webContents) &&
+          hooks.ctx.windows.windowIdFor(b.webContents) === wid,
+      )
+      ?.emit('focus')
+  }, id)
+  await expect(field).toBeFocused()
+  await expect.poll(focusedUrl).toContain('view=mini')
+  await field.press(`${MOD}+W`)
+  await expect(field).toHaveCount(0)
+  await expect.poll(focusedUrl).toBe(url)
   // ⌘L opens it again, and ⌘L again closes it, as in the main window (KS-04).
   await pressInPage(app, path, 'L', [mod])
   await expect(field).toBeFocused()
