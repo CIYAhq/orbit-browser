@@ -387,22 +387,28 @@ test('[FL-09][FL-29] ⌘W selects the next tab in the first frame drawn after th
   // Main wakes the page below only once the change has gone out to the shell (windows.ts,
   // fastSwitch): woken first, it holds the selection back a frame (review M2).
   const budget = FRAME_SLACK > 1 ? 2 : 1
+  // And no close of the five takes more than a frame longer, the first after a launch included,
+  // which can take 2 (fix check N3): a change that slows two closes in five fails here.
+  const cap = budget + 1
   const middle = (xs: number[]) => xs.slice().sort((a, b) => a - b)[2] as number
+  const slowest = (closes: Close[]) => Math.max(...closes.map((c) => c.frames))
   const { best, all } = await bestOf(
     async () => {
       const closes: Close[] = []
       for (let n = 0; n < 5; n++) closes.push(await close())
       return { closes, frames: middle(closes.map((c) => c.frames)), ms: middle(closes.map((c) => c.ms)) }
     },
-    (x) => x.frames <= budget,
+    (x) => x.frames <= budget && slowest(x.closes) <= cap,
   )
   for (const [n, x] of all.entries())
     console.log(`[feel] FL-09 ⌘W round ${n + 1}: frames ${x.closes.map((c) => c.frames).join(', ')}`)
   note('FL-09', '⌘W → next tab selected, median of five closes', best.frames, '1', 'frames')
   note('FL-09', '⌘W → next tab selected, median of five closes', best.ms, '1 frame (16.7 ms)')
+  note('FL-09', '⌘W → next tab selected, slowest of five closes', slowest(best.closes), `≤ ${cap}`, 'frames')
   for (const c of all.flatMap((x) => x.closes))
     expect(c.beforeLeaving, 'the next row is selected no later than the closed one starts to leave').toBe(true)
   expect(best.frames).toBeLessThanOrEqual(budget)
+  expect(slowest(best.closes), 'every close of the five').toBeLessThanOrEqual(cap)
 })
 
 test('[FL-07] ⌘D on the third Today tab: it travels into the pinned section as the others re-flow; ⌘Z plays it back', async () => {
