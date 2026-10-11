@@ -10,6 +10,7 @@ import { type LeaveInfo, registerLeave } from './leave'
 import { findSystemApp, findTestApp, launchInApp, registerOtherApps } from './other-apps'
 import { deliverPrint, type PrintInfo, type PrintRecord, registerPrint, systemPrinters, testPrinters } from './print'
 import { LOAD_TIMEOUT_MS, type PageScreenInfo, registerScreens } from './screens'
+import { registerViewSource } from './view-source'
 
 /** Test-only handle (ORBIT_E2E=1): globalThis.__orbitPages. */
 export interface PagesTestHooks {
@@ -37,7 +38,7 @@ export interface PagesTestHooks {
  * crash screens (NV-13, NV-14): what the page's area shows when its page couldn't load, crashed or
  * stopped responding. Links that open other apps (NV-19): asked about over the page. Window full
  * screen (NV-20): the sidebar hidden, and Esc in the page. Print (NV-07): Orbit's print dialog over
- * the page.
+ * the page. View source (DT-04): the page's source in a new tab.
  */
 export function registerPages(ctx: MainContext, ops: TabOps): void {
   const dialogs = registerDialogs(ctx)
@@ -80,6 +81,8 @@ export function registerPages(ctx: MainContext, ops: TabOps): void {
         }
       : { deliver: deliverPrint, printers: systemPrinters },
   )
+
+  registerViewSource(ctx)
 
   if (ctx.e2e) {
     const hooks: PagesTestHooks = {

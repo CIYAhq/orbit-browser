@@ -5,7 +5,7 @@ import { type PageReferrer, referrerPolicyName } from '../../shared/nav'
 import { isPrivateTab } from '../../shared/private'
 import type { TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
-import { printPage } from '../pages/entry'
+import { printPage, viewSource } from '../pages/entry'
 import type { TabPage } from '../tabs/ops'
 import { NAV_WORLD } from './focus'
 
@@ -195,18 +195,8 @@ export function pageItems(ctx: MainContext, tabId: TabId, contents: WebContents)
     // Orbit's print dialog over the page (pages lane, NV-07).
     { label: 'Print…', click: () => printPage(contents) },
     { type: 'separator' },
-    {
-      label: 'View Page Source',
-      click: () => {
-        const url = contents.getURL()
-        if (!url || url.startsWith('view-source:')) return
-        const tab = ctx.store.state.tabs[tabId]
-        const windowId = ctx.windows.windowOfTab(tabId)
-        void ctx.commands
-          .run('tabs.create', { url: `view-source:${url}`, spaceId: tab?.spaceId, activate: true }, { windowId })
-          .catch(() => {})
-      },
-    },
+    // The page's source in a new tab (pages lane, DT-04).
+    { label: 'View Page Source', click: () => viewSource(contents) },
   ]
 }
 

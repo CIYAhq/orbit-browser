@@ -26,7 +26,7 @@ import { engineForWindow, parseInput } from '../../shared/url'
 import type { MainContext } from '../context'
 import { KEEP_KEYBOARD } from '../keys/focus'
 import { TAB_MENU_KEYS, withKeyHints } from '../keys/menu-hints'
-import { printPage } from '../pages/entry'
+import { printPage, viewSource } from '../pages/entry'
 import type { CallContext } from '../registry'
 import { tabSplitMenuItems } from '../split/menu'
 import { TabMaintenance } from './maintenance'
@@ -786,13 +786,8 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     })
   // Orbit's print dialog over the page (pages lane, NV-07).
   actions.register('page.print', onContents(printPage))
-  actions.register(
-    'page.viewSource',
-    withActive((tabId, windowId) => {
-      const url = store.state.tabs[tabId]?.url
-      if (url) ops.createTab({ url: `view-source:${url}`, windowId })
-    }),
-  )
+  // The page's source in a new tab (pages lane, DT-04).
+  actions.register('page.viewSource', onContents(viewSource))
   // DevTools keys (devtools.*) are registered by src/main/devtools.
 
   // Favicons in state are small data URLs on tabs only (lane review MF-2, F13): remote URLs (which

@@ -7,11 +7,17 @@ import type { WebContents } from 'electron'
  */
 const entries = {
   print: (_page: WebContents): void => {},
+  viewSource: (_page: WebContents): void => {},
 }
 
 /** Opens the print dialog over `page`, or brings back the one it has (NV-07). */
 export function printPage(page: WebContents): void {
   entries.print(page)
+}
+
+/** Opens `page`'s source in a new tab (DT-04). */
+export function viewSource(page: WebContents): void {
+  entries.viewSource(page)
 }
 
 export function setPageEntries(next: Partial<typeof entries>): void {
