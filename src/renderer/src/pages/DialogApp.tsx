@@ -16,9 +16,10 @@ import './dialog.css'
 
 /**
  * A page's dialog (NV-24), in a transparent view main keeps over that page only: the page's alert,
- * confirm or prompt, "Leave site?", or HTTP sign-in. It takes the keyboard while it shows (KS-19):
- * Enter answers with the accepting button, Esc cancels, and Tab stays inside the card. Main gives
- * the keyboard back to the page when it goes (KS-16).
+ * confirm or prompt, "Leave site?", HTTP sign-in, or "Page unresponsive" (NV-14). It takes the
+ * keyboard while it shows (KS-19): Enter answers with the accepting button, Esc cancels (or gives
+ * the safe answer: an alert's OK, Wait), and Tab stays inside the card. Main gives the keyboard back
+ * to the page when it goes (KS-16).
  */
 export function DialogApp() {
   const win = useWindow()
@@ -118,8 +119,8 @@ function DialogCard({
     if (e.key === 'Escape') {
       e.preventDefault()
       e.stopPropagation()
-      // An alert has one button: Esc closes it as OK does.
-      if (content.noCancel) accept()
+      // An alert has one button: Esc closes it as OK does; "Page unresponsive" waits.
+      if (content.noCancel || content.escapeAccepts) accept()
       else cancel()
       return
     }
@@ -142,7 +143,11 @@ function DialogCard({
   }
 
   const alert =
-    content.kind === 'alert' || content.kind === 'confirm' || content.kind === 'leave' || content.kind === 'reload'
+    content.kind === 'alert' ||
+    content.kind === 'confirm' ||
+    content.kind === 'leave' ||
+    content.kind === 'reload' ||
+    content.kind === 'hang'
   return (
     <form
       ref={card}
@@ -212,7 +217,7 @@ function DialogCard({
       <div className="page-dialog__actions">
         {!content.noCancel && (
           <button type="button" className="page-dialog__button" data-testid="page-dialog-cancel" onClick={cancel}>
-            Cancel
+            {content.cancelLabel ?? 'Cancel'}
           </button>
         )}
         <button ref={okButton} type="submit" className="page-dialog__button is-primary" data-testid="page-dialog-ok">

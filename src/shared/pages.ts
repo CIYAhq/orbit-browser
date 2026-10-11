@@ -1,11 +1,15 @@
 /**
  * What a page asks of the user, shown in Orbit's own dialogs over that page (pages lane, NV-24):
  * the page's `alert`, `confirm` and `prompt`, "Leave site?" before a page that asks for it goes,
- * and HTTP sign-in.
+ * HTTP sign-in, and "Page unresponsive" (NV-14). And what the page's area shows when the page
+ * couldn't load or crashed (NV-13, NV-14).
  */
 
-/** The kinds of page dialog. `leave` and `reload` are the leave-page warning (`beforeunload`). */
-export type PageDialogKind = 'alert' | 'confirm' | 'prompt' | 'leave' | 'reload' | 'auth'
+/**
+ * The kinds of page dialog. `leave` and `reload` are the leave-page warning (`beforeunload`),
+ * `hang` the page that stopped responding.
+ */
+export type PageDialogKind = 'alert' | 'confirm' | 'prompt' | 'leave' | 'reload' | 'auth' | 'hang'
 
 /** What a dialog view shows. */
 export interface PageDialogContent {
@@ -19,10 +23,14 @@ export interface PageDialogContent {
   note?: string
   /** prompt: the text the field starts with. */
   value?: string
-  /** The accepting button: "OK", "Leave", "Reload", "Sign in". */
+  /** The accepting button: "OK", "Leave", "Reload", "Sign in", "Wait". */
   okLabel: string
+  /** The other button, when it isn't "Cancel": "Close page". */
+  cancelLabel?: string
   /** alert: one button only. */
   noCancel?: boolean
+  /** Esc answers with the accepting button (the safe answer), not the other one. */
+  escapeAccepts?: boolean
 }
 
 /** The user's answer; `ok: false` is Cancel (or Esc, or the dialog going away). */
@@ -123,4 +131,211 @@ export function scriptAnswer(kind: 'alert' | 'confirm' | 'prompt', answer: PageD
   if (kind === 'alert') return undefined
   if (kind === 'confirm') return answer?.ok === true
   return answer?.ok ? (answer.value ?? '') : null
+}
+
+/**
+ * "Page unresponsive" (NV-14, Chromium's hung-page dialog): Wait is the safe answer (Enter and Esc
+ * give it); Close page stops the page.
+ */
+export function hangDialog(pageUrl: string | undefined): Omit<PageDialogContent, 'id'> {
+  const site = screenSite(pageUrl)
+  return {
+    kind: 'hang',
+    title: 'Page unresponsive',
+    message: `${site || 'This page'} isn’t responding. You can wait for it, or close the page.`,
+    okLabel: 'Wait',
+    cancelLabel: 'Close page',
+    escapeAccepts: true,
+  }
+}
+
+// ---- Error and crash screens (NV-13, NV-14) ----
+
+/**
+ * What a page's area shows instead of its page: it couldn't load (`error`), the device is offline
+ * (`offline`), the site's certificate isn't trusted (`cert`), or the page crashed (`crash`).
+ */
+export type PageScreenKind = 'error' | 'offline' | 'cert' | 'crash'
+
+/** What a screen view shows. */
+export interface PageScreenContent {
+  id: number
+  kind: PageScreenKind
+  /** "This site can’t be reached". */
+  title: string
+  /** One plain sentence. */
+  message: string
+  /** The site the page is for: its host with the port, or a file's name. */
+  site: string
+  /** Chromium's name for what went wrong, shown small: "ERR_NAME_NOT_RESOLVED". */
+  code?: string
+  /** The main button: load the address again, reload a crashed page, or leave a site that isn't safe. */
+  action: 'retry' | 'reload' | 'back'
+  actionLabel: string
+  /** A certificate error: what Advanced says, and, where the user may go on anyway, its button. */
+  advanced?: { text: string; proceedLabel?: string }
+}
+
+/** What a screen view asks main to do; `online` is the network coming back while it shows. */
+export type PageScreenAction = 'retry' | 'reload' | 'back' | 'proceed' | 'online'
+
+/** The site a screen names: the host with its port, a file's name, or "" when there is none. */
+export function screenSite(pageUrl: string | undefined): string {
+  try {
+    let url = new URL(pageUrl ?? '')
+    // A page's source is for the page.
+    if (url.protocol === 'view-source:') url = new URL(url.href.slice('view-source:'.length))
+    if (url.protocol === 'file:') {
+      const name = url.pathname.split('/').filter(Boolean).pop() ?? ''
+      try {
+        return decodeURIComponent(name)
+      } catch {
+        return name
+      }
+    }
+    return url.host
+  } catch {
+    return ''
+  }
+}
+
+/** Chromium's name for a load error, as Electron gives it ("ERR_NAME_NOT_RESOLVED"). */
+function errorName(code: number, description: string): string {
+  const name = description.replace(/^net::/, '').trim()
+  return /^ERR_[A-Z0-9_]+$/.test(name) ? name : `ERR_${Math.abs(code)}`
+}
+
+/** A certificate error (Chromium's -200 to -299). */
+export function isCertError(code: number): boolean {
+  return code <= -200 && code > -300
+}
+
+/** Certificate errors nobody may go past: a revoked certificate, a known interception. */
+const CERT_FATAL = new Set([-206, -217])
+
+const UNREACHABLE = 'This site can’t be reached'
+const NOT_WORKING = 'This page isn’t working'
+
+/** The screen for a page that couldn't load, by Chromium's error code (`did-fail-provisional-load`). */
+export function errorScreen(
+  code: number,
+  description: string,
+  pageUrl: string | undefined,
+): Omit<PageScreenContent, 'id'> {
+  const site = screenSite(pageUrl)
+  const name = errorName(code, description)
+  const retry = { site, code: name, action: 'retry' as const, actionLabel: 'Try again' }
+  if (isCertError(code)) return certScreen(code, name, site)
+  const say = (title: string, message: string, kind: PageScreenKind = 'error') => ({ kind, title, message, ...retry })
+  switch (code) {
+    case -106: // ERR_INTERNET_DISCONNECTED
+      return say('No internet', 'Your device isn’t connected to the internet.', 'offline')
+    case -105: // ERR_NAME_NOT_RESOLVED
+    case -137: // ERR_NAME_RESOLUTION_FAILED
+      return say(UNREACHABLE, 'Orbit couldn’t find the server at this address.')
+    case -102: // ERR_CONNECTION_REFUSED
+      return say(UNREACHABLE, 'The server refused to connect.')
+    case -7: // ERR_TIMED_OUT
+    case -118: // ERR_CONNECTION_TIMED_OUT
+      return say(UNREACHABLE, 'The server took too long to respond.')
+    case -101: // ERR_CONNECTION_RESET
+      return say(UNREACHABLE, 'The connection was reset.')
+    case -100: // ERR_CONNECTION_CLOSED
+    case -324: // ERR_EMPTY_RESPONSE
+      return say(NOT_WORKING, 'The server closed the connection without sending anything.')
+    case -21: // ERR_NETWORK_CHANGED
+      return say(UNREACHABLE, 'Your connection was interrupted.')
+    case -109: // ERR_ADDRESS_UNREACHABLE
+      return say(UNREACHABLE, 'The server’s address can’t be reached from this network.')
+    case -130: // ERR_PROXY_CONNECTION_FAILED
+    case -111: // ERR_TUNNEL_CONNECTION_FAILED
+      return say(UNREACHABLE, 'Orbit couldn’t connect through the proxy server.')
+    case -310: // ERR_TOO_MANY_REDIRECTS
+      return say(NOT_WORKING, 'The site redirected too many times.')
+    case -320: // ERR_INVALID_RESPONSE
+    case -337: // ERR_INVALID_HTTP_RESPONSE
+      return say(NOT_WORKING, 'The site sent a response Orbit can’t read.')
+    case -107: // ERR_SSL_PROTOCOL_ERROR
+    case -113: // ERR_SSL_VERSION_OR_CIPHER_MISMATCH
+      return say('This site can’t provide a secure connection', 'The site sent a response Orbit can’t trust.')
+    case -20: // ERR_BLOCKED_BY_CLIENT
+    case -22: // ERR_BLOCKED_BY_ADMINISTRATOR
+      return say('This page has been blocked', 'Something in Orbit, such as an extension, blocked it.')
+    case -27: // ERR_BLOCKED_BY_RESPONSE
+      return say('This page has been blocked', 'The site doesn’t allow it to be shown here.')
+    case -6: // ERR_FILE_NOT_FOUND
+      return say('This file can’t be opened', 'It may have been moved, renamed or deleted.')
+    case -10: // ERR_ACCESS_DENIED
+      return say('This file can’t be opened', 'Orbit isn’t allowed to read it.')
+    case -312: // ERR_UNSAFE_PORT
+      return say(UNREACHABLE, 'The address uses a port that browsers block for safety.')
+    default:
+      return say(UNREACHABLE, 'Something went wrong while loading it.')
+  }
+}
+
+/** The screen for a navigation that got no answer within Orbit's own time limit. */
+export function timeoutScreen(pageUrl: string | undefined): Omit<PageScreenContent, 'id'> {
+  return errorScreen(-7, 'ERR_TIMED_OUT', pageUrl)
+}
+
+/**
+ * "Your connection is not private" (Chromium's certificate interstitial): Back to safety is the
+ * main button, and going on needs Advanced, then Proceed.
+ */
+function certScreen(code: number, name: string, site: string): Omit<PageScreenContent, 'id'> {
+  const who = site || 'this site'
+  const why =
+    code === -201 // ERR_CERT_DATE_INVALID
+      ? 'its security certificate has expired or isn’t valid yet'
+      : code === -200 // ERR_CERT_COMMON_NAME_INVALID
+        ? 'its security certificate is for another site'
+        : code === -202 // ERR_CERT_AUTHORITY_INVALID
+          ? 'its security certificate isn’t trusted by your device'
+          : code === -206 // ERR_CERT_REVOKED
+            ? 'its security certificate has been revoked'
+            : 'its security certificate has a problem'
+  return {
+    kind: 'cert',
+    title: 'Your connection is not private',
+    message:
+      'Someone might be trying to steal your information from this site, such as passwords, messages or card numbers.',
+    site,
+    code: name,
+    action: 'back',
+    actionLabel: 'Back to safety',
+    advanced: {
+      text: `The server couldn’t prove that it’s ${who}: ${why}.`,
+      ...(CERT_FATAL.has(code) ? {} : { proceedLabel: `Proceed to ${who} (unsafe)` }),
+    },
+  }
+}
+
+/**
+ * The screen for a crashed page (Chromium's "sad tab"): Reload loads it again. `reason` is
+ * `render-process-gone`'s, or `hung` for a page the user closed from "Page unresponsive".
+ */
+export function crashScreen(reason: string, pageUrl: string | undefined): Omit<PageScreenContent, 'id'> {
+  const site = screenSite(pageUrl)
+  const say = (title: string, message: string) => ({
+    kind: 'crash' as const,
+    title,
+    message,
+    site,
+    code: reason.toUpperCase().replace(/[^A-Z0-9]+/g, '_'),
+    action: 'reload' as const,
+    actionLabel: 'Reload',
+  })
+  switch (reason) {
+    case 'hung':
+      return say('This page was closed', 'It stopped responding, so Orbit closed it.')
+    case 'oom':
+      return say('This page crashed', 'It ran out of memory.')
+    case 'memory-eviction':
+      return say('This page crashed', 'It was closed to free up memory.')
+    case 'killed':
+      return say('This page crashed', 'Its process was ended.')
+    default:
+      return say('This page crashed', 'Something went wrong while showing it.')
+  }
 }

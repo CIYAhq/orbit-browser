@@ -686,8 +686,8 @@ export class WindowManager {
       view.setBorderRadius(corner)
       rec.corners.set(pane.tabId, corner)
       view.setVisible(true)
-      // A tab whose page crashed while in the background reloads when it is shown again.
-      if (!rec.visible.has(pane.tabId) && view.webContents.isCrashed()) view.webContents.reload()
+      // A tab whose page crashed while in the background shows its crash screen when it is shown
+      // again, until the user reloads it (NV-14: the pages lane's screen over the page).
     }
     rec.visible = wanted
     if (panes.length === 1) rec.lastSingleRect = panes[0]?.rect

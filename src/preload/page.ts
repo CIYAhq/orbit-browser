@@ -226,6 +226,9 @@ interface StoppedNavigation {
  *   would tell for sure, but would cost every page: see `going` in `patchPage`.)
  * - `redo()`: starts that navigation again (the user chose Leave; main lets the next warning
  *   through): a link or `location` loads its URL, a form is submitted again, a reload reloads.
+ *
+ * The same `navigate` event tells main when the page sends a form (`PAGE_CHANNEL.formSent`): it may
+ * be uploading, so Orbit's time limit for a server's answer leaves that navigation alone (NV-13).
  */
 function exposeLeave(): void {
   const nav = (window as { navigation?: EventTarget }).navigation
@@ -241,6 +244,7 @@ function exposeLeave(): void {
       sourceElement?: Element | null
     }
     if (!e.destination?.url || e.destination.sameDocument) return
+    if (e.formData) ipcRenderer.send(PAGE_CHANNEL.formSent, e.destination.url)
     const source = e.sourceElement ?? null
     const form = e.formData
       ? source instanceof HTMLFormElement

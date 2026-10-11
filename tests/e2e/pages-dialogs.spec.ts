@@ -4,6 +4,7 @@ import { clickInPage, closeWindow, cmdIn } from './nav-support'
 import {
   AUTH_PASSWORD,
   AUTH_USER,
+  clickClosing,
   dialogPage,
   leaveInfo,
   mayDiscard,
@@ -205,7 +206,7 @@ test('[NV-24] a Peek’s and a Mini Window’s page show their dialogs over them
   await expect
     .poll(async () => JSON.stringify((await waitDialog(app, (d) => d.id === peek.id)).bounds))
     .toBe(JSON.stringify(await pageBounds(peekTab)))
-  await (await dialogPage(app, peek.id)).getByTestId('page-dialog-ok').click()
+  await clickClosing((await dialogPage(app, peek.id)).getByTestId('page-dialog-ok'))
   await answered(peekTab, 'true')
 
   await app.evaluate((_e, u) => {
@@ -221,7 +222,7 @@ test('[NV-24] a Peek’s and a Mini Window’s page show their dialogs over them
   await expect
     .poll(async () => JSON.stringify((await waitDialog(app, (d) => d.id === mini.id)).bounds))
     .toBe(JSON.stringify(await pageBounds(miniTab)))
-  await (await dialogPage(app, mini.id)).getByTestId('page-dialog-cancel').click()
+  await clickClosing((await dialogPage(app, mini.id)).getByTestId('page-dialog-cancel'))
   await answered(miniTab, 'false')
 })
 

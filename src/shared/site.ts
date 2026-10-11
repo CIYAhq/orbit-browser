@@ -199,6 +199,13 @@ export const PAGE_CHANNEL = {
    */
   escape: 'orbit-page:escape',
   /**
+   * send(url): the page's main frame is about to send a form (POST) to `url`, from the Navigation
+   * API's `navigate` event. It may be a large upload, so Orbit's time limit for a server's answer
+   * leaves that navigation alone (NV-13; main side: src/main/pages/screens.ts). Main reads it only
+   * from a tab's or a pop-up's main frame.
+   */
+  formSent: 'orbit-page:form-sent',
+  /**
    * sendSync(kind, message, value): the page called `alert`, `confirm` or `prompt` (NV-24). Main
    * shows Orbit's dialog over that page, answers only a tab's or a pop-up's main frame, and replies
    * when the user does: the page waits meanwhile, as it would for the engine's dialog

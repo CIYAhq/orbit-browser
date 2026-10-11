@@ -41,6 +41,21 @@ async function boot(): Promise<void> {
     )
     return
   }
+  // What a page's area shows when its page couldn't load or crashed (pages lane, NV-13, NV-14).
+  if (view === 'screen') {
+    const app = import('./pages/ScreenApp')
+    await initStore()
+    installShortcutFallback()
+    document.documentElement.dataset.view = view
+    document.documentElement.dataset.platform = window.orbit.platform
+    const { ScreenApp } = await app
+    createRoot(document.getElementById('root') as HTMLElement).render(
+      <StrictMode>
+        <ScreenApp />
+      </StrictMode>,
+    )
+    return
+  }
   // An internal page (DT-13): Orbit's UI in a normal tab. Keys go to it as to any page.
   if (view === 'internal') {
     const app = import('./internal/InternalApp')

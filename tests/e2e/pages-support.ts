@@ -1,13 +1,20 @@
 /**
  * Helpers for the pages lane's e2e specs (pages*.spec.ts): fixture pages that ask things of the
- * user, and handles on Orbit's page dialogs (NV-24). Builds on helpers.ts.
+ * user or fail to load, and handles on Orbit's page dialogs (NV-24) and on what a page's area shows
+ * when its page couldn't load or crashed (NV-13, NV-14). Builds on helpers.ts.
  */
-import { createServer, type Server } from 'node:http'
-import type { ElectronApplication, Page } from '@playwright/test'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { createServer as createSecureServer } from 'node:https'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type { ElectronApplication, Locator, Page } from '@playwright/test'
 import { expect } from '@playwright/test'
 import type { PageDialogInfo } from '../../src/main/pages/dialogs'
 import type { LeaveInfo } from '../../src/main/pages/leave'
-import { listenInRange } from './helpers'
+import type { PageScreenInfo } from '../../src/main/pages/screens'
+import { listenInRange, tabPage } from './helpers'
 
 export interface PagesFixtures {
   port: number
@@ -21,8 +28,12 @@ export interface PagesFixtures {
 export const AUTH_USER = 'orbit'
 export const AUTH_PASSWORD = 'secret word'
 
+/** Every fixture page's icon, so a test can see a row keep it. */
+export const PAGE_ICON =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%23d2691e'/%3E%3C/svg%3E"
+
 const html = (title: string, body: string, head = '') => `<!doctype html>
-<html><head><meta charset="utf-8"><title>${title}</title>${head}
+<html><head><meta charset="utf-8"><title>${title}</title><link rel="icon" href="${PAGE_ICON}">${head}
 <style>body{font:16px system-ui;margin:0;padding:24px;background:#f6f3ee}button,a{font:inherit}
 #area{height:600px;background:#e8e2d8}</style></head><body>${body}</body></html>`
 
@@ -36,10 +47,44 @@ const html = (title: string, body: string, head = '') => `<!doctype html>
  * - `/auth`: HTTP Basic sign-in (AUTH_USER, AUTH_PASSWORD).
  * - `/page/<name>`: a plain page.
  * - `/opener?to=…`: opens `to` in a pop-up window on a click of `#open`.
+ * - `/upload?to=…`: a form (`#form`) that posts to `to`.
+ *
+ * Every page has an icon (PAGE_ICON). `port` listens on that port only (a server back on the port
+ * it left).
  */
-export async function startPagesFixtures(base = 3340): Promise<PagesFixtures> {
+export async function startPagesFixtures(base = 3340, opts: { port?: number } = {}): Promise<PagesFixtures> {
   const seen: string[] = []
-  const server: Server = createServer((req, res) => {
+  const server: Server = createServer(pagesHandler(seen))
+  const port = opts.port ? await listenOn(server, opts.port) : await listenInRange(server, base)
+  return {
+    port,
+    url: (path) => `http://localhost:${port}${path}`,
+    seen: () => [...seen],
+    close: () => closeServer(server),
+  }
+}
+
+/** Listens on loopback at exactly `port`. */
+function listenOn(server: Server, port: number): Promise<number> {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(port, '127.0.0.1', () => {
+      server.off('error', reject)
+      resolve(port)
+    })
+  })
+}
+
+function closeServer(server: Server): Promise<void> {
+  return new Promise((resolve) => {
+    server.closeAllConnections()
+    server.close(() => resolve())
+  })
+}
+
+/** The fixture pages' answers, for the plain and the secure server alike. */
+function pagesHandler(seen: string[]): (req: IncomingMessage, res: ServerResponse) => void {
+  return (req, res) => {
     const u = new URL(req.url ?? '/', 'http://localhost')
     seen.push(`${req.method} ${u.pathname}${u.search}`)
     const send = (body: string, status = 200, headers: Record<string, string> = {}) => {
@@ -134,18 +179,108 @@ addEventListener('pagehide', () => note('pagehide', prompt('Your name?', 'Ada'))
       send(html(name, `<h1 id="title">${name}</h1><div id="area"></div>`))
       return
     }
+    if (u.pathname === '/upload') {
+      send(
+        html(
+          'Upload',
+          `<form id="form" method="post" action="${u.searchParams.get('to') ?? '/posted'}"><input name="note" value="big">
+<button id="send">Send</button></form><div id="area"></div>`,
+        ),
+      )
+      return
+    }
     send('not found', 404)
+  }
+}
+
+/** Whether this machine can make a certificate for the secure fixture. */
+export function canMakeCertificate(): boolean {
+  try {
+    execFileSync('openssl', ['version'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The fixture pages over HTTPS, with a certificate for localhost that no one trusts (made now by
+ * openssl, and valid for a day): every page gets Chromium's ERR_CERT_AUTHORITY_INVALID.
+ */
+export async function startSecureFixtures(base = 3365): Promise<PagesFixtures> {
+  const dir = mkdtempSync(join(tmpdir(), 'orbit-e2e-cert-'))
+  let key: Buffer
+  let cert: Buffer
+  try {
+    const config = join(dir, 'cert.cnf')
+    writeFileSync(
+      config,
+      `[req]
+distinguished_name = dn
+x509_extensions = ext
+prompt = no
+[dn]
+CN = localhost
+[ext]
+subjectAltName = DNS:localhost, IP:127.0.0.1
+basicConstraints = CA:FALSE
+`,
+    )
+    execFileSync(
+      'openssl',
+      [
+        'req',
+        '-x509',
+        '-newkey',
+        'rsa:2048',
+        '-nodes',
+        '-days',
+        '1',
+        '-config',
+        config,
+        '-keyout',
+        join(dir, 'key.pem'),
+        '-out',
+        join(dir, 'cert.pem'),
+      ],
+      { stdio: 'ignore' },
+    )
+    key = readFileSync(join(dir, 'key.pem'))
+    cert = readFileSync(join(dir, 'cert.pem'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+  const seen: string[] = []
+  const server = createSecureServer({ key, cert }, pagesHandler(seen))
+  const port = await listenInRange(server as unknown as Server, base)
+  return {
+    port,
+    url: (path) => `https://localhost:${port}${path}`,
+    seen: () => [...seen],
+    close: () => closeServer(server as unknown as Server),
+  }
+}
+
+export interface SilentServer {
+  port: number
+  url: (path: string) => string
+  /** How many requests for a path reached it. */
+  hits: (path: string) => number
+  close: () => Promise<void>
+}
+
+/** A server that takes every request and never answers one (NV-13's time limit). */
+export async function startSilentServer(base = 3360): Promise<SilentServer> {
+  const seen: string[] = []
+  const server = createServer((req) => {
+    seen.push(new URL(req.url ?? '/', 'http://localhost').pathname)
   })
   const port = await listenInRange(server, base)
   return {
     port,
     url: (path) => `http://localhost:${port}${path}`,
-    seen: () => [...seen],
-    close: () =>
-      new Promise((resolve) => {
-        server.closeAllConnections()
-        server.close(() => resolve())
-      }),
+    hits: (path) => seen.filter((p) => p === path).length,
+    close: () => closeServer(server),
   }
 }
 
@@ -154,6 +289,19 @@ type PagesGlobal = {
     dialogs: () => PageDialogInfo[]
     leave: (tabId: string) => LeaveInfo | null
     mayDiscard: (tabId: string) => boolean
+    screens: () => PageScreenInfo[]
+  }
+}
+
+/**
+ * Clicks a button whose click closes the page it's in: a Peek's, a Mini Window's or a pop-up's
+ * dialog has a view of its own, which goes with the dialog, sometimes before the click returns.
+ */
+export async function clickClosing(target: Locator): Promise<void> {
+  try {
+    await target.click()
+  } catch (error) {
+    if (!String(error).includes('has been closed')) throw error
   }
 }
 
@@ -209,4 +357,147 @@ export async function dialogPage(app: ElectronApplication, id: number): Promise<
 /** What a `/ask` page's call returned (JSON text), once the page is free to answer. */
 export async function askResult(page: Page): Promise<string> {
   return (await page.locator('#result').textContent()) ?? ''
+}
+
+/** Every page's error or crash screen (shown or waiting for its page to show). */
+export function pageScreens(app: ElectronApplication): Promise<PageScreenInfo[]> {
+  return app.evaluate(() => (globalThis as unknown as PagesGlobal).__orbitPages.screens())
+}
+
+/** Waits for a screen that matches, and returns it. */
+export async function waitScreen(
+  app: ElectronApplication,
+  match: (s: PageScreenInfo) => boolean,
+  timeout = 15_000,
+): Promise<PageScreenInfo> {
+  let found: PageScreenInfo | undefined
+  await expect
+    .poll(
+      async () => {
+        found = (await pageScreens(app)).find(match)
+        return !!found
+      },
+      { timeout },
+    )
+    .toBe(true)
+  return found as PageScreenInfo
+}
+
+/** Waits until a tab has no screen. */
+export async function waitNoScreen(app: ElectronApplication, tabId: string): Promise<void> {
+  await expect.poll(async () => (await pageScreens(app)).filter((s) => s.tabId === tabId).length).toBe(0)
+}
+
+/** The screen view (a Playwright page) showing the screen with this id. */
+export async function screenPage(app: ElectronApplication, id: number): Promise<Page> {
+  const deadline = Date.now() + 15_000
+  while (Date.now() < deadline) {
+    for (const page of app.windows()) {
+      if (!page.url().includes('view=screen')) continue
+      const shows = await page
+        .locator(`[data-screen-id="${id}"]`)
+        .count()
+        .catch(() => 0)
+      if (shows > 0) return page
+    }
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  throw new Error(`no screen view shows screen ${id}`)
+}
+
+type TabsGlobal = { __orbit: { ctx: { tabs: { contents: (id: string) => Electron.WebContents | undefined } } } }
+
+/** Crashes a tab's page, as a renderer that dies does. */
+export async function crashTab(app: ElectronApplication, tabId: string): Promise<void> {
+  await app.evaluate((_e, id) => {
+    ;(globalThis as unknown as TabsGlobal).__orbit.ctx.tabs.contents(id)?.forcefullyCrashRenderer()
+  }, tabId)
+}
+
+export function tabCrashed(app: ElectronApplication, tabId: string): Promise<boolean | null> {
+  return app.evaluate(
+    (_e, id) => (globalThis as unknown as TabsGlobal).__orbit.ctx.tabs.contents(id)?.isCrashed() ?? null,
+    tabId,
+  )
+}
+
+/**
+ * Emits one of a tab's page's events as the engine does (`unresponsive`, `responsive`). The engine
+ * itself says nothing of a hung page while a debugger is attached to it, and Playwright attaches
+ * to every page.
+ */
+export async function emitOnTab(app: ElectronApplication, tabId: string, name: string): Promise<void> {
+  await app.evaluate(
+    (_e, [id, n]) => {
+      ;(globalThis as unknown as TabsGlobal).__orbit.ctx.tabs.contents(id)?.emit(n)
+    },
+    [tabId, name] as const,
+  )
+}
+
+/** Starts a script in a tab's page and doesn't wait for it (it may never end). */
+export async function startInTab(app: ElectronApplication, tabId: string, code: string): Promise<void> {
+  await app.evaluate(
+    (_e, [id, c]) => {
+      void (globalThis as unknown as TabsGlobal).__orbit.ctx.tabs
+        .contents(id)
+        ?.executeJavaScript(c)
+        .catch(() => {})
+    },
+    [tabId, code] as const,
+  )
+}
+
+/**
+ * Counts a tab's main-frame navigations from now on (a listener of the test's own on the page).
+ * Returns a reader.
+ */
+export async function countNavigations(app: ElectronApplication, tabId: string): Promise<() => Promise<number>> {
+  const key = `__pagesNavigations_${tabId}`
+  await app.evaluate(
+    (_e, [id, k]) => {
+      const g = globalThis as unknown as TabsGlobal & Record<string, number>
+      g[k] = 0
+      g.__orbit.ctx.tabs.contents(id)?.on('did-start-navigation', (details) => {
+        if (details.isMainFrame && !details.isSameDocument) g[k] = (g[k] ?? 0) + 1
+      })
+    },
+    [tabId, key] as const,
+  )
+  return () => app.evaluate((_e, k) => (globalThis as unknown as Record<string, number>)[k] ?? 0, key)
+}
+
+export interface NetworkSwitch {
+  /** Takes the page off the network (its loads fail with ERR_INTERNET_DISCONNECTED), or puts it back. */
+  offline(on: boolean): Promise<void>
+  close(): Promise<void>
+}
+
+/**
+ * Takes one tab's page off the network and puts it back, as DevTools' Offline does (the profile's
+ * own network emulation doesn't reach a page's navigations). `urlPart` finds the page.
+ */
+export async function networkSwitch(app: ElectronApplication, urlPart: string): Promise<NetworkSwitch> {
+  const page = await tabPage(app, urlPart)
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Network.enable')
+  return {
+    offline: async (on) => {
+      await cdp.send('Network.emulateNetworkConditions', {
+        offline: on,
+        latency: 0,
+        downloadThroughput: -1,
+        uploadThroughput: -1,
+      })
+    },
+    close: () => cdp.detach().catch(() => {}),
+  }
+}
+
+/** A tab's page area (window coordinates). */
+export function pageBounds(app: ElectronApplication, tabId: string): Promise<unknown> {
+  return app.evaluate((_e, id) => {
+    const g = globalThis as unknown as { __orbit: { tabView: (id: string) => { bounds: unknown } | null } }
+    return g.__orbit.tabView(id)?.bounds
+  }, tabId)
 }

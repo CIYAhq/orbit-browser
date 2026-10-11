@@ -1,0 +1,152 @@
+/*
+ * What a page's area shows when its page couldn't load or crashed (NV-13, NV-14): Orbit's page in
+ * place of the page, over that page's area only. Quiet: an icon, a title, one sentence, the site
+ * and the way on.
+ */
+.page-screen-view {
+  box-sizing: border-box;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  height: 100%;
+  padding: max(48px, 14vh) 24px 24px;
+  overflow: auto;
+  background: var(--surface, #fff);
+  font: 14px / 1.5 var(--font, system-ui, sans-serif);
+  color: var(--text, #1c1c1f);
+  cursor: default;
+}
+
+.page-screen {
+  --screen-fill: color-mix(in srgb, var(--text, #1c1c1f) 7%, transparent);
+  --screen-fill-hover: color-mix(in srgb, var(--text, #1c1c1f) 12%, transparent);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: min(520px, 100%);
+  animation: page-screen-in 180ms var(--ease-out, ease-out);
+}
+
+@keyframes page-screen-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-screen {
+    animation: none;
+  }
+}
+
+.page-screen__icon {
+  margin-bottom: 10px;
+  color: var(--text-muted, rgba(28, 28, 31, 0.56));
+}
+
+.page-screen.is-cert .page-screen__icon {
+  color: #c4372c;
+}
+
+.page-screen__title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.page-screen__message {
+  margin: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.page-screen__site {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.page-screen__code {
+  margin: 0;
+  color: var(--text-muted, rgba(28, 28, 31, 0.56));
+  font:
+    11px / 1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  letter-spacing: 0.02em;
+  user-select: text;
+}
+
+.page-screen__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.page-screen__button {
+  min-height: 32px;
+  padding: 6px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--screen-fill);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background var(--dur-fast, 120ms) ease;
+}
+
+.page-screen__button:hover {
+  background: var(--screen-fill-hover);
+}
+
+.page-screen__button.is-primary {
+  background: var(--accent, #5865d8);
+  color: #fff;
+}
+
+.page-screen__button.is-primary:hover {
+  background: color-mix(in srgb, var(--accent, #5865d8) 88%, #000);
+}
+
+.page-screen__button:focus-visible,
+.page-screen__link:focus-visible {
+  outline: 2px solid var(--accent, #5865d8);
+  outline-offset: 2px;
+}
+
+.page-screen__advanced {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 14px;
+  color: var(--text-muted, rgba(28, 28, 31, 0.56));
+  font-size: 13px;
+}
+
+.page-screen__advanced p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.page-screen__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #c4372c;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}

@@ -93,6 +93,8 @@ export type RendererView =
   | 'internal'
   /** Pages lane: a page's dialog over its page (alert, confirm, prompt, leave-page, sign-in; NV-24). */
   | 'dialog'
+  /** Pages lane: what a page's area shows when its page couldn't load or crashed (NV-13, NV-14). */
+  | 'screen'
 
 /** The API the preload exposes on `window.orbit` to Orbit's own UI renderers. */
 export interface OrbitBridge {

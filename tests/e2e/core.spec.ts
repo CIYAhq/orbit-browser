@@ -658,12 +658,13 @@ test('[TB-19] a tab view that replaces another stays below the open command bar 
   expect(await overlay.getByTestId('command-input').isVisible()).toBe(true)
 })
 
-test('[NV-14] a crashed shell renderer reloads, and a crashed tab reloads when shown (review F11)', async () => {
+test('[NV-14] a crashed shell renderer reloads, and a crashed tab comes back when reloaded (review F11)', async () => {
   const a = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/Crashy') })) as string
   await tabPage(orbit.app, '/page/Crashy')
   const b = (await run(orbit.app, 'tabs.create', { url: fx.url('/page/Calm') })) as string
   await tabPage(orbit.app, '/page/Calm')
-  // A background tab crashes; selecting it reloads the page.
+  // A background tab crashes. Selecting it shows its crash screen (pages-crash.spec.ts); reloading
+  // brings the page back.
   await orbit.app.evaluate(
     (_e, id) => (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id)?.forcefullyCrashRenderer(),
     a,
@@ -675,6 +676,7 @@ test('[NV-14] a crashed shell renderer reloads, and a crashed tab reloads when s
     )
   await expect.poll(() => crashed(a)).toBe(true)
   await run(orbit.app, 'tabs.activate', { tabId: a })
+  await run(orbit.app, 'tabs.reload', { tabId: a })
   await expect.poll(() => crashed(a)).toBe(false)
   await expect
     .poll(() =>

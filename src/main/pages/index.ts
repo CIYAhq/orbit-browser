@@ -5,6 +5,7 @@ import type { MainContext } from '../context'
 import type { TabOps } from '../tabs/ops'
 import { type PageDialogInfo, type PageDialogs$, registerDialogs } from './dialogs'
 import { type LeaveInfo, registerLeave } from './leave'
+import { LOAD_TIMEOUT_MS, type PageScreenInfo, registerScreens } from './screens'
 
 /** Test-only handle (ORBIT_E2E=1): globalThis.__orbitPages. */
 export interface PagesTestHooks {
@@ -14,16 +15,23 @@ export interface PagesTestHooks {
   leave: (tabId: TabId) => LeaveInfo | null
   /** Whether auto-archive and sleep may let a tab's page go (NV-24). */
   mayDiscard: (tabId: TabId) => boolean
+  /** Every page's error or crash screen (NV-13, NV-14). */
+  screens: () => PageScreenInfo[]
 }
 
 /**
  * The pages lane: what a page does beyond loading. Page dialogs (NV-24): a page's alert, confirm and
- * prompt, the leave-page warning and HTTP sign-in, in Orbit's own dialog over that page.
+ * prompt, the leave-page warning and HTTP sign-in, in Orbit's own dialog over that page. Error and
+ * crash screens (NV-13, NV-14): what the page's area shows when its page couldn't load, crashed or
+ * stopped responding.
  */
 export function registerPages(ctx: MainContext, ops: TabOps): void {
   const dialogs = registerDialogs(ctx)
   const leave = registerLeave(ctx, ops, dialogs)
   registerSignIn(dialogs)
+  // Tests give a navigation's first answer less time (ORBIT_E2E_LOAD_TIMEOUT_MS).
+  const testTimeout = ctx.e2e ? Number(process.env.ORBIT_E2E_LOAD_TIMEOUT_MS) : Number.NaN
+  const screens = registerScreens(ctx, ops, dialogs, testTimeout > 0 ? testTimeout : LOAD_TIMEOUT_MS)
 
   if (ctx.e2e) {
     const hooks: PagesTestHooks = {
@@ -33,6 +41,7 @@ export function registerPages(ctx: MainContext, ops: TabOps): void {
         return page ? leave.info(page) : null
       },
       mayDiscard: (tabId) => leave.mayDiscard(tabId),
+      screens: () => screens.info(),
     }
     ;(globalThis as unknown as { __orbitPages: PagesTestHooks }).__orbitPages = hooks
   }
