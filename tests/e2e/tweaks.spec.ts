@@ -786,10 +786,17 @@ test('[BO-18][BO-02] a key a busy page’s renderer gives back late never takes 
   // went in under the same key.
   await mark(page)
   await cmd(app, 'tabs.navigate', { tabId, url: fx.url('/busy/Busy?ms=400&back=50') })
-  await expect.poll(() => page.url(), { timeout: 15_000 }).toContain('/page/Kept')
-  await newDocument(page)
-  // The page that came back notes every frame from its first: none may lose the Tweak, from then
-  // until well after the late key came.
+  // The page that came back is a new document of the other site's page (neither the one marked
+  // before, nor the busy one): it notes every frame from its first. None may lose the Tweak, from
+  // then until well after the late key came.
+  const cameBack = () =>
+    page
+      .evaluate(() => {
+        const w = window as unknown as { __mark?: number; __frames?: unknown[] }
+        return location.pathname === '/page/Kept' && w.__mark !== 1 && (w.__frames?.length ?? 0) > 0
+      })
+      .catch(() => false)
+  await expect.poll(cameBack, { timeout: 15_000 }).toBe(true)
   type Frame = [number, string]
   const frames = () => page.evaluate(() => (window as unknown as { __frames?: Frame[] }).__frames ?? [])
   const span = async () => {
