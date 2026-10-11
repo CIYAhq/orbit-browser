@@ -715,3 +715,189 @@ test("[CB-23][KS-19][MW-03] the bar over a Mini Window's page takes its keys fir
     .poll(async () => Object.values((await state(app)).windows).find((w) => w.kind === 'main')?.overlay.kind)
     .toBe('commandbar')
 })
+
+// ---- New splits from the "+" menu and the split button (SV-07) ----
+
+/** The split showing `tabId`, as its panes in reading order and its layout's direction. */
+async function splitOf(tabId: string): Promise<{ panes: string[]; axis: string } | null> {
+  const s = await state(orbit.app)
+  const split = Object.values(s.splits).find((sp) => paneOrder(sp.layout).includes(tabId))
+  return split ? { panes: paneOrder(split.layout), axis: split.layout.type } : null
+}
+
+test('[SV-07][SV-02][SB-09] New Split View in the + menu opens a pane beside the current tab with the bar ready; what is chosen fills it', async () => {
+  const { app, shell } = orbit
+  const a = await newTab('Alpha')
+  await shell.getByTestId('sidebar-plus').click()
+  const overlay = await viewPage(app, 'overlay')
+  await overlay.getByTestId('menu-plus-split').click()
+  await expect(input(overlay)).toBeFocused()
+  await expect(shell.getByTestId('split-pane')).toHaveCount(2)
+  const split = await splitOf(a)
+  expect(split?.axis).toBe('row')
+  expect(split?.panes[0]).toBe(a)
+  const pane = split?.panes[1] as string
+  // The page chosen in the bar loads in the new pane; the current tab stays on the left.
+  const url = fx.url('/page/Bravo')
+  await input(overlay).fill(url)
+  await input(overlay).press('Enter')
+  await expect.poll(async () => (await state(app)).tabs[pane]?.url).toBe(url)
+  expect((await splitOf(a))?.panes).toEqual([a, pane])
+})
+
+test('[SV-07][SB-26][KS-18] Windows and Linux: the split button beside the window controls offers Add Split Right, Left, Above and Below, with their keys', async () => {
+  test.skip(process.platform === 'darwin', 'macOS has the traffic lights and no split button')
+  const { app, shell } = orbit
+  const a = await newTab('Alpha')
+  const button = shell.getByTestId('split-button')
+  const controls = await shell.getByTestId('window-controls').boundingBox()
+  const box = await button.boundingBox()
+  expect(controls && box).toBeTruthy()
+  if (!controls || !box) return
+  // Right after the window controls, on their row.
+  expect(box.x).toBeGreaterThanOrEqual(controls.x + controls.width - 1)
+  expect(box.x).toBeLessThan(controls.x + controls.width + 12)
+  expect(Math.abs(box.y + box.height / 2 - (controls.y + controls.height / 2))).toBeLessThan(2)
+
+  await recordMenus(app)
+  expect(await run(app, 'keys.bind', { actionId: 'split.addBelow', accel: 'F8' })).toEqual({ ok: true })
+  await button.click()
+  await expect
+    .poll(() => shownMenu(app))
+    .toEqual(['Add Split Right', 'Add Split Left', 'Add Split Above', 'Add Split Below'])
+  const below = await app.evaluate(
+    () =>
+      (globalThis as unknown as { __shownMenu?: Electron.Menu }).__shownMenu?.items.find(
+        (i) => i.label === 'Add Split Below',
+      )?.accelerator,
+  )
+  expect(below).toBe('F8')
+  expect(await clickShownMenu(app, 'Add Split Below')).toBe(true)
+  const overlay = await viewPage(app, 'overlay')
+  await expect(input(overlay)).toBeFocused()
+  await expect(shell.getByTestId('split-pane')).toHaveCount(2)
+  const split = await splitOf(a)
+  expect(split?.axis).toBe('column')
+  expect(split?.panes[0]).toBe(a)
+  // Esc leaves the window as it was: the empty pane goes.
+  await input(overlay).press('Escape')
+  await expect(shell.getByTestId('split-pane')).toHaveCount(1)
+  await expect.poll(() => splitOf(a)).toBeNull()
+
+  // A narrow sidebar keeps Back, Forward and Reload: the split button goes first, and nothing in
+  // the row spills at any width.
+  const row = shell.getByTestId('topbar').locator('.topbar__row')
+  const fits = (width: number) =>
+    row.evaluate((el, w) => el.clientWidth === w && el.scrollWidth <= el.clientWidth, width - 12)
+  await run(app, 'window.setSidebar', { width: 226 })
+  await expect.poll(() => fits(226)).toBe(true)
+  await expect(button).toBeVisible()
+  await run(app, 'window.setSidebar', { width: 180 })
+  await expect.poll(() => fits(180)).toBe(true)
+  await expect(button).toBeHidden()
+  await expect(shell.getByTestId('topbar').getByRole('button', { name: 'Reload' })).toBeVisible()
+})
+
+// ---- A link dragged out of a page makes a split (SV-08) ----
+
+test('[SV-08][SV-04] a link dragged out of a page that rests on the page shows the drop indicator and opens in a new pane there; a text field and a short drag keep their own behaviour', async () => {
+  const { app, shell } = orbit
+  const a = await newTab('Alpha')
+  const page = await findPage(app, '/page/Alpha')
+  await page.evaluate(() => document.body.insertAdjacentHTML('afterbegin', '<input id="field" style="width:320px">'))
+  const indicator = shell.getByTestId('split-drop-indicator')
+  const size = await page.evaluate(() => ({ w: innerWidth, h: innerHeight }))
+  /** Picks up the link and moves it to `to` (page coordinates); the button stays down. */
+  const pickUp = async (to?: { x: number; y: number }) => {
+    const box = await page.locator('#next').boundingBox()
+    if (!box) throw new Error('no link')
+    const from = { x: box.x + 8, y: box.y + box.height / 2 }
+    await page.mouse.move(from.x, from.y)
+    await page.mouse.down()
+    await page.mouse.move(from.x + 8, from.y + 4, { steps: 2 })
+    if (to) await page.mouse.move(to.x, to.y, { steps: 6 })
+  }
+
+  // Let go next to where it was picked up: nothing happens.
+  await pickUp()
+  await page.mouse.up()
+  // A text field on the page takes the link as text, as it always has.
+  const field = await page.locator('#field').boundingBox()
+  if (!field) throw new Error('no field')
+  await pickUp({ x: field.x + 40, y: field.y + field.height / 2 })
+  await page.mouse.up()
+  await expect(page.locator('#field')).toHaveValue(/Alpha-next/)
+  expect(await splitOf(a)).toBeNull()
+  await expect(indicator).toHaveCount(0)
+  // The page fills the frame again (a link resting on the way would have previewed a pane).
+  await expect.poll(() => page.evaluate(() => innerWidth)).toBe(size.w)
+
+  // Resting on the page itself: the indicator previews a pane on the right; the drop opens the link there.
+  await pickUp({ x: Math.round(size.w * 0.35), y: Math.round(size.h * 0.55) })
+  await expect(indicator).toBeVisible()
+  await expect(indicator).toHaveAttribute('data-side', 'right')
+  await page.mouse.up()
+  await expect.poll(async () => (await splitOf(a))?.panes.length).toBe(2)
+  const split = await splitOf(a)
+  expect(split?.axis).toBe('row')
+  expect(split?.panes[0]).toBe(a)
+  const pane = split?.panes[1] as string
+  await expect.poll(async () => (await state(app)).tabs[pane]?.url).toBe(fx.url('/page/Alpha-next'))
+  await expect(indicator).toHaveCount(0)
+  // The page the link came from stays as it was, beside it.
+  expect((await state(app)).tabs[a]?.url).toBe(fx.url('/page/Alpha'))
+})
+
+test("[SV-08][SV-04] over Orbit's own surface in the frame a dragged link drops too: the left edge band opens it on the left; a full split takes none", async () => {
+  const { app, shell } = orbit
+  const a = await newTab('Alpha')
+  const frame = await shell.getByTestId('content-frame').boundingBox()
+  if (!frame) throw new Error('no frame')
+  const cdp = await shell.context().newCDPSession(shell)
+  const drag = async (type: 'dragEnter' | 'dragOver' | 'drop', at: { x: number; y: number }, url: string) =>
+    cdp.send('Input.dispatchDragEvent', {
+      type,
+      ...at,
+      data: {
+        items: [
+          { mimeType: 'text/uri-list', data: url },
+          { mimeType: 'text/plain', data: url },
+        ],
+        dragOperationsMask: 1,
+      },
+    })
+  const url = fx.url('/page/Dropped')
+  const left = { x: Math.round(frame.x + frame.width * 0.08), y: Math.round(frame.y + frame.height / 2) }
+  await drag('dragEnter', left, url)
+  await drag('dragOver', left, url)
+  const indicator = shell.getByTestId('split-drop-indicator')
+  await expect(indicator).toHaveAttribute('data-side', 'left')
+  // The drop lands on the indicator, which appeared under the pointer.
+  await drag('drop', left, url)
+  await expect.poll(async () => (await splitOf(a))?.panes.length).toBe(2)
+  await expect.poll(async () => (await splitOf(a))?.panes.length).toBe(2)
+  const panes = (await splitOf(a))?.panes ?? []
+  expect(panes[1]).toBe(a)
+  await expect.poll(async () => (await state(app)).tabs[panes[0] as string]?.url).toBe(url)
+  await expect(indicator).toHaveCount(0)
+
+  // Four panes: no indicator, and the drop opens nothing.
+  const b = await newTab('Bravo')
+  const c = await newTab('Charlie')
+  const d = await newTab('Delta')
+  await run(app, 'split.create', { tabIds: [b, c, d, await newTab('Echo')] })
+  await expect(shell.getByTestId('split-pane')).toHaveCount(4)
+  const tabs = Object.keys((await state(app)).tabs).length
+  const middle = { x: Math.round(frame.x + frame.width / 2), y: Math.round(frame.y + frame.height / 2) }
+  await drag('dragEnter', middle, url)
+  await drag('dragOver', middle, url)
+  // Longer than a dragged link rests before the indicator shows.
+  await new Promise((r) => setTimeout(r, 600))
+  await expect(indicator).toHaveCount(0)
+  await drag('drop', middle, url)
+  // Longer than a dropped link takes to open.
+  await new Promise((r) => setTimeout(r, 600))
+  await expect(shell.getByTestId('split-pane')).toHaveCount(4)
+  expect(Object.keys((await state(app)).tabs).length).toBe(tabs)
+  await expect(indicator).toHaveCount(0)
+})

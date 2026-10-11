@@ -4,13 +4,13 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 244 built (79 partial) · 330 tested · 0 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 245 built (78 partial) · 331 tested · 0 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 144 | 168 |
-| P1 | 219 | 85 | 145 |
-| P2 | 79 | 15 | 17 |
+| P1 | 219 | 86 | 145 |
+| P2 | 79 | 15 | 18 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
 
@@ -45,7 +45,7 @@ Spec: `spec/sidebar.md`
 | SB-23 | Scrolling, auto-reveal of the active tab and overflow indicator | P1 | ✅ | ✅ e2e | – | selected tab scrolled into view (smooth, then settles); pill points to it while it is out of view; rows use content-visibility |
 | SB-24 | Sidebar colouring follows the Space theme | P0 | 🟡 partial | ✅ e2e+unit | – | theme gradient + grain on sidebar and frame, tinted selection; the neutral theme is a solid soft grey/near-black, not a translucent material yet |
 | SB-25 | Incognito window sidebar | P1 | ✅ | ✅ e2e+unit | – | private window sidebar: top bar and address, a Private label with icon and a plain note, then only its own tabs; no Spaces, Favorites or pinned tabs (and their actions do nothing); + and Cmd/Ctrl+T open the command bar, which a new private window starts with |
-| SB-26 | Platform notes (Windows / Linux) | P2 | – | – | – |  |
+| SB-26 | Platform notes (Windows / Linux) | P2 | – | ✅ e2e | – |  |
 | SB-27 | Link status pill | P1 | ✅ | ✅ e2e+unit | – | hovering (or focusing) a link shows a theme-styled pill with where it goes (no scheme) at the bottom-left of that page card, in its own small view; the full URL after 1.5 s on the link, kept for the next links while it stays up; moves to the other corner when the pointer comes within 24 px, out of the way if near both; goes 120 ms after the link is left; not on Peek pages |
 | SB-28 | Page loading indicator | P1 | ✅ | ✅ e2e | – | loading indicator at the top centre of the shown page card (the focused pane; Mini Windows too), in its own view over the page, after 150 ms; it leaves the window when hidden; shows in native full screen, not over a page in HTML full screen (back when that ends if still loading); tab rows keep their favicon loading ring |
 
@@ -201,8 +201,8 @@ Spec: `spec/split-view.md`
 | SV-04 | Create by dragging a tab onto the page | P0 | ✅ | ✅ e2e+unit | – | drag a tab row over the page: theme-coloured drop indicator, the page makes room, release adds the pane |
 | SV-05 | Create by dropping a tab onto another tab row | P0 | ✅ | ✅ e2e+unit | – | resting a dragged tab on a tab or split row's middle band (~400 ms) highlights that half; dropping makes or extends a split there, undoable with Cmd/Ctrl+Z; quick drags reorder as usual |
 | SV-06 | Create from a multi-selection | P0 | ✅ | ✅ e2e+unit | – | Open in Split View in the tab menu for a 2-4 tab multi-selection (sidebar order); more than 4 is disabled with the hint |
-| SV-07 | Create from the "+" menu or the window's split button | P1 | 🟡 partial | ✅ unit | – | New Split View and Add Split Right/Left/Above/Below actions plus newSplitMenuItems(); the '+' menu and title-bar button belong to the sidebar chrome |
-| SV-08 | Open a link into a split | P1 | 🟡 partial | ✅ e2e+unit | – | Open Link in Split View in the page's link menu; Option/Alt-click a link opens it beside the page (the engine download is cancelled); dragging links not built |
+| SV-07 | Create from the "+" menu or the window's split button | P1 | ✅ | ✅ e2e+unit | – | the sidebar's + menu has New Split View (as ⌃⇧=: a pane beside the current tab with the bar ready; the choice fills it); on Windows and Linux a split button beside the window controls opens Add Split Right, Left, Above and Below, each showing its key, and is the first to give way when the sidebar is narrow; macOS has none (traffic lights). No right-edge hover target (decision) |
+| SV-08 | Open a link into a split | P1 | 🟡 partial | ✅ e2e+unit | – | Open Link in Split View in the page's link menu; Option/Alt-click a link opens it beside the page (the engine download is cancelled; Download Linked File stays in the menu); a link dragged out of a page that rests on a pane's page (or on Orbit's surface in the frame) for 250 ms shows the drop indicator with SV-04's zones, and the drop opens it in a new pane there; the page's own drop targets and text fields keep the drag, a drag that stays near the link does nothing, a full split takes none, http(s) only, main frame only; from a Peek, PK-08. Not built: a file dropped onto the window (inferred bullet): the drop gives no file address without a preload change (D40), and D58 (3) sends dropped addresses through D49 |
 | SV-09 | Option-click a tab row | P1 | ✅ | ✅ e2e+unit | – | Alt-click a tab row joins it (the selected tab duplicates beside itself); Alt-click a split row separates |
 | SV-10 | Notes and canvases in a split | P2 | – | – | – |  |
 | SV-11 | Layouts and flipping orientation | P0 | ✅ | ✅ e2e+unit | – | row/column trees, 3-4 pane arrangements from where panes are added, flip transposes keeping ratios |

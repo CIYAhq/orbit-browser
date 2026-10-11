@@ -27,6 +27,8 @@ import { SPLIT_PANE_MENU_KEYS, withKeyHints } from '../keys/menu-hints'
 import type { CallContext } from '../registry'
 import { makeTab } from '../tabs/model'
 import { activeTabOf } from '../windows'
+import { installLinkDrop } from './link-drop'
+import { newSplitMenuItems } from './menu'
 import {
   addPaneInDraft,
   adoptPlacement,
@@ -84,6 +86,7 @@ export function registerSplit(ctx: MainContext): void {
   const windowOf = (c: CallContext): WindowId | undefined => c.windowId ?? windows.focusedWindowId()
   const sessions = new Map<WindowId, PaneSession>()
   const strip = new PaneStrip(ctx)
+  installLinkDrop(ctx)
   // An empty pane whose command bar was open when Orbit quit has nothing to show.
   store.update((d) => {
     dropBlankPanes(d)
@@ -644,6 +647,13 @@ export function registerSplit(ctx: MainContext): void {
     const items = withKeyHints(paneControls(tabId, windowId), SPLIT_PANE_MENU_KEYS)
     const win = windowId ? windows.get(windowId) : undefined
     if (items.length > 0) Menu.buildFromTemplate(items).popup(win ? { window: win } : {})
+  })
+
+  commands.register('split.addMenu', ({ x, y }, c) => {
+    const windowId = windowOf(c)
+    const win = windowId ? windows.get(windowId) : undefined
+    const items = withKeyHints(newSplitMenuItems(ctx, windowId), SPLIT_PANE_MENU_KEYS)
+    Menu.buildFromTemplate(items).popup(win ? { window: win, x: Math.round(x), y: Math.round(y) } : {})
   })
 
   commands.register('split.contextMenu', ({ splitId }, c) => {

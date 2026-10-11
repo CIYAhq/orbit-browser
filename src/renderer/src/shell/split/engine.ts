@@ -55,6 +55,8 @@ export interface DropPreview {
   side: PaneSide | 'center'
   /** A pane of the shown split being moved (SV-20) rather than a tab joining it. */
   move?: boolean
+  /** A link dragged from a page (SV-08): the preview ends when the pane it opens appears. */
+  link?: boolean
 }
 
 interface PaneAnim {
@@ -226,6 +228,7 @@ export class PaneEngine {
       // A pane drag's preview ends as soon as the drop changes the stored layout.
       if (!sameLayout(this.model.layout, model.layout)) this.preview = null
     } else if (this.preview && after.includes(this.preview.tabId)) this.preview = null
+    else if (this.preview?.link && after.some((id) => !before.includes(id))) this.preview = null
     this.model = model
     this.ready = true
     this.relayout(related && !prefersReducedMotion())

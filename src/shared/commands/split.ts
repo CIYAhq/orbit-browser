@@ -59,6 +59,11 @@ export interface SplitCommands {
   'split.contextMenu': { args: { splitId: SplitId }; result: void }
   /** The split-controls menu of a pane (SV-12). */
   'split.paneMenu': { args: { tabId: TabId }; result: void }
+  /**
+   * The menu of the split button beside the window controls on Windows and Linux (SV-07): Add Split
+   * Right, Left, Above, Below. At a point in window coordinates.
+   */
+  'split.addMenu': { args: { x: number; y: number }; result: void }
   /** The pane the strip currently belongs to (the strip asks once its page has loaded). */
   'split.stripTarget': { args: Record<string, never>; result: { tabId: TabId | null } }
   /** The pane strip relays a drag of its pane (strip-view coordinates) to the frame (SV-20). */
