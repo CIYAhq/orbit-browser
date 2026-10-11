@@ -89,6 +89,8 @@ export type RendererView =
   | 'import'
   /** Downloads lane: an internal page, `orbit://<page>/` in a tab (DT-13). */
   | 'internal'
+  /** Tabs lane: toasts over the page card while the sidebar is hidden (SB-13, SP-02). */
+  | 'toasts'
 
 /** The API the preload exposes on `window.orbit` to Orbit's own UI renderers. */
 export interface OrbitBridge {

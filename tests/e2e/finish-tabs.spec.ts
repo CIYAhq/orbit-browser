@@ -3,8 +3,33 @@
  * the other lanes merged (lanes/finish-tabs.md).
  */
 import { expect, type Page, test } from '@playwright/test'
-import { type Fixtures, isMac, launchOrbit, type Orbit, run, startFixtures, state, tabPage, viewPage } from './helpers'
-import { cmd, menuFor, newTab, row, rowMenu, settled, space, tabsHook } from './tabs-support'
+import {
+  type Fixtures,
+  isMac,
+  launchOrbit,
+  type Orbit,
+  run,
+  startFixtures,
+  state,
+  tabPage,
+  tabView,
+  viewPage,
+} from './helpers'
+import { pressInPage } from './nav-support'
+import {
+  act,
+  activeId,
+  cmd,
+  menuFor,
+  newTab,
+  row,
+  rowMenu,
+  settled,
+  space,
+  tabsHook,
+  toastView,
+  waitTab,
+} from './tabs-support'
 
 let fx: Fixtures
 let orbit: Orbit
@@ -338,4 +363,196 @@ test('[TB-14][KS-16] Rename… in a row’s menu gives the sidebar the keyboard,
   await expect.poll(async () => (await state(app)).tabs[t]?.customTitle).toBe('Named')
   await renameFrom(shell.locator(`[data-testid="split-row"][data-split-id="${split}"]`), split, 'Pair')
   await expect.poll(async () => (await state(app)).splits[split]?.name).toBe('Pair')
+})
+
+// ---------- SB-13, SP-02, SP-16: toasts over the page while the sidebar is hidden, in the Space's colours ----------
+
+/** A toast's colours against the theme its view has (`root` holds the palette's variables, SP-16). */
+function toastColours(page: Page, root: string) {
+  return page.evaluate((sel) => {
+    const toast = document.querySelector('[data-testid="toast"]')
+    if (!toast) return { background: 'no toast', text: '', surface: '', themeText: '' }
+    const probe = document.createElement('div')
+    probe.style.background = 'var(--surface)'
+    probe.style.color = 'var(--text)'
+    ;(document.querySelector(sel) as HTMLElement).appendChild(probe)
+    const theme = getComputedStyle(probe)
+    const out = {
+      background: getComputedStyle(toast).backgroundColor,
+      text: getComputedStyle(toast).color,
+      surface: theme.backgroundColor,
+      themeText: theme.color,
+    }
+    probe.remove()
+    return out
+  }, root)
+}
+
+const RED = { colors: ['#d4322c'], intensity: 1, grain: 0 }
+
+/** The toasts' view sits over the bottom centre of `card`: centred, its stack 16 px above the card's foot (FL-22). */
+async function expectOver(card: { x: number; y: number; width: number; height: number }) {
+  await expect.poll(async () => (await toastView(orbit.app)).visible).toBe(true)
+  const { bounds } = await toastView(orbit.app)
+  if (!bounds) throw new Error('no toast view')
+  expect(Math.abs(bounds.x + bounds.width / 2 - (card.x + card.width / 2))).toBeLessThanOrEqual(1)
+  // The view is the stack and a 24 px margin.
+  expect(Math.abs(bounds.y + bounds.height - 24 - (card.y + card.height - 16))).toBeLessThanOrEqual(1)
+}
+
+test('[SP-02][SB-13][SP-16] New Space with the sidebar hidden says so over the page card, in the Space’s colours; Show shows the sidebar', async () => {
+  const { app } = orbit
+  const t = await newTab(app, fx.url('/page/UnderToast'))
+  await waitTab(app, t, '/page/UnderToast')
+  await run(app, 'window.setSidebar', { visible: false })
+  await cmd(app, 'tabs.focusPage', {})
+  await expect.poll(focusedUrl).toBe(fx.url('/page/UnderToast'))
+  await act(app, 'space.new')
+  const toasts = await viewPage(app, 'toasts')
+  const toast = toasts.getByTestId('toast')
+  await expect(toast).toContainText('Created “Space 2”')
+  await expect(toast.getByTestId('toast-action')).toHaveText('Show')
+  // Over the bottom centre of the page card (the new Space is empty: its frame); the keyboard stays
+  // where it was (KS-16).
+  const windowId = Object.keys((await state(app)).windows)[0] as string
+  const frame = await orbit.shell.getByTestId('content-frame').boundingBox()
+  if (!frame) throw new Error('no page frame')
+  await expectOver(frame)
+  expect((await focusedUrl()) ?? '').not.toContain('view=toasts')
+  // In the Space's colours, and they follow its theme.
+  await toast.hover()
+  const before = await toastColours(toasts, '[data-testid="toast-view"]')
+  expect(before.background).toBe(before.surface)
+  expect(before.text).toBe(before.themeText)
+  await run(app, 'spaces.update', { spaceId: (await state(app)).windows[windowId]?.spaceId, theme: RED })
+  await expect
+    .poll(async () => (await toastColours(toasts, '[data-testid="toast-view"]')).background)
+    .not.toBe(before.background)
+  const red = await toastColours(toasts, '[data-testid="toast-view"]')
+  expect(red.background).toBe(red.surface)
+  // Show: the sidebar comes back; the toast goes, and the view with its last toast.
+  await toast.getByTestId('toast-action').click()
+  await expect.poll(async () => (await state(app)).windows[windowId]?.sidebar.visible).toBe(true)
+  await expect(toast).toHaveCount(0)
+  await expect.poll(async () => (await toastView(app)).visible).toBe(false)
+})
+
+test('[SB-13][FL-22][NV-08] a ⌘-clicked link with the sidebar hidden: the toast over the page is clickable as a whole and goes to the new tab', async () => {
+  const { app } = orbit
+  const t = await newTab(app, fx.url('/page/Links'))
+  await waitTab(app, t, '/page/Links')
+  await run(app, 'window.setSidebar', { visible: false })
+  const page = await tabPage(app, '/page/Links')
+  await page.click('#next', { modifiers: [isMac ? 'Meta' : 'Control'] })
+  await expect.poll(async () => (await space(app)).today.length).toBe(2)
+  const bg = (await space(app)).today[0] as string
+  const toasts = await viewPage(app, 'toasts')
+  const toast = toasts.getByTestId('toast').last()
+  await expect(toast).toContainText('Opened in a new tab')
+  await expect(toast.getByTestId('toast-action')).toHaveText('Show')
+  const view = await tabView(app, t)
+  if (!view) throw new Error('no page view')
+  await expectOver(view.bounds)
+  // The page keeps the keyboard (KS-16).
+  expect(await focusedUrl()).toContain('/page/Links')
+  expect(await activeId(app)).toBe(t)
+  // A click on its words, not on its button, goes to the tab.
+  await toast.click({ position: { x: 8, y: 8 } })
+  await expect.poll(() => activeId(app)).toBe(bg)
+  await expect(toasts.getByTestId('toast')).toHaveCount(0)
+  await expect.poll(async () => (await toastView(app)).visible).toBe(false)
+})
+
+test('[SB-13][NV-03] ⌘-clicking Reload with the sidebar hidden copies the tab behind it; the toast’s Show goes to the copy', async () => {
+  const { app } = orbit
+  const t = await newTab(app, fx.url('/page/Again'))
+  await waitTab(app, t, '/page/Again')
+  await run(app, 'window.setSidebar', { visible: false })
+  const copy = await cmd<string>(app, 'nav.press', { button: 'reload', newTab: true })
+  expect(copy).not.toBe(t)
+  expect(await activeId(app)).toBe(t)
+  const toast = (await viewPage(app, 'toasts')).getByTestId('toast')
+  await expect(toast).toContainText('Opened in a new tab')
+  await toast.getByTestId('toast-action').click()
+  await expect.poll(() => activeId(app)).toBe(copy)
+})
+
+test('[FL-22][SB-13] in a split, the toasts go over the pane being used, and move with it', async () => {
+  const { app, shell } = orbit
+  const c = await newTab(app, fx.url('/page/PaneL'))
+  const d = await newTab(app, fx.url('/page/PaneR'), { activate: false })
+  await cmd(app, 'split.create', { tabIds: [c, d] })
+  await cmd(app, 'tabs.activate', { tabId: d })
+  await settled(shell)
+  await run(app, 'window.setSidebar', { visible: false })
+  await cmd(app, 'tabs.copyLinks', { tabIds: [d] })
+  const toasts = await viewPage(app, 'toasts')
+  await expect(toasts.getByTestId('toast')).toContainText('Copied')
+  await toasts.getByTestId('toast').hover()
+  const used = await tabView(app, d)
+  if (!used) throw new Error('no pane view')
+  await expectOver(used.bounds)
+  // The other pane in use: the toasts follow.
+  await cmd(app, 'tabs.activate', { tabId: c })
+  const other = await tabView(app, c)
+  if (!other) throw new Error('no pane view')
+  const centre = (r: { x: number; width: number }) => Math.round(r.x + r.width / 2)
+  expect(Math.abs(centre(other.bounds) - centre(used.bounds))).toBeGreaterThan(200)
+  await expect
+    .poll(async () => {
+      const b = (await toastView(app)).bounds
+      return b ? Math.abs(centre(b) - centre(other.bounds)) <= 1 : null
+    })
+    .toBe(true)
+})
+
+test('[SP-16] a toast over the sidebar takes the Space’s colours too', async () => {
+  const { app, shell } = orbit
+  const t = await newTab(app, fx.url('/page/CopyMe'))
+  await waitTab(app, t, '/page/CopyMe')
+  await run(app, 'spaces.update', { spaceId: (await space(app)).id, theme: RED })
+  await cmd(app, 'tabs.copyLinks', { tabIds: [t] })
+  await expect(shell.getByTestId('toast')).toContainText('Copied')
+  // While it shows (3 s).
+  await expect
+    .poll(
+      async () => {
+        const c = await toastColours(shell, '[data-testid="shell"]')
+        return c.background === c.surface && c.text === c.themeText
+      },
+      { timeout: 2000 },
+    )
+    .toBe(true)
+  // Red-family: more red than blue.
+  const [r = 0, , b = 0] = ((await toastColours(shell, '[data-testid="shell"]')).background.match(/\d+/g) ?? []).map(
+    Number,
+  )
+  expect(r).toBeGreaterThan(b)
+})
+
+// ---------- SP-14: ⌘Z after the theme picker closes ----------
+
+test('[SP-14][TB-18] ⌘Z after the theme picker closed puts the Space’s theme back, from the page or the sidebar; ⌘⇧Z puts the change back', async () => {
+  const { app, shell } = orbit
+  const t = await newTab(app, fx.url('/page/Painted'))
+  await waitTab(app, t, '/page/Painted')
+  const spaceId = (await space(app)).id
+  await run(app, 'spaces.update', { spaceId, theme: RED })
+  const colours = async () => (await state(app)).spaces[spaceId]?.theme.colors
+  await act(app, 'space.theme')
+  const overlay = await viewPage(app, 'overlay')
+  await expect(overlay.getByTestId('theme-picker')).toBeVisible()
+  await overlay.getByTestId('theme-preset').nth(2).click()
+  await expect.poll(colours).toEqual(['#2fbf8f'])
+  await overlay.keyboard.press('Escape')
+  await expect.poll(overlayKind).toBe('none')
+  // From the page: the key goes through the browser process, as a person's does.
+  const mod = isMac ? 'meta' : 'control'
+  await pressInPage(app, '/page/Painted', 'Z', [mod])
+  await expect.poll(colours).toEqual(['#d4322c'])
+  await pressInPage(app, '/page/Painted', 'Z', [mod, 'shift'])
+  await expect.poll(colours).toEqual(['#2fbf8f'])
+  // And from the sidebar.
+  await shell.keyboard.press(`${isMac ? 'Meta' : 'Control'}+Z`)
+  await expect.poll(colours).toEqual(['#d4322c'])
 })

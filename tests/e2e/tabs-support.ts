@@ -19,8 +19,28 @@ type Hooks = {
     maintenance: (now?: number) => { archived: string[]; slept: string[] }
     rowMenu: (windowId?: string) => RowMenuInfo | null
     chooseRowMenu: (path: string, windowId?: string) => boolean
+    toastView: (windowId?: string) => ToastViewInfo
     undo: () => string | undefined
   }
+}
+
+type Rect = { x: number; y: number; width: number; height: number }
+
+/** The toast view over the page card while the sidebar is hidden (SB-13). */
+export interface ToastViewInfo {
+  /** In the window, showing toasts. */
+  visible: boolean
+  bounds?: Rect
+  /** The page card it is centred on. */
+  card?: Rect
+}
+
+/** The toast view of window `w`. */
+export function toastView(app: ElectronApplication, w = 0): Promise<ToastViewInfo> {
+  return app.evaluate((_e, wi) => {
+    const g = globalThis as unknown as Hooks
+    return g.__orbitTabs.toastView(g.__orbit.windowIds()[wi])
+  }, w)
 }
 
 /** A sidebar row's right-click menu as the overlay draws it (TB-14). */

@@ -222,10 +222,10 @@ export function registerSpaces(ctx: MainContext): void {
     if (!windowId || !win) return
     if (win.overlay.kind !== 'none') await commands.run('overlay.close', {}, { windowId })
     if (!win.sidebar.visible) {
-      // No sidebar to show the flow in: create right away and say so (SP-02, SB-13).
+      // No sidebar to show the flow in: create right away, say so and offer to show it (SP-02, SB-13).
       const id = await commands.run('spaces.create', {}, { windowId })
       const name = store.state.spaces[id]?.name ?? 'New Space'
-      ctx.toast(windowId, `Created “${name}”. Show the sidebar to see it.`)
+      ctx.toast(windowId, `Created “${name}”`, { label: 'Show', command: 'window.setSidebar', args: { visible: true } })
       return
     }
     focusShell(windowId)

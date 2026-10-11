@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { type ElectronApplication, expect, test } from '@playwright/test'
 import type { SplitLayout } from '../../src/shared/state'
-import { isMac, launchOrbit, type Orbit, state, tabPage } from './helpers'
+import { isMac, launchOrbit, type Orbit, state, tabPage, viewPage } from './helpers'
 import {
   blockedMenu,
   chooseBlocked,
@@ -549,7 +549,8 @@ test('[NV-12] Open Link in New Tab with the sidebar hidden says so, as a ⌘-cli
   await expect.poll(async () => (await pageMenu(app))?.tabId).toBe(id)
   expect(await choosePageMenu(app, 'Open Link in New Tab')).toBe(true)
   await expect.poll(async () => urlOf(app, (await today(app))[0])).toBe(page('Hidden-next'))
-  await expect(shell.getByTestId('toast').last()).toContainText('Opened in a new tab')
+  // Over the page, where it can be seen (SB-13).
+  await expect((await viewPage(app, 'toasts')).getByTestId('toast').last()).toContainText('Opened in a new tab')
   expect(await selectedTab(app)).toBe(id)
 })
 

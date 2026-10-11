@@ -9,6 +9,7 @@ import { isFolderId, isTabId, newId } from '../../shared/ids'
 import { framesMayOpen, isLocalFileUrl, localFileBlockedMessage } from '../../shared/link-routing'
 import { isPrivateTab, privateTabMenu } from '../../shared/private'
 import type { ContainerRef, Folder, FolderId, ItemId, TabId, WindowId } from '../../shared/state'
+import type { ToastAction } from '../../shared/toast'
 import {
   containerItems,
   insertItem,
@@ -31,6 +32,8 @@ import { folderMenu, type MenuOps, tabMenu } from './menus'
 import { makeTab, numberedTarget, steppedTarget, todayInsertIndex } from './model'
 import { TabOps, type TabPage } from './ops'
 import { type RowMenuInfo, registerRowMenus } from './row-menu'
+import { registerThemeUndo } from './theme-undo'
+import { registerToastView, type ToastViewInfo } from './toasts'
 
 /** Test-only handle (ORBIT_E2E=1): globalThis.__orbitTabs. */
 export interface TabTestHooks {
@@ -39,6 +42,8 @@ export interface TabTestHooks {
   rowMenu: (windowId?: WindowId) => RowMenuInfo | null
   /** Chooses an item of the open row menu by its label path ("Move to > Work > Pinned"), as a click does. */
   chooseRowMenu: (path: string, windowId?: WindowId) => boolean
+  /** The toast view over the page card while the sidebar is hidden (SB-13). */
+  toastView: (windowId?: WindowId) => ToastViewInfo
   undo: () => string | undefined
   recentlyClosed: () => string[]
 }
@@ -89,7 +94,8 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   const send = (windowId: WindowId | undefined, channel: string, payload: unknown) => {
     if (windowId) windows.sendToWindow(windowId, channel, payload)
   }
-  const toast = (windowId: WindowId | undefined, message: string) => ctx.toast(windowId, message)
+  const toast = (windowId: WindowId | undefined, message: string, action?: ToastAction) =>
+    ctx.toast(windowId, message, action)
 
   const copyLinks = (windowId: WindowId | undefined, tabIds: TabId[], markdown: boolean) => {
     const text = ops.linkText(tabIds, markdown)
@@ -218,6 +224,8 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   })
 
   const rowMenus = registerRowMenus(ctx)
+  const toastView = registerToastView(ctx)
+  registerThemeUndo(ctx, ops.undo)
   /** What a row menu is about, for screen readers: the tab, the folder or the selection. */
   const menuLabelFor = (id: ItemId, selection: TabId[]): string => {
     const state = store.state
@@ -459,8 +467,10 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
         const id = ops.createTab({ url: details.url, spaceId, windowId, activate, openerTabId, ...page })
         if (activate) return
         tabs.ensure(id)
-        // With the sidebar hidden the new tab would open unseen: say so (TB-02, SB-13).
-        if (windowId && !store.state.windows[windowId]?.sidebar.visible) toast(windowId, 'Opened in a new tab')
+        // With the sidebar hidden the new tab would open unseen: say so, with a button to it (TB-02, SB-13).
+        if (windowId && !store.state.windows[windowId]?.sidebar.visible) {
+          toast(windowId, 'Opened in a new tab', { label: 'Show', command: 'tabs.activate', args: { tabId: id } })
+        }
       }
       /** A link the engine left to the browser, opened by its page itself (TabRuntime.openFromPage). */
       const fromPage = (open: (page: TabPage) => void) => {
@@ -832,6 +842,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
       rowMenu: (windowId) => rowMenus.info(windowId ?? windows.focusedWindowId() ?? windows.ids()[0]),
       chooseRowMenu: (path, windowId) =>
         rowMenus.chooseByLabel(windowId ?? windows.focusedWindowId() ?? windows.ids()[0], path),
+      toastView: (windowId) => toastView.info(windowId ?? windows.focusedWindowId() ?? windows.ids()[0] ?? ''),
       undo: () => ops.undo.undo(),
       recentlyClosed: () => ops.recentlyClosed.map((r) => r.tab.id),
     }

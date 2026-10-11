@@ -526,8 +526,10 @@ test('[DL-02] with the sidebar hidden, a toast says what is downloading', async 
     )
     .toBe(false)
   await page.locator('#attachment').click()
-  await expect(orbit.shell.getByTestId('toast').filter({ hasText: 'Downloading data.csv' })).toHaveCount(1)
-  await expect(orbit.shell.getByTestId('toast').filter({ hasText: 'Downloaded data.csv' })).toHaveCount(1)
+  // Over the page, while the sidebar is hidden (SB-13).
+  const toasts = (await viewPage(orbit.app, 'toasts')).getByTestId('toast')
+  await expect(toasts.filter({ hasText: 'Downloading data.csv' })).toHaveCount(1)
+  await expect(toasts.filter({ hasText: 'Downloaded data.csv' })).toHaveCount(1)
   expect(await animations('download-flight')).toEqual([])
 })
 

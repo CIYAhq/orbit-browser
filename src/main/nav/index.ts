@@ -101,7 +101,10 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
   /** A tab opened behind the current one: with the sidebar hidden it would appear unseen, so say so. */
   const openedInBackground = (windowId: WindowId | undefined, tabId: TabId) => {
     tabs.ensure(tabId)
-    if (windowId && !store.state.windows[windowId]?.sidebar.visible) ctx.toast(windowId, 'Opened in a new tab')
+    if (windowId && !store.state.windows[windowId]?.sidebar.visible) {
+      // With a button that goes to it (SB-13).
+      ctx.toast(windowId, 'Opened in a new tab', { label: 'Show', command: 'tabs.activate', args: { tabId } })
+    }
   }
 
   // The address while a page is on its way or failed (NV-04, NV-13), and the loading indicator (SB-28).

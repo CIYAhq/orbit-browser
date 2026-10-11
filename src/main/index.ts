@@ -75,9 +75,9 @@ function start(): void {
     perf,
     paths: { userData, stateFile },
     e2e,
-    toast: (windowId, message) => {
+    toast: (windowId, message, action) => {
       const target = windowId ?? windows.focusedWindowId()
-      if (target) windows.sendToWindow(target, 'toast', { message })
+      if (target) windows.sendToWindow(target, 'toast', action ? { message, action } : { message })
     },
   }
   ctx.tabs.init(ctx)

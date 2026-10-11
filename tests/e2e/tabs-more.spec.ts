@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { type Fixtures, launchOrbit, MOD, type Orbit, startFixtures, state, tabPage } from './helpers'
+import { type Fixtures, launchOrbit, MOD, type Orbit, startFixtures, state, tabPage, viewPage } from './helpers'
 import {
   act,
   activeId,
@@ -617,7 +617,7 @@ test('[TB-07] recently closed tabs are listed newest first and any of them can b
 })
 
 test('[TB-02][TB-03] a Cmd/Ctrl-clicked link opens a background tab at the top of Today; with the sidebar hidden a toast says so', async () => {
-  const { app, shell } = orbit
+  const { app } = orbit
   const t = await newTab(app, fx.url('/page/Links'))
   await waitTab(app, t, '/page/Links')
   const page = await tabPage(app, '/page/Links')
@@ -626,11 +626,11 @@ test('[TB-02][TB-03] a Cmd/Ctrl-clicked link opens a background tab at the top o
   const bg = (await space(app)).today[0] as string
   expect(await activeId(app)).toBe(t)
   expect((await tab(app, bg))?.url).toContain('/page/Links-next')
-  // Sidebar hidden: the background open is announced.
+  // Sidebar hidden: the background open is announced, over the page (SB-13).
   await cmd(app, 'window.setSidebar', { visible: false })
   await page.click('#next', { modifiers: [MOD_KEY] })
   await expect.poll(async () => (await space(app)).today.length).toBe(3)
-  await expect(shell.getByTestId('toast').last()).toContainText('Opened in a new tab')
+  await expect((await viewPage(app, 'toasts')).getByTestId('toast').last()).toContainText('Opened in a new tab')
   expect(await activeId(app)).toBe(t)
 })
 

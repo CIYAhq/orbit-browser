@@ -624,7 +624,7 @@ test('[KS-16][NV-01] a text field in a frame whose page uses ⌘[ / Alt+← keep
 })
 
 test('[KS-02][SB-11] keyboard in a frame: Toggle Sidebar, preferring websites, toggles on the first press when the frame leaves ⌘S / Ctrl+S alone; a frame that uses it gets it first', async () => {
-  const { app, shell } = orbit
+  const { app } = orbit
   await sidebarPrefersWebsites()
   const { at, frame } = await framedTab('FrameSave', false)
   await clickInFrame(at, frame, '#box')
@@ -635,7 +635,8 @@ test('[KS-02][SB-11] keyboard in a frame: Toggle Sidebar, preferring websites, t
   // A frame that saves with the key: the first press is the frame's, and the toast says so.
   await inFrame(at, frame, `addEventListener('keydown', (e) => { if (e.code === 'KeyS') e.preventDefault() })`)
   await pressInPage(app, at, 'S', PRIMARY_MOD)
-  const toast = shell.getByTestId('toast').filter({ hasText: `The page used ${SAVE}` })
+  // The sidebar is hidden: the toast shows over the page (SB-13).
+  const toast = (await viewPage(app, 'toasts')).getByTestId('toast').filter({ hasText: `The page used ${SAVE}` })
   await expect(toast).toHaveCount(1)
   expect(await sidebarVisible()).toBe(false)
   await pressInPage(app, at, 'S', PRIMARY_MOD)

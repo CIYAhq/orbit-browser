@@ -218,6 +218,7 @@ export class WindowManager {
   /** Where each tab's page sits in its view while DevTools are docked there (DT-03): as DevTools last laid it out. */
   private devtoolsPages = new Map<TabId, Rect>()
   private layoutListeners: ((windowId: WindowId) => void)[] = []
+  private toastRoute?: (windowId: WindowId, payload: unknown) => boolean
   private createdListeners: ((windowId: WindowId, win: BrowserWindow) => void)[] = []
   private toolsReadyListeners: ((windowId: WindowId) => void)[] = []
   /** Tabs whose page closed its own web contents (window.close()): not reopened until selected again. */
@@ -575,6 +576,8 @@ export class WindowManager {
   sendToWindow(windowId: WindowId, channel: string, payload: unknown): void {
     const rec = this.records.get(windowId)
     if (!rec) return
+    // A toast the sidebar can't show (it is hidden) goes to a view of its own (tabs lane, SB-13).
+    if (channel === 'toast' && this.toastRoute?.(windowId, payload)) return
     // While the floating sidebar is out, what the sidebar shows (a rename field, the new-Space
     // flow, an undo toast) happens there and not in the hidden, docked one.
     const floating = this.floatingContents(windowId)
@@ -696,6 +699,14 @@ export class WindowManager {
     if (rec.overlayShown) this.fitOverlay(rec)
     this.focusIfNewlyShown(rec, shownBefore)
     for (const listener of this.layoutListeners) listener(windowId)
+  }
+
+  /**
+   * Toasts for a window go to `route` first; it returns true when it showed one itself, else the
+   * sidebar shows it (tabs lane: toasts over the page while the sidebar is hidden, SB-13, SP-02).
+   */
+  routeToasts(route: (windowId: WindowId, payload: unknown) => boolean): void {
+    this.toastRoute = route
   }
 
   /** Runs after a window's pages were laid out again (tab switch, resize, split, full screen). */
@@ -957,6 +968,15 @@ export class WindowManager {
     const active = activeTabOf(this.ctx.store.state, rec.id)
     if (!active || !rec.visible.has(active) || shownBefore.has(active)) return
     if (!rec.overlayShown && rec.win.isFocused()) this.liveContents(active)?.focus()
+  }
+
+  /**
+   * The page card's frame as the shell last reported it (window coordinates): every pane together,
+   * or the empty card of a Space with no tabs, where pageArea() has no panes to go by.
+   */
+  frameArea(windowId: WindowId): Rect | undefined {
+    const rec = this.records.get(windowId)
+    return rec && !rec.win.isDestroyed() && rec.frameRect ? roundRect(rec.frameRect) : undefined
   }
 
   /** The page area: the bounding box of the window's page panes (window coordinates, DIP). */

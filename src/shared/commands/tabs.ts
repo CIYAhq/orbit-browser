@@ -80,6 +80,10 @@ export interface TabCommands {
   'tabs.contextMenu': { args: { id: ItemId; selection?: TabId[]; at?: RowMenuAt }; result: void }
   /** The overlay's row menu: run item `id` ("4.1.0") of menu `menu`, if it is still open (TB-14). */
   'rowMenu.choose': { args: { menu: number; id: string }; result: boolean }
+  /** The toast view has loaded and listens: it is sent the toasts that waited for it (SB-13). */
+  'toasts.ready': { args: Record<string, never>; result: void }
+  /** The toast view's stack is this big now (0 × 0: no toasts), so main fits the view to it (SB-13). */
+  'toasts.size': { args: { width: number; height: number }; result: void }
   /** The sidebar's multi-selection in this window, so ⌘W and ⌘⇧C act on all of it (TB-13). */
   'tabs.setSelection': { args: { tabIds: TabId[] }; result: void }
   /** Control was released: the recent-tab switch in progress settles on the current tab (TB-05). */

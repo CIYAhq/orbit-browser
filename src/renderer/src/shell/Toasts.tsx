@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { CommandName } from '../../../shared/rpc'
+import type { ToastAction, ToastPayload } from '../../../shared/toast'
 import { invoke } from '../api'
 import { EASE, POP, SNAPPY, tween, useReducedMotion } from '../motion'
 
@@ -8,7 +8,7 @@ interface Toast {
   id: number
   message: string
   /** A button that runs a command, e.g. "Go to Space" after a restore to another Space (AR-05). */
-  action?: { label: string; command: CommandName; args?: unknown }
+  action?: ToastAction
 }
 
 let nextId = 1
@@ -37,7 +37,10 @@ const LEAVE = { opacity: 0, y: 8, scale: 1, transition: { duration: 0.16, ease: 
 const FADE_IN = { opacity: 0, y: 0, scale: 1 }
 const FADE_OUT = { opacity: 0, y: 0, scale: 1, transition: { duration: 0.16, ease: EASE.quick } }
 
-/** Short confirmations from the main process (e.g. "Copied URL"), shown at the bottom of the sidebar. */
+/**
+ * Short confirmations from the main process (e.g. "Copied URL"), shown at the bottom of the sidebar;
+ * while the sidebar is hidden, over the page card in a view of their own (ToastViewApp, SB-13).
+ */
 export function Toasts() {
   const [toasts, setToasts] = useState<Toast[]>([])
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>())
@@ -64,7 +67,7 @@ export function Toasts() {
   useEffect(
     () =>
       window.orbit.on('toast', (payload) => {
-        const { message, action } = payload as { message: string; action?: Toast['action'] }
+        const { message, action } = payload as ToastPayload
         const id = nextId++
         setToasts((list) => [...list.slice(-(MAX_TOASTS - 1)), { id, message, ...(action ? { action } : {}) }])
         leaveAfter(id, action ? STAY_WITH_ACTION_MS : STAY_MS)
@@ -98,19 +101,21 @@ export function Toasts() {
               if (hovered.current === t.id) hovered.current = null
               leaveAfter(t.id, AFTER_HOVER_MS)
             }}
+            // A toast with a button is clickable as a whole: a click anywhere on it runs the button's
+            // action, the button's own included (SB-13, FL-22).
+            onClick={
+              t.action
+                ? () => {
+                    const action = t.action
+                    if (action) void invoke(action.command, action.args as never)
+                    dismiss(t.id)
+                  }
+                : undefined
+            }
           >
             {t.message}
             {t.action && (
-              <button
-                type="button"
-                className="toast__action"
-                data-testid="toast-action"
-                onClick={() => {
-                  const action = t.action
-                  if (action) void invoke(action.command, action.args as never)
-                  dismiss(t.id)
-                }}
-              >
+              <button type="button" className="toast__action" data-testid="toast-action">
                 {t.action.label}
               </button>
             )}
