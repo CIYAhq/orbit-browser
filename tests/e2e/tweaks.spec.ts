@@ -312,8 +312,11 @@ test('[BO-02][KS-19] the editor is a small view of its own over the page’s top
   expect(info.bounds.width).toBe(width + 2 * margin)
   expect(info.bounds.x + info.bounds.width).toBe(pageRect.x + pageRect.width - inset + margin)
   expect(info.bounds.y).toBe(pageRect.y + inset - margin)
-  // As tall as the panel: no more of the page is covered than the panel needs.
-  const panelHeight = await view.getByTestId('tweak-panel').evaluate((el) => el.getBoundingClientRect().height)
+  // As tall as the panel: no more of the page is covered than the panel needs. Measured once the
+  // panel has opened: its opening animation scales it.
+  const panel = view.getByTestId('tweak-panel')
+  await panel.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished.catch(() => a))))
+  const panelHeight = await panel.evaluate((el) => el.getBoundingClientRect().height)
   expect(Math.abs(info.bounds.height - (panelHeight + 2 * margin))).toBeLessThanOrEqual(2)
   // Inside the page, and a narrow column of it: most of the page shows beside the panel.
   expect(info.bounds.y + info.bounds.height).toBeLessThanOrEqual(pageRect.y + pageRect.height)
