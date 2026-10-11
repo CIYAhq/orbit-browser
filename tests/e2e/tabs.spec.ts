@@ -14,9 +14,11 @@ import {
   act,
   activeId,
   center,
+  chooseRowMenu,
   cmd,
   drag,
   liveTabs,
+  menuFor,
   newTab,
   PROFILE,
   row,
@@ -335,7 +337,7 @@ test('[TB-11][TB-14] context menus by tab type; Move to another Space selects th
   const t = await newTab(app, fx.url('/page/Mover'))
   await waitTab(app, t, '/page/Mover')
   await row(shell, t).click({ button: 'right' })
-  const today = await tabsHook<string[]>(app, 'lastMenu')
+  const today = await menuFor(app, t)
   for (const label of [
     'Pin Tab',
     'Add to Favorites',
@@ -355,7 +357,7 @@ test('[TB-11][TB-14] context menus by tab type; Move to another Space selects th
   }
   expect(today).not.toContain('Unpin Tab')
   await row(shell, pinned).click({ button: 'right' })
-  const pin = await tabsHook<string[]>(app, 'lastMenu')
+  const pin = await menuFor(app, pinned)
   for (const label of [
     'Unpin Tab',
     'Reset to Pinned URL',
@@ -368,7 +370,8 @@ test('[TB-11][TB-14] context menus by tab type; Move to another Space selects th
   expect(pin).not.toContain('Pin Tab')
   // Move the selected Today tab to Work's pinned section from the menu.
   await row(shell, t).click({ button: 'right' })
-  expect(await tabsHook<boolean>(app, 'clickMenu', 'Move to > Work > Pinned')).toBe(true)
+  await menuFor(app, t)
+  expect(await chooseRowMenu(app, 'Move to > Work > Pinned')).toBe(true)
   await expect.poll(async () => (await state(app)).spaces[sB]?.pinned).toEqual([t])
   const s = await state(app)
   expect(s.spaces[sA]?.today).toEqual([below])
@@ -566,7 +569,7 @@ test('[TB-09][SB-09] drop a tab on another Space’s switcher icon, then drag on
   const s = await state(app)
   expect(s.spaces[sA]?.today).toEqual([keep])
   expect(Object.values(s.windows)[0]?.spaceId).toBe(sA)
-  // Out of the window: a new window shows the tab as it was.
+  // Out of the window: a blank window, with a sidebar of its own, shows the tab as it was (TB-17).
   await row(shell, keep).click()
   await waitTab(app, keep, '/page/Keep')
   const start = await center(row(shell, keep))
@@ -578,11 +581,20 @@ test('[TB-09][SB-09] drop a tab on another Space’s switcher icon, then drag on
   await expect.poll(async () => Object.keys((await state(app)).windows).length).toBe(2)
   const s2 = await state(app)
   const wins = Object.values(s2.windows)
-  const created = wins.find((w) => w.activeTab[sA] === keep)
-  expect(created).toBeTruthy()
+  const created = wins.find((w) => w.spaceId !== sA)
+  const blank = created?.spaceId as string
+  expect(s2.spaces[blank]?.blank).toBe(true)
+  expect(created?.activeTab[blank]).toBe(keep)
+  expect(s2.spaces[blank]?.today).toEqual([keep])
+  expect(s2.spaces[sA]?.today).toEqual([])
   const original = wins.find((w) => w !== created)
   expect(original?.activeTab[sA]).not.toBe(keep)
   await expect.poll(async () => (await tabView(app, keep))?.visible).toBe(true)
+  // ⌘Z puts it back where it was; the blank window stays, empty.
+  await act(app, 'tab.undo')
+  await expect.poll(async () => (await state(app)).spaces[sA]?.today).toEqual([keep])
+  expect((await state(app)).spaces[blank]?.today).toEqual([])
+  await expect(row(shell, keep)).toBeVisible()
 })
 
 test('[SB-22][SB-23] the selected tab is scrolled into view; keyboard focus moves through rows', async () => {

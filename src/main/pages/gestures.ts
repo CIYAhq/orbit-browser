@@ -8,9 +8,11 @@ import type { WebContents } from 'electron'
  * - **A mouse-down.** `before-mouse-event` sees every frame's; `input-event` sees only the main
  *   frame's widget, so never a press in a frame from another site, which has a widget of its own.
  *   One press in the main frame brings both, in the same task: it counts once.
- * - **A key that reaches the page** (`before-input-event`, every frame's). Not one Orbit takes as its
- *   own shortcut: a listener prevents it (`windows.attachShortcuts`), so ⌘W never counts for the
- *   page it closes. Nor, as in Chromium, Esc, a modifier alone, or a key held down.
+ * - **A key that reaches the page** (`before-input-event`, every frame's). Not a shortcut Orbit takes
+ *   first: a listener prevents it (`windows.attachShortcuts`), so ⌘W doesn't count for the page it
+ *   closes, unless the user has set ⌘W to go to websites first. A shortcut that goes to the page
+ *   first reaches it, so it counts: by default Ctrl+S and Ctrl+Shift+C on Windows and Linux, and
+ *   Back and Forward in a text field. Nor, as in Chromium, Esc, a modifier alone, or a key held down.
  * - **A touch's end or a tap** (`input-event`).
  *
  * Orbit's own calls into a page (its scripts, a navigation it starts) are no gesture, and nor is

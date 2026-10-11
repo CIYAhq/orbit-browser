@@ -69,7 +69,7 @@ describe('A page’s user gestures, from any of its frames (D77)', () => {
     expect(count()).toBe(5)
   })
 
-  it('[NV-24][NV-19][NV-09] a key that reaches the page counts; one Orbit takes as its own shortcut doesn’t, so ⌘W never counts for the page it closes', async () => {
+  it('[NV-24][NV-19][NV-09] a key that reaches the page counts, a shortcut that goes to the page first too; one Orbit takes first doesn’t (⌘W, unless set to go to websites first)', async () => {
     const { page, count, key } = setup()
     key('a')
     await nextTask()

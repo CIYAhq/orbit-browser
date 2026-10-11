@@ -395,6 +395,9 @@ test('[FL-21] 300 tabs: rows coming on screen are drawn in that frame, by wheel,
   await watch.phase('found')
   await run(app, 'tabs.activate', { tabId: found })
   await expect(row(shell, found)).toBeInViewport()
+  // The reveal looks again 450 ms on (rows still growing in may have moved the row): let that pass,
+  // or it pulls the list back to this row after the jumps below, under the drag's first row.
+  await shell.waitForTimeout(1000)
   // A jump straight to the end.
   await watch.phase('jump')
   await scroller.evaluate((el) => {
@@ -407,6 +410,8 @@ test('[FL-21] 300 tabs: rows coming on screen are drawn in that frame, by wheel,
   })
   const moved = ids[2] as string
   await watch.phase('drag')
+  // The jump back is drawn once the row window has caught up: measure the row after that.
+  await expect(row(shell, moved)).toBeInViewport()
   const start = await row(shell, moved).boundingBox()
   if (!start) throw new Error('no row')
   const x = start.x + start.width / 2

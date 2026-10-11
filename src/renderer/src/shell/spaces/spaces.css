@@ -42,6 +42,11 @@
   will-change: transform;
 }
 
+/* Over the window's material (SB-24) only the layer paints: see-through for the neutral theme. */
+.shell[data-material] {
+  background: none;
+}
+
 .shell-bg__grain {
   position: absolute;
   inset: 0;

@@ -2,6 +2,7 @@ import type { CSSProperties } from 'react'
 import { OrbitMotionConfig } from '../motion'
 import { useWindow } from '../store'
 import { useShellTheme } from '../theme'
+import { useBatteryReport } from './battery'
 import { ContentArea } from './ContentArea'
 import { SidebarEdge } from './chrome/SidebarEdge'
 import { Sidebar } from './sidebar/Sidebar'
@@ -12,6 +13,8 @@ export function ShellApp() {
   const win = useWindow()
   // The Space theme is painted as CSS variables by the theme driver (no re-render per frame).
   const theme = useShellTheme(win?.spaceId)
+  // The battery saver (TB-16).
+  useBatteryReport()
   if (!win) return null
   const hidden = !win.sidebar.visible
   const style = { '--sidebar-w': `${win.sidebar.width}px` } as CSSProperties

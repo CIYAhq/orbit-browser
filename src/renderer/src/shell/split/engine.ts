@@ -249,7 +249,12 @@ export class PaneEngine {
   /** Current pane rectangles in window coordinates (target layout, not the animated one). */
   paneBoxes(): PaneBox[] {
     if (!this.model.layout) return []
-    return layoutBoxes(this.model.layout, this.frame, PANE_GAP).panes
+    return this.boxesOf(this.model.layout)
+  }
+
+  /** Where `layout`'s panes are when this frame shows it (window coordinates; TB-09). */
+  boxesOf(layout: SplitLayout): PaneBox[] {
+    return layoutBoxes(layout, this.frame, PANE_GAP).panes
   }
 
   contains(x: number, y: number): boolean {

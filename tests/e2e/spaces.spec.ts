@@ -739,7 +739,8 @@ test('[SP-02][SP-04] with the sidebar hidden, New Space creates at once; a singl
     await hooks.action('space.new', hooks.windowIds()[0])
   })
   await expect.poll(() => names(app)).toEqual(['Personal', 'Space 2'])
-  await expect(shell.getByTestId('toast')).toContainText('Space 2')
+  // The toast shows over the page while the sidebar is hidden (SB-13).
+  await expect((await viewPage(app, 'toasts')).getByTestId('toast')).toContainText('Space 2')
   await run(app, 'window.setSidebar', { visible: true })
   const second = (await order(app))[1] as string
   await run(app, 'spaces.delete', { spaceId: second })

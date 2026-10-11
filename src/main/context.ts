@@ -7,6 +7,7 @@ import type {
   WindowOpenHandlerResponse,
 } from 'electron'
 import type { TabId } from '../shared/state'
+import type { ToastAction } from '../shared/toast'
 import type { Perf } from './perf'
 import type { ActionRegistry, CommandRegistry, EventRegistry } from './registry'
 import type { Sessions } from './sessions'
@@ -47,6 +48,6 @@ export interface MainContext {
   paths: { userData: string; stateFile: string }
   /** True when running under the end-to-end test harness. */
   e2e: boolean
-  /** Shows a short confirmation message in a window (e.g. "Copied URL"). */
-  toast(windowId: string | undefined, message: string): void
+  /** Shows a short confirmation message in a window (e.g. "Copied URL"), with a button if `action` is given. */
+  toast(windowId: string | undefined, message: string, action?: ToastAction): void
 }

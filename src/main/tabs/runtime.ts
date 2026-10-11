@@ -9,6 +9,7 @@ import {
   type WebContentsViewConstructorOptions,
   type WindowOpenHandlerResponse,
 } from 'electron'
+import { sidebarUndoFor } from '../../shared/actions'
 import { framesMayOpen } from '../../shared/link-routing'
 import { reopenReferrerPolicy } from '../../shared/nav'
 import { isPrivateProfileId } from '../../shared/private'
@@ -30,17 +31,6 @@ function liveContents(view: WebContentsView | undefined): WebContents | undefine
   return contents && !contents.isDestroyed() ? contents : undefined
 }
 
-/** Keys that never count as a user activation (HTML: Escape and lone modifiers). */
-const NON_ACTIVATING_KEYS = new Set(['Escape', 'Shift', 'Control', 'Alt', 'Meta', 'Command', 'Cmd', 'CapsLock'])
-
-/** Input that counts as a user activation for opening tabs and pop-ups (NV-09, HTML user activation). */
-export function isActivation(input: Electron.InputEvent): boolean {
-  if (input.type === 'mouseDown' || input.type === 'touchEnd' || input.type === 'gestureTap') return true
-  if (input.type !== 'rawKeyDown' && input.type !== 'keyDown') return false
-  if (input.modifiers?.includes('isautorepeat')) return false
-  const key = (input as { keyCode?: string }).keyCode ?? ''
-  return !NON_ACTIVATING_KEYS.has(key)
-}
 const GESTURE_WINDOW_MS = 1000
 /** Every stored favicon is a data URL of at most this many characters (lane review MF-2). */
 const MAX_FAVICON_DATA_URL = 16 * 1024
@@ -162,10 +152,17 @@ export class TabRuntime {
    * false when the user keeps one (Cancel). Deleting a Space asks it first.
    */
   letGo?: (tabIds: TabId[]) => Promise<boolean>
-  /** Control was released in a page (ends recent-tab switching, TB-05). */
+  /** Control was released, wherever the keyboard is (ends recent-tab switching, TB-05). */
   onControlUp?: () => void
-  /** Recent-tab switching in a window (TB-05): whether it is going on, and closing its highlighted tab (W, KS-06). */
-  recentSwitch?: { active: (windowId: WindowId) => boolean; closeHighlighted: (windowId: WindowId) => void }
+  /**
+   * Recent-tab switching in a window (TB-05): whether it is going on, closing its highlighted tab
+   * (W, KS-06), and ending it with no switch (Esc; true when there was one to end).
+   */
+  recentSwitch?: {
+    active: (windowId: WindowId) => boolean
+    closeHighlighted: (windowId: WindowId) => void
+    cancel: (windowId: WindowId | undefined) => boolean
+  }
   /** A page tried to open a tab or pop-up without a user gesture. */
   onPopupBlocked?: (tabId: TabId, url: string, referrer: Referrer) => void
   /**
@@ -294,17 +291,21 @@ export class TabRuntime {
       this.update(tabId, { title })
       this.trackPinnedTitle(tabId, title)
     })
-    contents.on('before-input-event', (_event, input) => {
-      if (input.type === 'keyUp' && input.key === 'Control') this.onControlUp?.()
-      // ⌘Z / Ctrl+Z (with ⇧: redo): the page's own undo wins in text fields; elsewhere it undoes the
-      // last sidebar change.
-      if (input.type !== 'keyDown' || input.alt || input.key.toLowerCase() !== 'z') return
-      const mod = process.platform === 'darwin' ? input.meta && !input.control : input.control && !input.meta
-      if (!mod || !this.onUndoShortcut) return
+    contents.on('before-input-event', (event, input) => {
+      // Sidebar undo and redo, ⌘Z and ⌘⇧Z as the keymap has them (KS-05): a key that edits text is
+      // the page's own undo in a text field, and undoes the last sidebar change elsewhere (KS-16).
+      if (input.type !== 'keyDown' || !this.onUndoShortcut) return
+      const undo = sidebarUndoFor(input, process.platform)
+      if (!undo) return
+      if (!undo.outsideText) {
+        event.preventDefault()
+        this.onUndoShortcut(tabId, undo.redo)
+        return
+      }
       contents
         .executeJavaScriptInIsolatedWorld(999, [{ code: FOCUS_IS_EDITABLE }])
         .then((editable) => {
-          if (!editable) this.onUndoShortcut?.(tabId, !!input.shift)
+          if (!editable) this.onUndoShortcut?.(tabId, undo.redo)
         })
         .catch(() => {})
     })

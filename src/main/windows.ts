@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { BrowserWindow, nativeTheme, screen, type WebContents, WebContentsView, webContents } from 'electron'
 import { actionForInput, outsideTextActionFor } from '../shared/actions'
+import { isBlankSpace } from '../shared/blank'
 import { createWindowState, DEFAULT_SIDEBAR_WIDTH } from '../shared/defaults'
 import { isPrivateSpace, PRIVATE_PALETTE } from '../shared/private'
 import type { Rect, RendererView } from '../shared/rpc'
@@ -14,11 +15,13 @@ import type {
   WindowId,
   WindowState,
 } from '../shared/state'
+import { switcherOf } from '../shared/tab-switcher'
 import { paletteFor } from '../shared/theme'
 import { splitLeaves, splitOfTab } from '../shared/tree'
 import type { MainContext } from './context'
 import { KEEP_KEYBOARD } from './keys/focus'
 import { keyRouter } from './keys/router'
+import { materialWindowOptions, windowMaterial } from './material'
 import { focusIsEditable } from './nav/focus'
 import { fastSwitchPanes } from './split/layout'
 
@@ -169,7 +172,12 @@ export function uiWebPreferences(windowId: WindowId, view: RendererView): Electr
     contextIsolation: true,
     nodeIntegration: false,
     spellcheck: false,
-    additionalArguments: [`--orbit-window-id=${windowId}`, `--orbit-view=${view}`],
+    additionalArguments: [
+      `--orbit-window-id=${windowId}`,
+      `--orbit-view=${view}`,
+      // The shell lets the window's material through the neutral theme (SB-24).
+      ...(view === 'shell' && windowMaterial() !== 'none' ? [`--orbit-material=${windowMaterial()}`] : []),
+    ],
     // A view that (re)loads never takes the keyboard (KS-16).
     ...KEEP_KEYBOARD,
   }
@@ -218,6 +226,7 @@ export class WindowManager {
   /** Where each tab's page sits in its view while DevTools are docked there (DT-03): as DevTools last laid it out. */
   private devtoolsPages = new Map<TabId, Rect>()
   private layoutListeners: ((windowId: WindowId) => void)[] = []
+  private toastRoute?: (windowId: WindowId, payload: unknown) => boolean
   private createdListeners: ((windowId: WindowId, win: BrowserWindow) => void)[] = []
   private toolsReadyListeners: ((windowId: WindowId) => void)[] = []
   /** Tabs whose page closed its own web contents (window.close()): not reopened until selected again. */
@@ -374,9 +383,10 @@ export class WindowManager {
     const state = this.ctx.store.state
     let winState = existing ?? this.takeClosedMain(spaceId)
     if (!winState) {
-      // A window opened from a private one shows a normal Space (NV-11).
+      // A window opened from a private or blank one shows a normal Space (NV-11, TB-17).
       const focused = state.windows[this.focusedWindowId() ?? '']?.spaceId
-      const space = spaceId ?? (focused && !isPrivateSpace(state, focused) ? focused : undefined) ?? state.spaceOrder[0]
+      const normal = focused && !isPrivateSpace(state, focused) && !isBlankSpace(state, focused)
+      const space = spaceId ?? (normal ? focused : undefined) ?? state.spaceOrder[0]
       if (!space) throw new Error('No spaces')
       winState = createWindowState(space)
       const created = winState
@@ -399,6 +409,8 @@ export class WindowManager {
       show: false,
       title: 'Orbit',
       backgroundColor: windowBackground(this.ctx.store.state, winState.spaceId) ?? '#e9eaf5',
+      // See-through behind the shell, with the system's material, where there is one (SB-24).
+      ...materialWindowOptions(windowMaterial()),
       ...(isMac ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: TRAFFIC_LIGHTS } : { frame: false }),
       webPreferences: { ...uiWebPreferences(id, 'shell'), backgroundThrottling: false },
     })
@@ -580,6 +592,8 @@ export class WindowManager {
   sendToWindow(windowId: WindowId, channel: string, payload: unknown): void {
     const rec = this.records.get(windowId)
     if (!rec) return
+    // A toast the sidebar can't show (it is hidden) goes to a view of its own (tabs lane, SB-13).
+    if (channel === 'toast' && this.toastRoute?.(windowId, payload)) return
     // While the floating sidebar is out, what the sidebar shows (a rename field, the new-Space
     // flow, an undo toast) happens there and not in the hidden, docked one.
     const floating = this.floatingContents(windowId)
@@ -701,6 +715,14 @@ export class WindowManager {
     if (rec.overlayShown) this.fitOverlay(rec)
     this.focusIfNewlyShown(rec, shownBefore)
     for (const listener of this.layoutListeners) listener(windowId)
+  }
+
+  /**
+   * Toasts for a window go to `route` first; it returns true when it showed one itself, else the
+   * sidebar shows it (tabs lane: toasts over the page while the sidebar is hidden, SB-13, SP-02).
+   */
+  routeToasts(route: (windowId: WindowId, payload: unknown) => boolean): void {
+    this.toastRoute = route
   }
 
   /** Runs after a window's pages were laid out again (tab switch, resize, split, full screen). */
@@ -983,6 +1005,15 @@ export class WindowManager {
     if (!rec.overlayShown && rec.win.isFocused()) this.liveContents(active)?.focus()
   }
 
+  /**
+   * The page card's frame as the shell last reported it (window coordinates): every pane together,
+   * or the empty card of a Space with no tabs, where pageArea() has no panes to go by.
+   */
+  frameArea(windowId: WindowId): Rect | undefined {
+    const rec = this.records.get(windowId)
+    return rec && !rec.win.isDestroyed() && rec.frameRect ? roundRect(rec.frameRect) : undefined
+  }
+
   /** The page area: the bounding box of the window's page panes (window coordinates, DIP). */
   pageArea(windowId: WindowId): Rect | undefined {
     const rec = this.records.get(windowId)
@@ -1113,10 +1144,20 @@ export class WindowManager {
         event.preventDefault()
         return
       }
+      // Letting go of Control, wherever the keyboard is, ends a switch to a recent tab (TB-05).
+      if (input.type === 'keyUp' && input.key === 'Control') this.ctx.tabs.onControlUp?.()
       if (input.type !== 'keyDown') return
+      // Esc ends a switch to a recent tab with no switch (TB-05), here, in step with Control's release.
+      if (
+        input.key === 'Escape' &&
+        this.ctx.tabs.recentSwitch?.cancel(this.windowIdFor(contents) ?? this.focusedWindowId())
+      ) {
+        if (!this.isOverlay(contents)) event.preventDefault()
+        return
+      }
       // W while switching to a recent tab closes the highlighted tab (keys lane, KS-06).
       if (keyRouter.switcherKey(input, () => this.windowIdFor(contents) ?? this.focusedWindowId())) {
-        event.preventDefault()
+        if (!this.isOverlay(contents)) event.preventDefault()
         return
       }
       // Where the key was pressed may decide the action (keys lane: ⌘O opens a file outside a Peek, KS-12).
@@ -1124,6 +1165,8 @@ export class WindowManager {
         actionForInput(input, process.platform),
         () => this.windowIdFor(contents) ?? this.focusedWindowId(),
       )
+      // Its keys are the view's or page's with the keyboard (sidebar undo, KS-05).
+      if (action?.inPlace) return
       if (!action || !this.ctx.actions.has(action.id)) {
         this.runOutsideText(contents, input)
         return
@@ -1132,7 +1175,11 @@ export class WindowManager {
       if (keyRouter.leaveToPage(contents, input, action, () => this.windowIdFor(contents) ?? this.focusedWindowId())) {
         return
       }
-      event.preventDefault()
+      // ⌃Tab and ⌃⇧Tab stay with the overlay, which has the keyboard from the switcher's first Tab
+      // on (TB-05): once Orbit takes a key from a view, the engine holds back every key-up there
+      // until another key goes down, the release of Control that ends the switch included. The
+      // overlay's page leaves them alone (shortcuts.ts, TabSwitcher).
+      if (!(RECENT_SWITCH.has(action.id) && this.isOverlay(contents))) event.preventDefault()
       const windowId = this.windowIdFor(contents) ?? this.focusedWindowId()
       // Close Tab in a window that isn't an Orbit window (a page's popup) closes that window.
       if (!windowId && action.id === 'tab.close') {
@@ -1143,6 +1190,12 @@ export class WindowManager {
     })
   }
 
+  /** Whether `contents` is a window's overlay (command bar, menus, the recent-tab switcher). */
+  private isOverlay(contents: WebContents): boolean {
+    for (const rec of this.records.values()) if (rec.overlay?.webContents === contents) return true
+    return false
+  }
+
   /**
    * Keys that edit text inside a field but are Orbit actions elsewhere (⌘← and ⌘→ go back and
    * forward on macOS, KS-16, NV-01). The key is never taken from the page: the action runs only
@@ -1150,7 +1203,7 @@ export class WindowManager {
    */
   private runOutsideText(contents: WebContents, input: Electron.Input): void {
     const action = outsideTextActionFor(input, process.platform)
-    if (!action || !this.ctx.actions.has(action.id)) return
+    if (!action || action.inPlace || !this.ctx.actions.has(action.id)) return
     const windowId = this.windowIdFor(contents) ?? this.focusedWindowId()
     void focusIsEditable(contents).then((editable) => {
       if (!editable && !contents.isDestroyed()) void this.ctx.actions.run(action.id, { windowId })
@@ -1283,9 +1336,11 @@ export class WindowManager {
       }
       if (now.overlay !== before?.overlay) {
         // A Peek has played its own close by now (or was dismissed outright): its layer goes at
-        // once so the page takes clicks again (FL-19). Other overlays linger to animate out.
-        if (now.overlay.kind === 'none') this.hideOverlay(rec, before?.overlay.kind === 'peek')
-        else if (!rec.overlayShown || overlayKey(now.overlay) !== overlayKey(before?.overlay)) this.showOverlay(rec)
+        // once so the page takes clicks again (FL-19). So does the recent-tab switcher, in the frame
+        // its tab shows (FL-26). Other overlays linger to animate out.
+        if (now.overlay.kind === 'none') {
+          this.hideOverlay(rec, before?.overlay.kind === 'peek' || !!switcherOf(before?.overlay))
+        } else if (!rec.overlayShown || overlayKey(now.overlay) !== overlayKey(before?.overlay)) this.showOverlay(rec)
         // The same overlay changed (e.g. a Peek's phase or area): keep its place and focus.
         else this.fitOverlay(rec)
       }
@@ -1626,6 +1681,8 @@ export class WindowManager {
 
   /** The native background shows at the window's edges while resizing: keep it the frame's colour. */
   private applyBackground(rec: WindowRecord): void {
+    // Over a material the window stays see-through: the shell paints the theme (SB-24).
+    if (windowMaterial() !== 'none') return
     const state = this.ctx.store.state
     const colour = windowBackground(state, state.windows[rec.id]?.spaceId)
     if (colour && !rec.win.isDestroyed()) rec.win.setBackgroundColor(colour)
@@ -1668,6 +1725,9 @@ export function windowBackground(state: OrbitState, spaceId: SpaceId | undefined
   // The theme source follows settings.appearance, so this is the global light/dark choice.
   return paletteFor(space.theme, nativeTheme.shouldUseDarkColors).windowBackground
 }
+
+/** The recent-tab switcher's actions (TB-05): the overlay keeps their keys (`attachShortcuts`). */
+const RECENT_SWITCH = new Set(['tab.recent', 'tab.recentBack'])
 
 /** Identifies one opening of an overlay (its kind and nonce): updates to it keep the same key. */
 function overlayKey(overlay: OverlayState | undefined): string {
