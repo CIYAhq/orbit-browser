@@ -225,9 +225,12 @@
   - The feel-fix lane (CB-22) warms the overlay up at the window's size: over six launches at load 6–8 the first ⌘T showed the bar in 7–17 ms, and the overlay's own work for it took 3–7 ms, as later opens' (4–9). Before, over ten launches at load 3.5–9: 5–31 ms, and 8–17 ms of work against 4–8 for later opens.
 - **FL-18:**
   - The zone shows 3 frames after the move that finds it, for two reasons. A fade from 0 shows only from its second frame, and React renders a pointer move's state in a task of its own, which can miss the next frame. Over seven runs it took 2–4 frames.
+    - Since the feel-fix lane (FL-18) the move's state renders in the move's own task, and the fade starts a frame along its curve, so its first frame shows. In three runs at load 4–8 the zone showed in the frame after the move that found it, and moved to a new half in 1 frame (3 and 2 before).
   - The zone now moves to a new half at once, as FL-18 asks. SV-26's 120 ms ease defers to feel.md.
   - The page makes room while the zone shows, so on release the new pane only takes the zone's place.
   - Adding a pane, a flip and closing a pane use the standard spring. The panes are within 2 px in 267–300 ms, as the spec asks, but within 0.5 px only at 433–483 ms, after a 1.4 px (0.2 %) overshoot.
+    - Since the feel-fix lane (SV-26, FL-18) a pane that comes to its place under 600 px/s stops there, so none passes it; one turned around at speed still carries on past and comes back (FL-01). Three runs at load 4–8: an added pane in place in 300–317 ms, a flip in 283 ms, a close in 283–300 ms, none past its place.
+  - Closing a pane (SV-26): since the feel-fix lane its card fades and collapses to about 0.96 with a still of its page on it, gone in 200–233 ms (three runs at load 4–9). Main keeps a still of each pane once the panes are at rest, 200 ms after the last load, scroll or key, so a pane closed within about 200 ms of the split showing has none and closes blank.
   - Not built: the "bubble" while a tab hovers another tab's row, and the wobble on drop.
 - **FL-19:** the close's tween and the expand's spring now start their clocks when they are called, so their first frame already moves. This is a timing change in the peek lane's `PeekLayer.tsx`, shown by `feel-peek.spec.ts`.
   - The open uses a spring tuned to FL-19's 280–320 ms (response 0.275 s, ratio 0.92). The standard spring FL-19 names takes longer than 320 ms over a card's travel (D70).
