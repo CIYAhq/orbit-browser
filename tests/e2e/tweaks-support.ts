@@ -35,6 +35,17 @@ const FIRST_FRAME = `<script>requestAnimationFrame(() => {
   window.__first = { bg: body.backgroundColor, zoom: html.zoom, font: body.fontFamily }
 })</script>`
 
+/** Notes, in each frame the page paints from its first on, when and its body's background (`window.__frames`). */
+const FRAME_LOG = `<script>(() => {
+  const log = []
+  window.__frames = log
+  const tick = () => {
+    log.push([performance.timeOrigin + performance.now(), getComputedStyle(document.body).backgroundColor])
+    requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
+})()</script>`
+
 const head = (title: string, bg: string) => `<!doctype html>
 <html><head><meta charset="utf-8"><title>${title}</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%23e0703a'/%3E%3C/svg%3E">
@@ -72,7 +83,11 @@ const BLOCK_COLORS = ['#1f5fd6', '#18a058', '#c2410c', '#7c3aed']
 /**
  * - `/page/<name>?bg=…`: a plain page: a heading, a link to `/page/<name>-next` (`#next`), a
  *   button that counts its clicks (`#count`, `window.__clicks`), a text field (`#field`) and a tall
- *   area. `window.__first` is what its first frame showed (FIRST_FRAME).
+ *   area. `window.__first` is what its first frame showed (FIRST_FRAME). With `log=1` it notes, from
+ *   its first frame on, when each frame came and its body's background (`window.__frames`, FRAME_LOG).
+ * - `/busy/<name>?bg=…&ms=…&back=…`: a plain page that, as soon as its document is ready, keeps its
+ *   renderer busy for `ms` (400 by default), answering nothing; with `back`, it goes back in its
+ *   tab's history `back` ms into that time, as the Back button would then.
  * - `/framed/<name>?other=<url>`: a page with a frame (`#inner`) showing another address.
  * - `/slow/<name>?bg=…&ms=…`: sends its heading and a coloured block (`#block`, a new colour on each
  *   load) at once, and the rest of the page `ms` later (600 by default): it paints before the
@@ -109,11 +124,30 @@ export async function startTweakFixtures(base = 3370): Promise<TweakFixtures> {
     if (u.pathname.startsWith('/page/')) {
       res.writeHead(200, ok)
       res.end(
-        `${head(name, bg)}<body>${FIRST_FRAME}<h1 id="title">${name}</h1>
+        `${head(name, bg)}<body>${FIRST_FRAME}${u.searchParams.get('log') === '1' ? FRAME_LOG : ''}<h1 id="title">${name}</h1>
 <p><a id="next" href="/page/${encodeURIComponent(name)}-next?bg=${encodeURIComponent(bg)}">Next page</a></p>
 <p><button id="count" onclick="window.__clicks = (window.__clicks || 0) + 1; this.textContent = 'Clicked ' + window.__clicks">Count</button></p>
 <p><input id="field" aria-label="Field"></p>
 <div style="height:2400px"></div></body></html>`,
+      )
+      return
+    }
+    if (u.pathname.startsWith('/busy/')) {
+      const ms = Number(u.searchParams.get('ms') ?? 400)
+      const back = Number(u.searchParams.get('back') ?? -1)
+      res.writeHead(200, ok)
+      res.end(
+        `${head(name, bg)}<body>${FIRST_FRAME}<h1 id="title">${name}</h1>
+<script>document.addEventListener('DOMContentLoaded', () => setTimeout(() => {
+  const start = performance.now()
+  let back = ${back} < 0
+  while (performance.now() - start < ${ms}) {
+    if (!back && performance.now() - start >= ${back}) {
+      back = true
+      history.back()
+    }
+  }
+}, 0))</script></body></html>`,
       )
       return
     }
@@ -491,6 +525,30 @@ export function answers(app: ElectronApplication, tabId: string, ms: number): Pr
     },
     [tabId, ms] as const,
   )
+}
+
+type KeyMod = 'shift' | 'control' | 'alt' | 'meta'
+
+/** Key presses (Electron key codes), each sent to whatever has the keyboard at that moment, as the keyboard does. */
+export function keys(app: ElectronApplication, ...presses: [keyCode: string, modifiers?: KeyMod[]][]): Promise<void> {
+  return app.evaluate(({ webContents }, list) => {
+    for (const [keyCode, modifiers = []] of list) {
+      webContents.getFocusedWebContents()?.sendInputEvent({ type: 'keyDown', keyCode, modifiers })
+      webContents.getFocusedWebContents()?.sendInputEvent({ type: 'keyUp', keyCode, modifiers })
+    }
+  }, presses)
+}
+
+/** Types text into whatever has the keyboard, as the keyboard does. */
+export function typeText(app: ElectronApplication, text: string): Promise<void> {
+  return app.evaluate(({ webContents }, t) => {
+    for (const ch of t) {
+      const contents = webContents.getFocusedWebContents()
+      contents?.sendInputEvent({ type: 'keyDown', keyCode: ch })
+      contents?.sendInputEvent({ type: 'char', keyCode: ch })
+      contents?.sendInputEvent({ type: 'keyUp', keyCode: ch })
+    }
+  }, text)
 }
 
 /** From now on a tab's page notes, in each frame it paints, when and its body's background (`window.__frames`). */

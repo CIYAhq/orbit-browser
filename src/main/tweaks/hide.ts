@@ -423,6 +423,13 @@ export function registerTweakHide(ctx: MainContext, editor: TweakEditor, pages: 
       if (details.isMainFrame && !details.isSameDocument) end(windowId)
     }
     const onGone = () => end(windowId)
+    // While the mode starts, an Esc pressed in the page cancels the start too, as the panel's does;
+    // the page still gets it (D89 (5)). Once the picker is in, the picker takes the page's Esc.
+    const onKey = (_event: Electron.Event, input: Electron.Input) => {
+      if (input.type !== 'keyDown' || input.key !== 'Escape' || input.isComposing) return
+      if (input.control || input.alt || input.meta) return
+      end(windowId)
+    }
     let onLoaded = () => {}
     const loaded = new Promise<void>((resolve) => {
       onLoaded = resolve
@@ -445,17 +452,21 @@ export function registerTweakHide(ctx: MainContext, editor: TweakEditor, pages: 
         contents.off('render-process-gone', onGone)
         contents.off('destroyed', onGone)
         contents.off('did-stop-loading', onLoaded)
+        contents.off('before-input-event', onKey)
         wake()
       },
     }
     sessions.set(windowId, s)
     // A page still loading takes the picker only once its load ends: Electron holds main's calls in
     // an isolated world until then (D89). The panel shows the mode starting meanwhile, the page acting
-    // as usual; Done, Esc or another document cancels it, and the picker never goes in.
+    // as usual; Done, Esc (in the panel or the page) or another document cancels it, and the picker
+    // never goes in.
     if (contents.isLoadingMainFrame()) {
       contents.once('did-stop-loading', onLoaded)
+      contents.on('before-input-event', onKey)
       editor.setHide(windowId, { on: false, starting: true, pick: null })
       await Promise.race([loaded, ended])
+      contents.off('before-input-event', onKey)
       if (s.ended) return false
       if (!pages.tweakable(s.tabId)) {
         end(windowId)

@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 import { TWEAK_EDITOR } from '../../src/shared/commands/tweaks'
-import { isMac, launchOrbit, MOD, type Orbit, run, state, tabPage, tabView, viewPage } from './helpers'
-import { clickInPage, focusedUrl, pressInPage } from './nav-support'
+import { action, isMac, launchOrbit, MOD, type Orbit, run, state, tabPage, tabView, viewPage } from './helpers'
+import { clickInPage, cmdIn, focusedUrl, pressInPage, uiPageOf, windowList } from './nav-support'
 import { crashTab, startInTab, tabCrashed } from './pages-support'
 import { remoteRequests } from './settings-support'
 import {
@@ -16,6 +16,7 @@ import {
   menuFor,
   newTab,
   rowMenu,
+  row as tabRow,
   tabsHook,
   waitTab,
 } from './tabs-support'
@@ -28,6 +29,7 @@ import {
   firstFrame,
   framesTo,
   inTab,
+  keys,
   logFrames,
   mark,
   marked,
@@ -41,6 +43,7 @@ import {
   startTweakFixtures,
   type TweakFixtures,
   tweakList,
+  typeText,
   waitEditor,
   waitEditorShown,
   zoomOf,
@@ -64,6 +67,22 @@ test.afterEach(async () => {
 
 /** A tab on fixture page `path` (on `host`), loaded. */
 const openPage = (app: ElectronApplication, path: string, host?: string) => openFixture(app, fx, path, host)
+
+type ActionHooks = { __orbit: { action: (id: string, w?: string) => Promise<void> } }
+type FocusHooks = { __orbit: { ctx: { windows: { focusedWindowId: () => string | undefined } } } }
+
+/** Runs an action as from a window: the window's own keys, or its command bar. */
+const actIn = (app: ElectronApplication, id: string, windowId: string) =>
+  app.evaluate(
+    async (_e, [actionId, w]) => {
+      await (globalThis as unknown as ActionHooks).__orbit.action(actionId, w)
+    },
+    [id, windowId] as const,
+  )
+
+/** The Orbit window with the focus, as main sees it. */
+const focusedWindow = (app: ElectronApplication) =>
+  app.evaluate(() => (globalThis as unknown as FocusHooks).__orbit.ctx.windows.focusedWindowId() ?? null)
 
 type Points = { x: number; y: number }[]
 
@@ -211,6 +230,77 @@ test('[BO-01][BO-21] every entry point makes a Tweak for the shown site and open
   expect((await state(app)).tabs[tabId]?.url).toBe(fx.url('/page/Alpha'))
 })
 
+test('[BO-01][TB-14][KS-16] “Tweak this Site…” chosen in a row’s menu, by a click or by Enter, though the page had the keyboard, leaves it in the editor: what is typed then names the Tweak', async () => {
+  orbit = await launchOrbit()
+  const { app, shell } = orbit
+  await run(app, 'tweaks.dismissIntro', {})
+  const { tabId } = await openPage(app, '/page/RowMenu')
+  const overlay = await viewPage(app, 'overlay')
+  const item = overlay.locator('[data-testid="row-menu-item"][data-label="Tweak this Site…"]')
+  const focusedItem = overlay
+    .locator('[data-testid="row-menu-level"]')
+    .last()
+    .locator('[data-testid="row-menu-item"][data-focused]')
+
+  // The page has the keyboard; the row's menu opens over it, with the keyboard, and the item is chosen.
+  const choose = async (how: 'click' | 'Enter') => {
+    await cmd(app, 'tabs.focusPage', {})
+    await expect.poll(() => focusedUrl(app)).toBe(fx.url('/page/RowMenu'))
+    await tabRow(shell, tabId).click({ button: 'right' })
+    await expect.poll(async () => (await rowMenu(app))?.key).toBe(tabId)
+    expect((await rowMenu(app))?.native).toBe(false)
+    await expect.poll(() => focusedUrl(app)).toContain('view=overlay')
+    if (how === 'click') {
+      await item.click()
+    } else {
+      for (let i = 0; i < 20; i++) {
+        const label = await focusedItem.getAttribute('data-label', { timeout: 2_000 }).catch(() => null)
+        if (label === 'Tweak this Site…') break
+        await keys(app, ['Down'])
+      }
+      await expect(focusedItem).toHaveAttribute('data-label', 'Tweak this Site…')
+      await keys(app, ['Enter'])
+    }
+    await waitEditor(app, true)
+    return (await edited(app)).id
+  }
+  // Then the keyboard alone names the Tweak: Tab to its name, Space for the name's menu, Space on
+  // Rename…, the new name typed, and Enter. Every key goes where the keyboard is.
+  const nameByKeys = async (name: string) => {
+    const view = await editorPage(app)
+    const focusedIn = () =>
+      view.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.testid ?? null).catch(() => null)
+    await expect.poll(() => focusedUrl(app)).toContain('view=tweak')
+    await expect.poll(focusedIn).toBe('tweak-panel')
+    await keys(app, ['Tab'])
+    await expect.poll(focusedIn).toBe('tweak-name')
+    await keys(app, ['Space'])
+    await expect.poll(focusedIn).toBe('tweak-menu-rename')
+    await keys(app, ['Space'])
+    await expect.poll(focusedIn).toBe('tweak-name-input')
+    await typeText(app, name)
+    await expect(view.getByTestId('tweak-name-input')).toHaveValue(name)
+    await keys(app, ['Enter'])
+    await expect(view.getByTestId('tweak-name')).toHaveText(name)
+  }
+
+  // A click on the item, the editor's view opening for the first time.
+  const first = await choose('click')
+  await nameByKeys('Clicked')
+  await expect.poll(async () => (await state(app)).tweaks[first]?.name).toBe('Clicked')
+  // Esc closes the editor, and the page has the keyboard back (KS-19).
+  await keys(app, ['Escape'])
+  await waitEditor(app, false)
+  await expect.poll(() => focusedUrl(app)).toBe(fx.url('/page/RowMenu'))
+
+  // Enter on the item, the editor's view there already.
+  const second = await choose('Enter')
+  expect(second).not.toBe(first)
+  await nameByKeys('Entered')
+  await expect.poll(async () => (await state(app)).tweaks[second]?.name).toBe('Entered')
+  expect((await tweakList(app)).map((t) => t.name)).toEqual(['Clicked', 'Entered'])
+})
+
 test('[BO-01][KS-18] an internal page takes no Tweak: the entry points are greyed or gone and the action says why; a key given to New Tweak… shows in the tab’s menu', async () => {
   orbit = await launchOrbit()
   const { app, shell } = orbit
@@ -266,14 +356,7 @@ test('[BO-01][BO-21] a Mini Window’s page takes no Tweak: the Tweak actions th
   }
   const miniTab = (await shownInMini()) as string
   expect((await state(app)).tabs[miniTab]?.floating).toBe('mini')
-  const actInMini = (id: string) =>
-    app.evaluate(
-      async (_e, [actionId, windowId]) => {
-        const g = globalThis as unknown as { __orbit: { action: (id: string, w?: string) => Promise<void> } }
-        await g.__orbit.action(actionId, windowId)
-      },
-      [id, mini] as const,
-    )
+  const actInMini = (id: string) => actIn(app, id, mini)
 
   // New Tweak…, Edit Tweak and the site's switch there (by keys the user gave them): the browser
   // window says why, as a Mini Window shows no notes; nothing is made or changed, no editor opens.
@@ -306,6 +389,42 @@ test('[BO-01][BO-21] a Mini Window’s page takes no Tweak: the Tweak actions th
   expect(await activeId(app)).toBe(alpha.tabId)
   expect(await shownInMini()).toBe(miniTab)
   expect((await state(app)).tabs[miniTab]?.floating).toBe('mini')
+})
+
+test('[BO-21][KS-20] from a Mini Window in front of a private window, a Tweak action’s note shows in the browser window, where View Tweaks opens the Library, and not in the private one', async () => {
+  orbit = await launchOrbit()
+  const { app, shell } = orbit
+  const [browser] = await windowList(app)
+  if (!browser) throw new Error('no browser window')
+  // A browser window, then a private window, then a Mini Window, which comes forward with the focus.
+  await action(app, 'window.newPrivate')
+  await expect.poll(async () => (await windowList(app)).filter((w) => w.kind === 'private').length).toBe(1)
+  const priv = (await windowList(app)).find((w) => w.kind === 'private')
+  if (!priv) throw new Error('no private window')
+  const privShell = await uiPageOf(app, 'shell', priv.id)
+  const mini = (await run(app, 'mini.open', { url: fx.url('/page/MiniNote') })) as string
+  await tabPage(app, '/page/MiniNote')
+  expect((await state(app)).windows[mini]?.kind).toBe('mini')
+  await expect.poll(() => focusedWindow(app)).toBe(mini)
+
+  // New Tweak… there (by a key the user gave it): the note shows in the browser window, as the
+  // Mini Window shows none, and not in the private window, the last one opened.
+  const why = (p: Page) =>
+    p.getByTestId('toast').filter({ hasText: 'Move the Mini Window’s page into a Space to tweak it' })
+  await actIn(app, 'tweak.new', mini)
+  await expect(why(shell)).toHaveCount(1)
+  await expect(why(privShell)).toHaveCount(0)
+  expect(await tweakList(app)).toEqual([])
+
+  // View Tweaks there opens the Library in that same browser window.
+  await actIn(app, 'tweak.view', mini)
+  await expect
+    .poll(async () => cmdIn(app, browser.id, 'library.status', {}))
+    .toMatchObject({
+      open: true,
+      section: 'tweaks',
+    })
+  expect(await cmdIn(app, priv.id, 'library.status', {})).toMatchObject({ open: false })
 })
 
 test('[BO-02][KS-19] the editor is a small view of its own over the page’s top-right corner, sized to the panel; the page stays live; Esc, ✕ and Done close it, the page gets the keyboard back, and it reopens as it was', async () => {
@@ -640,6 +759,50 @@ test('[BO-02][BO-14][BO-16] a change a busy page never took holds up nothing onc
   expect(frames).toBeLessThanOrEqual(12)
   await expect.poll(async () => (await pageTweaks(app, tabId))?.preloaded).toBe(false)
   console.log(`[BO-14] a change on the other site's page showed in frame ${frames}`)
+})
+
+test('[BO-18][BO-02] a key a busy page’s renderer gives back late never takes a sheet of the page that replaced it: back, 50 ms after document ready, from a page busy 400 ms to another site with a Tweak of its own, that page keeps its Tweak in every frame', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  // Two sites with a Tweak each, one sheet each: 127.0.0.1 is another site than localhost, so its
+  // page comes in another renderer, where the keys count from 1 again. The localhost one is made in
+  // a tab that then closes, so no page of that site is open when the busy page comes.
+  const NAVY = 'rgb(0, 0, 128)'
+  const made = await openPage(app, '/page/Busy')
+  const busy = (await run(app, 'tweaks.create', { tabId: made.tabId })) as string
+  await run(app, 'tweaks.update', { id: busy, patch: { css: 'body { color: #101010 }' } })
+  await run(app, 'tweaks.closeEditor', {})
+  await cmd(app, 'tabs.close', { tabId: made.tabId })
+  await expect.poll(async () => (await state(app)).tabs[made.tabId]).toBeUndefined()
+  const { tabId, page } = await openPage(app, '/page/Kept?log=1', '127.0.0.1')
+  const kept = (await run(app, 'tweaks.create', { tabId })) as string
+  await run(app, 'tweaks.update', { id: kept, patch: { css: 'body { background: #000080 }' } })
+  await run(app, 'tweaks.closeEditor', {})
+  await expect.poll(() => bgOf(page)).toBe(NAVY)
+
+  // The busy page: at document ready main puts its own copy of the sheet in, which waits on that
+  // renderer; 50 ms later the page goes back (to the other site's page, in a new renderer), and
+  // its renderer gives the key back only once its 400 ms are over, after the new page's own sheet
+  // went in under the same key.
+  await mark(page)
+  await cmd(app, 'tabs.navigate', { tabId, url: fx.url('/busy/Busy?ms=400&back=50') })
+  await expect.poll(() => page.url(), { timeout: 15_000 }).toContain('/page/Kept')
+  await newDocument(page)
+  // The page that came back notes every frame from its first: none may lose the Tweak, from then
+  // until well after the late key came.
+  type Frame = [number, string]
+  const frames = () => page.evaluate(() => (window as unknown as { __frames?: Frame[] }).__frames ?? [])
+  const span = async () => {
+    const f = await frames()
+    return f.length ? (f[f.length - 1] as Frame)[0] - (f[0] as Frame)[0] : 0
+  }
+  await expect.poll(span, { timeout: 10_000 }).toBeGreaterThanOrEqual(2500)
+  const seen = await frames()
+  const lost = seen.filter(([, bg]) => bg !== NAVY).map(([at, bg]) => [Math.round(at - (seen[0] as Frame)[0]), bg])
+  console.log(`[BO-18] the page that came back: ${seen.length} frames over ${Math.round(await span())} ms`)
+  expect(lost, JSON.stringify(lost.slice(0, 5))).toEqual([])
+  expect(await bgOf(page)).toBe(NAVY)
+  expect((await pageTweaks(app, tabId))?.parts).toEqual([`t:${kept}`])
 })
 
 test('[BO-18][BO-01] a Tweak survives reloads, other pages of its site, back and forward, a closed tab reopened, a sleeping tab woken and a restart', async () => {

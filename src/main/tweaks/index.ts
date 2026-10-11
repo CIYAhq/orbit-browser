@@ -69,16 +69,21 @@ export function registerTweaks(ctx: MainContext): void {
     tabs.contents(tabId) ? pages.hostOf(tabId) : tweakHostOf(store.state.tabs[tabId]?.url)
 
   /**
-   * Shows a note for a window: in it, or for a Mini Window (which shows none) in the browser window
-   * focused, else the last one opened.
+   * Shows a note for a window: in it; for a Mini Window, which shows none, in the window where View
+   * Tweaks opens the Library (the Library's `mainWindowOf`, src/main/archive/index.ts): the focused
+   * browser window that isn't private, else the last such one opened; with none, nowhere (BO-21;
+   * tweaks fix check 2, follow-up 1).
    */
   const say = (windowId: WindowId, message: string) => {
-    const shows = (id: WindowId | undefined): id is WindowId => {
-      const kind = id ? store.state.windows[id]?.kind : undefined
-      return kind === 'main' || kind === 'private'
-    }
+    const kindOf = (id: WindowId | undefined) => (id ? store.state.windows[id]?.kind : undefined)
+    const isMain = (id: WindowId | undefined): id is WindowId => kindOf(id) === 'main'
     const focused = windows.focusedWindowId()
-    const to = shows(windowId) ? windowId : shows(focused) ? focused : windows.ids().filter(shows).pop()
+    const to =
+      isMain(windowId) || kindOf(windowId) === 'private'
+        ? windowId
+        : isMain(focused)
+          ? focused
+          : windows.ids().filter(isMain).pop()
     if (to) ctx.toast(to, message)
   }
 

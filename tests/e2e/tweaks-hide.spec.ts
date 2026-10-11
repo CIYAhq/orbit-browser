@@ -1,9 +1,11 @@
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 import { launchOrbit, type Orbit, run, state } from './helpers'
+import { clickEvents, focusedUrl, sendToPage } from './nav-support'
 import { cmd, waitTab } from './tabs-support'
 import {
   editorInfo,
   editorPage,
+  keys,
   mark,
   marked,
   newDocument,
@@ -422,4 +424,53 @@ test('[BO-10] on a page still loading, a click on the lightning button shows the
   await waitTab(app, tabId, fx.url('/'))
   expect(await pickerInfo(app, tabId)).toBeNull()
   fx.slowHome(0)
+})
+
+test('[BO-10][KS-19] on a page still loading, an Esc pressed in the page while the mode starts cancels it too, and the page still gets it: once the load ends, the mode is still off and the page has no picker (D89 (5))', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const { tabId, page } = await openPage(app, '/held/PageEsc')
+  const { view } = await newTweak(app, tabId)
+  const button = view.getByTestId('tweak-hide-button')
+  const area = view.getByTestId('tweak-hide')
+
+  // A load its image holds until the test lets it end; the page notes its clicks and keys.
+  const url = fx.url('/held/PageEsc?hold=1')
+  await mark(page)
+  await cmd(app, 'tabs.navigate', { tabId, url })
+  await newDocument(page)
+  expect(await page.evaluate(() => document.readyState)).toBe('interactive')
+  await page.evaluate(() => {
+    const w = window as unknown as { __heard: string[] }
+    w.__heard = []
+    window.addEventListener('click', () => w.__heard.push('click'), true)
+    window.addEventListener('keydown', (e) => w.__heard.push(e.key), true)
+  })
+  const heard = () => page.evaluate(() => (window as unknown as { __heard: string[] }).__heard)
+
+  // The mode starts; a click in the page meanwhile acts as usual there, and the page has the
+  // keyboard, as a hand's click gives it (a test's click comes through no window system: Orbit
+  // gives it the keyboard here).
+  await button.click()
+  await expect(area).toHaveAttribute('data-state', 'starting')
+  const box = await page.locator('#title').boundingBox()
+  if (!box) throw new Error('no title')
+  await sendToPage(app, url, clickEvents(Math.round(box.x + 8), Math.round(box.y + box.height / 2)))
+  await expect.poll(heard).toEqual(['click'])
+  await cmd(app, 'tabs.focusPage', {})
+  await expect.poll(() => focusedUrl(app)).toBe(url)
+
+  // Esc there: the page gets it, and the start is cancelled.
+  await keys(app, ['Escape'])
+  await expect.poll(heard).toEqual(['click', 'Escape'])
+  await expect(area).toHaveCount(0)
+  await expect(button).toHaveAttribute('aria-pressed', 'false')
+  expect((await editorInfo(app)).open).toBe(true)
+
+  // The load ends: the mode never turned on, and the page has no picker.
+  fx.releaseHeld()
+  await waitTab(app, tabId, '/held/PageEsc')
+  expect(await pickerInfo(app, tabId)).toBeNull()
+  await expect(area).toHaveCount(0)
+  await expect(button).toHaveAttribute('aria-pressed', 'false')
 })
