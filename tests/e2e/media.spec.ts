@@ -7,7 +7,8 @@ import type { PlayerHost, PlayerInfo } from '../../src/main/media/player'
 import { formatClock } from '../../src/shared/media'
 import type { TabMedia } from '../../src/shared/state'
 import { FRAME_SLACK, launchOrbit, MOD, type Orbit, state, tabPage, tabView } from './helpers'
-import { choosePageMenu, pageMenu } from './nav-support'
+import { choosePageMenu, pageMenu, uiPageOf, windowState } from './nav-support'
+import { openSettings } from './settings-support'
 import { act, activeId, cmd, newTab, tab, tabsHook, waitTab } from './tabs-support'
 
 // ---- Local media fixtures (on ports 3330–3349) ----
@@ -1847,4 +1848,63 @@ test('[MD-02] right-clicking a video in a frame from another site offers Picture
   expect(await choosePageMenu(app, 'Picture in Picture')).toBe(true)
   await expect.poll(() => enginePip(v.frame)).toBe(false)
   await expect.poll(async () => (await media(app, v.id))?.pip).toBe(false)
+})
+
+// ---- The switches in other panels (MD-08: site controls NV-16, Settings › Advanced ST-10) ----
+
+test('[MD-08][NV-16][ST-10] the site controls switch and Settings › Advanced turn automatic picture-in-picture off; the video plays on in the sidebar', async () => {
+  orbit = await launchOrbit()
+  const { app, shell } = orbit
+  const win = await windowState(app)
+  const v = await openPlaying(app, '/media/long-video/Film')
+  await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
+  const site = () => cmd(app, 'media.sitePip', { url: fx.url('/x') })
+
+  // On by default; switching it off is "Always turn off for this site".
+  await shell.getByTestId('site-controls-button').click()
+  const overlay = await uiPageOf(app, 'overlay', win.id)
+  const panel = overlay.getByTestId('site-controls')
+  const pip = panel.getByTestId('site-switch-pip')
+  await expect(pip).toHaveAttribute('aria-checked', 'true')
+  await pip.click()
+  await expect(pip).toHaveAttribute('aria-checked', 'false')
+  expect(await site()).toBe('always')
+  await overlay.keyboard.press('Escape')
+  await expect(panel).toBeHidden()
+  const other = await leave(app)
+  expect((await player(app)).opening).toBe(false)
+  await expect(controller(orbit, v.id)).toBeVisible()
+  await expectNoPlayer(app)
+  expect(await paused(v.page, '#v')).toBe(false)
+
+  // The player menu's "Turn off for today" shows there too; switching on undoes it.
+  await cmd(app, 'tabs.activate', { tabId: v.id })
+  await cmd(app, 'media.setSitePip', { url: fx.url('/'), mode: 'today' })
+  await shell.getByTestId('site-controls-button').click()
+  await expect(pip).toHaveAttribute('aria-checked', 'false')
+  await expect(panel.getByTestId('site-controls-pip')).toContainText('Off for today')
+  await pip.click()
+  await expect(pip).toHaveAttribute('aria-checked', 'true')
+  expect(await site()).toBe('on')
+  await overlay.keyboard.press('Escape')
+  await expect(panel).toBeHidden()
+  await cmd(app, 'tabs.activate', { tabId: other })
+  await expectPlayer(app, v.id)
+  await cmd(app, 'tabs.activate', { tabId: v.id })
+  await expectNoPlayer(app)
+
+  // Settings › Advanced turns it off for every site, which the site controls say.
+  const settings = await openSettings(app, { section: 'advanced' })
+  await expect(settings.getByTestId('auto-pip')).toHaveAttribute('aria-checked', 'true')
+  await settings.getByTestId('auto-pip').click()
+  await expect.poll(async () => (await state(app)).settings.autoPip).toBe(false)
+  await cmd(app, 'tabs.activate', { tabId: other })
+  expect((await player(app)).opening).toBe(false)
+  await expect(controller(orbit, v.id)).toBeVisible()
+  await expectNoPlayer(app)
+  expect(await paused(v.page, '#v')).toBe(false)
+  await cmd(app, 'tabs.activate', { tabId: v.id })
+  await shell.getByTestId('site-controls-button').click()
+  await expect(pip).toHaveAttribute('aria-checked', 'true')
+  await expect(panel.getByTestId('site-controls-pip')).toContainText('Off for every site in Settings')
 })
