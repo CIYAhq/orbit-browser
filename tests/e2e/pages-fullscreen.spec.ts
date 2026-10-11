@@ -78,25 +78,37 @@ async function escPage(app: ElectronApplication, prevent = true) {
   return { tabId, page, escapes: () => page.evaluate(() => (window as unknown as { __escapes: string[] }).__escapes) }
 }
 
-/** Presses Esc the way the keyboard does (through the browser process), in the view at `urlPart`; `repeats`: held that long. */
-function pressEscape(app: ElectronApplication, urlPart: string, repeats = 0): Promise<void> {
-  return sendToPage(app, urlPart, [
+/**
+ * Presses Esc the way the keyboard does (through the browser process), in the view at `urlPart`;
+ * `repeats`: held that long. `presses` presses go in one call, so no wait comes between them.
+ */
+function pressEscape(app: ElectronApplication, urlPart: string, repeats = 0, presses = 1): Promise<void> {
+  const press = [
     { type: 'keyDown', keyCode: 'Escape' },
     ...Array.from({ length: repeats }, () => ({ type: 'keyDown', keyCode: 'Escape', modifiers: ['isAutoRepeat'] })),
     { type: 'keyUp', keyCode: 'Escape' },
-  ])
+  ]
+  return sendToPage(app, urlPart, Array.from({ length: presses }, () => press).flat())
 }
 
-/** Presses Esc once in a tab's page, as the keyboard does: while it loads another address too. */
-function pressEscapeInTab(app: ElectronApplication, tabId: string): Promise<void> {
-  return app.evaluate((_e, id) => {
-    const g = globalThis as unknown as {
-      __orbit: { ctx: { tabs: { contents: (id: string) => Electron.WebContents } } }
-    }
-    const page = g.__orbit.ctx.tabs.contents(id)
-    page.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
-    page.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' })
-  }, tabId)
+/**
+ * Presses Esc in a tab's page, as the keyboard does: while it loads another address too.
+ * `presses` presses go in one call, so no wait comes between them.
+ */
+function pressEscapeInTab(app: ElectronApplication, tabId: string, presses = 1): Promise<void> {
+  return app.evaluate(
+    (_e, [id, count]) => {
+      const g = globalThis as unknown as {
+        __orbit: { ctx: { tabs: { contents: (id: string) => Electron.WebContents } } }
+      }
+      const page = g.__orbit.ctx.tabs.contents(id)
+      for (let i = 0; i < count; i++) {
+        page.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
+        page.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' })
+      }
+    },
+    [tabId, presses] as const,
+  )
 }
 
 /** The Esc presses Orbit waited on while a tab loaded, oldest first (keys lane, NV-04). */
@@ -193,14 +205,16 @@ test('[NV-20][KS-02] Esc goes to the page first: one press keeps full screen, an
   await pressEscape(app, '/esc')
   await expect.poll(escapes).toEqual(['keydown', 'keyup', 'keydown', 'keyup'])
   expect(await win(app)).toMatchObject({ fullscreen: true, sidebar: false })
-  // Again at once: full screen ends, and the page doesn't get that press.
-  await pressEscape(app, '/esc')
+  // Two presses at once: full screen ends, and the page doesn't get the press that ends it. (Which
+  // of the two that is depends on how long the check above took: a press within a second of the
+  // one before leaves, and out of full screen the next press is the page's.)
+  const pair = ['keydown', 'keyup', 'keydown', 'keyup', 'keydown', 'keyup']
+  await pressEscape(app, '/esc', 0, 2)
   await expect.poll(() => win(app)).toMatchObject({ fullscreen: false, sidebar: true })
-  expect(await escapes()).toEqual(['keydown', 'keyup', 'keydown', 'keyup'])
+  await expect.poll(escapes).toEqual(pair)
   // Out of full screen, Esc is the page's alone.
-  await pressEscape(app, '/esc')
-  await pressEscape(app, '/esc')
-  await expect.poll(async () => (await escapes()).length).toBe(8)
+  await pressEscape(app, '/esc', 0, 2)
+  await expect.poll(async () => (await escapes()).length).toBe(10)
   expect(await win(app)).toMatchObject({ fullscreen: false, sidebar: true })
 })
 
@@ -304,10 +318,10 @@ test('[NV-20][NV-04] on a loading page, the Esc that leaves full screen stops no
   await enterFullScreen(app, '/esc')
   await run(app, 'tabs.navigate', { tabId, url: silent.url('/never') })
   await expect.poll(async () => (await state(app)).tabs[tabId]?.loading).toBe(true)
-  // The page uses the first press, so the load goes on (NV-04).
-  await pressEscapeInTab(app, tabId)
+  // The page uses the first press, so the load goes on (NV-04); the second, in the same call, leaves
+  // full screen.
+  await pressEscapeInTab(app, tabId, 2)
   await expect.poll(() => escapeLog(app)).toMatchObject([{ used: true, stopped: false }])
-  await pressEscapeInTab(app, tabId)
   await expect.poll(() => win(app)).toMatchObject({ fullscreen: false, sidebar: true })
   // Longer than Orbit waits for a page's answer to an Esc (250 ms): no wait for that press, no stop.
   await new Promise((r) => setTimeout(r, 600))
