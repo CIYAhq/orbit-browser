@@ -8,7 +8,7 @@ import { expect, type Page, test } from '@playwright/test'
 import type { SearchResult } from '../../src/shared/commands/commandbar'
 import { DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
 import { switcherOf } from '../../src/shared/tab-switcher'
-import { bestOf, frameAfterWall, mainInputs, motionOf, ms, note, record, series, viewShown } from './frames'
+import { type Box, bestOf, frameAfterWall, mainInputs, motionOf, ms, note, record, series, viewShown } from './frames'
 import {
   type Fixtures,
   FRAME_SLACK,
@@ -2004,4 +2004,43 @@ test('[TB-16] tabs put to sleep give their memory back; a sleeping tab costs und
   note('TB-16', '… the same over all 50, with what loading the 10 left behind', all, '< 5 MB', 'MB')
   expect(awake - slept).toBeGreaterThan(10 * 1024)
   expect(each).toBeLessThan(5)
+})
+
+test('[AR-11][FD-01] a folder that comes back with its tabs in one update (Restore Data) draws its row in the frame its tabs first show, above them', async () => {
+  const { app, shell } = orbit
+  const tabs: string[] = []
+  for (const name of ['Packing', 'Hotels']) {
+    const t = await newTab(app, fx.url(`/page/${name}`))
+    await waitTab(app, t, `/page/${name}`)
+    tabs.push(t)
+  }
+  const folderId = (await run(app, 'folders.create', { name: 'Trip ideas', items: tabs })) as string
+  await expect.poll(async () => (await state(app)).folders[folderId]?.children.length).toBe(2)
+  const backup = (await run(app, 'backups.take')) as { id: string }
+  await run(app, 'folders.delete', { folderId })
+  await expect(shell.locator(`[data-slot][data-key="${folderId}"]`)).toHaveCount(0)
+  await settled(shell)
+  // Every row of the pinned section, nested ones too, in each frame as it is drawn.
+  const rec = await record(shell, { slots: { selector: '[data-testid="pinned-list"] [data-slot]', key: 'data-key' } })
+  // One store update brings back the folder and both its tabs.
+  expect(await run(app, 'backups.restore', { id: backup.id })).toMatchObject({ restored: true })
+  await expect.poll(async () => (await state(app)).folders[folderId]?.children.toSorted()).toEqual(tabs.toSorted())
+  const r = await rec.until(1200)
+  const drawn = (b: Box | undefined): b is Box => !!b && b.height > 1 && b.opacity > 0.02
+  const firstShown = r.frames.find((f) => tabs.some((id) => drawn(f.lists.slots?.[id])))
+  expect(firstShown, 'the restored tabs were drawn').toBeDefined()
+  const orphans: string[] = []
+  for (const f of r.frames) {
+    const folder = f.lists.slots?.[folderId]
+    for (const id of tabs) {
+      const child = f.lists.slots?.[id]
+      if (!drawn(child)) continue
+      if (!drawn(folder) || folder.y + folder.height > child.y + 1) {
+        const at = folder ? `${Math.round(folder.height)} px high, opacity ${folder.opacity.toFixed(2)}` : 'not there'
+        orphans.push(`frame ${f.i}: tab row at ${Math.round(child.y)}, folder row ${at}`)
+      }
+    }
+  }
+  console.log(`[AR-11] tab rows drawn without their folder row: ${orphans.length} (first tab frame ${firstShown?.i})`)
+  expect(orphans).toEqual([])
 })

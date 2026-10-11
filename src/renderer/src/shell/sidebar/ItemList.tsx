@@ -379,6 +379,7 @@ function RowSlot({
   ancestors,
   className = 'row-slot',
   far = false,
+  whole = false,
   onPointerDown,
 }: SlotProps & {
   id: string
@@ -387,6 +388,8 @@ function RowSlot({
   className?: string
   /** Far from the visible band, drawing nothing (FL-21). */
   far?: boolean
+  /** Drawn whole from its first frame, never growing in (a folder that arrives with its tabs, AR-11). */
+  whole?: boolean
   onPointerDown?: (e: ReactPointerEvent<HTMLDivElement>) => void
 }) {
   const y = useRowShift(id)
@@ -405,7 +408,7 @@ function RowSlot({
   // Rows that arrive or leave through a drag appear/disappear at once (the ghost covers them). A
   // travelling row's room opens as it travels; the row itself is drawn whole all along.
   const [instant] = useState(
-    () => hidden || reducedMotion() || takeUnseenArrival(id) || (!travel && !claimEnterAnimation()),
+    () => whole || hidden || reducedMotion() || takeUnseenArrival(id) || (!travel && !claimEnterAnimation()),
   )
   const [growing, setGrowing] = useState(!instant && !travel)
   useLayoutEffect(() => {
@@ -806,6 +809,10 @@ const FolderRow = memo(function FolderRow({
   }, [])
   // The chevron turns at once with reduced motion, also after the folder was drawn (FL-28).
   const reduced = useReducedMotion()
+  // A folder that arrives open with its tabs (Restore Data, undo, a new folder from tabs) draws its
+  // row in the frame they show: they appear at once (its children's list mounts with it), so a row
+  // growing in would show them for a moment without it, then push them down (AR-11).
+  const [arrivesWhole] = useState(() => !!liveFolder && !liveFolder.collapsed && liveFolder.children.length > 0)
   if (!folder) return null
   const childAncestors = ancestors ? `${ancestors},${folderId}` : folderId
   // A deleted folder animating out draws no children (they're gone or moved on).
@@ -815,6 +822,7 @@ const FolderRow = memo(function FolderRow({
       <RowSlot
         id={folderId}
         folder={open ? 'open' : 'closed'}
+        whole={arrivesWhole}
         depth={depth}
         containerKey={containerKey}
         index={index}
