@@ -10,6 +10,7 @@ import type { ArchivedTab, FolderId, ItemId, OrbitState, ProfileId, SpaceId, Tab
 import { splitLeaves } from '../../shared/tree'
 import { type ArchiveSource, archiveSource } from '../archive/inbox'
 import { hostOf, urlKeyOf } from '../history/store'
+import { isUnplacedImportTab, unplacedImportVersion } from '../import/unplaced'
 import { initials } from './match'
 import type { ActionDoc, ArchiveDoc, FolderDoc, SpaceDoc, TabDoc } from './rank'
 
@@ -63,14 +64,18 @@ export class SourceCache {
   /** The keymap the action docs' shortcuts were read from: a remap builds them again (KS-18). */
   private actionDocsKeymap = -1
 
-  /** Every tab in every Space (pinned, Favorites, Today, folders, splits). */
+  /**
+   * Every tab in every Space (pinned, Favorites, Today, folders, splits), and a Peek's or a mini window's. Not an import's
+   * tabs that no section shows yet: nothing may reach them until their folder is shown (D65 (1)).
+   */
   tabs(state: OrbitState): TabDoc[] {
     const layout = this.layoutOf(state)
-    const refs = [state.tabs, layout]
+    const refs = [state.tabs, layout, unplacedImportVersion()]
     if (sameRefs(refs, this.tabsRef)) return this.tabDocs
     this.tabsRef = refs
     const docs: TabDoc[] = []
     for (const tab of Object.values(state.tabs)) {
+      if (isUnplacedImportTab(tab.id) && !layout.section.has(tab.id)) continue
       let doc = this.tabDocCache.get(tab)
       if (!doc) {
         doc = makeTabDoc(tab, layout.section.get(tab.id))

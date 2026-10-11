@@ -12,6 +12,7 @@
  * The default set follows the KS-* tables of the shortcuts spec.
  */
 
+import { IMPORT_ACTIONS } from './commands/import'
 import type { ShortcutPriority } from './commands/keys'
 import { SETTINGS_ACTIONS, SETTINGS_LANE_ACTIONS } from './commands/settings'
 import {
@@ -533,6 +534,7 @@ export const ACTIONS: ActionDef[] = [
   // Settings sections and common settings (ST-02); onboarding, updates and help
   ...SETTINGS_ACTIONS,
   ...SETTINGS_LANE_ACTIONS,
+  ...IMPORT_ACTIONS,
 ]
 
 export const ACTIONS_BY_ID: Record<string, ActionDef> = Object.fromEntries(ACTIONS.map((a) => [a.id, a]))

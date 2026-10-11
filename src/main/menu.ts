@@ -52,6 +52,8 @@ export function installMenu(ctx: MainContext): void {
         { type: 'separator' },
         item('app.settings', 'Settings…'),
         item('settings.defaultBrowser', 'Set as Default Browser…'),
+        // The import flow (import lane, IM-01).
+        item('app.import', 'Import from Another Browser…'),
         { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
@@ -76,6 +78,9 @@ export function installMenu(ctx: MainContext): void {
         item('tab.reopenClosed'),
         // The last ~10 closed tabs (archive lane, AR-09); rebuilt as tabs close and come back.
         { label: 'Recently Closed', submenu: recentlyClosedItems(ctx) },
+        { type: 'separator' },
+        // Anti-lock-in (import lane, IM-17).
+        item('app.exportPinned', 'Export Pinned Items as Bookmarks…'),
         { type: 'separator' },
         item('page.print'),
       ],

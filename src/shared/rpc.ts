@@ -85,6 +85,8 @@ export type RendererView =
   | 'pip'
   /** Settings lane: the first-run onboarding window (OB-01). */
   | 'onboarding'
+  /** Import lane: the import window (IM-01). */
+  | 'import'
   /** Downloads lane: an internal page, `orbit://<page>/` in a tab (DT-13). */
   | 'internal'
 

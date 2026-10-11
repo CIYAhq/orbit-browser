@@ -1,5 +1,6 @@
 import type { BackupRestoreResult, BackupUndoResult } from '../../shared/commands/archive'
 import type { MainContext } from '../context'
+import { stopImportsForRestore } from '../import/unplaced'
 import type { BackupStore } from './backups'
 import { sidebarUndo } from './inbox'
 import { buildSnapshot, restoreSidebar, type SidebarSnapshot } from './snapshot'
@@ -51,6 +52,8 @@ export class RestoreData {
       console.error('[backups] could not back up the sidebar before a restore; nothing was changed', err)
       return { restored: false, reason: 'backup-failed' }
     }
+    // A running import stops first (D65 (3)), so what this restore replaces holds nothing of it.
+    stopImportsForRestore()
     const at = this.now()
     const state = this.ctx.store.state
     const replaced = buildSnapshot(state, at)

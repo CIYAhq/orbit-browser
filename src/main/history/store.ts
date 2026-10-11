@@ -66,6 +66,16 @@ export interface HostInfo {
   lastVisit: number
 }
 
+/** A page from another browser's history (IM-07, added by the import lane). */
+export interface ImportedPage {
+  url: string
+  title: string
+  visitCount: number
+  typedCount: number
+  /** Its latest visit times, in ms (the newest MAX_VISITS_PER_ENTRY are kept). */
+  visits: number[]
+}
+
 export interface HistoryStoreOptions {
   now?: () => number
   /** Background compaction once appended bytes pass max(this, last snapshot size). Default 1 MiB. */
@@ -247,6 +257,64 @@ export class HistoryStore {
     this.rebuildHosts()
     this.changed()
     this.write(rec)
+  }
+
+  /**
+   * Adds pages imported from another browser (IM-07, import lane), after `load()`: one pass, no log
+   * record per visit. A visit already here isn't added again, so importing the same history twice
+   * changes nothing (IM-15). Call it a chunk at a time, then `finishImport()`. Returns the pages
+   * that were new or gained visits.
+   */
+  importPages(pages: readonly ImportedPage[]): number {
+    if (!this.isLoaded) throw new Error('History isn’t loaded yet')
+    if (this.dropped) return 0
+    let changed = 0
+    for (const p of pages) {
+      if (!isRecordable(p.url)) continue
+      const times = [...new Set(p.visits.filter(Number.isFinite))].sort((a, b) => a - b)
+      const recent = times.slice(-MAX_VISITS_PER_ENTRY)
+      const known = this.map.get(p.url)
+      // Visits this page already has mean it was imported before: only its newer visits are added
+      // (an entry keeps its newest visits only, so older ones may be counted already).
+      const before = known && recent.some((at) => known.visits.includes(at)) ? known : undefined
+      const fresh = before
+        ? recent.filter(
+            (at) =>
+              !before.visits.includes(at) && (before.visits.length < MAX_VISITS_PER_ENTRY || at > before.visits[0]!),
+          )
+        : recent
+      const first = fresh[0]
+      const last = fresh[fresh.length - 1]
+      if (first === undefined || last === undefined) continue
+      const visits = before ? fresh.length : Math.max(Number(p.visitCount) || 0, times.length)
+      const typed = before ? 0 : Math.min(Math.max(0, Number(p.typedCount) || 0), visits)
+      const e = this.entry(this.map, p.url, first)
+      const title = p.title.trim().slice(0, MAX_TITLE)
+      if (!e.title && title) {
+        e.title = title
+        e.titleLower = title.toLowerCase()
+      }
+      e.visitCount += visits
+      e.typedCount += typed
+      e.firstVisit = Math.min(e.firstVisit, first)
+      e.lastVisit = Math.max(e.lastVisit, last)
+      for (const at of fresh) pushVisit(e.visits, at)
+      this.countHost(e, visits, typed, e.lastVisit)
+      // A log that can't be read gets each addition in its side file; otherwise finishImport's snapshot holds them.
+      if (this.phase !== 'ready') {
+        this.write({ t: 'e', u: p.url, ti: e.title, vc: visits, tc: typed, fv: first, v: fresh })
+      }
+      changed++
+    }
+    if (changed) this.changed()
+    return changed
+  }
+
+  /** After `importPages`: keeps the newest MAX_ENTRIES entries and writes them as a snapshot. */
+  async finishImport(): Promise<void> {
+    this.trim()
+    await this.idle()
+    await this.compact()
   }
 
   /** Forgets everything and removes the files (the profile was deleted). */
