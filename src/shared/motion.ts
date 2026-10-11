@@ -95,9 +95,18 @@ export function tween(token: Token, opts: { exit?: boolean; delay?: number } = {
   }
 }
 
-/** Popovers (FL-25): open on the snappy curve in about 150 ms (fade and 0.97 → 1), close with quick. */
+/**
+ * One 60 Hz frame (s). An entrance timed from its first frame shows nothing in that frame when it
+ * fades up from 0; starting it this far in shows it at once (FL-29: the first frame after the key).
+ */
+export const ONE_FRAME_S = 1 / 60
+
+/**
+ * Popovers (FL-25): open on the snappy curve in about 150 ms (fade and 0.97 → 1), a frame along so the
+ * first frame drawn already shows them (ONE_FRAME_S); close with quick.
+ */
 export const POPOVER = {
-  in: { duration: 0.15, ease: EASE.snappy },
+  in: { duration: 0.15, ease: EASE.snappy, delay: -ONE_FRAME_S },
   out: tween('quick', { exit: true }),
 } as const
 
@@ -118,9 +127,3 @@ export const REDUCED = {
 
 /** Reduced motion's settle for a released drag or swipe, as a motion tween. */
 export const REDUCED_SETTLE = { duration: REDUCED.settleMs / 1000, ease: REDUCED.settleEase }
-
-/**
- * One 60 Hz frame (s). An entrance timed from its first frame shows nothing in that frame when it
- * fades up from 0; starting it this far in shows it at once (FL-29: the first frame after the key).
- */
-export const ONE_FRAME_S = 1 / 60

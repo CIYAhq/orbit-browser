@@ -1,4 +1,4 @@
-import { motion } from 'motion/react'
+import { AnimatePresence, motion, useIsPresent } from 'motion/react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { isFolderId } from '../../../../shared/ids'
 import { invoke } from '../../api'
@@ -60,6 +60,12 @@ const EMOJI: [string, string][] = [
 /** Emoji picker for a tab or folder icon (TB-12, FD-07). Removing the icon restores the favicon. */
 export function IconPicker() {
   const id = useIconPicker((s) => s.id)
+  // FL-25: it closes with the quick timing (fade and back to 0.97).
+  return <AnimatePresence>{id && <IconPickerPanel key={id} id={id} />}</AnimatePresence>
+}
+
+function IconPickerPanel({ id }: { id: string }) {
+  const present = useIsPresent()
   const [query, setQuery] = useState('')
   const [top, setTop] = useState(0)
   const ref = useRef<HTMLDivElement>(null)
@@ -76,6 +82,10 @@ export function IconPicker() {
     }
     input.current?.focus()
   }, [id])
+  // Closing: it fades out, and keys go back to the sidebar at once.
+  useEffect(() => {
+    if (!present) input.current?.blur()
+  }, [present])
   useEffect(() => {
     if (!id) return
     const onDown = (e: PointerEvent) => {
@@ -84,7 +94,6 @@ export function IconPicker() {
     window.addEventListener('pointerdown', onDown, true)
     return () => window.removeEventListener('pointerdown', onDown, true)
   }, [id])
-  if (!id) return null
   const set = (icon: string | null) => {
     if (isFolderId(id)) void invoke('folders.setIcon', { folderId: id, icon })
     else void invoke('tabs.setIcon', { tabId: id, icon })
@@ -103,6 +112,7 @@ export function IconPicker() {
       aria-label="Choose icon"
       initial={{ opacity: 0, scale: 0.97 }}
       animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.97, transition: POPOVER.out, pointerEvents: 'none' }}
       transition={POPOVER.in}
     >
       <input

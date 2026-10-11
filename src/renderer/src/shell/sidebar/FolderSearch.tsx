@@ -1,4 +1,4 @@
-import { motion } from 'motion/react'
+import { AnimatePresence, motion, useIsPresent } from 'motion/react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Tab } from '../../../../shared/state'
 import { tabTitle } from '../../../../shared/tabs'
@@ -19,6 +19,12 @@ const NO_MAP: Record<string, Tab> = {}
  */
 export function FolderSearch() {
   const id = useFolderSearch((s) => s.id)
+  // FL-25: it closes with the quick timing (fade and back to 0.97).
+  return <AnimatePresence>{id && <FolderSearchPanel key={id} id={id} />}</AnimatePresence>
+}
+
+function FolderSearchPanel({ id }: { id: string }) {
+  const present = useIsPresent()
   const folderName = useOrbit((s) => (id ? s.folders[id]?.name : undefined))
   const tabIds = useOrbit((s) => (id ? tabsInItem(s, id).join(',') : ''))
   // Only watch the tabs while open (a stable empty map otherwise).
@@ -55,6 +61,10 @@ export function FolderSearch() {
     }
     input.current?.focus()
   }, [id])
+  // Closing: it fades out, and keys go back to the sidebar at once.
+  useEffect(() => {
+    if (!present) input.current?.blur()
+  }, [present])
   useEffect(() => {
     if (!id) return
     const onDown = (e: PointerEvent) => {
@@ -63,7 +73,6 @@ export function FolderSearch() {
     window.addEventListener('pointerdown', onDown, true)
     return () => window.removeEventListener('pointerdown', onDown, true)
   }, [id])
-  if (!id) return null
   const open = (tab: Tab | undefined) => {
     if (!tab) return
     useFolderSearch.setState({ id: null })
@@ -79,6 +88,7 @@ export function FolderSearch() {
       aria-label={`Search ${folderName ?? 'folder'}`}
       initial={{ opacity: 0, scale: 0.97 }}
       animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.97, transition: POPOVER.out, pointerEvents: 'none' }}
       transition={POPOVER.in}
     >
       <input

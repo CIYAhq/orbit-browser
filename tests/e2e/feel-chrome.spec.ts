@@ -1,11 +1,11 @@
 /**
- * Feel of the window's own furniture (feel.md FL-22 toasts), measured frame by frame
+ * Feel of the window's own furniture (feel.md FL-22 toasts, FL-25 popovers), measured frame by frame
  * with the shared sampler (frames.ts). Each test logs its numbers (`[feel]` lines): docs/FEEL.md has them
  * against their targets.
  */
 import { expect, test } from '@playwright/test'
-import { motionOf, note, type Recording, record, series } from './frames'
-import { FRAME_SLACK, launchOrbit, type Orbit } from './helpers'
+import { motionOf, note, type Recording, record, responseTo, series } from './frames'
+import { FRAME_SLACK, launchOrbit, type Orbit, run, state } from './helpers'
 import { settled } from './tabs-support'
 
 let orbit: Orbit
@@ -124,4 +124,50 @@ test('[FL-22] three toasts stack 8 px apart, each rising in with the pop spring 
     expect(s.out).toBeLessThanOrEqual(250 * FRAME_SLACK)
     expect(s.drop, 'a leaving toast drops').toBeGreaterThanOrEqual(4)
   }
+})
+
+test('[FL-25] a folder’s search popover opens from 0.97 with the snappy timing and closes with the quick one', async () => {
+  const { app, shell } = orbit
+  const tabs: string[] = []
+  for (let k = 0; k < 3; k++)
+    tabs.push((await run(app, 'tabs.create', { url: `about:blank#p${k}`, activate: false })) as string)
+  const space = Object.values((await state(app)).windows)[0]?.spaceId as string
+  await run(app, 'folders.create', { container: { kind: 'pinned', spaceId: space }, name: 'Box', items: tabs })
+  const folderRow = shell.getByTestId('folder-row')
+  await folderRow.hover()
+  await settled(shell)
+  const button = shell.getByTestId('folder-search-button')
+  await expect(button).toHaveCSS('opacity', '1')
+  const rec = await record(shell, { pop: '[data-testid="folder-search"]' })
+  await button.click()
+  await expect(shell.getByTestId('folder-search-input')).toBeFocused()
+  await shell.waitForTimeout(400)
+  await shell.keyboard.press('Escape')
+  await expect(shell.getByTestId('folder-search')).toHaveCount(0)
+  const r = await rec.until(1000)
+  const click = r.inputs.find((i) => i.type === 'pointerup')
+  const esc = r.inputs.find((i) => i.type === 'keydown' && i.key === 'Escape')
+  if (!click || !esc) throw new Error('the click or Escape never reached the shell')
+  const open = r.frames.filter((f) => f.i < esc.frame && f.els.pop)
+  const full = open.at(-1)?.els.pop
+  if (!full) throw new Error('the popover never showed')
+  const shown = responseTo(r, click, (f) => (f.els.pop?.opacity ?? 0) > 0)
+  const first = shown?.frame.els.pop
+  const opened = responseTo(
+    r,
+    click,
+    (f) => (f.els.pop?.opacity ?? 0) >= 0.99 && (f.els.pop?.width ?? 0) >= full.width - 0.5,
+  )
+  const closing = r.frames.filter((f) => f.i >= esc.frame && f.els.pop && (f.els.pop.opacity ?? 0) > 0.01)
+  const gone = responseTo(r, esc, (f) => !f.els.pop || f.els.pop.opacity <= 0.01)
+  note('FL-25', 'popover: click → first drawn', shown?.frames, '1', 'frames')
+  note('FL-25', 'popover: first frame scale', first ? first.width / full.width : undefined, '≈ 0.97', '×')
+  note('FL-25', 'popover: click → fully open', opened?.ms, '≈ 150 ms (snappy)')
+  note('FL-25', 'popover: Escape → gone', gone?.ms, '≈ 90–130 ms (quick)')
+  note('FL-25', 'popover: frames closing', closing.length, '≥ 2 (a fade, not a cut)', 'frames')
+  expect(shown?.frames ?? Number.POSITIVE_INFINITY, 'frames from the click to the popover').toBeLessThanOrEqual(2)
+  expect(first ? first.width / full.width : 1, 'it grows in from about 0.97').toBeLessThanOrEqual(0.99)
+  expect(opened?.ms ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual((150 + 3 * FRAME) * FRAME_SLACK)
+  expect(closing.length, 'the popover fades out').toBeGreaterThanOrEqual(2)
+  expect(gone?.ms ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual((130 + 3 * FRAME) * FRAME_SLACK)
 })
