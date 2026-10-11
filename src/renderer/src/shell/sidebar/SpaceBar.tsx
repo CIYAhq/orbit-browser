@@ -13,6 +13,7 @@ import { DEFAULT_PROFILE_ID } from '../../../../shared/defaults'
 import type { SpaceId, WindowState } from '../../../../shared/state'
 import { primaryColor } from '../../../../shared/theme'
 import { invoke } from '../../api'
+import { useKeymap } from '../../keys/live'
 import { LibraryButton } from '../../library/LibraryButton'
 import { useOrbit } from '../../store'
 import { switcher } from '../spaces/switcher'
@@ -208,8 +209,9 @@ const SpaceTarget = memo(function SpaceTarget(props: {
     const id = s.spaces[spaceId]?.profileId
     return id && id !== DEFAULT_PROFILE_ID ? s.profiles[id]?.name : undefined
   })
+  // The shortcut comes from the keymap, so it follows remaps (AP-16, KS-18; review F14).
+  useKeymap()
   if (name === undefined) return null
-  // The shortcut comes from the action table, so it follows remaps (AP-16; review F14).
   const action = index < 9 ? ACTIONS_BY_ID[`space.goto.${index + 1}`] : undefined
   const accel = action ? shortcutsFor(action, window.orbit.platform)[0] : undefined
   const shortcut = accel ? formatAccelerator(accel, window.orbit.platform) : ''

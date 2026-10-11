@@ -15,6 +15,7 @@ import { layoutLeaves, MAX_PANES, SPLIT_FULL_MESSAGE } from '../../shared/split'
 import type { OrbitState, SpaceId, Tab, TabId, WindowId } from '../../shared/state'
 import { insertItem, sectionOf, splitOfTab } from '../../shared/tree'
 import type { MainContext } from '../context'
+import { KEEP_KEYBOARD } from '../keys/focus'
 import { openMiniWindow } from '../miniwindow'
 import type { CallContext } from '../registry'
 import { activateInDraft, todayInsertIndex } from '../tabs/model'
@@ -649,6 +650,7 @@ export function registerPeek(ctx: MainContext): void {
         return {
           action: 'allow',
           outlivesOpener: true,
+          overrideBrowserWindowOptions: { webPreferences: KEEP_KEYBOARD },
           createWindow: (options) => {
             const guest = (options as { webContents?: WebContents }).webContents
             let created: WebContents | undefined

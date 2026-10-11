@@ -93,6 +93,14 @@ export const SETTINGS_ACTIONS: SettingsActionDef[] = [
     settings: { section: 'appearance' },
     keywords: ['theme', 'dark mode', 'light mode', 'match system'],
   },
+  // Keys lane: Settings → Shortcuts (ST-08, KS-12).
+  {
+    id: 'settings.shortcuts',
+    title: 'Shortcut Settings',
+    category: 'App',
+    settings: { section: 'shortcuts' },
+    keywords: ['keyboard shortcuts', 'shortcuts', 'remap keys', 'key bindings', 'hotkeys'],
+  },
   {
     id: 'settings.links',
     title: 'Link Settings',
@@ -138,7 +146,15 @@ export const SETTINGS_LANE_ACTIONS: ActionDef[] = [
   // Runs the first-run flow again over the open windows, keeping all data (OB-14).
   { id: 'onboarding.reset', title: 'Reset Onboarding', category: 'App', keywords: ['welcome', 'first run', 'setup'] },
   // Help and feedback (OB-13): the project's public pages, in a tab. Orbit has no support server.
-  { id: 'help.open', title: 'Help', category: 'App', keywords: ['documentation', 'user guide', 'support', 'readme'] },
+  {
+    id: 'help.open',
+    title: 'Help',
+    category: 'App',
+    // Windows and Linux: F1, which can't be changed (KS-15); macOS has ⌘? for the Help menu.
+    other: ['F1'],
+    fixed: 'other',
+    keywords: ['documentation', 'user guide', 'support', 'readme'],
+  },
   {
     id: 'help.reportBug',
     title: 'Report a Bug',

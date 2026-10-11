@@ -4,6 +4,7 @@ import type { NavDirection } from '../../../../shared/commands/nav'
 import { shownTabId } from '../../../../shared/nav'
 import { sectionOf } from '../../../../shared/tree'
 import { invoke, isMac } from '../../api'
+import { useKeymap } from '../../keys/live'
 import { useOrbitShallow } from '../../store'
 import { playPress } from './press'
 import { rasterizeSvgIcons } from './raster'
@@ -56,6 +57,8 @@ export function NavButtons({ windowId }: { windowId: string }) {
  * long-press or right-click shows the tab's history in that direction (NV-01).
  */
 function HistoryButton({ direction, enabled }: { direction: NavDirection; enabled: boolean }) {
+  // The tooltips follow remapped shortcuts (KS-18).
+  useKeymap()
   const ref = useRef<HTMLButtonElement>(null)
   const hold = useRef<{ timer: number; opened: boolean } | null>(null)
   const label = direction === 'back' ? 'Back' : 'Forward'
@@ -143,6 +146,8 @@ function HistoryButton({ direction, enabled }: { direction: NavDirection; enable
  * ⌘-click or middle-click duplicates the tab (SB-03, NV-03, NV-04).
  */
 function ReloadButton({ enabled, loading }: { enabled: boolean; loading: boolean }) {
+  // The tooltips follow remapped shortcuts (KS-18).
+  useKeymap()
   const ref = useRef<HTMLButtonElement>(null)
   const duplicate = (foreground: boolean) => {
     playPress(ref.current, 'reload')

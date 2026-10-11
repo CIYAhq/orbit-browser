@@ -1,0 +1,70 @@
+{
+   "checksum": "ffffffffffffffffffffffffffffffff",
+   "roots": {
+      "bookmark_bar": {
+         "children": [
+            {
+               "date_added": "13351132800000000",
+               "guid": "00000000-0000-4000-8000-000000000004",
+               "id": "4",
+               "name": "Weather",
+               "type": "url",
+               "url": "https://weather.example.org/"
+            }
+         ],
+         "date_added": "13351132800000000",
+         "date_modified": "13351132800000000",
+         "guid": "00000000-0000-4000-8000-000000000001",
+         "id": "1",
+         "name": "Bookmarks bar",
+         "type": "folder"
+      },
+      "other": {
+         "children": [
+            {
+               "children": [
+                  {
+                     "date_added": "13351132800000000",
+                     "guid": "00000000-0000-4000-8000-000000000006",
+                     "id": "6",
+                     "name": "Trains",
+                     "type": "url",
+                     "url": "https://example.com/page/Trains"
+                  }
+               ],
+               "date_added": "13351132800000000",
+               "guid": "00000000-0000-4000-8000-000000000005",
+               "id": "5",
+               "name": "Travel",
+               "date_modified": "13351132800000000",
+               "type": "folder"
+            }
+         ],
+         "date_added": "13351132800000000",
+         "date_modified": "13351132800000000",
+         "guid": "00000000-0000-4000-8000-000000000002",
+         "id": "2",
+         "name": "Other bookmarks",
+         "type": "folder"
+      },
+      "synced": {
+         "children": [
+            {
+               "date_added": "13351132800000000",
+               "guid": "00000000-0000-4000-8000-000000000007",
+               "id": "7",
+               "name": "Recipes on the go",
+               "type": "url",
+               "url": "https://example.com/page/Mobile"
+            }
+         ],
+         "date_added": "13351132800000000",
+         "date_modified": "13351132800000000",
+         "guid": "00000000-0000-4000-8000-000000000003",
+         "id": "3",
+         "name": "Mobile bookmarks",
+         "type": "folder"
+      }
+   },
+   "version": 1
+}

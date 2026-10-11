@@ -12,9 +12,10 @@ import {
 import { framesMayOpen } from '../../shared/link-routing'
 import { reopenReferrerPolicy } from '../../shared/nav'
 import { isPrivateProfileId } from '../../shared/private'
-import type { Tab, TabId } from '../../shared/state'
+import type { Tab, TabId, WindowId } from '../../shared/state'
 import { isAwayFromPinned, sameDocUrl } from '../../shared/tabs'
 import type { MainContext } from '../context'
+import { KEEP_KEYBOARD } from '../keys/focus'
 import { showPageContextMenu } from './context-menu'
 import { FaviconStore } from './favicon-store'
 import { isIco, readIco } from './ico'
@@ -157,6 +158,8 @@ export class TabRuntime {
   onPageClosed?: (tabId: TabId) => void
   /** Control was released in a page (ends recent-tab switching, TB-05). */
   onControlUp?: () => void
+  /** Recent-tab switching in a window (TB-05): whether it is going on, and closing its highlighted tab (W, KS-06). */
+  recentSwitch?: { active: (windowId: WindowId) => boolean; closeHighlighted: (windowId: WindowId) => void }
   /** A page tried to open a tab or pop-up without a user gesture. */
   onPopupBlocked?: (tabId: TabId, url: string, referrer: Referrer) => void
   /**
@@ -218,6 +221,8 @@ export class TabRuntime {
         scrollBounce: true,
         navigateOnDragDrop: false,
         safeDialogs: true,
+        // A page that loads never takes the keyboard (KS-16).
+        ...KEEP_KEYBOARD,
       },
     })
     this.adopt(tabId, view)
@@ -548,6 +553,7 @@ export class TabRuntime {
     return {
       action: 'allow',
       outlivesOpener: true,
+      overrideBrowserWindowOptions: { webPreferences: KEEP_KEYBOARD },
       createWindow: (options) => {
         const guest = (options as { webContents?: WebContents }).webContents
         // No page after all (only links the browser opens come without one): Orbit loads it.

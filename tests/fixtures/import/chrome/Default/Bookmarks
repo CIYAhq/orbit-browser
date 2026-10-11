@@ -1,0 +1,139 @@
+{
+   "checksum": "ffffffffffffffffffffffffffffffff",
+   "roots": {
+      "bookmark_bar": {
+         "children": [
+            {
+               "children": [
+                  {
+                     "date_added": "13351132800000000",
+                     "guid": "00000000-0000-4000-8000-000000000005",
+                     "id": "5",
+                     "name": "Team calendar",
+                     "type": "url",
+                     "url": "https://example.com/page/Calendar"
+                  },
+                  {
+                     "date_added": "13351132800000000",
+                     "guid": "00000000-0000-4000-8000-000000000006",
+                     "id": "6",
+                     "name": "Design docs",
+                     "type": "url",
+                     "url": "https://example.com/page/Docs"
+                  },
+                  {
+                     "date_added": "13351132800000000",
+                     "guid": "00000000-0000-4000-8000-000000000007",
+                     "id": "7",
+                     "name": "Issue tracker",
+                     "type": "url",
+                     "url": "https://example.com/page/Issues"
+                  }
+               ],
+               "date_added": "13351132800000000",
+               "guid": "00000000-0000-4000-8000-000000000004",
+               "id": "4",
+               "name": "Work",
+               "date_modified": "13351132800000000",
+               "type": "folder"
+            },
+            {
+               "children": [
+                  {
+                     "date_added": "13351132800000000",
+                     "guid": "00000000-0000-4000-8000-000000000009",
+                     "id": "9",
+                     "name": "Morning paper",
+                     "type": "url",
+                     "url": "https://example.com/page/Paper"
+                  },
+                  {
+                     "date_added": "13351132800000000",
+                     "guid": "00000000-0000-4000-8000-000000000010",
+                     "id": "10",
+                     "name": "Tech & Science <weekly>",
+                     "type": "url",
+                     "url": "https://example.com/page/Weekly"
+                  }
+               ],
+               "date_added": "13351132800000000",
+               "guid": "00000000-0000-4000-8000-000000000008",
+               "id": "8",
+               "name": "News",
+               "date_modified": "13351132800000000",
+               "type": "folder"
+            }
+         ],
+         "date_added": "13351132800000000",
+         "date_modified": "13351132800000000",
+         "guid": "00000000-0000-4000-8000-000000000001",
+         "id": "1",
+         "name": "Bookmarks bar",
+         "type": "folder"
+      },
+      "other": {
+         "children": [
+            {
+               "children": [
+                  {
+                     "children": [
+                        {
+                           "date_added": "13351132800000000",
+                           "guid": "00000000-0000-4000-8000-000000000013",
+                           "id": "13",
+                           "name": "Sourdough",
+                           "type": "url",
+                           "url": "https://example.com/page/Sourdough"
+                        }
+                     ],
+                     "date_added": "13351132800000000",
+                     "guid": "00000000-0000-4000-8000-000000000012",
+                     "id": "12",
+                     "name": "Bread",
+                     "date_modified": "13351132800000000",
+                     "type": "folder"
+                  }
+               ],
+               "date_added": "13351132800000000",
+               "guid": "00000000-0000-4000-8000-000000000011",
+               "id": "11",
+               "name": "Recipes",
+               "date_modified": "13351132800000000",
+               "type": "folder"
+            },
+            {
+               "date_added": "13351132800000000",
+               "guid": "00000000-0000-4000-8000-000000000014",
+               "id": "14",
+               "name": "Make it dark",
+               "type": "url",
+               "url": "javascript:document.body.style.background=\"#000\""
+            },
+            {
+               "date_added": "13351132800000000",
+               "guid": "00000000-0000-4000-8000-000000000015",
+               "id": "15",
+               "name": "Browser settings",
+               "type": "url",
+               "url": "chrome://settings/"
+            }
+         ],
+         "date_added": "13351132800000000",
+         "date_modified": "13351132800000000",
+         "guid": "00000000-0000-4000-8000-000000000002",
+         "id": "2",
+         "name": "Other bookmarks",
+         "type": "folder"
+      },
+      "synced": {
+         "children": [],
+         "date_added": "13351132800000000",
+         "date_modified": "13351132800000000",
+         "guid": "00000000-0000-4000-8000-000000000003",
+         "id": "3",
+         "name": "Mobile bookmarks",
+         "type": "folder"
+      }
+   },
+   "version": 1
+}

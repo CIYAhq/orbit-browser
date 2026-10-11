@@ -17,6 +17,8 @@ import type { Space, SpaceId } from '../../../../shared/state'
 import { containerKey, locate, sectionOf, splitOfTab } from '../../../../shared/tree'
 import { engineForSpace, parseInput } from '../../../../shared/url'
 import { invoke, isMac, runAction } from '../../api'
+import { importDroppedFile, importPastedLinks, revealInSidebar } from '../../import/sidebar'
+import { useShortcutLabel } from '../../keys/live'
 import { activeTabId } from '../../selectors'
 import { getOrbitState, useOrbit } from '../../store'
 import { DragGhost } from './DragGhost'
@@ -100,13 +102,14 @@ export const SidebarItems = memo(function SidebarItems({
           onKeyDown={onKeyDown}
           onDragOver={onLinkDragOver}
           onDrop={(e) => onLinkDrop(e, space.id)}
+          onPaste={importPastedLinks}
           onContextMenu={(e) => {
             if (!e.defaultPrevented) onContextMenu?.(e)
           }}
         >
           {simple ? header : <SpaceHeader space={space}>{header}</SpaceHeader>}
           {!simple && <PinnedSection space={space} />}
-          <TodayBlock space={space} />
+          <TodayBlock space={space} clear={!simple} />
           <ItemList
             key={`today:${space.id}`}
             containerKey={`today:${space.id}`}
@@ -220,10 +223,15 @@ const PinnedSection = memo(function PinnedSection({ space }: { space: Space }) {
   )
 })
 
-/** Divider with Clear (TD-04) and the "+ New Tab" row (SB-07): one drop slot between pinned and Today. */
-function TodayBlock({ space }: { space: Space }) {
+/**
+ * Divider with Clear (TD-04) and the "+ New Tab" row (SB-07): one drop slot between pinned and Today.
+ * A private window's list has no Clear: its tabs have no Archive to go to (SB-25, KS-20).
+ */
+function TodayBlock({ space, clear }: { space: Space; clear: boolean }) {
   const y = useRowShift('divider')
-  const hasToday = space.today.length > 0
+  const hasToday = clear && space.today.length > 0
+  // The button's tooltip follows a remapped shortcut (KS-18).
+  const clearShortcut = useShortcutLabel('tabs.clearToday')
   return (
     <motion.div
       className="today-block"
@@ -241,7 +249,7 @@ function TodayBlock({ space }: { space: Space }) {
             type="button"
             className="sidebar__clear"
             data-testid="clear-today"
-            title={`Archive all Today tabs (${isMac ? '⌘⇧K' : 'Ctrl+Shift+K'})`}
+            title={clearShortcut ? `Archive all Today tabs (${clearShortcut})` : 'Archive all Today tabs'}
             onClick={() => void invoke('tabs.clearToday', { spaceId: space.id })}
           >
             <ArrowDown size={11} strokeWidth={2.4} />
@@ -269,7 +277,7 @@ function TodayBlock({ space }: { space: Space }) {
 function onLinkDragOver(e: ReactDragEvent) {
   if (useDrag.getState().phase !== 'idle') return
   const types = e.dataTransfer.types
-  if (types.includes('text/uri-list') || types.includes('text/plain')) {
+  if (types.includes('text/uri-list') || types.includes('text/plain') || types.includes('Files')) {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'copy'
   }
@@ -281,6 +289,7 @@ function onLinkDrop(e: ReactDragEvent, spaceId: string) {
     .split('\n')
     .find((l) => l && !l.startsWith('#'))
   const text = uri?.trim() || e.dataTransfer.getData('text/plain').trim()
+  if (importDroppedFile(e, text, spaceId)) return
   if (!text) return
   e.preventDefault()
   const parsed = parseInput(text, engineForSpace(getOrbitState(), spaceId))
@@ -308,6 +317,7 @@ function useMainMessages(scrollRef: React.RefObject<HTMLDivElement | null>) {
       window.orbit.on('sidebar:edit-pinned-url', (p) => startRename((p as { id: string }).id, { mode: 'url' })),
       window.orbit.on('sidebar:icon', (p) => useIconPicker.setState({ id: (p as { id: string }).id })),
       window.orbit.on('sidebar:clear-selection', () => clearSelection()),
+      window.orbit.on('sidebar:reveal', (p) => revealInSidebar(scrollRef.current, (p as { id: string }).id)),
       window.orbit.on('sidebar:focus', () => {
         const el = scrollRef.current
         if (!el) return

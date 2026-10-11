@@ -192,6 +192,12 @@ export const PAGE_CHANNEL = {
   internalInvoke: 'orbit-page:internal-invoke',
   /** Main → page: (channel, ...args) of a state change or broadcast Orbit's UI gets. */
   internalEvent: 'orbit-page:internal-event',
+  /**
+   * send(used): a trusted Esc reached the page's main frame and every handler of the page has had
+   * it: whether one called preventDefault (KS-19, D59). Main reads it only while it waits after an
+   * Esc in a loading tab, and only from that tab's main frame (src/main/keys/escape.ts).
+   */
+  escape: 'orbit-page:escape',
 } as const
 
 /** A tab comes forward for its notifications' clicks at most this often (a flood can't stall the shell). */
