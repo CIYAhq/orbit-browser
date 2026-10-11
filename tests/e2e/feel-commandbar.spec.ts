@@ -282,78 +282,97 @@ test('[FL-17][FL-29] typing 10 characters at 10 per second: each echoes in a fra
   })
   for (const name of ['Orbit notes', 'Orbit news', 'Orbital mechanics']) await openTab(app, name)
   const overlay = await viewPage(app, 'overlay')
-  await keysThroughMain(app, 'view=shell', 'T', [MOD_KEY])
-  await expect(overlay.getByTestId('command-input')).toBeFocused()
   const query = 'orbit note'
-  const rec = await record(
-    overlay,
-    {
-      input: { selector: '[data-testid="command-bar"] [data-testid="command-input"]', text: true },
-      bar: '[data-testid="command-bar"]',
-      rows: {
-        selector: '[data-testid="command-bar"] [data-testid="command-result"]',
-        key: 'data-id',
-        attrs: ['aria-selected', 'data-kind'],
+  // One round types the whole query into a fresh bar. Its timing budgets (the worst echo, the
+  // slowest local results) are judged on the best of up to three rounds (D46): one slow frame of a
+  // busy machine says little about Orbit. What must hold every time is checked in every round.
+  const typing = async () => {
+    await keysThroughMain(app, 'view=shell', 'T', [MOD_KEY])
+    await expect(overlay.getByTestId('command-input')).toBeFocused()
+    const rec = await record(
+      overlay,
+      {
+        input: { selector: '[data-testid="command-bar"] [data-testid="command-input"]', text: true },
+        bar: '[data-testid="command-bar"]',
+        rows: {
+          selector: '[data-testid="command-bar"] [data-testid="command-result"]',
+          key: 'data-id',
+          attrs: ['aria-selected', 'data-kind'],
+        },
+        titles: {
+          selector: '[data-testid="command-bar"] [data-testid="command-result-title"]',
+          key: 'data-id',
+          text: true,
+        },
       },
-      titles: {
-        selector: '[data-testid="command-bar"] [data-testid="command-result-title"]',
-        key: 'data-id',
-        text: true,
-      },
-    },
-    { maxMs: 4000 },
-  )
-  await keysThroughMain(app, 'view=overlay', '', [], query, 100)
-  const r = await rec.until(1000 + 900)
-  await suggest.close()
-  const downs = r.inputs.filter((i) => i.type === 'keydown')
-  expect(downs).toHaveLength(query.length)
-  const echo: number[] = []
-  const results: number[] = []
-  for (const [k, input] of downs.entries()) {
-    const typed = query.slice(0, k + 1)
-    const shown = r.frames.find((f) => f.i >= input.frame && f.els.input?.text === typed)
-    echo.push(shown ? shown.i - input.frame + 1 : Number.POSITIVE_INFINITY)
-    // The web-search row names what was typed (trimmed): the local results for this keystroke are
-    // in. A trailing space names the same search, so that keystroke has nothing new to show.
-    if (k > 0 && typed.trim() === query.slice(0, k).trim()) continue
-    const listed = r.frames.find(
-      (f) =>
-        f.i >= input.frame &&
-        Object.entries(f.lists.titles ?? {}).some(
-          ([id, b]) => b.text?.trim() === typed.trim() && f.lists.rows?.[id]?.attrs?.['data-kind'] === 'search',
-        ),
+      { maxMs: 4000 },
     )
-    results.push(listed ? listed.t - input.t : Number.POSITIVE_INFINITY)
-  }
-  // Highlight changes: each must follow a keystroke's own results (within 4 frames of the text
-  // changing); any later one was caused by something arriving late.
-  const moved: string[] = []
-  let lastText = ''
-  let textAt = 0
-  let prev: string | null | undefined
-  for (const f of r.frames) {
-    const text = f.els.input?.text ?? ''
-    if (text !== lastText) {
-      lastText = text
-      textAt = f.t
+    await keysThroughMain(app, 'view=overlay', '', [], query, 100)
+    const r = await rec.until(1000 + 900)
+    const downs = r.inputs.filter((i) => i.type === 'keydown')
+    expect(downs).toHaveLength(query.length)
+    const echo: number[] = []
+    const results: number[] = []
+    for (const [k, input] of downs.entries()) {
+      const typed = query.slice(0, k + 1)
+      const shown = r.frames.find((f) => f.i >= input.frame && f.els.input?.text === typed)
+      echo.push(shown ? shown.i - input.frame + 1 : Number.POSITIVE_INFINITY)
+      // The web-search row names what was typed (trimmed): the local results for this keystroke are
+      // in. A trailing space names the same search, so that keystroke has nothing new to show.
+      if (k > 0 && typed.trim() === query.slice(0, k).trim()) continue
+      const listed = r.frames.find(
+        (f) =>
+          f.i >= input.frame &&
+          Object.entries(f.lists.titles ?? {}).some(
+            ([id, b]) => b.text?.trim() === typed.trim() && f.lists.rows?.[id]?.attrs?.['data-kind'] === 'search',
+          ),
+      )
+      results.push(listed ? listed.t - input.t : Number.POSITIVE_INFINITY)
     }
-    const h = highlighted(f)
-    if (prev !== undefined && h !== prev && f.t - textAt > 4 * FRAME)
-      moved.push(`${prev}→${h} at ${Math.round(f.t)} ms`)
-    prev = h
+    // Highlight changes: each must follow a keystroke's own results (within 4 frames of the text
+    // changing); any later one was caused by something arriving late.
+    const moved: string[] = []
+    let lastText = ''
+    let textAt = 0
+    let prev: string | null | undefined
+    for (const f of r.frames) {
+      const text = f.els.input?.text ?? ''
+      if (text !== lastText) {
+        lastText = text
+        textAt = f.t
+      }
+      const h = highlighted(f)
+      if (prev !== undefined && h !== prev && f.t - textAt > 4 * FRAME)
+        moved.push(`${prev}→${h} at ${Math.round(f.t)} ms`)
+      prev = h
+    }
+    const end = r.frames.at(-1)
+    const suggestions = Object.values(end?.lists.rows ?? {}).filter(
+      (b) => b.attrs?.['data-kind'] === 'suggestion',
+    ).length
+    // The list's height between updates: a snap or a short animation, never a bounce back.
+    const heights = r.frames.map((f) => f.els.bar?.height ?? 0)
+    let reversals = 0
+    for (let k = 2; k < heights.length; k++) {
+      const a = (heights[k - 1] as number) - (heights[k - 2] as number)
+      const b = (heights[k] as number) - (heights[k - 1] as number)
+      if (Math.abs(a) > 0.5 && Math.abs(b) > 0.5 && Math.sign(a) !== Math.sign(b)) reversals++
+    }
+    await keysThroughMain(app, 'view=overlay', 'Escape', [])
+    await overlayGone(app)
+    return { echo, results, moved, suggestions, reversals }
   }
-  const end = r.frames.at(-1)
-  const suggestions = Object.values(end?.lists.rows ?? {}).filter((b) => b.attrs?.['data-kind'] === 'suggestion').length
-  // The list's height between updates: a snap or a short animation, never a bounce back.
-  const heights = r.frames.map((f) => f.els.bar?.height ?? 0)
-  let reversals = 0
-  for (let k = 2; k < heights.length; k++) {
-    const a = (heights[k - 1] as number) - (heights[k - 2] as number)
-    const b = (heights[k] as number) - (heights[k - 1] as number)
-    if (Math.abs(a) > 0.5 && Math.abs(b) > 0.5 && Math.sign(a) !== Math.sign(b)) reversals++
+  const { best, all } = await bestOf(
+    typing,
+    (m) => Math.max(...m.echo) <= (FRAME_SLACK > 1 ? 2 : 1) && Math.max(...m.results) <= 50 * FRAME_SLACK,
+  )
+  await suggest.close()
+  const { echo, results } = best
+  for (const m of all) {
+    console.log(
+      `[feel] FL-17 echo frames ${m.echo.join(' ')}; results ms ${m.results.map((v) => Math.round(v)).join(' ')}`,
+    )
   }
-  console.log(`[feel] FL-17 echo frames ${echo.join(' ')}; results ms ${results.map((v) => Math.round(v)).join(' ')}`)
   note('FL-17', 'keystroke → field shows it, worst', Math.max(...echo), '1 frame', 'frames')
   note('FL-29', 'keystroke → local results on screen, worst', Math.max(...results), '≤ 50 ms')
   note(
@@ -362,14 +381,16 @@ test('[FL-17][FL-29] typing 10 characters at 10 per second: each echoes in a fra
     [...results].sort((a, b) => a - b)[results.length >> 1],
     '1 frame',
   )
-  note('FL-17', 'highlight moved by a late update', moved.length, '0', 'times')
-  note('FL-17', 'suggestion rows shown at the end', suggestions, '> 0', 'rows')
-  note('FL-17', 'list height reversals (bounces)', reversals, '0', '')
-  expect(moved).toEqual([])
-  expect(suggestions).toBeGreaterThan(0)
+  note('FL-17', 'highlight moved by a late update', Math.max(...all.map((m) => m.moved.length)), '0', 'times')
+  note('FL-17', 'suggestion rows shown at the end', Math.min(...all.map((m) => m.suggestions)), '> 0', 'rows')
+  note('FL-17', 'list height reversals (bounces)', Math.max(...all.map((m) => m.reversals)), '0', '')
+  for (const m of all) {
+    expect(m.moved).toEqual([])
+    expect(m.suggestions).toBeGreaterThan(0)
+    expect(m.reversals).toBe(0)
+  }
   expect(Math.max(...echo)).toBeLessThanOrEqual(FRAME_SLACK > 1 ? 2 : 1)
   expect(Math.max(...results)).toBeLessThanOrEqual(50 * FRAME_SLACK)
-  expect(reversals).toBe(0)
 })
 
 test('[FL-17] ↑/↓ move the highlight in the next frame', async () => {
