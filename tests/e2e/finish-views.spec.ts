@@ -1076,12 +1076,30 @@ test('[MW-04][MW-15] a Mini Window opens with a quick scale-and-fade: its UI gro
     .toBe(1)
   if (!ui) throw new Error('no Mini Window UI')
   type Sample = { t: number; scale: number; opacity: number }
+  /** When the grow's own animation started and finished, on the page's clock. */
+  type GrowTiming = { start: number | null; end: number | null }
   await ui.evaluate(() => {
     const root = document.querySelector('[data-testid="mini"]') as HTMLElement
     const samples: Sample[] = []
+    const timing: GrowTiming = { start: null, end: null }
     ;(window as unknown as { __grow: Sample[] }).__grow = samples
+    ;(window as unknown as { __growTiming: GrowTiming }).__growTiming = timing
+    let watched: Animation | undefined
     const began = performance.now()
     const timer = setInterval(() => {
+      const scaling = root
+        .getAnimations()
+        .find((a) => (a.effect as KeyframeEffect | null)?.getKeyframes().some((k) => k.transform !== undefined))
+      if (scaling && !watched) {
+        watched = scaling
+        scaling.finished.then(
+          () => {
+            timing.end = performance.now()
+          },
+          () => {},
+        )
+      }
+      if (watched && timing.start === null && watched.startTime !== null) timing.start = Number(watched.startTime)
       const cs = getComputedStyle(root)
       const scale = cs.transform === 'none' ? 1 : new DOMMatrixReadOnly(cs.transform).a
       samples.push({ t: performance.now(), scale, opacity: Number(cs.opacity) })
@@ -1119,7 +1137,13 @@ test('[MW-04][MW-15] a Mini Window opens with a quick scale-and-fade: its UI gro
     expect(growing[i]?.scale).toBeGreaterThanOrEqual((growing[i - 1]?.scale ?? 0) - 0.001)
   }
   expect(growing.some((x) => x.scale > 0.94 && x.scale < 0.99)).toBe(true)
-  const took = (s[to]?.t ?? 0) - (growing[0]?.t ?? 0)
+  // Timed from the grow's own start to its end: samples alone can start late on a busy machine,
+  // and an ease-out comes within 0.1% of full size well before it ends.
+  const growTiming = () => (ui as Page).evaluate(() => (window as unknown as { __growTiming: GrowTiming }).__growTiming)
+  await expect.poll(async () => (await growTiming()).end).not.toBeNull()
+  const { start, end } = await growTiming()
+  expect(start).not.toBeNull()
+  const took = (end ?? 0) - (start ?? 0)
   expect(took).toBeGreaterThan(150)
   expect(took).toBeLessThan(200 + 300 * FRAME_SLACK)
   // Where the window itself can't fade (Linux), the UI fades in with the grow.
