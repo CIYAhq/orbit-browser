@@ -30,11 +30,14 @@
   - P1 rows (FL-07, 08, 11, 12, 15, 18, 20, 22, 25) and FL-19: `1920500`, the lane after its P0 fixes and before any P1 change, run with the P1 specs. Three runs on 2026-10-11 at load 3–4 (FL-19 at load 2).
   - FL-22's Before is read from the old toast code (a 220 ms CSS keyframe, toasts 6 px apart, removed after 2.2 s), because the test doesn't run on the old toasts.
 - **After:** the lane's app code at `5416e5c`. Three runs on 2026-10-11 at load 3–4.5. FL-19 ran at load 0.7–1. FL-03's leave row ran at load 5, after its poll was made finer. FL-26 ran nine times on the lane merged with `main` at `592096b`, which has the keys lane's switcher, at load 2.5–5.6.
+  - FL-26 was measured again once TB-05 built the switcher's list (the finish-tabs lane): three runs at load 16–18, with two other lanes' e2e runs beside them. A row's Before is the keys lane's switcher as measured at `592096b`; a blank Before is a row that came with the list.
+  - FL-12's folder icon row came with FD-07's full-colour icon (the finish-tabs lane): three runs at load 5.4–6.3.
   - Fix round 1 (PR #25's review) measured the rows it touched again, on the lane after its fixes: FL-01's interruptions, FL-05's scroll, FL-09, FL-19's close, FL-21's accessibility row and the toasts under reduced motion. Their runs and loads are in the notes. The Before of a row new in this round is the lane just before its fix, in one run: FL-05's scroll at `a4adf9b` (load 4.4), the toasts at `0f9fbfb` (load 6.2–7.9). FL-21's accessibility row is the review's reading of `0f9fbfb`.
-- A blank Before cell has one of three causes:
+- A blank Before cell has one of four causes:
   - the row's test came with its fix;
   - on the old build the test failed an earlier check and stopped before the row (FL-07's ⌘Z and other-Space rows, FL-12's closing);
-  - the row is an audit with no change (FL-23, FL-26, FL-27), so its After is also how it was before.
+  - the row is an audit with no change (FL-23, FL-27), so its After is also how it was before;
+  - the row came with TB-05's list (FL-26) or FD-07's folder icon (FL-12).
 - **gap** marks a value that misses its target. The notes below the table say why each After gap remains. No number was tuned to pass on one run.
 
 | ID | Observable | Target | Before | After |
@@ -94,6 +97,7 @@
 | FL-12 | Click → content below in place / largest step share | ≤ 250 ms / < 60 % | 243 ms (237–245) / 17% | 239 ms (238–240) / 17% |
 | FL-12 | Children: first shown → last shown | 5 × 10–15 ms | **gap**: 0 ms | 67 ms |
 | FL-12 | Closing: content below moves for / click → closed | 150–180 ms / ≤ 250 ms |  | 167 ms (150–167) / 175 ms (167–179) |
+| FL-12 | Folder icon (FD-07), closed → open: cross-fade, first to last changing frame | about 150 ms |  | 100 ms (100–100), 130 ms set |
 | FL-13 | Swipe: frames off the fingers by > 0.5 px | 0 | 0 | 0 |
 | FL-13 | Swipe release → settled (release seen 90 ms after the last event) | ≤ 350 + 90 ms | **gap**: 476 ms (396–479) | 412 ms (394–412) |
 | FL-13 | Flick: travel / last event → settled | < 25 % / ≤ 350 + 90 ms | 23% / 361 ms (356–364) | 23% / 276 ms (275–291) |
@@ -161,11 +165,12 @@
 | FL-25 | Folder search: click → first drawn / first frame scale | 1 frame / ≈ 0.97 | **gap**: 2 frames / 0.98 | 1 frame / 0.99 |
 | FL-25 | Click → fully open | ≈ 150 ms (snappy) | 131 ms (130–136) | 120 ms (117–127) |
 | FL-25 | Escape → gone / frames closing | ≈ 90–130 ms / ≥ 2 | **gap**: 9 ms (6–15) / 0 | 84 ms (82–92) / 5 |
-| FL-26 | Holding ⌃: Tab → the previous tab highlighted (its sidebar row: the switcher has no list yet) | 1 frame (at once) |  | **gap**: 16 ms (7–35), 2 frames |
-| FL-26 | … a second Tab → the next tab highlighted | 1 frame |  | 10 ms (3–26), 1 frame |
-| FL-26 | … each Tab → that tab's page shown | when ⌃ is let go (TB-05) |  | **gap**: 8 ms (6–12) after the first Tab, 1 ms (1–2) after the second |
-| FL-26 | Letting go of ⌃ → frames that change the highlight | 0 (the page switches in that frame) |  | 0 |
-| FL-26 | The switcher's list: shown after the second Tab / its fade | 1 frame, or after a 150 ms hold / ≤ 100 ms, no slide |  | **gap**: not built (TB-05) |
+| FL-26 | Holding ⌃: one Tab held → the list drawn | after a hold of about 150 ms |  | 165 ms (160–170) |
+| FL-26 | … a second Tab → the list drawn | 1 frame |  | **gap**: 2 frames, 40 ms (26–41), at load 16–18; 1 frame at load 6.6 |
+| FL-26 | … each further Tab → the highlight moved | 1 frame (at once) | 1 frame, 10 ms (3–26) (the sidebar row; there was no list) | 1 frame (1–2) |
+| FL-26 | The list: fade in, first frame to full / movement while it shows | ≤ 100 ms / no slide |  | 100 ms (83–117), 90 ms set / 0 px |
+| FL-26 | Holding ⌃ → pages shown before ⌃ is let go | none (TB-05) | **gap**: each Tab's, 8 ms (6–12) after the first Tab, 1 ms (1–2) after the second | none |
+| FL-26 | Letting go of ⌃ → list hidden after the page shown | 0 (the same frame) | 0 frames that changed the highlight (no list) | 1.3 ms (1.2–1.6), in the same task in main |
 | FL-27 | Window loses focus (main’s blur) → sidebar starts dimming | at once |  | 20 ms (16–43) |
 | FL-27 | Blur: sidebar dimming takes / frames in between | ≈ 150 ms / a fade |  | 133 ms / 8 |
 | FL-27 | Focus → sidebar bright again / frames in between | at once / 0 |  | 10 ms (9–11) / 0 |
@@ -249,15 +254,16 @@
   - Under load 3–4 the long lists still have frames of two intervals, so p99 is two intervals: 5 such frames per 200-tab fling, and 12 per 500-tab scroll (was 102).
   - The longest task during a first showing is 57 ms (was 258 ms).
   - Rows that aren't drawn leave no hole for a screen reader: every row says its place in its list and the list's size (`aria-posinset`, `aria-setsize`), and its depth. Arrow keys, Home and End walk every row, drawn or not (review M3). Three runs at load 2.2–3.
-- **FL-22:** built as FL-22 says, with three exceptions:
-  - toasts show at the bottom of the sidebar, not over the page card, so they are hidden with the sidebar;
-  - plain toasts let clicks through, and only a toast with a button holds on hover;
-  - they don't use the Space theme (AP-14).
+- **FL-22:** built as FL-22 says, with two exceptions while the sidebar is shown, as its note says:
+  - Toasts still show at the sidebar's foot, not over the page card. They show over the bottom centre of the page card (the pane in use in a split) only while the sidebar is hidden (SB-13).
+  - Plain toasts let clicks through, and only a toast with a button holds on hover. Over the page card every toast takes the pointer.
 - **FL-23:** audited, not changed. The pill shows at 150 ms, and never for a fast load.
 - **FL-25:** the folder search popover now shows in its first frame and closes with the quick fade. Before, it took 2 frames to show and was gone at once.
-- **FL-26:** audited, not changed. The recent-tab switcher has no list on screen yet (TB-05 is partial), so there is no overlay to time.
-  - Holding ⌃, each Tab selects its tab at once and its page shows a few ms later. The row lights in the first frame after main has the key for every Tab but the first of a hold, which took 2 frames at the median (1–3 over nine runs).
-  - FL-26 and TB-05 switch the page when ⌃ is let go, with the list showing the highlight until then. That needs the list, which is TB-05's to build.
+- **FL-26:** built with TB-05's list (the finish-tabs lane). The first Tab opens the switcher in the overlay without drawing it. The list is drawn at the second Tab or after a 150 ms hold, and fades in over 90 ms (`--motion-instant`) with no slide. The highlight has no transition.
+  - The page stays as it is until ⌃ is let go. Then main shows the highlighted tab's page and hides the overlay's layer in the same task, with no fade out.
+  - The fade reads up to a frame longer than set: the list's first frame is drawn before its animation's clock starts (as `feel-reduced` allows).
+  - At load 16–18 the list was drawn in the second frame after the second Tab, in each of three runs. In one run at load 6.6 it was drawn in the first.
+  - Under reduced motion the list shows at full opacity in its first frame (`feel-reduced`).
 - **FL-27:** audited, not changed.
   - Main's blur reaches the shell over IPC, so the dimming starts 1–3 frames later.
   - On a window resized a step every frame, X merges steps: 8–10 of 16 widths are drawn. The page view gets the card's width within a frame at the median and in 18 ms at worst (25 ms in one run). Any gap shows the page's own colour.
@@ -280,7 +286,6 @@
 ### Not measured or not built
 
 - **FL-24** (P2, the Library's first open): not measured in this lane.
-- **FL-26's** list (P1, the Ctrl+Tab switcher): not built (TB-05), so its fade and timing can't be measured. The keys it has are in the table.
 - **FL-31** (P2, haptics): not built. There are no trackpad haptics on Linux.
 - **FL-18's** bubble and wobble (see the notes above).
 

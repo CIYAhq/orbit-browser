@@ -1,4 +1,5 @@
 import type { PageReferrer } from '../nav'
+import type { RowMenuAt } from '../row-menu'
 import type { LayoutPath, PaneSide, SplitAxis } from '../split'
 import type { ContainerRef, SplitId, TabId } from '../state'
 
@@ -56,7 +57,8 @@ export interface SplitCommands {
   /** Brings every pane of a pinned or Favorite split back to its own pinned page (SV-23). */
   'split.reset': { args: { splitId: SplitId }; result: void }
   /** Right-click menu of a split row (SV-22). */
-  'split.contextMenu': { args: { splitId: SplitId }; result: void }
+  /** The split row's menu, at `at` (the sender's coordinates) or the pointer (tabs lane's row menu, TB-14). */
+  'split.contextMenu': { args: { splitId: SplitId; at?: RowMenuAt }; result: void }
   /** The split-controls menu of a pane (SV-12). */
   'split.paneMenu': { args: { tabId: TabId }; result: void }
   /**

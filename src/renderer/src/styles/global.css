@@ -330,6 +330,56 @@ html.is-resizing * {
   background: var(--accent);
 }
 
+/* A Favorite playing sound: two small notes rise and fade over its corner, in turn (TB-15). */
+.favorite__notes {
+  position: absolute;
+  right: 4px;
+  top: 3px;
+  width: 14px;
+  height: 18px;
+  pointer-events: none;
+  color: var(--accent);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.favorite__note {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  opacity: 0;
+  animation: favorite-note 1.8s ease-out infinite;
+}
+
+.favorite__note + .favorite__note {
+  left: 6px;
+  animation-delay: 0.9s;
+}
+
+@keyframes favorite-note {
+  0% {
+    opacity: 0;
+    transform: translateY(4px) scale(0.8);
+  }
+  25% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-8px) scale(1);
+  }
+}
+
+/* Still notes: the second sits a little higher. */
+.reduce-motion .favorite__note {
+  animation: none;
+  opacity: 1;
+}
+
+.reduce-motion .favorite__note + .favorite__note {
+  transform: translateY(-6px);
+}
+
 /* Scrollable lists */
 .sidebar__scroll {
   flex: 1;
@@ -941,35 +991,39 @@ html[data-view="strip"] body {
   z-index: 10;
 }
 
+/* In the Space's colours (SP-16, tabs lane), as the other surfaces over the window are. */
 .toast {
   padding: 8px 12px;
   border-radius: 9px;
   font-size: 12px;
-  color: #fff;
-  background: rgba(24, 24, 28, 0.88);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  color: var(--text, #fff);
+  background: var(--surface, rgba(24, 24, 28, 0.88));
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.16),
+    0 6px 20px rgba(0, 0, 0, 0.2);
 }
 
-/* A toast with a button (AR-05 "Go to Space") takes clicks. */
+/* A toast with a button (AR-05 "Go to Space") takes clicks, all of it (SB-13, FL-22). */
 .toast.has-action {
   display: flex;
   align-items: center;
   gap: 10px;
   pointer-events: auto;
+  cursor: default;
 }
 
 .toast__action {
   flex: none;
   padding: 3px 8px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.16);
-  color: #fff;
+  background: color-mix(in oklab, var(--accent, #fff) 18%, transparent);
+  color: var(--text, #fff);
   font-size: 12px;
   font-weight: 500;
 }
 
-.toast__action:hover {
-  background: rgba(255, 255, 255, 0.26);
+.toast.has-action:hover .toast__action {
+  background: color-mix(in oklab, var(--accent, #fff) 28%, transparent);
 }
 
 /* ---------- Sidebar items: tabs, pinned, Favorites, Today, folders (tabs lane) ---------- */
@@ -1016,6 +1070,8 @@ html[data-view="strip"] body {
 }
 
 .tab-row.is-focused,
+.tab-row.is-menu-open,
+.folder-row.is-menu-open,
 .folder-row.is-focused {
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 70%, transparent);
 }
@@ -1083,10 +1139,26 @@ html[data-view="strip"] body {
   color: var(--text-muted);
 }
 
-/* Full-colour default folder glyph, distinct open and closed shapes (FD-07). */
-.folder-row__icon svg {
-  color: var(--accent);
-  fill: color-mix(in srgb, var(--accent) 28%, transparent);
+/*
+ * The default folder glyph in full colour (FD-07): the back in the Space's accent, the front a
+ * lighter tone of it. Opening or closing, the closed front and the open one cross-fade (FL-12).
+ */
+.folder-glyph__back {
+  fill: var(--accent);
+}
+
+.folder-glyph__front {
+  fill: color-mix(in srgb, var(--accent) 58%, #fff);
+  transition: opacity var(--motion-quick) var(--ease-quick);
+}
+
+.folder-glyph__lid,
+.folder-glyph.is-open .folder-glyph__shut {
+  opacity: 0;
+}
+
+.folder-glyph.is-open .folder-glyph__lid {
+  opacity: 1;
 }
 
 .folder-row.is-drop-into {

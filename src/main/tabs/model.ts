@@ -4,7 +4,7 @@
 import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
 import { isMediaBusy } from '../../shared/media'
-import { windowMayShow } from '../../shared/private'
+import { mayReopenIn, windowMayShow } from '../../shared/private'
 import { noteSplitFocus, removePane } from '../../shared/split'
 import type { ItemId, OrbitState, Space, SpaceId, Tab, TabId, WindowId } from '../../shared/state'
 import {
@@ -127,10 +127,14 @@ function splitLeavesOf(state: OrbitState, tabId: TabId): TabId[] {
   return s ? splitLeaves(s.layout) : [tabId]
 }
 
-/** Tabs currently on screen: each window's selected tab, with all panes of its split view. */
+/**
+ * Tabs currently on screen: each window's selected tab, with all panes of its split view, and the page of its open
+ * Peek (so nothing freezes it or puts it to sleep while it shows, TB-16).
+ */
 export function displayedTabs(state: OrbitState): Set<TabId> {
   const out = new Set<TabId>()
   for (const win of Object.values(state.windows)) {
+    if (win.overlay.kind === 'peek' && state.tabs[win.overlay.tabId]) out.add(win.overlay.tabId)
     const id = win.activeTab[win.spaceId]
     if (!id || !state.tabs[id]) continue
     const split = splitOfTab(state, id)
@@ -273,12 +277,37 @@ export function autoArchiveCandidates(state: OrbitState, now: number): ItemId[] 
 /** Favorites stay warm this many times longer than other tabs (FV-08). */
 export const FAVORITE_WARM_FACTOR = 4
 
+/** What makes tabs sleep sooner (TB-16): the system low on memory, the battery saver on. */
+export interface SleepPressure {
+  lowMemory?: boolean
+  saver?: boolean
+}
+
+/** On low memory, background tabs idle this long sleep, whatever the timer says (TB-16). */
+export const LOW_MEMORY_SLEEP_MS = 5 * 60_000
+
+/**
+ * How long a background tab stays loaded unused (TB-16): the timer (0 is Never). With the battery
+ * saver, a quarter of it, five minutes at least; on low memory, five minutes at most, Never too.
+ */
+export function sleepPeriod(timer: number, pressure: SleepPressure = {}): number {
+  let after = timer > 0 ? timer : 0
+  if (pressure.saver && after > 0) after = Math.min(after, Math.max(LOW_MEMORY_SLEEP_MS, Math.round(after / 4)))
+  if (pressure.lowMemory) after = after > 0 ? Math.min(after, LOW_MEMORY_SLEEP_MS) : LOW_MEMORY_SLEEP_MS
+  return after
+}
+
 /**
  * Awake tabs idle longer than the sleep period (TB-16). Never: tabs on screen or playing
  * audio. Favorites stay loaded for longer (FV-08).
  */
-export function sleepCandidates(state: OrbitState, now: number, awake: Iterable<TabId>): TabId[] {
-  const after = state.settings.sleepAfterMs
+export function sleepCandidates(
+  state: OrbitState,
+  now: number,
+  awake: Iterable<TabId>,
+  pressure?: SleepPressure,
+): TabId[] {
+  const after = sleepPeriod(state.settings.sleepAfterMs, pressure)
   if (!(after > 0)) return []
   const shown = displayedTabs(state)
   const out: TabId[] = []
@@ -289,6 +318,19 @@ export function sleepCandidates(state: OrbitState, now: number, awake: Iterable<
     if (now - tab.lastActiveAt >= limit) out.push(id)
   }
   return out
+}
+
+/**
+ * The closed tabs a window may bring back, newest first (TB-07): Reopen Closed Tab's own rule
+ * (`mayReopenIn`), so no list ever offers one window another's private or blank-window tabs. With
+ * no window (the macOS app menu, made for every window), what a normal window may bring back.
+ */
+export function closedFor<T extends { tab: Pick<Tab, 'id' | 'profileId' | 'spaceId'> }>(
+  state: OrbitState,
+  closed: readonly T[],
+  windowId: WindowId | undefined,
+): T[] {
+  return [...closed].reverse().filter((r) => !state.tabs[r.tab.id] && mayReopenIn(state, r.tab, windowId))
 }
 
 /** The tab ⌘N jumps to (TB-04, FV-10). `n` is 1–9. */

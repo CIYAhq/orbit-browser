@@ -1,4 +1,6 @@
 import { screen, session } from 'electron'
+import { sidebarUndoLabel } from '../../shared/actions'
+import { isBlankSpace } from '../../shared/blank'
 import type { SpacePanel } from '../../shared/commands/spaces'
 import { createWindowState, DEFAULT_PROFILE_ID } from '../../shared/defaults'
 import type { SpaceId, TabId, WindowId } from '../../shared/state'
@@ -6,6 +8,7 @@ import { tabsInItem } from '../../shared/tree'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
 import type { SavedHistory } from '../tabs/runtime'
+import { eraseLeftovers, erasePartition } from './erase'
 import {
   assignProfileInDraft,
   createProfileInDraft,
@@ -37,6 +40,8 @@ export function registerSpaces(ctx: MainContext): void {
 
   // Older state files: bring every Space to the current shape (D12 drops theme.mode).
   store.update((d) => normalizeSpacesInDraft(d))
+  // Deleted profiles' partition folders their sessions held or wrote to until Orbit quit (PR-08).
+  eraseLeftovers(ctx.paths.userData)
 
   /** Last Space any window switched to: what a window opened from nowhere shows (SP-24). */
   let lastSpaceId: SpaceId | undefined
@@ -180,12 +185,12 @@ export function registerSpaces(ctx: MainContext): void {
     const windowId = windowOf(c)
     if (windowId) {
       windows.sendToWindow(windowId, 'spaces:deleted', { spaceId, name: deleted.space.name })
-      // The Undo note lives in the sidebar; with it hidden, say how to undo (review F12).
+      // The Undo note lives in the sidebar; with it hidden, say how to undo (review F12): with
+      // sidebar undo's key as it is now, or an Undo button when it has none (KS-05, KS-18).
       if (!store.state.windows[windowId]?.sidebar.visible) {
-        ctx.toast(
-          windowId,
-          `Deleted “${deleted.space.name}”. ${process.platform === 'darwin' ? '⌘Z' : 'Ctrl+Z'} restores it.`,
-        )
+        const key = sidebarUndoLabel(process.platform)
+        if (key) ctx.toast(windowId, `Deleted “${deleted.space.name}”. ${key} restores it.`)
+        else ctx.toast(windowId, `Deleted “${deleted.space.name}”.`, { label: 'Undo', command: 'spaces.undoDelete' })
       }
     }
     return true
@@ -227,10 +232,10 @@ export function registerSpaces(ctx: MainContext): void {
     if (!windowId || !win) return
     if (win.overlay.kind !== 'none') await commands.run('overlay.close', {}, { windowId })
     if (!win.sidebar.visible) {
-      // No sidebar to show the flow in: create right away and say so (SP-02, SB-13).
+      // No sidebar to show the flow in: create right away, say so and offer to show it (SP-02, SB-13).
       const id = await commands.run('spaces.create', {}, { windowId })
       const name = store.state.spaces[id]?.name ?? 'New Space'
-      ctx.toast(windowId, `Created “${name}”. Show the sidebar to see it.`)
+      ctx.toast(windowId, `Created “${name}”`, { label: 'Show', command: 'window.setSidebar', args: { visible: true } })
       return
     }
     focusShell(windowId)
@@ -272,13 +277,15 @@ export function registerSpaces(ctx: MainContext): void {
       result = deleteProfileInDraft(d, profileId)
     })
     if (!result) return false
-    // Its Favorites' pages close (no page keeps the deleted session), then its stored data goes.
+    // Its Favorites' pages close (no page keeps the deleted session), then its stored data goes, and
+    // its folder on disk (now, and at the next launch if its session holds it or writes to it again).
     for (const tabId of result.removed) ctx.tabs.destroy(tabId)
     const ses = session.fromPartition(profile.partition)
     void ses
       .clearStorageData()
       .then(() => ses.clearCache())
       .catch((err) => console.error('[spaces] could not clear profile data', err))
+      .then(() => erasePartition(ctx.paths.userData, ses.storagePath))
     return true
   })
 
@@ -325,7 +332,8 @@ export function registerSpaces(ctx: MainContext): void {
     const source = sourceId ? store.state.windows[sourceId] : undefined
     const sourceWin = sourceId ? windows.get(sourceId) : undefined
     const spaceId =
-      (source?.kind === 'main' ? source.spaceId : undefined) ??
+      // From a blank window (TB-17): a normal one, on the Space used last.
+      (source?.kind === 'main' && !isBlankSpace(store.state, source.spaceId) ? source.spaceId : undefined) ??
       (lastSpaceId && store.state.spaces[lastSpaceId] ? lastSpaceId : undefined) ??
       (store.state.spaceOrder[0] as SpaceId)
     const winState = createWindowState(spaceId)

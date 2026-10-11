@@ -89,3 +89,9 @@ export const IDLE_DRAG: DragState = {
 }
 
 export const useDrag = create<DragState>(() => IDLE_DRAG)
+
+/**
+ * Rows that mount drawn whole at once rather than growing in, by id, with when that was decided:
+ * a row arriving out of sight (FL-07), or a link's row landing in the room already open for it (NV-08).
+ */
+export const appearsAtOnce = new Map<string, number>()

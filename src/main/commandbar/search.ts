@@ -1,5 +1,6 @@
 import { clipboard, net } from 'electron'
 import { actionForInput } from '../../shared/actions'
+import { isBlankSpace } from '../../shared/blank'
 import type { SearchQueryArgs, SearchResult } from '../../shared/commands/commandbar'
 import type { CommandName } from '../../shared/rpc'
 import type { OrbitState, WindowId } from '../../shared/state'
@@ -77,6 +78,16 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
     const visibleTo = (profileId: string | undefined) =>
       isPrivate ? profileId === profile?.id : !profileId || !privateProfiles.has(profileId)
     const spaceProfile = (spaceId: string | undefined) => (spaceId ? state.spaces[spaceId]?.profileId : undefined)
+    // A blank window (TB-17) finds only its own tabs and no Spaces or folders; no other window finds its tabs.
+    const blank = isBlankSpace(state, space?.id)
+    const anyBlank = Object.values(state.spaces).some((s) => s.blank)
+    const tabsHere = (tabs: typeof allTabs) =>
+      !anyBlank
+        ? tabs
+        : tabs.filter((t) => {
+            const tabSpace = state.tabs[t.id]?.spaceId
+            return blank ? tabSpace === space?.id : !isBlankSpace(state, tabSpace)
+          })
     // A Mini Window's bar loads its choice in that window (CB-23): open tabs, the archive, Spaces,
     // folders, actions and Settings sections all act on the browser, so none of them is offered.
     const mini = !!args.mini || (!!windowId && state.windows[windowId]?.kind === 'mini')
@@ -85,7 +96,9 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
       mode: args.mode,
       now: Date.now(),
       engine: { name: engine.name, search: engine.search },
-      tabs: mini ? [] : privateProfiles.size ? allTabs.filter((t) => visibleTo(state.tabs[t.id]?.profileId)) : allTabs,
+      tabs: mini
+        ? []
+        : tabsHere(privateProfiles.size ? allTabs.filter((t) => visibleTo(state.tabs[t.id]?.profileId)) : allTabs),
       activeTabId,
       currentSpaceId: space?.id ?? '',
       spaceNames: sources.spaceNames(state),
@@ -95,8 +108,11 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
       history: hs?.entries() ?? [],
       hosts: hs?.hostList() ?? [],
       archive: profile && !isPrivate && !mini ? sources.archive(state, profile.id) : [],
-      spaces: isPrivate || mini ? [] : sources.spaces(state).filter((sp) => visibleTo(spaceProfile(sp.id))),
-      folders: isPrivate || mini ? [] : sources.folders(state).filter((f) => visibleTo(spaceProfile(f.spaceId))),
+      spaces: isPrivate || blank || mini ? [] : sources.spaces(state).filter((sp) => visibleTo(spaceProfile(sp.id))),
+      folders:
+        isPrivate || blank || mini
+          ? []
+          : sources.folders(state).filter((f) => visibleTo(spaceProfile(f.spaceId)) && !isBlankSpace(state, f.spaceId)),
       actions: mini ? [] : sources.actions((id) => actions.has(id), process.platform),
       siteSearches,
       scope: args.siteSearchId ? siteSearches.find((s) => s.id === args.siteSearchId) : undefined,

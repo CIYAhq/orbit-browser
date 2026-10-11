@@ -1,0 +1,85 @@
+/*
+ * The recent-tab switcher (TB-05, FL-26): a list in the middle of the window, in the Space's colours
+ * (SP-16), the Space menu's surface (spaces.css). Nothing dims the page behind it.
+ */
+.tab-switcher__place {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  /* A click beside the list reaches the backdrop, which closes it. */
+  pointer-events: none;
+}
+
+.tab-switcher {
+  pointer-events: auto;
+  width: min(440px, calc(100vw - 32px));
+  padding: 6px;
+  border-radius: 12px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface, #fff);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.16),
+    0 14px 36px rgba(0, 0, 0, 0.22),
+    0 2px 8px rgba(0, 0, 0, 0.1);
+  /* It fades in and never slides (FL-26: no fade longer than about 100 ms). */
+  animation: tab-switcher-in var(--motion-instant) var(--ease-instant) var(--motion-lead) both;
+}
+
+@keyframes tab-switcher-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.tab-switcher__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  cursor: default;
+}
+
+/* The highlight moves at once with each Tab (FL-26): no transition. */
+.tab-switcher__item[aria-selected="true"] {
+  background: color-mix(in oklab, var(--accent) 18%, transparent);
+}
+
+.tab-switcher__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+
+.tab-switcher__emoji {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.tab-switcher__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tab-switcher__crumb {
+  color: var(--text-muted);
+}
+
+.tab-switcher__audio {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.reduce-motion .tab-switcher {
+  animation: none;
+}

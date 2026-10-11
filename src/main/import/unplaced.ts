@@ -1,4 +1,6 @@
-import type { TabId } from '../../shared/state'
+import { isTabId } from '../../shared/ids'
+import type { ItemId, OrbitState, TabId } from '../../shared/state'
+import { locate, splitOfTab } from '../../shared/tree'
 
 /**
  * An import's unfinished tabs (D62 (3), D65): the tabs of its bookmarks, in the state where no section shows them, until
@@ -9,6 +11,7 @@ import type { TabId } from '../../shared/state'
 const unplaced = new Set<TabId>()
 let version = 0
 let stopImports: (() => void) | undefined
+let guarded = true
 
 /**
  * Whether `id` is a tab an import made out of sight and hasn't shown yet. One the user reached and placed anyway is
@@ -16,6 +19,21 @@ let stopImports: (() => void) | undefined
  */
 export function isUnplacedImportTab(id: TabId): boolean {
   return unplaced.has(id)
+}
+
+/**
+ * Whether main refuses `id` to a window (D66 (1)): a tab an unfinished import made out of sight that no section and no
+ * split holds. Every command that shows or places a tab by an id a window sends asks this (`TabOps.hiddenByImport`, the
+ * split and Mini Window commands). One the user placed anyway is theirs (D65 (2)).
+ */
+export function hiddenByImport(state: OrbitState, id: ItemId | undefined): boolean {
+  if (!id || !guarded || !isTabId(id) || !unplaced.has(id)) return false
+  return !locate(state, id) && !splitOfTab(state, id)
+}
+
+/** Off only in the test that stands for a route main doesn't guard (D65 (2)). */
+export function guardImportTabs(on: boolean): void {
+  guarded = on
 }
 
 /** Changes whenever the set does: a cache built with it starts over. */

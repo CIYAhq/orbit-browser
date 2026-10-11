@@ -70,7 +70,7 @@ v.play().then(() => { document.body.dataset.state = 'playing' })
  * - `/auth`: HTTP Basic sign-in (AUTH_USER, AUTH_PASSWORD).
  * - `/page/<name>`: a plain page.
  * - `/video/<name>`: a page whose video plays with sound as it loads (`VIDEO`).
- * - `/opener?to=…`: opens `to` in a pop-up window on a click of `#open`.
+ * - `/opener?to=…&as=…`: opens `to` in a pop-up window named `as` (`popup`) on a click of `#open`.
  * - `/upload?to=…`: a form (`#form`) that posts to `to`.
  * - `/apps?frame=…`: links to other apps (NV-19): `#mail` (mailto:), `#call` (tel:), `#mail-tab`
  *   (mailto: in a new tab), `#app-tab` (a new tab that redirects to zoommtg:), `#pop` (a pop-up
@@ -204,12 +204,13 @@ addEventListener('pagehide', () => note('pagehide', prompt('Your name?', 'Ada'))
     }
     if (u.pathname === '/opener') {
       const to = u.searchParams.get('to') ?? '/page/Popup'
+      const name = u.searchParams.get('as') ?? 'popup'
       send(
         html(
           'Opener',
           `<button id="open">Open</button><div id="area"></div>
 <script>document.getElementById('open').addEventListener('click', () => {
-  window.open(${JSON.stringify(to)}, 'popup', 'popup,width=520,height=420')
+  window.open(${JSON.stringify(to)}, ${JSON.stringify(name)}, 'popup,width=520,height=420')
 })</script>`,
         ),
       )

@@ -7,6 +7,7 @@ import type {
   WindowOpenHandlerResponse,
 } from 'electron'
 import { WebContentsView } from 'electron'
+import { sidebarUndoFor } from '../../shared/actions'
 import { decideLink, type LinkHow, type LinkSettings, type LinkSource, routeFor } from '../../shared/link-routing'
 import { PEEK_RADIUS, peekCard, splitTarget } from '../../shared/peek-geometry'
 import { isPrivateTab } from '../../shared/private'
@@ -837,11 +838,8 @@ export function registerPeek(ctx: MainContext): void {
     }
   }
 
-  const isUndoKey = (input: Input) =>
-    input.key.toLowerCase() === 'z' &&
-    !input.shift &&
-    !input.alt &&
-    (process.platform === 'darwin' ? input.meta && !input.control : input.control && !input.meta)
+  /** Sidebar undo's key, as the keymap has it (KS-05). */
+  const isUndoKey = (input: Input) => sidebarUndoFor(input, process.platform)?.redo === false
 
   const onKey = (tabId: TabId, event: Electron.Event, input: Input) => {
     if (input.type !== 'keyDown') return
