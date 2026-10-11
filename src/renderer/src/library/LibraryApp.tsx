@@ -1,7 +1,8 @@
 import { X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { LibraryShow } from '../../../shared/commands/archive'
-import { invoke, isMac, perfMark } from '../api'
+import { invoke, perfMark } from '../api'
+import { sidebarUndoKey } from '../shell/sidebar/undo-keys'
 import { useWindow } from '../store'
 import { paletteVars, prefersReducedMotion, usePalette } from '../theme'
 import { LibraryToasts } from './LibraryToasts'
@@ -104,12 +105,13 @@ export function LibraryApp() {
         void invoke('library.close', {})
         return
       }
-      const mod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
-      if (!mod || e.altKey || e.key.toLowerCase() !== 'z') return
+      // The keys as the keymap has them (KS-05); one that edits text is a field's own inside one.
+      const undo = sidebarUndoKey(e)
+      if (!undo) return
       const target = e.target as HTMLElement | null
-      if (target?.closest('input, textarea, [contenteditable="true"]')) return
+      if (undo.outsideText && target?.closest('input, textarea, [contenteditable="true"]')) return
       e.preventDefault()
-      void invoke(e.shiftKey ? 'tabs.redo' : 'tabs.undo', {})
+      void invoke(undo.redo ? 'tabs.redo' : 'tabs.undo', {})
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

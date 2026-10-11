@@ -170,6 +170,14 @@ async function boot(): Promise<void> {
         <LinkPillApp />
       </StrictMode>,
     )
+  } else if (view === 'toasts') {
+    // Toasts over the page card while the sidebar is hidden (tabs lane, SB-13).
+    const { ToastViewApp } = await import('./shell/ToastViewApp')
+    root.render(
+      <StrictMode>
+        <ToastViewApp />
+      </StrictMode>,
+    )
   } else if (view === 'library') {
     // The Library (archive lane, AR-02): its own view over the page area.
     const { LibraryApp } = (await app) as typeof import('./library/LibraryApp')

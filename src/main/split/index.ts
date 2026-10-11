@@ -23,9 +23,11 @@ import { isAwayFromPinned } from '../../shared/tabs'
 import { paletteFor } from '../../shared/theme'
 import { insertItem, locate, sectionOf, splitOfTab } from '../../shared/tree'
 import type { MainContext } from '../context'
+import { hiddenByImport } from '../import/unplaced'
 import { SPLIT_PANE_MENU_KEYS, withKeyHints } from '../keys/menu-hints'
 import type { CallContext } from '../registry'
 import { makeTab } from '../tabs/model'
+import { showRowMenu } from '../tabs/row-menu'
 import { activeTabOf } from '../windows'
 import { installLinkDrop } from './link-drop'
 import { newSplitMenuItems } from './menu'
@@ -138,6 +140,7 @@ export function registerSplit(ctx: MainContext): void {
   commands.register('split.create', ({ tabIds, orientation, focus }, c) => {
     const windowId = windowOf(c)
     const state = store.state
+    if (tabIds.some((id) => hiddenByImport(state, id))) return null
     const ordered = sidebarSorted(
       state,
       [...new Set(tabIds)].filter((id) => state.tabs[id]),
@@ -172,6 +175,7 @@ export function registerSplit(ctx: MainContext): void {
 
   commands.register('split.addTab', ({ tabId, target, side = 'right', focus = true }, c) => {
     const windowId = windowOf(c)
+    if (hiddenByImport(store.state, tabId) || hiddenByImport(store.state, target)) return null
     let result: ReturnType<typeof addPaneInDraft> = 'invalid'
     // A split row as the target: the new pane goes after its last pane (or before its first for 'left'/'top').
     const anchor = splitAnchor(store.state, target, side) ?? target
@@ -189,7 +193,7 @@ export function registerSplit(ctx: MainContext): void {
   commands.register('split.openUrl', ({ url, target, side = 'right', referrer }, c) => {
     const windowId = windowOf(c)
     const anchor = store.state.tabs[target]
-    if (!anchor) return null
+    if (!anchor || hiddenByImport(store.state, target)) return null
     if (leavesOf(store.state, splitOfTab(store.state, target)).length >= MAX_PANES) {
       ctx.toast(windowId, SPLIT_FULL_MESSAGE)
       return null
@@ -493,7 +497,9 @@ export function registerSplit(ctx: MainContext): void {
 
   commands.register('split.focusPane', ({ tabId }, c) => {
     const windowId = windowOf(c)
-    if (!windowId) return
+    // A pane of a split only, in a split the window may show (focusInDraft checks that: NV-11, TB-17). A tab the
+    // import hasn't shown is in none (D66 (1)).
+    if (!windowId || !splitOfTab(store.state, tabId)) return
     store.update((d) => focusInDraft(d, windowId, tabId))
   })
 
@@ -656,7 +662,7 @@ export function registerSplit(ctx: MainContext): void {
     Menu.buildFromTemplate(items).popup(win ? { window: win, x: Math.round(x), y: Math.round(y) } : {})
   })
 
-  commands.register('split.contextMenu', ({ splitId }, c) => {
+  commands.register('split.contextMenu', ({ splitId, at }, c) => {
     const windowId = windowOf(c)
     const state = store.state
     const split = state.splits[splitId]
@@ -692,12 +698,22 @@ export function registerSplit(ctx: MainContext): void {
       { type: 'separator' },
       {
         label: 'Rename…',
-        click: () => windowId && windows.sendToWindow(windowId, 'sidebar:rename', { id: splitId }),
+        click: () => {
+          if (!windowId) return
+          // The menu gave the keyboard back where it was (TB-14): the sidebar's name field takes it.
+          windows.sidebarContents(windowId)?.focus()
+          windows.sendToWindow(windowId, 'sidebar:rename', { id: splitId })
+        },
       },
       // The sidebar's icon picker, as for a tab (TB-12); it can remove the icon too.
       {
         label: 'Change Icon…',
-        click: () => windowId && windows.sendToWindow(windowId, 'sidebar:icon', { id: splitId }),
+        click: () => {
+          if (!windowId) return
+          // As Rename…: the picker's search field takes the keyboard, though the page had it (TB-14).
+          windows.sidebarContents(windowId)?.focus()
+          windows.sendToWindow(windowId, 'sidebar:icon', { id: splitId })
+        },
       },
       ...(split.name
         ? [{ label: 'Show Pane Titles', click: () => void commands.run('split.rename', { splitId, name: null }) }]
@@ -769,8 +785,8 @@ export function registerSplit(ctx: MainContext): void {
         click: () => void commands.run('split.close', { splitId }),
       },
     )
-    const win = windowId ? windows.get(windowId) : undefined
-    Menu.buildFromTemplate(items).popup(win ? { window: win } : {})
+    // A row menu: Orbit's own, in the overlay and the Space's colours (tabs lane, TB-14).
+    showRowMenu(windowId, items, { key: splitId, label: split.name || 'Split View', at, sender: c.sender })
   })
 
   commands.register('split.stripHover', ({ hovered }, c) => strip.setHovered(windowOf(c), hovered))

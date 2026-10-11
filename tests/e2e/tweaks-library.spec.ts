@@ -1,7 +1,7 @@
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 import { launchOrbit, MOD, type Orbit, run, state, tabPage, viewPage } from './helpers'
 import { focusBrowserWindow, openSettings } from './settings-support'
-import { act, activeId, cmd, newTab, tabsHook } from './tabs-support'
+import { act, activeId, closeOverlay, cmd, menuFor, newTab } from './tabs-support'
 import {
   bgOf,
   edited,
@@ -352,7 +352,8 @@ test('[BO-16] the switch in Settings → Advanced takes every Tweak off every pa
   await focusBrowserWindow(app)
   await expect(shell.getByTestId('tweak-button')).toHaveCount(0)
   await cmd(app, 'tabs.contextMenu', { id: tabId })
-  expect(await tabsHook<string[]>(app, 'lastMenu')).not.toContain('Tweak this Site…')
+  expect(await menuFor(app, tabId)).not.toContain('Tweak this Site…')
+  await closeOverlay(app)
   await shell.getByTestId('sidebar-plus').click()
   const overlay = await viewPage(app, 'overlay')
   await expect(overlay.getByTestId('menu-plus-folder')).toBeVisible()

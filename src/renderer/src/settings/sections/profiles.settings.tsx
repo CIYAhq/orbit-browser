@@ -159,6 +159,10 @@ function ProfileSettings({ profileId }: { profileId: ProfileId }) {
   const spaces = useOrbitShallow((s) =>
     s.spaceOrder.filter((id) => s.spaces[id]?.profileId === profileId).map((id) => s.spaces[id]?.name ?? ''),
   )
+  // Blank windows (TB-17) open in it: their pages use its session.
+  const blankWindows = useOrbit(
+    (s) => Object.values(s.spaces).filter((sp) => sp.blank && sp.profileId === profileId).length,
+  )
   const isDefault = profileId === DEFAULT_PROFILE_ID
   const [draft, setDraft] = useState(name)
   useEffect(() => setDraft(name), [name])
@@ -218,14 +222,22 @@ function ProfileSettings({ profileId }: { profileId: ProfileId }) {
             description={
               spaces.length > 0
                 ? `Used by ${plural(spaces.length, 'Space')}. Give ${spaces.length === 1 ? 'it' : 'them'} another profile first.`
-                : 'Deletes its cookies, history and site data from this computer.'
+                : blankWindows > 0
+                  ? `Used by ${plural(blankWindows, 'blank window')}. Close ${blankWindows === 1 ? 'it' : 'them'} first.`
+                  : 'Deletes its cookies, history and site data from this computer.'
             }
           >
             <Button
               kind="danger"
               testId="profile-delete"
-              disabled={spaces.length > 0}
-              title={spaces.length > 0 ? 'A profile a Space uses can’t be deleted' : undefined}
+              disabled={spaces.length > 0 || blankWindows > 0}
+              title={
+                spaces.length > 0
+                  ? 'A profile a Space uses can’t be deleted'
+                  : blankWindows > 0
+                    ? 'A profile a blank window uses can’t be deleted'
+                    : undefined
+              }
               onClick={() => setConfirming(true)}
             >
               Delete Profile…
@@ -236,7 +248,7 @@ function ProfileSettings({ profileId }: { profileId: ProfileId }) {
       {confirming && (
         <Dialog
           title={`Delete the profile “${name}”?`}
-          description="Its cookies, history, Favorites and site data are deleted from this computer. This can’t be undone."
+          description="Its logins, cookies, history, Favorites and site data are deleted from this computer. This can’t be undone."
           testId="profile-delete-dialog"
           onClose={() => setConfirming(false)}
           actions={

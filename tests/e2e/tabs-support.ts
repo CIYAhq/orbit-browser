@@ -17,10 +17,88 @@ type Hooks = {
   }
   __orbitTabs: {
     maintenance: (now?: number) => { archived: string[]; slept: string[] }
-    lastMenu: () => string[]
-    clickMenu: (path: string) => boolean
+    clockAhead: (ms: number) => void
+    launchPassDone: () => boolean
+    rowMenu: (windowId?: string) => RowMenuInfo | null
+    chooseRowMenu: (path: string, windowId?: string) => boolean
+    toastView: (windowId?: string) => ToastViewInfo
     undo: () => string | undefined
+    resources: (memory?: { total: number; available: number } | null) => ResourceInfo
+    importGuard: (on: boolean) => void
   }
+}
+
+/** A pass of the background limits (TB-16, `src/main/tabs/resources.ts`). */
+export interface ResourceInfo {
+  frozen: string[]
+  /** Each awake tab's process, in % of one core over the last pass. */
+  usage: Record<string, number>
+  lowMemory: boolean
+  saver: boolean
+}
+
+type Rect = { x: number; y: number; width: number; height: number }
+
+/** The toast view over the page card while the sidebar is hidden (SB-13). */
+export interface ToastViewInfo {
+  /** In the window, showing toasts. */
+  visible: boolean
+  bounds?: Rect
+  /** The page card it is centred on. */
+  card?: Rect
+}
+
+/** The toast view of window `w`. */
+export function toastView(app: ElectronApplication, w = 0): Promise<ToastViewInfo> {
+  return app.evaluate((_e, wi) => {
+    const g = globalThis as unknown as Hooks
+    return g.__orbitTabs.toastView(g.__orbit.windowIds()[wi])
+  }, w)
+}
+
+/** A sidebar row's right-click menu as the overlay draws it (TB-14). */
+export interface RowMenuInfo {
+  /** The row it is for (its slot's key). */
+  key: string
+  label: string
+  /** Item labels, submenus as "Parent > Child". */
+  labels: string[]
+  enabled: Record<string, boolean>
+  checked: Record<string, boolean>
+  /** "Label=key" for each item that shows a key (KS-18). */
+  hints: string[]
+  /** The system's menu: a Peek had the overlay when it opened (PK-13). */
+  native: boolean
+}
+
+/** The row menu open in window `w`, or null. */
+export function rowMenu(app: ElectronApplication, w = 0): Promise<RowMenuInfo | null> {
+  return app.evaluate((_e, wi) => {
+    const g = globalThis as unknown as Hooks
+    return g.__orbitTabs.rowMenu(g.__orbit.windowIds()[wi])
+  }, w)
+}
+
+/** Waits for the menu of row `key` to be open in window `w`; returns its labels. */
+export async function menuFor(app: ElectronApplication, key: string, w = 0): Promise<string[]> {
+  await expect.poll(async () => (await rowMenu(app, w))?.key ?? null).toBe(key)
+  return (await rowMenu(app, w))?.labels ?? []
+}
+
+/** Chooses an item of the open row menu by its label path, as a click in the menu does. */
+export function chooseRowMenu(app: ElectronApplication, path: string, w = 0): Promise<boolean> {
+  return app.evaluate(
+    (_e, [label, wi]) => {
+      const g = globalThis as unknown as Hooks
+      return g.__orbitTabs.chooseRowMenu(label as string, g.__orbit.windowIds()[wi as number])
+    },
+    [path, w] as const,
+  )
+}
+
+/** Closes whatever the overlay shows (a row menu left open after reading it). */
+export function closeOverlay(app: ElectronApplication, w = 0): Promise<unknown> {
+  return cmd(app, 'overlay.close', {}, w)
 }
 
 /** Runs a command as if from window `w` (default: the first window). */

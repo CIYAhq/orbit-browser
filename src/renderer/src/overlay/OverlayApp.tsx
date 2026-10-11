@@ -2,6 +2,8 @@ import { AnimatePresence, domAnimation, LazyMotion } from 'motion/react'
 import { type CSSProperties, useEffect, useState } from 'react'
 import { DOWNLOADS_FLYOUT_PANEL } from '../../../shared/commands/downloads'
 import { SHORTCUT_SHEET } from '../../../shared/commands/keys'
+import { ROW_MENU_PANEL } from '../../../shared/row-menu'
+import { TAB_SWITCHER_PANEL } from '../../../shared/tab-switcher'
 import { invoke } from '../api'
 import { DownloadsFlyout } from '../downloads/DownloadsFlyout'
 import { ShortcutSheet } from '../keys/ShortcutSheet'
@@ -12,7 +14,9 @@ import { paletteVars, usePalette } from '../theme'
 import { CommandBar } from './CommandBar'
 import { installTypeahead } from './commandbar/typeahead'
 import { PeekLayer } from './PeekLayer'
+import { RowMenu } from './RowMenu'
 import { SiteControls } from './site/SiteControls'
+import { TabSwitcher } from './TabSwitcher'
 
 // Keys typed before the bar mounts (CB-22). Only here: a Mini Window's bar takes its keys itself.
 installTypeahead()
@@ -67,6 +71,14 @@ export function OverlayApp() {
           )}
           {overlay?.kind === 'panel' && overlay.panel === 'site-controls' && (
             <SiteControls key={overlay.nonce} overlay={overlay} dark={palette?.dark} />
+          )}
+          {/* A sidebar row's right-click menu (tabs lane, TB-14). */}
+          {overlay?.kind === 'panel' && overlay.panel === ROW_MENU_PANEL && (
+            <RowMenu key={overlay.nonce} overlay={overlay} />
+          )}
+          {/* The recent-tab switcher, ⌃Tab (tabs lane, TB-05). */}
+          {overlay?.kind === 'panel' && overlay.panel === TAB_SWITCHER_PANEL && (
+            <TabSwitcher key={overlay.nonce} overlay={overlay} />
           )}
           {overlay?.kind === 'panel' && overlay.panel === SHORTCUT_SHEET && (
             <ShortcutSheet key={overlay.nonce} dark={palette?.dark} />

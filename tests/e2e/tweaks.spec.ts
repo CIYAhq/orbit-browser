@@ -7,7 +7,18 @@ import { isMac, launchOrbit, MOD, type Orbit, run, state, tabPage, tabView, view
 import { clickInPage, focusedUrl, pressInPage } from './nav-support'
 import { crashTab, startInTab, tabCrashed } from './pages-support'
 import { remoteRequests } from './settings-support'
-import { act, activeId, cmd, newTab, tabsHook, waitTab } from './tabs-support'
+import {
+  act,
+  activeId,
+  chooseRowMenu,
+  closeOverlay,
+  cmd,
+  menuFor,
+  newTab,
+  rowMenu,
+  tabsHook,
+  waitTab,
+} from './tabs-support'
 import {
   answers,
   bgOf,
@@ -182,10 +193,11 @@ test('[BO-01][BO-21] every entry point makes a Tweak for the shown site and open
   expect((await tweakList(app)).map((t) => t.id)).toEqual([kept.id])
   await expect(brush).toHaveAttribute('data-state', 'on')
 
-  // 5. The tab's menu: a second Tweak for the same site, beside the first.
+  // 5. The tab's menu (its row menu in the overlay, TB-14): a second Tweak for the same site, beside
+  // the first.
   await cmd(app, 'tabs.contextMenu', { id: tabId })
-  expect(await tabsHook<string[]>(app, 'lastMenu')).toContain('Tweak this Site…')
-  expect(await tabsHook<boolean>(app, 'clickMenu', 'Tweak this Site…')).toBe(true)
+  expect(await menuFor(app, tabId)).toContain('Tweak this Site…')
+  expect(await chooseRowMenu(app, 'Tweak this Site…')).toBe(true)
   await waitEditor(app, true)
   const second = await edited(app)
   expect(second.id).not.toBe(kept.id)
@@ -206,11 +218,11 @@ test('[BO-01][KS-18] an internal page takes no Tweak: the entry points are greye
   expect(await run(app, 'keys.bind', { actionId: 'tweak.new', accel: `${isMac ? 'Cmd' : 'Ctrl'}+Shift+Y` })).toEqual({
     ok: true,
   })
+  // The row menu in the overlay shows the key beside the item (TB-14, KS-18).
   await cmd(app, 'tabs.contextMenu', { id: tabId })
-  const hints = await app.evaluate(() =>
-    (globalThis as unknown as { __orbitKeys: { lastMenuHints: () => string[] } }).__orbitKeys.lastMenuHints(),
-  )
-  expect(hints).toContain(`Tweak this Site…=${isMac ? 'Command' : 'Control'}+Shift+Y`)
+  await menuFor(app, tabId)
+  expect((await rowMenu(app))?.hints).toContain(`Tweak this Site…=${isMac ? '⇧⌘Y' : 'Ctrl+Shift+Y'}`)
+  await closeOverlay(app)
 
   const history = await newTab(app, 'orbit://history/')
   await expect.poll(async () => (await state(app)).tabs[history]?.url).toBe('orbit://history/')
@@ -220,7 +232,8 @@ test('[BO-01][KS-18] an internal page takes no Tweak: the entry points are greye
   expect(await tweakList(app)).toEqual([])
   await expect(shell.getByTestId('tweak-button')).toHaveCount(0)
   await cmd(app, 'tabs.contextMenu', { id: history })
-  expect(await tabsHook<string[]>(app, 'lastMenu')).not.toContain('Tweak this Site…')
+  expect(await menuFor(app, history)).not.toContain('Tweak this Site…')
+  await closeOverlay(app)
   await shell.getByTestId('sidebar-plus').click()
   const overlay = await viewPage(app, 'overlay')
   await expect(overlay.getByTestId('menu-plus-tweak')).toBeDisabled()

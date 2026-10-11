@@ -2,15 +2,16 @@ import {
   type BrowserWindow,
   clipboard,
   dialog,
-  Menu,
-  type MenuItemConstructorOptions,
   WebContentsView,
   type WebContentsViewConstructorOptions,
 } from 'electron'
+import { sidebarUndoLabel } from '../../shared/actions'
+import { isBlankSpace } from '../../shared/blank'
 import { isFolderId, isTabId, newId } from '../../shared/ids'
 import { framesMayOpen, isLocalFileUrl, localFileBlockedMessage } from '../../shared/link-routing'
 import { isPrivateTab, privateTabMenu } from '../../shared/private'
 import type { ContainerRef, Folder, FolderId, ItemId, TabId, WindowId } from '../../shared/state'
+import type { ToastAction } from '../../shared/toast'
 import {
   containerItems,
   insertItem,
@@ -18,30 +19,54 @@ import {
   profileOfContainer,
   rootContainerOf,
   sectionOf,
-  sidebarTabOrder,
   splitOfTab,
   tabsInItem,
 } from '../../shared/tree'
 import { engineForWindow, parseInput } from '../../shared/url'
 import type { MainContext } from '../context'
+import { guardImportTabs } from '../import/unplaced'
 import { KEEP_KEYBOARD } from '../keys/focus'
 import { TAB_MENU_KEYS, withKeyHints } from '../keys/menu-hints'
 import { printPage, savePage, viewSource } from '../pages/entry'
+import { onGesture } from '../pages/gestures'
 import type { CallContext } from '../registry'
+import { registerSpaceOrderUndo } from '../spaces/order-undo'
 import { tabSplitMenuItems } from '../split/menu'
 import { TWEAK_TAB_MENU_KEYS, tabTweakMenuItems } from '../tweaks/menu'
+import { registerBlankWindows } from './blank'
+import { registerLinkDrop } from './link-drop'
 import { TabMaintenance } from './maintenance'
-import { findMenuItem, folderMenu, type MenuOps, menuLabels, tabMenu } from './menus'
-import { makeTab, numberedTarget, steppedTarget, todayInsertIndex } from './model'
+import { folderMenu, type MenuOps, tabMenu } from './menus'
+import { closedFor, makeTab, numberedTarget, steppedTarget, todayInsertIndex } from './model'
 import { TabOps, type TabPage } from './ops'
+import { type MemoryInfo, type ResourceInfo, ResourceWatch } from './resources'
+import { type RowMenuInfo, registerRowMenus } from './row-menu'
+import { registerTabSwitcher } from './switcher'
+import { registerThemeUndo } from './theme-undo'
+import { registerToastView, type ToastViewInfo } from './toasts'
 
 /** Test-only handle (ORBIT_E2E=1): globalThis.__orbitTabs. */
 export interface TabTestHooks {
   maintenance: (now?: number) => { archived: string[]; slept: string[] }
-  lastMenu: () => string[]
-  clickMenu: (path: string) => boolean
+  /** Moves the maintenance clock ahead, as if that much time had passed (TD-02, TD-03). */
+  clockAhead: (ms: number) => void
+  /** The maintenance pass shortly after launch has run. */
+  launchPassDone: () => boolean
+  /** The row menu open in a window (default: the focused one), as the overlay draws it (TB-14). */
+  rowMenu: (windowId?: WindowId) => RowMenuInfo | null
+  /** Chooses an item of the open row menu by its label path ("Move to > Work > Pinned"), as a click does. */
+  chooseRowMenu: (path: string, windowId?: WindowId) => boolean
+  /** The toast view over the page card while the sidebar is hidden (SB-13). */
+  toastView: (windowId?: WindowId) => ToastViewInfo
   undo: () => string | undefined
   recentlyClosed: () => string[]
+  /** Runs a pass of the background limits now (TB-16); `memory` stands in for the system's (null: the real one). */
+  resources: (memory?: MemoryInfo | null) => ResourceInfo
+  /**
+   * Off: commands reach a tab an unfinished import hasn't shown, as a route main doesn't guard would
+   * (D65 (2)'s test); on again after (D66 (1)).
+   */
+  importGuard: (on: boolean) => void
 }
 
 /** ⌘Z pressed in a page only undoes sidebar changes this recent (lane review FU-4). */
@@ -50,8 +75,10 @@ const PAGE_UNDO_MAX_AGE_MS = 60_000
 export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabMaintenance } {
   const { store, commands, actions, tabs, windows } = ctx
   const ops = new TabOps(ctx)
-  const maintenance = new TabMaintenance(ctx, ops)
-  let lastMenu: MenuItemConstructorOptions[] = []
+  /** Test runs move the maintenance clock ahead (clockAhead); otherwise it is the real one. */
+  let ahead = 0
+  const maintenance = new TabMaintenance(ctx, ops, () => Date.now() + ahead)
+  const resources = new ResourceWatch(ctx, ops, maintenance)
 
   const windowOf = (c: CallContext): WindowId | undefined => c.windowId ?? windows.focusedWindowId()
   /** Multi-selection per window, reported by the sidebar (TB-13). */
@@ -91,7 +118,8 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   const send = (windowId: WindowId | undefined, channel: string, payload: unknown) => {
     if (windowId) windows.sendToWindow(windowId, channel, payload)
   }
-  const toast = (windowId: WindowId | undefined, message: string) => ctx.toast(windowId, message)
+  const toast = (windowId: WindowId | undefined, message: string, action?: ToastAction) =>
+    ctx.toast(windowId, message, action)
 
   const copyLinks = (windowId: WindowId | undefined, tabIds: TabId[], markdown: boolean) => {
     const text = ops.linkText(tabIds, markdown)
@@ -168,13 +196,15 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     const count = tabsInItem(store.state, folderId).length
     if (count > 0 && !ctx.e2e) {
       const win = windowId ? windows.get(windowId) : undefined
+      // Sidebar undo's key as it is now (KS-05, KS-18).
+      const key = sidebarUndoLabel(process.platform)
       const options = {
         type: 'warning' as const,
         buttons: ['Delete', 'Cancel'],
         defaultId: 0,
         cancelId: 1,
         message: `Delete “${folder.name}”?`,
-        detail: `Its ${count} ${count === 1 ? 'tab moves' : 'tabs move'} to the Archive. You can undo this with ${process.platform === 'darwin' ? '⌘Z' : 'Ctrl+Z'}.`,
+        detail: `Its ${count} ${count === 1 ? 'tab moves' : 'tabs move'} to the Archive.${key ? ` You can undo this with ${key}.` : ''}`,
       }
       const { response } = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options)
       if (response !== 0) return
@@ -182,9 +212,14 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     ops.deleteFolder(folderId, false)
   }
 
+  /** A menu item that edits in the sidebar gives it the keyboard (the menu gave it to the page). */
+  const toSidebar = (windowId: WindowId | undefined, channel: string, payload: unknown) => {
+    if (windowId) windows.sidebarContents(windowId)?.focus()
+    send(windowId, channel, payload)
+  }
   const menuOps = (windowId: WindowId | undefined): MenuOps => ({
-    rename: (id) => send(windowId, 'sidebar:rename', { id }),
-    changeIcon: (id) => send(windowId, 'sidebar:icon', { id }),
+    rename: (id) => toSidebar(windowId, 'sidebar:rename', { id }),
+    changeIcon: (id) => toSidebar(windowId, 'sidebar:icon', { id }),
     copyLinks: (tabIds, markdown) => void copyLinks(windowId, tabIds, markdown),
     duplicate: (tabId) => void commands.run('tabs.duplicate', { tabId }, { windowId }).catch(() => {}),
     setMuted: (tabId, muted) => void commands.run('tabs.setMuted', { tabId, muted }, { windowId }),
@@ -203,7 +238,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     archiveBelow: (tabId) => ops.archiveBelow(tabId),
     resetToPinned: (tabId) => ops.resetToPinned(tabId, { windowId }),
     replacePinnedUrl: (tabId) => ops.setPinnedUrl(tabId),
-    editPinnedUrl: (tabId) => send(windowId, 'sidebar:edit-pinned-url', { id: tabId }),
+    editPinnedUrl: (tabId) => toSidebar(windowId, 'sidebar:edit-pinned-url', { id: tabId }),
     close: (tabIds) => ops.closeTabs(tabIds, 'closed'),
     remove: (id) => ops.deleteItem(id),
     newFolder: (items) => void commands.run('folders.create', { items }, { windowId }),
@@ -214,6 +249,21 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     splitItems: (tabIds) => tabSplitMenuItems(ctx, tabIds, windowId),
     tweakItems: (tabId) => tabTweakMenuItems(ctx, tabId, windowId),
   })
+
+  const rowMenus = registerRowMenus(ctx)
+  const toastView = registerToastView(ctx)
+  registerThemeUndo(ctx, ops.undo)
+  registerSpaceOrderUndo(ctx, ops.undo)
+  registerLinkDrop(ctx)
+  registerBlankWindows(ctx, ops)
+  /** What a row menu is about, for screen readers: the tab, the folder or the selection. */
+  const menuLabelFor = (id: ItemId, selection: TabId[]): string => {
+    const state = store.state
+    if (selection.length > 1 && selection.includes(id as TabId)) return `${selection.length} tabs`
+    if (isFolderId(id)) return state.folders[id]?.name ?? 'Folder'
+    const tab = state.tabs[id as TabId]
+    return tab?.customTitle || tab?.title || tab?.url || 'Tab'
+  }
 
   // ---- Commands ----
 
@@ -226,8 +276,10 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     if (windowId) ops.activate(windowId, tabId)
   })
 
+  // A tab an unfinished import hasn't shown isn't there for a window: it goes to no Archive, no
+  // menu, no copy and no selection (D66 (1); `ops.hiddenByImport`, also in activate and splitWith).
   commands.register('tabs.close', ({ tabId, tabIds }) => {
-    const ids = [...(tabIds ?? []), ...(tabId ? [tabId] : [])]
+    const ids = [...(tabIds ?? []), ...(tabId ? [tabId] : [])].filter((id) => !ops.hiddenByImport(id))
     ops.closeTabs(ids, 'closed')
   })
 
@@ -235,19 +287,20 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     tabId ? ops.reopen(tabId, windowOf(c)) : ops.reopenLast(windowOf(c)),
   )
   commands.register('tabs.favicon', ({ url }) => tabs.faviconFor(url) ?? null)
-  commands.register('tabs.recentlyClosed', () =>
-    [...ops.recentlyClosed]
-      .reverse()
-      .filter((r) => !store.state.tabs[r.tab.id])
-      .map((r) => ({
-        tabId: r.tab.id,
-        url: r.tab.url,
-        title: r.tab.customTitle || r.tab.title,
-        favicon: r.tab.favicon,
-        spaceId: r.tab.spaceId,
-        profileId: r.tab.profileId,
-        closedAt: r.closedAt ?? 0,
-      })),
+  commands.register('tabs.battery', ({ level, charging }, c) => {
+    if (typeof level === 'number' && Number.isFinite(level)) resources.battery(level, charging === true, windowOf(c))
+  })
+  // Only what the calling window may bring back: a private window's closed tabs stay its own.
+  commands.register('tabs.recentlyClosed', (_args, c) =>
+    closedFor(store.state, ops.recentlyClosed, c.windowId).map((r) => ({
+      tabId: r.tab.id,
+      url: r.tab.url,
+      title: r.tab.customTitle || r.tab.title,
+      favicon: r.tab.favicon,
+      spaceId: r.tab.spaceId,
+      profileId: r.tab.profileId,
+      closedAt: r.closedAt ?? 0,
+    })),
   )
   commands.register('tabs.undo', () => ops.undo.undo() ?? null)
   commands.register('tabs.redo', () => ops.undo.redo() ?? null)
@@ -299,14 +352,16 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   })
   commands.register('tabs.rename', ({ tabId, title }) => ops.rename(tabId, title))
   commands.register('tabs.setIcon', ({ tabId, icon }) => ops.setIcon(tabId, icon))
-  commands.register('tabs.delete', ({ id }) => ops.deleteItem(id))
+  commands.register('tabs.delete', ({ id }) => {
+    if (!ops.hiddenByImport(id)) ops.deleteItem(id)
+  })
   commands.register('tabs.archiveBelow', ({ tabId }) => ops.archiveBelow(tabId))
   commands.register('tabs.copyLinks', ({ tabIds, markdown = false }, c) => copyLinks(windowOf(c), tabIds, markdown))
 
   commands.register('tabs.duplicate', ({ tabId, to, index, activate }, c) => {
     const state = store.state
     const tab = state.tabs[tabId]
-    if (!tab) throw new Error('No such tab')
+    if (!tab || ops.hiddenByImport(tabId)) throw new Error('No such tab')
     const item = splitOfTab(state, tabId) ?? tabId
     const loc = locate(state, item)
     const pinned = !to && !!tab.pinnedUrl && sectionOf(state, tabId) !== 'today'
@@ -361,6 +416,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   commands.register('tabs.setSelection', ({ tabIds }, c) => {
     const windowId = windowOf(c)
     if (!windowId) return
+    tabIds = tabIds.filter((id) => !ops.hiddenByImport(id))
     if (tabIds.length > 0) selections.set(windowId, tabIds)
     else selections.delete(windowId)
   })
@@ -373,7 +429,9 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     if (windowId) windows.focusActiveTab(windowId)
   })
 
-  commands.register('tabs.contextMenu', ({ id, selection = [] }, c) => {
+  commands.register('tabs.contextMenu', ({ id, selection = [], at }, c) => {
+    if (ops.hiddenByImport(id)) return
+    selection = selection.filter((s) => !ops.hiddenByImport(s))
     const windowId = windowOf(c)
     const state = store.state
     const mo = menuOps(windowId)
@@ -381,13 +439,12 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     const forTab = (tabId: TabId) =>
       withKeyHints(tabMenu(state, tabId, selection, mo), [...TAB_MENU_KEYS, ...TWEAK_TAB_MENU_KEYS])
     const all = isFolderId(id) ? folderMenu(state, id, mo) : isTabId(id) ? forTab(id) : []
-    // Private windows have no pinned tabs, Favorites, folders or other Spaces (NV-11, SB-25).
-    const items = isTabId(id) && isPrivateTab(state, id) ? privateTabMenu(all) : all
+    // Private and blank windows have no pinned tabs, Favorites, folders or other Spaces (NV-11, SB-25, TB-17).
+    const own = isTabId(id) && (isPrivateTab(state, id) || isBlankSpace(state, state.tabs[id]?.spaceId))
+    const items = own ? privateTabMenu(all) : all
     if (items.length === 0) return
-    lastMenu = items
-    if (ctx.e2e) return
-    const win = windowId ? windows.get(windowId) : undefined
-    Menu.buildFromTemplate(items).popup(win ? { window: win } : undefined)
+    // Orbit's own menu in the overlay, in the Space's colours (TB-14, SP-16).
+    rowMenus.show(windowId, items, { key: id, label: menuLabelFor(id, selection), at, sender: c.sender })
   })
 
   commands.register('folders.create', ({ container, index, name = 'New Folder', items = [] }, c) => {
@@ -450,8 +507,10 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
         const id = ops.createTab({ url: details.url, spaceId, windowId, activate, openerTabId, ...page })
         if (activate) return
         tabs.ensure(id)
-        // With the sidebar hidden the new tab would open unseen: say so (TB-02, SB-13).
-        if (windowId && !store.state.windows[windowId]?.sidebar.visible) toast(windowId, 'Opened in a new tab')
+        // With the sidebar hidden the new tab would open unseen: say so, with a button to it (TB-02, SB-13).
+        if (windowId && !store.state.windows[windowId]?.sidebar.visible) {
+          toast(windowId, 'Opened in a new tab', { label: 'Show', command: 'tabs.activate', args: { tabId: id } })
+        }
       }
       /** A link the engine left to the browser, opened by its page itself (TabRuntime.openFromPage). */
       const fromPage = (open: (page: TabPage) => void) => {
@@ -512,11 +571,13 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   )
   const trackPopup = (popup: BrowserWindow, openerTabId: TabId) => {
     const wc = popup.webContents
+    // As a tab's (NV-09): a click or a key in any of its frames, one from another site's too (D77).
     let gesture = { at: 0, used: true }
-    wc.on('input-event', (_e, input) => {
-      if (['mouseDown', 'mouseUp', 'keyDown', 'rawKeyDown', 'gestureTap', 'touchEnd'].includes(input.type)) {
-        gesture = { at: Date.now(), used: false }
-      }
+    onGesture(wc, () => {
+      const now = Date.now()
+      // Two presses within 30 ms are one activation.
+      if (now - gesture.at < 30) gesture.at = now
+      else gesture = { at: now, used: false }
     })
     wc.setWindowOpenHandler((details) => {
       // As for a tab's page: a local file opens for no web page, and a toast names it (D49, round 2
@@ -626,6 +687,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   })
   actions.register('tab.reopenClosed', (c) => void ops.reopenLast(windowOf(c)))
   actions.register('tab.undo', () => void ops.undo.undo())
+  actions.register('tab.redo', () => void ops.undo.redo())
   const step = (delta: number) => (c: CallContext) => {
     const windowId = windowOf(c)
     if (!windowId) return
@@ -635,82 +697,8 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   actions.register('tab.next', step(1))
   actions.register('tab.previous', step(-1))
 
-  // Recent-tab switching (TB-05): while Control is held, each Tab steps back through the five
-  // most recently used tabs of this Space; a quick tap-and-release goes to the previous tab.
-  // Releasing Control settles there; tabs passed on the way keep their place in the recency order.
-  let recent: {
-    windowId: WindowId
-    order: TabId[]
-    times: Map<TabId, number>
-    index: number
-    timer?: NodeJS.Timeout
-  } | null = null
-  const endRecent = () => {
-    const r = recent
-    if (!r) return
-    recent = null
-    if (r.timer) clearTimeout(r.timer)
-    const landed = r.order[r.index]
-    const start = r.order[0]
-    // Restore recency of the tabs merely passed through (after the idle-clock updates have run).
-    setTimeout(() => {
-      store.update((d) => {
-        for (const [id, at] of r.times) {
-          if (id === landed || id === start) continue
-          const t = d.tabs[id]
-          if (t) t.lastActiveAt = at
-        }
-      })
-    }, 0)
-  }
-  const stepRecent = (delta: number) => (c: CallContext) => {
-    const windowId = windowOf(c)
-    if (!windowId) return
-    if (!recent || recent.windowId !== windowId) {
-      const state = store.state
-      const win = state.windows[windowId]
-      if (!win) return
-      const ids = [...new Set(sidebarTabOrder(state, win.spaceId))]
-        .map((id) => state.tabs[id])
-        .filter((t): t is NonNullable<typeof t> => !!t)
-        .sort((a, b) => b.lastActiveAt - a.lastActiveAt)
-        .slice(0, 5)
-      const active = ops.activeTab(windowId)
-      const order = active ? [active, ...ids.map((t) => t.id).filter((id) => id !== active)] : ids.map((t) => t.id)
-      recent = { windowId, order: order.slice(0, 5), times: new Map(ids.map((t) => [t.id, t.lastActiveAt])), index: 0 }
-    }
-    const r = recent
-    if (r.order.length < 2) return
-    r.index = (r.index + delta + r.order.length) % r.order.length
-    const target = r.order[r.index]
-    if (target) ops.activate(windowId, target)
-    // If the Control release is never seen (focus moved), settle after a pause.
-    if (r.timer) clearTimeout(r.timer)
-    r.timer = setTimeout(endRecent, 1500)
-  }
-  actions.register('tab.recent', stepRecent(1))
-  actions.register('tab.recentBack', stepRecent(-1))
-  tabs.onControlUp = endRecent
-  // W, with Control still held, closes the highlighted tab; the next one in the switcher takes its
-  // place and switching goes on (TB-05, keys lane KS-06).
-  tabs.recentSwitch = {
-    active: (windowId) => recent?.windowId === windowId,
-    closeHighlighted: (windowId) => {
-      const r = recent
-      if (!r || r.windowId !== windowId) return
-      const closing = r.order[r.index]
-      if (!closing) return
-      r.order.splice(r.index, 1)
-      r.times.delete(closing)
-      if (r.index >= r.order.length) r.index = 0
-      ops.closeTabs([closing], 'closed')
-      const next = r.order[r.index]
-      if (next && store.state.tabs[next]) ops.activate(windowId, next)
-      if (r.timer) clearTimeout(r.timer)
-      r.timer = setTimeout(endRecent, 1500)
-    },
-  }
-  commands.register('tabs.endRecentSwitch', () => endRecent())
+  // The recent-tab switcher, ⌃Tab (TB-05).
+  registerTabSwitcher(ctx, ops)
   for (let n = 1; n <= 9; n++) {
     actions.register(`tab.goto.${n}`, (c) => {
       const windowId = windowOf(c)
@@ -811,19 +799,26 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     for (const entry of d.archive) if (entry.favicon) delete entry.favicon
   })
   maintenance.start()
+  resources.start()
 
   if (ctx.e2e) {
     const hooks: TabTestHooks = {
       maintenance: (now) => maintenance.run(now),
-      lastMenu: () => menuLabels(lastMenu),
-      clickMenu: (path) => {
-        const item = findMenuItem(lastMenu, path)
-        if (!item?.click || item.enabled === false) return false
-        ;(item.click as () => void)()
-        return true
+      clockAhead: (ms) => {
+        ahead += ms
       },
+      launchPassDone: () => !maintenance.launchPending,
+      rowMenu: (windowId) => rowMenus.info(windowId ?? windows.focusedWindowId() ?? windows.ids()[0]),
+      chooseRowMenu: (path, windowId) =>
+        rowMenus.chooseByLabel(windowId ?? windows.focusedWindowId() ?? windows.ids()[0], path),
+      toastView: (windowId) => toastView.info(windowId ?? windows.focusedWindowId() ?? windows.ids()[0] ?? ''),
       undo: () => ops.undo.undo(),
       recentlyClosed: () => ops.recentlyClosed.map((r) => r.tab.id),
+      resources: (memory) => {
+        if (memory !== undefined) resources.memory = memory
+        return resources.pass()
+      },
+      importGuard: (on) => guardImportTabs(on),
     }
     ;(globalThis as unknown as { __orbitTabs: TabTestHooks }).__orbitTabs = hooks
   }

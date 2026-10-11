@@ -1,0 +1,30 @@
+/* A row's right-click menu (TB-14): the Space menu's look (spaces.css), in the Space's colours. */
+.row-menu {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.row-menu__level {
+  pointer-events: auto;
+  max-width: 340px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+
+.row-menu__item.is-open:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+}
+
+.row-menu__item:disabled {
+  cursor: default;
+}
+
+/* The key that does the same thing (KS-18). */
+.row-menu__hint {
+  flex: none;
+  margin-left: 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}

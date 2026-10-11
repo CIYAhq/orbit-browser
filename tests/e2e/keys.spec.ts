@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { expect, type Page, test } from '@playwright/test'
 import { FOCUS_IS_EDITABLE } from '../../src/main/nav/focus'
+import { switcherOf } from '../../src/shared/tab-switcher'
 import { action, isMac, launchOrbit, MOD, type Orbit, run, state, tabPage, viewPage } from './helpers'
 import {
   cmd,
@@ -669,7 +670,7 @@ test('[KS-16][NV-01] a text field in a frame whose page uses ⌘[ / Alt+← keep
 })
 
 test('[KS-02][SB-11] keyboard in a frame: Toggle Sidebar, preferring websites, toggles on the first press when the frame leaves ⌘S / Ctrl+S alone; a frame that uses it gets it first', async () => {
-  const { app, shell } = orbit
+  const { app } = orbit
   await sidebarPrefersWebsites()
   const { at, frame } = await framedTab('FrameSave', false)
   await clickInFrame(at, frame, '#box')
@@ -680,7 +681,8 @@ test('[KS-02][SB-11] keyboard in a frame: Toggle Sidebar, preferring websites, t
   // A frame that saves with the key: the first press is the frame's, and the toast says so.
   await inFrame(at, frame, `addEventListener('keydown', (e) => { if (e.code === 'KeyS') e.preventDefault() })`)
   await pressInPage(app, at, 'S', PRIMARY_MOD)
-  const toast = shell.getByTestId('toast').filter({ hasText: `The page used ${SAVE}` })
+  // The sidebar is hidden: the toast shows over the page (SB-13).
+  const toast = (await viewPage(app, 'toasts')).getByTestId('toast').filter({ hasText: `The page used ${SAVE}` })
   await expect(toast).toHaveCount(1)
   expect(await sidebarVisible()).toBe(false)
   await pressInPage(app, at, 'S', PRIMARY_MOD)
@@ -766,6 +768,12 @@ async function selectPage(tabId: string, url: string): Promise<void> {
 async function activeTab(): Promise<string | undefined> {
   const win = Object.values((await state(orbit.app)).windows)[0]
   return win?.activeTab[win.spaceId] ?? undefined
+}
+
+/** The tab the recent-tab switcher of the first window highlights, once its list shows (TB-05). */
+async function highlighted(): Promise<string | undefined> {
+  const list = switcherOf(Object.values((await state(orbit.app)).windows)[0]?.overlay)
+  return list?.tabs[list.index]
 }
 
 test('[KS-05][PN-02][TB-07] from a page: ⌘D pins a Today tab and ⌘D again puts it back on top of Today; ⌘⇧T after ⌘W restores a closed tab in its place', async () => {
@@ -861,22 +869,25 @@ test('[KS-06][TB-05] holding ⌃: Tab and ⇧Tab step through recent tabs, W clo
     ['keyDown', 'Tab', mods],
     ['keyUp', 'Tab', mods],
   ]
+  // Held, the list shows with A highlighted; the page stays D's until Control is let go.
   await keyEvents([['keyDown', 'Control', ctrl], ...tab(ctrl)])
-  await expect.poll(activeTab).toBe(a)
+  await expect.poll(highlighted).toBe(a)
   await keyEvents(tab(ctrl))
-  await expect.poll(activeTab).toBe(c)
+  await expect.poll(highlighted).toBe(c)
   await keyEvents([['keyDown', 'Shift', ['control', 'shift']], ...tab(['control', 'shift']), ['keyUp', 'Shift', ctrl]])
-  await expect.poll(activeTab).toBe(a)
+  await expect.poll(highlighted).toBe(a)
   // W closes A; C, next in the switcher, is highlighted in its place.
   await keyEvents([
     ['keyDown', 'W', ctrl],
     ['keyUp', 'W', ctrl],
   ])
   await expect.poll(async () => (await state(app)).tabs[a]).toBeUndefined()
-  await expect.poll(activeTab).toBe(c)
+  await expect.poll(highlighted).toBe(c)
   await keyEvents(tab(ctrl))
-  await expect.poll(activeTab).toBe(b)
+  await expect.poll(highlighted).toBe(b)
+  expect(await activeTab()).toBe(d)
   await keyEvents([['keyUp', 'Control', []]])
+  await expect.poll(activeTab).toBe(b)
   // Settled on B: a quick ⌃Tab goes back to D, the tab used before it.
   await keyEvents([['keyDown', 'Control', ctrl], ...tab(ctrl), ['keyUp', 'Control', []]])
   await expect.poll(activeTab).toBe(d)
@@ -909,9 +920,10 @@ test('[KS-06][TB-05] ⌃` steps back in the recent-tab switcher on every platfor
     ['keyDown', 'Tab', ctrl],
     ['keyUp', 'Tab', ctrl],
   ])
-  await expect.poll(activeTab).toBe(a)
+  await expect.poll(highlighted).toBe(a)
   await keyEvents(tick)
-  await expect.poll(activeTab).toBe(b)
+  await expect.poll(highlighted).toBe(b)
+  expect(await activeTab()).toBe(c)
   await keyEvents([['keyUp', 'Control', []]])
   await expect.poll(focusedUrl).toBe(fx.url('/page/TickB'))
   expect(await activeTab()).toBe(b)
@@ -1280,6 +1292,11 @@ test('[KS-18] remap Pin to ⌘⇧P: the command bar’s row and the tab’s righ
   expect(await menuHints()).toEqual(
     expect.arrayContaining([`Pin Tab=${menuKey('Shift+P')}`, `Close Tab=${menuKey('W')}`]),
   )
+  // The row menu is Orbit's own, in the overlay (TB-14): it draws the key as the keymap has it.
+  const pinHint = overlay.locator('[data-testid="row-menu-item"][data-label="Pin Tab"] .row-menu__hint')
+  await expect(pinHint).toHaveText(isMac ? '⇧⌘P' : 'Ctrl+Shift+P')
+  await overlay.keyboard.press('Escape')
+  await expect(overlay.getByTestId('row-menu')).toHaveCount(0)
 
   // The page's own menu: Reload shows its keys, and another key once remapped.
   const page = await tabPage(app, '/page/Hints')
