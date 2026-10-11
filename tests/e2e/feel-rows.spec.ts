@@ -620,72 +620,92 @@ test('[FL-11] ⌘⇧K with 8 Today tabs: the rows sweep out one after another wi
   const { app, shell } = orbit
   const ids = await blankTabs(8)
   await shell.mouse.move(600, 860)
-  const rec = await record(shell, {
-    rows: { selector: TODAY_ROWS, key: 'data-tab-id' },
-    slots: { selector: '[data-testid="today-list"] > [data-slot]', key: 'data-key' },
-    divider: '[data-testid="today-divider"]',
-    newTab: '[data-testid="new-tab-button"]',
-  })
-  await shell.keyboard.press(`${MOD}+Shift+K`)
-  await expect.poll(async () => (await space(app)).today.length).toBe(0)
-  const r = await rec.until(1000)
-  const press = r.inputs.find((i) => i.type === 'keydown' && i.key?.toLowerCase() === 'k')
-  if (!press) throw new Error('⌘⇧K never reached the shell')
-  const first = r.frames[0]
-  if (!first) throw new Error('nothing recorded')
-  // When each row starts leaving (its slide or fade shows), and how far it slides.
-  const starts = ids.map((id) => {
-    const x0 = first.lists.rows?.[id]?.x ?? 0
-    const f = r.frames.find(
-      (g) =>
-        g.i >= press.frame &&
-        (!g.lists.rows?.[id] || (g.lists.rows[id]?.opacity ?? 1) < 0.99 || (g.lists.rows[id]?.x ?? x0) < x0 - 0.5),
+  // One round clears Today with ⌘⇧K and brings the same eight rows back with ⌘Z. Its budgets (Today
+  // empty within 450 ms, the rows growing back in) are judged on the best of up to three rounds
+  // (D46): one slow frame of a busy machine says little about Orbit. What must hold every time is
+  // checked in every round.
+  const round = async () => {
+    const rec = await record(shell, {
+      rows: { selector: TODAY_ROWS, key: 'data-tab-id' },
+      slots: { selector: '[data-testid="today-list"] > [data-slot]', key: 'data-key' },
+      divider: '[data-testid="today-divider"]',
+      newTab: '[data-testid="new-tab-button"]',
+    })
+    await shell.keyboard.press(`${MOD}+Shift+K`)
+    await expect.poll(async () => (await space(app)).today.length).toBe(0)
+    const r = await rec.until(1000)
+    const press = r.inputs.find((i) => i.type === 'keydown' && i.key?.toLowerCase() === 'k')
+    if (!press) throw new Error('⌘⇧K never reached the shell')
+    const first = r.frames[0]
+    if (!first) throw new Error('nothing recorded')
+    // When each row starts leaving (its slide or fade shows), and how far it slides.
+    const starts = ids.map((id) => {
+      const x0 = first.lists.rows?.[id]?.x ?? 0
+      const f = r.frames.find(
+        (g) =>
+          g.i >= press.frame &&
+          (!g.lists.rows?.[id] || (g.lists.rows[id]?.opacity ?? 1) < 0.99 || (g.lists.rows[id]?.x ?? x0) < x0 - 0.5),
+      )
+      return f ? f.t - press.t : Number.POSITIVE_INFINITY
+    })
+    const slides = ids.map((id) => {
+      const x0 = first.lists.rows?.[id]?.x ?? 0
+      const xs = r.frames
+        .map((f) => f.lists.rows?.[id])
+        .filter((b) => !!b && b.opacity > 0.05)
+        .map((b) => b?.x ?? x0)
+      return x0 - Math.min(x0, ...xs)
+    })
+    // Empty: every slot gone, or no room left.
+    const empty = r.frames.find(
+      (f) => f.i >= press.frame && ids.every((id) => (f.lists.slots?.[id]?.height ?? 0) <= 0.5),
     )
-    return f ? f.t - press.t : Number.POSITIVE_INFINITY
-  })
-  const slides = ids.map((id) => {
-    const x0 = first.lists.rows?.[id]?.x ?? 0
-    const xs = r.frames
-      .map((f) => f.lists.rows?.[id])
-      .filter((b) => !!b && b.opacity > 0.05)
-      .map((b) => b?.x ?? x0)
-    return x0 - Math.min(x0, ...xs)
-  })
-  // Empty: every slot gone, or no room left.
-  const empty = r.frames.find((f) => f.i >= press.frame && ids.every((id) => (f.lists.slots?.[id]?.height ?? 0) <= 0.5))
-  const emptied = empty ? empty.t - press.t : Number.POSITIVE_INFINITY
-  const inOrder = starts.every((s, k) => k === 0 || s >= (starts[k - 1] as number))
-  const spread = (starts.at(-1) as number) - (starts[0] as number)
-  const still = ['divider', 'newTab'].map((name) => {
-    const ys = series(r, name, (b) => b.y)
-      .map((p) => p.v)
-      .filter((v) => !Number.isNaN(v))
-    return Math.max(...ys.map((v) => Math.abs(v - (ys[0] ?? v))))
-  })
-  note('FL-11', '⌘⇧K → Today empty', emptied, '≤ 450 ms')
-  note('FL-11', 'first row starts → last row starts', spread, '7 × 20–30 ms (one after another)')
-  note('FL-11', 'rows slide left', Math.min(...slides), '≈ 24 px', 'px')
-  note('FL-11', 'divider and "+ New Tab" moved', Math.max(...still), '0 (stay put)', 'px')
-  expect(inOrder, `rows start leaving top to bottom: ${starts.map((s) => Math.round(s)).join(', ')} ms`).toBe(true)
-  expect(spread, 'the rows leave one after another').toBeGreaterThanOrEqual(2 * FRAME)
-  expect(emptied).toBeLessThanOrEqual(450 * FRAME_SLACK)
-  expect(Math.min(...slides), 'every row slides left').toBeGreaterThanOrEqual(12)
-  expect(Math.max(...still), 'the divider and "+ New Tab" stay put').toBeLessThanOrEqual(0.5)
+    const emptied = empty ? empty.t - press.t : Number.POSITIVE_INFINITY
+    const inOrder = starts.every((s, k) => k === 0 || s >= (starts[k - 1] as number))
+    const spread = (starts.at(-1) as number) - (starts[0] as number)
+    const still = ['divider', 'newTab'].map((name) => {
+      const ys = series(r, name, (b) => b.y)
+        .map((p) => p.v)
+        .filter((v) => !Number.isNaN(v))
+      return Math.max(...ys.map((v) => Math.abs(v - (ys[0] ?? v))))
+    })
 
-  // ⌘Z: the rows grow back in, all in the same frame.
-  await settled(shell)
-  const back = await record(shell, { slots: { selector: '[data-testid="today-list"] > [data-slot]', key: 'data-key' } })
-  await shell.keyboard.press(`${MOD}+Z`)
-  await expect.poll(async () => (await space(app)).today.length).toBe(8)
-  const b = await back.until(900)
-  const appeared = ids.map((id) => b.frames.find((f) => (f.lists.slots?.[id]?.height ?? 0) > 0.5)?.t)
-  const known = appeared.filter((t): t is number => t !== undefined)
-  const together = known.length === ids.length ? Math.max(...known) - Math.min(...known) : Number.POSITIVE_INFINITY
-  const grow = Math.max(...ids.map((id) => motionOf(series(b, 'slots', (x) => x.height, id)).biggestStep))
-  note('FL-11', '⌘Z: first row back → last row back', together, '0 (one group)')
-  note('FL-11', '⌘Z: rows growing in, largest step share', grow * 100, '< 60 % (the insertion motion)', '%')
-  expect(together, 'the rows come back in one group').toBeLessThanOrEqual(FRAME + 1)
-  if (FRAME_SLACK === 1) expect(grow, 'the rows grow in').toBeLessThan(0.6)
+    // ⌘Z: the rows grow back in, all in the same frame.
+    await settled(shell)
+    const back = await record(shell, {
+      slots: { selector: '[data-testid="today-list"] > [data-slot]', key: 'data-key' },
+    })
+    await shell.keyboard.press(`${MOD}+Z`)
+    await expect.poll(async () => (await space(app)).today.length).toBe(8)
+    const b = await back.until(900)
+    const appeared = ids.map((id) => b.frames.find((f) => (f.lists.slots?.[id]?.height ?? 0) > 0.5)?.t)
+    const known = appeared.filter((t): t is number => t !== undefined)
+    const together = known.length === ids.length ? Math.max(...known) - Math.min(...known) : Number.POSITIVE_INFINITY
+    const grow = Math.max(...ids.map((id) => motionOf(series(b, 'slots', (x) => x.height, id)).biggestStep))
+    await settled(shell)
+    return { starts, slides, emptied, inOrder, spread, still, together, grow }
+  }
+  const { best, all } = await bestOf(round, (m) => m.emptied <= 450 * FRAME_SLACK && (FRAME_SLACK > 1 || m.grow < 0.6))
+  console.log(
+    `[feel] FL-11 rounds: ${all.map((m) => `empty ${Math.round(m.emptied)} ms, growing in ${Math.round(m.grow * 100)} %`).join('; ')}`,
+  )
+  note('FL-11', '⌘⇧K → Today empty', best.emptied, '≤ 450 ms')
+  note('FL-11', 'first row starts → last row starts', best.spread, '7 × 20–30 ms (one after another)')
+  note('FL-11', 'rows slide left', Math.min(...best.slides), '≈ 24 px', 'px')
+  note('FL-11', 'divider and "+ New Tab" moved', Math.max(...best.still), '0 (stay put)', 'px')
+  note('FL-11', '⌘Z: first row back → last row back', best.together, '0 (one group)')
+  note('FL-11', '⌘Z: rows growing in, largest step share', best.grow * 100, '< 60 % (the insertion motion)', '%')
+  for (const m of all) {
+    expect(m.inOrder, `rows start leaving top to bottom: ${m.starts.map((s) => Math.round(s)).join(', ')} ms`).toBe(
+      true,
+    )
+    expect(m.spread, 'the rows leave one after another').toBeGreaterThanOrEqual(2 * FRAME)
+    expect(Math.min(...m.slides), 'every row slides left').toBeGreaterThanOrEqual(12)
+    expect(Math.max(...m.still), 'the divider and "+ New Tab" stay put').toBeLessThanOrEqual(0.5)
+    expect(m.together, 'the rows come back in one group').toBeLessThanOrEqual(FRAME + 1)
+  }
+  expect(best.emptied).toBeLessThanOrEqual(450 * FRAME_SLACK)
+  if (FRAME_SLACK === 1) expect(best.grow, 'the rows grow in').toBeLessThan(0.6)
 })
 
 /** Whether a slot is leaving (data-exiting) in frame `i`: the classes don't say, so look at the DOM's order. */

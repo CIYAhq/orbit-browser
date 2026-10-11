@@ -263,7 +263,7 @@
     - every file that calls motion's `animate()` reads it;
     - no stylesheet keys a rule off the media query alone.
 
-    Run on the code before N1's fix, the second check named 11 components in 9 files: the Favorites grid and its tiles, the split tile, the folder's box and row, the space header, the Today block, the drag ghost, both popovers and the downloads flyout.
+    Run on the code before N1's fix, the second check named 11 components in 8 files: the Favorites grid and its tiles, the split tile, the folder's box and row, the space header, the Today block, the drag ghost, both popovers and the downloads flyout.
 - **FL-29:** the Space shortcut now settles in 292 ms (was 409 ms). The other budgets are in the rows for FL-02, 03, 05, 09, 10, 13, 16 and 17.
   - FL-13's rubber band comes back in 478 ms on FL-13's own spring. FL-29's 350 ms is for swipes that land on a Space (D70).
   - ⌘W selects the next tab in 1 frame at the median of five closes. The first close after a launch took 2 frames in 10 runs of 15 (FL-09).
