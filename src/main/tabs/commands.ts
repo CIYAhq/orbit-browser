@@ -28,6 +28,7 @@ import { KEEP_KEYBOARD } from '../keys/focus'
 import { TAB_MENU_KEYS, withKeyHints } from '../keys/menu-hints'
 import type { CallContext } from '../registry'
 import { tabSplitMenuItems } from '../split/menu'
+import { registerLinkDrop } from './link-drop'
 import { TabMaintenance } from './maintenance'
 import { folderMenu, type MenuOps, tabMenu } from './menus'
 import { makeTab, numberedTarget, steppedTarget, todayInsertIndex } from './model'
@@ -235,6 +236,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   const rowMenus = registerRowMenus(ctx)
   const toastView = registerToastView(ctx)
   registerThemeUndo(ctx, ops.undo)
+  registerLinkDrop(ctx)
   /** What a row menu is about, for screen readers: the tab, the folder or the selection. */
   const menuLabelFor = (id: ItemId, selection: TabId[]): string => {
     const state = store.state

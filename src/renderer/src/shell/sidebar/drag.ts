@@ -10,8 +10,8 @@
 import { animate, motionValue } from 'motion/react'
 import { isFolderId, isSplitId, isTabId } from '../../../../shared/ids'
 import { layoutLeaves, MAX_PANES, rowDropSide } from '../../../../shared/split'
-import type { ItemId, OrbitState, SpaceId } from '../../../../shared/state'
-import { locate, parseContainerKey, visibleTabOrder } from '../../../../shared/tree'
+import type { ContainerRef, ItemId, OrbitState, SpaceId } from '../../../../shared/state'
+import { containerItems, locate, parseContainerKey, visibleTabOrder } from '../../../../shared/tree'
 import { invoke } from '../../api'
 import { EASE, REDUCED_SETTLE, reducedMotion, STANDARD, tween } from '../../motion'
 import { activeTabId } from '../../selectors'
@@ -26,7 +26,7 @@ import {
   rowShifts,
   type Slot,
 } from './dnd-model'
-import { IDLE_DRAG, useDrag, useSelection } from './ui-state'
+import { appearsAtOnce, type DragState, IDLE_DRAG, useDrag, useSelection } from './ui-state'
 
 /** Movement before a press becomes a drag (TB-08: no long-press, a few pixels). */
 export const DRAG_THRESHOLD = 4
@@ -783,4 +783,193 @@ function cancel(s: Session): void {
   void Promise.all([animate(ghostX, s.originX, to), animate(ghostY, s.originY, to), animate(ghostScale, 1, to)]).then(
     finish,
   )
+}
+
+// ---- A link dragged in from a page (NV-08, TB-02) ----
+
+/**
+ * A link (or text) dragged over the sidebar with the system's drag and drop, from a page: the rows
+ * make room where it would open, as they do for a tab row dragged there; a closed folder takes it
+ * in, the Favorites grid opens a place for it, a Space's icon takes it to that Space. The system
+ * draws the dragged link, so there is no ghost.
+ */
+interface LinkSession {
+  slots: Slot[]
+  measuredSeq: number
+  /** The room a new row takes. */
+  room: number
+  lastY: number
+  prevY: number
+  leaving: number
+}
+
+let linkSession: LinkSession | null = null
+
+/** A link from a page is over the sidebar at window point `x`, `y`. */
+export function linkDragOver(x: number, y: number): void {
+  if (session) return
+  let s = linkSession
+  if (s) window.clearTimeout(s.leaving)
+  else {
+    const slots = measureSlots()
+    const row = slots.find((sl) => sl.kind === 'item' && !sl.folder)
+    s = { slots, measuredSeq: getSeq(), room: (row?.height ?? 32) + ROW_GAP, lastY: y, prevY: y, leaving: 0 }
+    linkSession = s
+  }
+  if (getSeq() !== s.measuredSeq && listReady()) {
+    s.slots = measureSlots()
+    s.measuredSeq = getSeq()
+  }
+  s.prevY = s.lastY
+  s.lastY = y
+  const zone = zoneAt(x, y)
+  const prev = useDrag.getState()
+  const patch: DragState = { ...IDLE_DRAG, phase: 'dragging' }
+  if (zone.kind === 'list' && listReady()) {
+    const target = linkListTarget(s, prev.target)
+    patch.target = target
+    patch.intoFolder = target?.type === 'into' ? target.folderId : null
+    if (target?.type === 'between') {
+      const shifts: Record<string, number> = {}
+      s.slots.forEach((sl, i) => {
+        if (i >= target.at) shifts[sl.key] = s.room
+      })
+      patch.shifts = shifts
+    }
+  } else if (zone.kind === 'favorites' && ctx.favorites) {
+    const tiles = [...ctx.favorites.querySelectorAll<HTMLElement>('[data-fav-id]')]
+    patch.favIndex = gridDropIndex(
+      tiles.map((el) => el.getBoundingClientRect()),
+      x,
+      y,
+    )
+  } else if (zone.kind === 'space') {
+    patch.spaceTarget = zone.spaceId
+  }
+  if (prev.spaceTarget !== patch.spaceTarget) markSpaceTarget(patch.spaceTarget)
+  if (
+    prev.phase !== 'dragging' ||
+    !sameTarget(prev.target, patch.target) ||
+    gapTopOf(prev.target) !== gapTopOf(patch.target) ||
+    prev.favIndex !== patch.favIndex ||
+    prev.spaceTarget !== patch.spaceTarget ||
+    prev.intoFolder !== patch.intoFolder
+  ) {
+    useDrag.setState(patch)
+  }
+}
+
+function linkListTarget(s: LinkSession, prev: DropTarget | null): DropTarget | null {
+  const scroll = ctx.scroll
+  if (!scroll) return null
+  const y = s.lastY - scroll.getBoundingClientRect().top + scroll.scrollTop
+  const space = getOrbitState().spaces[ctx.spaceId]
+  const none = new Set<string>()
+  const counts = {
+    [`pinned:${ctx.spaceId}`]: { length: space?.pinned.length ?? 0, dragged: 0 },
+    [`today:${ctx.spaceId}`]: { length: space?.today.length ?? 0, dragged: 0 },
+  }
+  const at = (yy: number) =>
+    computeDropTarget(s.slots, yy, none, {
+      pinnedContainer: `pinned:${ctx.spaceId}`,
+      todayContainer: `today:${ctx.spaceId}`,
+      counts,
+    })
+  const target = at(y)
+  // Hysteresis, as for a row: the place holds until the pointer is a few pixels past the boundary.
+  if (prev && !sameTarget(prev, target)) {
+    const back = y - Math.sign(s.lastY - s.prevY || 1) * HYSTERESIS
+    if (sameTarget(prev, at(back))) return prev
+  }
+  return target
+}
+
+/**
+ * The link left the sidebar, or the drag ended elsewhere. A move onto another element of the
+ * sidebar brings a new `dragover` at once; only a leave with none after it is the link going.
+ */
+export function linkDragLeave(): void {
+  const s = linkSession
+  if (!s) return
+  window.clearTimeout(s.leaving)
+  s.leaving = window.setTimeout(() => endLinkDrag(), 100)
+}
+
+/** Closes the room the link opened: the rows spring back. */
+export function endLinkDrag(): void {
+  const s = linkSession
+  if (!s) return
+  window.clearTimeout(s.leaving)
+  linkSession = null
+  markSpaceTarget(null)
+  useDrag.setState({ ...IDLE_DRAG, phase: 'cancelling' })
+  window.setTimeout(() => {
+    if (!linkSession && !session && useDrag.getState().phase === 'cancelling') useDrag.setState(IDLE_DRAG)
+  }, 500)
+}
+
+/**
+ * The link `url` dropped at window point `x`, `y`: it opens as a tab where the room was, in the
+ * same frame as the room closes (NV-08, TB-02). Elsewhere on the sidebar, at the top of Today.
+ */
+export async function dropLink(x: number, y: number, url: string, spaceId: SpaceId): Promise<void> {
+  if (session) return
+  linkDragOver(x, y)
+  const s = linkSession
+  if (s) window.clearTimeout(s.leaving)
+  linkSession = null
+  const state = useDrag.getState()
+  markSpaceTarget(null)
+  const target = state.target
+  const place: { to?: ContainerRef; index?: number; spaceId: SpaceId } =
+    state.spaceTarget !== null
+      ? { spaceId: state.spaceTarget }
+      : state.favIndex !== null && ctx.profileId
+        ? { to: { kind: 'favorites', profileId: ctx.profileId }, index: state.favIndex, spaceId }
+        : target?.type === 'into'
+          ? { to: { kind: 'folder', folderId: target.folderId }, index: Number.MAX_SAFE_INTEGER, spaceId }
+          : target?.type === 'between'
+            ? { to: parseContainerKey(target.container), index: target.rawIndex, spaceId }
+            : { spaceId }
+  const to = place.to
+  if (!to || target?.type === 'into') {
+    useDrag.setState(IDLE_DRAG)
+    // Into another Space it opens there out of sight, as a tab dropped on its icon moves there.
+    const activate = state.spaceTarget === null || state.spaceTarget === ctx.spaceId
+    await invoke('tabs.create', { url, spaceId: place.spaceId, container: to, index: place.index, activate }).catch(
+      () => null,
+    )
+    return
+  }
+  // The new row lands in the room left for it: drawn whole at once, as the room closes (same render).
+  const before = new Set(containerItems(getOrbitState(), to) ?? [])
+  const seqAtDrop = getSeq()
+  let landed = false
+  const land = (id?: string) => {
+    if (landed) return
+    landed = true
+    unsubscribe()
+    if (id) appearsAtOnce.set(id, performance.now())
+    useDrag.setState(IDLE_DRAG)
+  }
+  const unsubscribe = useMirror.subscribe((m) => {
+    if (m.seq <= seqAtDrop || !m.state) return
+    const added = (containerItems(m.state, to) ?? []).find((id) => !before.has(id))
+    if (added) land(added)
+  })
+  const made = await invoke('tabs.create', { url, spaceId: place.spaceId, container: to, index: place.index }).catch(
+    () => null,
+  )
+  if (!made && !landed) {
+    // Refused (Favorites full: main says so): the room closes.
+    landed = true
+    unsubscribe()
+    useDrag.setState({ ...IDLE_DRAG, phase: 'cancelling' })
+    window.setTimeout(() => {
+      if (!linkSession && !session && useDrag.getState().phase === 'cancelling') useDrag.setState(IDLE_DRAG)
+    }, 500)
+    return
+  }
+  // The state with the tab comes before the answer; should it not, the room closes anyway.
+  window.setTimeout(() => land(), 1000)
 }

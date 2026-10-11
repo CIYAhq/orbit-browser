@@ -699,3 +699,321 @@ test('[KS-05][TB-18][KS-16][KS-18] sidebar undo and redo are in the keymap: rema
   await shell.waitForTimeout(500)
   expect(await title()).toBe('Second')
 })
+
+// ---------- TB-09: a row dragged onto the page ----------
+
+type Point = { x: number; y: number }
+
+/**
+ * Puts a note field and a chat box on page `name` (tab `tabId`): the chat box handles a dropped link
+ * itself, as a chat app does, and logs the drag events it gets. Returns their middles in the window.
+ */
+async function linkPlaces(tabId: string, name: string): Promise<{ note: Point; chat: Point; page: Page }> {
+  const page = await tabPage(orbit.app, `/page/${name}`)
+  const boxes = await page.evaluate(() => {
+    const note = document.createElement('textarea')
+    note.id = 'note'
+    note.style.cssText = 'position:fixed;left:50%;top:30%;width:220px;height:70px'
+    const chat = document.createElement('div')
+    chat.id = 'chat'
+    chat.style.cssText = 'position:fixed;left:30%;top:58%;width:260px;height:70px'
+    const box = document.createElement('div')
+    box.contentEditable = 'true'
+    box.style.cssText = 'width:100%;height:100%'
+    chat.append(box)
+    document.body.append(note, chat)
+    const log: { events: string[]; dropped: string[] } = { events: [], dropped: [] }
+    ;(window as unknown as { chatLog: typeof log }).chatLog = log
+    for (const type of ['dragenter', 'dragover', 'dragleave']) {
+      chat.addEventListener(type, (e) => {
+        if (log.events.at(-1) !== type) log.events.push(type)
+        if (type === 'dragover') e.preventDefault()
+      })
+    }
+    chat.addEventListener('drop', (e) => {
+      e.preventDefault()
+      log.dropped.push((e as DragEvent).dataTransfer?.getData('text/uri-list') ?? '')
+    })
+    const mid = (el: Element) => {
+      const r = el.getBoundingClientRect()
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+    }
+    return { note: mid(note), chat: mid(chat) }
+  })
+  const view = await tabView(orbit.app, tabId)
+  if (!view) throw new Error('no page view')
+  const at = (p: Point) => ({ x: view.bounds.x + p.x, y: view.bounds.y + p.y })
+  return { note: at(boxes.note), chat: at(boxes.chat), page }
+}
+
+/** Presses tab `tabId`'s row and lifts it off the sidebar, once the last drag's row is back. */
+async function lift(tabId: string): Promise<void> {
+  await expect(orbit.shell.getByTestId('drag-ghost')).toHaveCount(0)
+  await settled(orbit.shell)
+  const from = await row(orbit.shell, tabId).boundingBox()
+  if (!from) throw new Error('missing the row')
+  await orbit.shell.mouse.move(from.x + 40, from.y + from.height / 2)
+  await orbit.shell.mouse.down()
+  await orbit.shell.mouse.move(from.x + 60, from.y + from.height / 2, { steps: 3 })
+}
+
+const indicator = () => orbit.shell.getByTestId('split-drop-indicator')
+
+test('[TB-09][SV-04] a row dragged onto the page: over a text field it drops its link there, over a chat box the page takes it, elsewhere the page’s edge makes a split', async () => {
+  const { app, shell } = orbit
+  const b = await newTab(app, fx.url('/page/Dragged'))
+  const a = await newTab(app, fx.url('/page/Shown'))
+  await waitTab(app, b, '/page/Dragged')
+  await waitTab(app, a, '/page/Shown')
+  await expect.poll(async () => (await tabView(app, a))?.visible).toBe(true)
+  await settled(shell)
+  const url = (await state(app)).tabs[b]?.url as string
+  const { note, chat, page } = await linkPlaces(a, 'Shown')
+  const frame = await shell.getByTestId('content-frame').boundingBox()
+  if (!frame) throw new Error('missing the content frame')
+
+  // Over the plain page the split's preview shows; over the note field it doesn't, and the page
+  // is back as it was. Released there, the field gets the link, and the keyboard.
+  await lift(b)
+  await shell.mouse.move(frame.x + frame.width * 0.1, frame.y + frame.height / 2, { steps: 8 })
+  await shell.mouse.move(frame.x + frame.width * 0.1 + 5, frame.y + frame.height / 2, { steps: 2 })
+  await expect(indicator()).toBeVisible()
+  await shell.mouse.move(note.x, note.y, { steps: 8 })
+  await expect(indicator()).toHaveCount(0)
+  await expect.poll(async () => (await tabView(app, a))?.bounds.width).toBeGreaterThan(frame.width * 0.9)
+  await shell.mouse.up()
+  await expect.poll(() => page.evaluate(() => (document.getElementById('note') as HTMLTextAreaElement).value)).toBe(url)
+  expect(await page.evaluate(() => document.activeElement?.id)).toBe('note')
+  await expect.poll(focusedUrl).toContain('/page/Shown')
+  expect(Object.keys((await state(app)).splits)).toHaveLength(0)
+  expect(await activeId(app)).toBe(a)
+
+  // Over the chat box the page is told of the row (it shows where the link would go) and, released
+  // there, handles the link itself: nothing is typed into the box.
+  await lift(b)
+  // The first move over the page shows the page the drag began on again (FL-05); the next ones are over it.
+  await shell.mouse.move(chat.x, chat.y, { steps: 10 })
+  await shell.mouse.move(chat.x + 5, chat.y, { steps: 2 })
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { chatLog: { events: string[] } }).chatLog.events))
+    .toEqual(['dragenter', 'dragover'])
+  await expect(indicator()).toHaveCount(0)
+  // Off it, the page is told the row left.
+  await shell.mouse.move(frame.x + frame.width * 0.9, frame.y + frame.height / 2, { steps: 4 })
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { chatLog: { events: string[] } }).chatLog.events))
+    .toEqual(['dragenter', 'dragover', 'dragleave'])
+  await expect(indicator()).toBeVisible()
+  await shell.mouse.move(chat.x, chat.y, { steps: 4 })
+  await expect(indicator()).toHaveCount(0)
+  await shell.mouse.up()
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { chatLog: { dropped: string[] } }).chatLog.dropped))
+    .toEqual([url])
+  expect(await page.evaluate(() => document.querySelector('#chat [contenteditable]')?.textContent)).toBe('')
+  expect(Object.keys((await state(app)).splits)).toHaveLength(0)
+
+  // Released on the page's edge, away from both, the row makes a split, as SV-04 has it.
+  await lift(b)
+  await shell.mouse.move(frame.x + frame.width * 0.9, frame.y + frame.height / 2, { steps: 8 })
+  await shell.mouse.move(frame.x + frame.width * 0.9 + 5, frame.y + frame.height / 2, { steps: 2 })
+  await expect(indicator()).toHaveAttribute('data-side', 'right')
+  await shell.mouse.up()
+  await expect(shell.getByTestId('split-row')).toHaveCount(1)
+  const split = Object.values((await state(app)).splits)[0]
+  expect(JSON.stringify(split?.layout)).toBe(
+    JSON.stringify({
+      type: 'row',
+      children: [
+        { type: 'leaf', tabId: a },
+        { type: 'leaf', tabId: b },
+      ],
+      sizes: [0.5, 0.5],
+    }),
+  )
+  // The page got no more of the row.
+  expect(await page.evaluate(() => (window as unknown as { chatLog: { dropped: string[] } }).chatLog.dropped)).toEqual([
+    url,
+  ])
+})
+
+test('[TB-09][SV-14] in a split, the pane whose field takes a dropped link becomes the focused pane, with the keyboard', async () => {
+  const { app, shell } = orbit
+  const b = await newTab(app, fx.url('/page/Dragged'))
+  const c = await newTab(app, fx.url('/page/Right'))
+  const a = await newTab(app, fx.url('/page/Left'))
+  for (const [id, name] of [
+    [b, 'Dragged'],
+    [c, 'Right'],
+    [a, 'Left'],
+  ] as const) {
+    await waitTab(app, id, `/page/${name}`)
+  }
+  await run(app, 'split.create', { tabIds: [a, c] })
+  await expect.poll(async () => (await tabView(app, c))?.visible).toBe(true)
+  await expect.poll(() => activeId(app)).toBe(a)
+  await settled(shell)
+  const url = (await state(app)).tabs[b]?.url as string
+  const { note, page } = await linkPlaces(c, 'Right')
+  await lift(b)
+  await shell.mouse.move(note.x, note.y, { steps: 10 })
+  await shell.mouse.move(note.x + 5, note.y, { steps: 2 })
+  await expect(indicator()).toHaveCount(0)
+  await shell.mouse.up()
+  await expect.poll(() => page.evaluate(() => (document.getElementById('note') as HTMLTextAreaElement).value)).toBe(url)
+  await expect.poll(() => activeId(app)).toBe(c)
+  // Also once the row is back in the sidebar.
+  await expect(shell.getByTestId('drag-ghost')).toHaveCount(0)
+  await expect.poll(focusedUrl).toContain('/page/Right')
+  expect(await page.evaluate(() => document.activeElement?.id)).toBe('note')
+  // The split is as it was; the dragged tab is still a tab of its own.
+  const splits = Object.values((await state(app)).splits)
+  expect(splits).toHaveLength(1)
+  expect(JSON.stringify(splits[0]?.layout)).not.toContain(b)
+})
+
+// ---------- NV-08: a link dragged from a page onto the sidebar ----------
+
+/**
+ * The system's drag and drop of a link over the sidebar, at window point `x`, `y`: the events a
+ * link dragged from a page gives the element there, each carrying the link.
+ */
+function linkDrag(type: 'dragenter' | 'dragover' | 'dragleave' | 'drop', x: number, y: number, url: string) {
+  return orbit.shell.evaluate(
+    ([type, x, y, url]) => {
+      const el = document.elementFromPoint(x, y) ?? document.body
+      const data = new DataTransfer()
+      data.setData('text/uri-list', url)
+      data.setData('text/plain', url)
+      el.dispatchEvent(
+        new DragEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          clientX: x,
+          clientY: y,
+          dataTransfer: data,
+        }),
+      )
+    },
+    [type, x, y, url] as const,
+  )
+}
+
+/** Window y of tab `tabId`'s row as drawn (with the room a drag opens). */
+async function rowTop(tabId: string): Promise<number> {
+  return (await row(orbit.shell, tabId).boundingBox())?.y ?? Number.NaN
+}
+
+test('[NV-08][TB-02] a link dragged from a page onto the sidebar opens as a tab where it is dropped: rows make room there, a folder takes it in, Favorites open a place', async () => {
+  const { app, shell } = orbit
+  const sp = await space(app)
+  const ids: string[] = []
+  for (const name of ['One', 'Two', 'Three']) {
+    const id = await newTab(app, fx.url(`/page/${name}`))
+    await waitTab(app, id, `/page/${name}`)
+    ids.push(id)
+  }
+  const folderId = await cmd<string>(app, 'folders.create', {
+    name: 'Box',
+    container: { kind: 'today', spaceId: sp.id },
+    index: 3,
+  })
+  await run(app, 'folders.setCollapsed', { folderId, collapsed: true })
+  await settled(shell)
+  const today = async () => (await space(app)).today
+  const [first, second] = (await today()) as [string, string]
+  const box = await row(shell, first).boundingBox()
+  if (!box) throw new Error('missing the first row')
+  const x = box.x + box.width / 2
+  const secondTop = await rowTop(second)
+
+  // Over the first row's lower half: the rows below it make room for one row; it stays.
+  const linked = fx.url('/page/Linked')
+  await linkDrag('dragenter', x, box.y + box.height * 0.75, linked)
+  await linkDrag('dragover', x, box.y + box.height * 0.75, linked)
+  await expect.poll(async () => (await rowTop(second)) - secondTop).toBeGreaterThan(box.height * 0.9)
+  expect(await rowTop(first)).toBeCloseTo(box.y, 0)
+  // Off the sidebar, the room closes and nothing opens.
+  await linkDrag('dragleave', x, box.y + box.height * 0.75, linked)
+  await expect.poll(async () => Math.abs((await rowTop(second)) - secondTop)).toBeLessThan(1)
+
+  // Back, and dropped: the link opens there, between the two rows, drawn whole at once as the
+  // room closes.
+  await linkDrag('dragenter', x, box.y + box.height * 0.75, linked)
+  await linkDrag('dragover', x, box.y + box.height * 0.75, linked)
+  await expect.poll(async () => (await rowTop(second)) - secondTop).toBeGreaterThan(box.height * 0.9)
+  const count = Object.keys((await state(app)).tabs).length
+  await shell.evaluate(() => {
+    const w = window as unknown as { grown: string[] }
+    w.grown = []
+    new MutationObserver((list) => {
+      for (const m of list) {
+        for (const node of m.addedNodes) {
+          if (node instanceof HTMLElement && node.matches('[data-slot]') && node.classList.contains('is-growing')) {
+            w.grown.push(node.dataset.key ?? '')
+          }
+        }
+      }
+    }).observe(document.querySelector('[data-testid="today-list"]') as Node, { childList: true })
+  })
+  await linkDrag('drop', x, box.y + box.height * 0.75, linked)
+  await expect.poll(async () => Object.keys((await state(app)).tabs).length).toBe(count + 1)
+  const opened = (await today())[1] as string
+  expect((await state(app)).tabs[opened]?.url).toBe(linked)
+  await expect(row(shell, opened)).toBeVisible()
+  expect(await shell.evaluate(() => (window as unknown as { grown: string[] }).grown)).toEqual([])
+  expect(await rowTop(second)).toBeCloseTo(secondTop + box.height + 1, 0)
+
+  // Over a closed folder's middle: the folder takes it in, and no row moves.
+  const folder = shell.locator(`[data-testid="folder"][data-folder-id="${folderId}"] [data-testid="folder-row"]`)
+  await folder.scrollIntoViewIfNeeded()
+  const f = await folder.boundingBox()
+  if (!f) throw new Error('missing the folder row')
+  const into = fx.url('/page/Into')
+  await linkDrag('dragenter', x, f.y + f.height / 2, into)
+  await linkDrag('dragover', x, f.y + f.height / 2, into)
+  await expect(folder).toHaveClass(/is-drop-into/)
+  await linkDrag('drop', x, f.y + f.height / 2, into)
+  await expect
+    .poll(async () => {
+      const s = await state(app)
+      return (s.folders[folderId]?.children ?? []).map((id) => s.tabs[id]?.url)
+    })
+    .toEqual([into])
+  await expect(folder).not.toHaveClass(/is-drop-into/)
+
+  // Over the Favorites, above the list: a place opens there, and the link is a Favorite.
+  const list = await shell.getByTestId('sidebar-scroll').boundingBox()
+  if (!list) throw new Error('missing the list')
+  const fav = fx.url('/page/Fav')
+  await linkDrag('dragenter', x, list.y - 6, fav)
+  await linkDrag('dragover', x, list.y - 6, fav)
+  await expect(shell.getByTestId('favorite-placeholder')).toBeVisible()
+  await linkDrag('drop', x, list.y - 6, fav)
+  await expect
+    .poll(async () => {
+      const s = await state(app)
+      return (s.profiles[DEFAULT_PROFILE_ID]?.favorites ?? []).map((id) => s.tabs[id]?.url)
+    })
+    .toEqual([fav])
+  await expect(shell.getByTestId('favorite-placeholder')).toHaveCount(0)
+
+  // On another Space's icon: it opens there, out of sight, and this window stays where it is.
+  const other = await cmd<string>(app, 'spaces.create', { name: 'Other', activate: false })
+  const icon = shell.locator(`[data-space-id="${other}"]`)
+  await expect(icon).toBeVisible()
+  const i = await icon.boundingBox()
+  if (!i) throw new Error('missing the Space icon')
+  const away = fx.url('/page/Away')
+  await linkDrag('dragenter', i.x + i.width / 2, i.y + i.height / 2, away)
+  await linkDrag('dragover', i.x + i.width / 2, i.y + i.height / 2, away)
+  await linkDrag('drop', i.x + i.width / 2, i.y + i.height / 2, away)
+  await expect
+    .poll(async () => {
+      const s = await state(app)
+      return (s.spaces[other]?.today ?? []).map((id) => s.tabs[id]?.url)
+    })
+    .toEqual([away])
+  expect(Object.values((await state(app)).windows).map((w) => w.spaceId)).toEqual([sp.id])
+})

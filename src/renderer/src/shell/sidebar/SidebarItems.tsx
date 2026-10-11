@@ -2,7 +2,6 @@ import { ArrowDown, ArrowUp, ChevronDown, Plus } from 'lucide-react'
 import { AnimatePresence, cubicBezier, motion } from 'motion/react'
 import {
   memo,
-  type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -12,12 +11,10 @@ import {
   useState,
 } from 'react'
 import { isFolderId, isTabId } from '../../../../shared/ids'
-import { pageMayOpen } from '../../../../shared/link-routing'
 import type { Space, SpaceId } from '../../../../shared/state'
 import { containerItems, containerKey, locate, sectionOf, splitOfTab } from '../../../../shared/tree'
-import { engineForSpace, parseInput } from '../../../../shared/url'
 import { invoke, runAction } from '../../api'
-import { importDroppedFile, importPastedLinks, revealInSidebar } from '../../import/sidebar'
+import { importPastedLinks, revealInSidebar } from '../../import/sidebar'
 import { useShortcutLabel } from '../../keys/live'
 import { AT_ONCE, EASE, OrbitMotionConfig, reducedMotion, useReducedMotion } from '../../motion'
 import { activeTabId } from '../../selectors'
@@ -29,7 +26,7 @@ import { FolderSearch } from './FolderSearch'
 import { IconPicker } from './IconPicker'
 import { CHEVRON, ItemList, RevealBox, TabRow, useRowShift } from './ItemList'
 import { RowWindow, RowWindowContext } from './row-window'
-import { clearSelection, startRename, useDrag, useIconPicker, useKeyboardFocus, useSelection } from './ui-state'
+import { clearSelection, startRename, useIconPicker, useKeyboardFocus, useSelection } from './ui-state'
 import { sidebarUndoKey } from './undo-keys'
 
 /**
@@ -104,8 +101,6 @@ export const SidebarItems = memo(function SidebarItems({
           role="tree"
           aria-label="Tabs"
           onKeyDown={onKeyDown}
-          onDragOver={onLinkDragOver}
-          onDrop={(e) => onLinkDrop(e, space.id)}
           onPaste={importPastedLinks}
           onContextMenu={(e) => {
             if (!e.defaultPrevented) onContextMenu?.(e)
@@ -308,34 +303,6 @@ function TodayBlock({ space, clear }: { space: Space; clear: boolean }) {
       </button>
     </motion.div>
   )
-}
-
-// ---- Links dropped on the sidebar open as new tabs (TB-02) ----
-
-function onLinkDragOver(e: ReactDragEvent) {
-  if (useDrag.getState().phase !== 'idle') return
-  const types = e.dataTransfer.types
-  if (types.includes('text/uri-list') || types.includes('text/plain') || types.includes('Files')) {
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'copy'
-  }
-}
-
-function onLinkDrop(e: ReactDragEvent, spaceId: string) {
-  const uri = e.dataTransfer
-    .getData('text/uri-list')
-    .split('\n')
-    .find((l) => l && !l.startsWith('#'))
-  const text = uri?.trim() || e.dataTransfer.getData('text/plain').trim()
-  if (importDroppedFile(e, text, spaceId)) return
-  if (!text) return
-  e.preventDefault()
-  const parsed = parseInput(text, engineForSpace(getOrbitState(), spaceId))
-  // Where it was dragged from isn't known, and a web page may have offered it: a local file's
-  // address opens only when typed or pasted (D49). The engine gives no address for a file dragged
-  // from the system.
-  if (!pageMayOpen(undefined, parsed.url)) return
-  void invoke('tabs.create', { url: parsed.url, spaceId })
 }
 
 // ---- Messages from main (context menu items that need the sidebar) ----

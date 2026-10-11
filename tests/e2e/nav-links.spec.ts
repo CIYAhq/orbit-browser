@@ -1091,8 +1091,11 @@ test('[DT-13][NV-08][NV-09][NV-12] a web page has Orbit open no internal page: n
       },
       [type, text] as const,
     )
-    await shell.getByTestId('sidebar-scroll').dispatchEvent('dragover', { dataTransfer: dt })
-    await shell.getByTestId('sidebar-scroll').dispatchEvent('drop', { dataTransfer: dt })
+    // At the top of Today: a dropped link opens where it is dropped (NV-08).
+    const top = await shell.getByTestId('new-tab-button').boundingBox()
+    const at = top ? { clientX: top.x + top.width / 2, clientY: top.y + top.height / 2 } : {}
+    await shell.getByTestId('sidebar-scroll').dispatchEvent('dragover', { dataTransfer: dt, ...at })
+    await shell.getByTestId('sidebar-scroll').dispatchEvent('drop', { dataTransfer: dt, ...at })
   }
   await drop('text/uri-list', internal)
   await drop('text/plain', internal)
@@ -1170,8 +1173,11 @@ test('[TB-02] a local file’s address dropped on the sidebar opens nothing, as 
       },
       [type, text] as const,
     )
-    await shell.getByTestId('sidebar-scroll').dispatchEvent('dragover', { dataTransfer: dt })
-    await shell.getByTestId('sidebar-scroll').dispatchEvent('drop', { dataTransfer: dt })
+    // At the top of Today: a dropped link opens where it is dropped (NV-08).
+    const top = await shell.getByTestId('new-tab-button').boundingBox()
+    const at = top ? { clientX: top.x + top.width / 2, clientY: top.y + top.height / 2 } : {}
+    await shell.getByTestId('sidebar-scroll').dispatchEvent('dragover', { dataTransfer: dt, ...at })
+    await shell.getByTestId('sidebar-scroll').dispatchEvent('drop', { dataTransfer: dt, ...at })
   }
   await drop('text/uri-list', local.text)
   await drop('text/plain', local.text)

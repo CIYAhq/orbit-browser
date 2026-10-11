@@ -40,6 +40,7 @@ import { RenameField } from './RenameField'
 import { RowWindowContext, useInRowWindow } from './row-window'
 import { SplitRow } from './SplitRow'
 import {
+  appearsAtOnce,
   clearSelection,
   startRename,
   useDrag,
@@ -189,8 +190,9 @@ const departed = new Map<string, { top: number; left: number; at: number }>()
 /**
  * Rows moving to a place scrolled out of sight (FL-07): they appear there at once, since nothing
  * there is seen, and the list's scroll anchoring keeps the rows in sight still in that same frame.
+ * A link's row landing in the room opened for it appears at once too (NV-08).
  */
-const arrivesUnseen = new Map<string, number>()
+const arrivesUnseen = appearsAtOnce
 
 /** Whether the row `id` mounting now arrives out of sight (taken once). */
 function takeUnseenArrival(id: string): boolean {

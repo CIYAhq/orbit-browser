@@ -1,4 +1,5 @@
 import type { RowMenuAt } from '../row-menu'
+import type { Box } from '../split'
 import type { ContainerRef, FolderId, ItemId, ProfileId, SpaceId, TabId, WindowId } from '../state'
 
 /** Owned by the sidebar/tabs lane. */
@@ -48,6 +49,17 @@ export interface TabCommands {
   'tabs.splitWith': { args: { tabId: TabId; target: ItemId; side: 'left' | 'right' }; result: string | null }
   /** Drag a tab out of the window: a new window shows it (TB-09). `x`/`y` are screen coordinates. */
   'tabs.toNewWindow': { args: { tabId: TabId; x?: number; y?: number }; result: WindowId | null }
+  /**
+   * A tab's row dragged over the page (TB-09): where the pages in `panes` take its link (text fields
+   * and editable areas in sight), in window coordinates, asked as they are drawn now.
+   */
+  'tabs.linkTargets': { args: { tabId: TabId; panes: { tabId: TabId; rect: Box }[] }; result: Box[] }
+  /**
+   * The row's link at a window point over one of those places: `over` tells the page the row is
+   * there, `leave` that it moved off, `drop` gives it the link, `end` forgets the drag (the row left
+   * the page, or was let go elsewhere). False when nothing took it.
+   */
+  'tabs.dropLink': { args: { x: number; y: number; phase: 'over' | 'leave' | 'drop' | 'end' }; result: boolean }
   /** Pin into the tab's Space, or into `spaceId` ("Pin to [Space]") (PN-02). */
   'tabs.pin': { args: { tabId: TabId; spaceId?: SpaceId }; result: void }
   'tabs.unpin': { args: { tabId: TabId }; result: void }

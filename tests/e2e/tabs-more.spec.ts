@@ -346,8 +346,11 @@ test('[TB-02] a link dropped on the sidebar and a pasted URL open as new Today t
     d.setData('text/uri-list', u)
     return d
   }, url)
-  await shell.getByTestId('sidebar-scroll').dispatchEvent('dragover', { dataTransfer: dt })
-  await shell.getByTestId('sidebar-scroll').dispatchEvent('drop', { dataTransfer: dt })
+  // At the top of Today: a dropped link opens where it is dropped (NV-08).
+  const top = await shell.getByTestId('new-tab-button').boundingBox()
+  const at = top ? { clientX: top.x + top.width / 2, clientY: top.y + top.height / 2 } : {}
+  await shell.getByTestId('sidebar-scroll').dispatchEvent('dragover', { dataTransfer: dt, ...at })
+  await shell.getByTestId('sidebar-scroll').dispatchEvent('drop', { dataTransfer: dt, ...at })
   await expect.poll(async () => (await space(app)).today.length).toBe(1)
   const dropped = (await space(app)).today[0] as string
   await waitTab(app, dropped, '/page/Dropped')
