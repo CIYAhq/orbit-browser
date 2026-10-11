@@ -2,6 +2,7 @@ import { type ElectronApplication, expect, type Page, test } from '@playwright/t
 import type { TrayTestHooks } from '../../src/main/miniwindow/tray'
 import type { SearchResponse } from '../../src/shared/commands/commandbar'
 import { paneOrder } from '../../src/shared/split'
+import { type Box, record } from './frames'
 import {
   activeTabId,
   type Fixtures,
@@ -595,6 +596,45 @@ test('[SV-26] a pane added while its neighbour still grows back from a close gro
     return
   }
   throw new Error(`frames never came in time to show the grow-in (${rounds.join('; ')})`)
+})
+
+test('[SV-26][FL-28] with reduced motion a new split shows its panes in place at once: the page takes its half and the new pane appears at its size, with no frame between', async () => {
+  await orbit.app.close()
+  orbit = await launchOrbit({ reducedMotion: true })
+  const { app, shell } = orbit
+  // The shell sees the system's setting as it would without Playwright, which emulates no
+  // preference in the pages it drives (the split's motion runs in the shell).
+  await shell.emulateMedia({ reducedMotion: null })
+  await expect(shell.locator('html')).toHaveClass(/\breduce-motion\b/)
+  const a = await newTab('Left')
+  await expect.poll(async () => (await tabView(app, a))?.visible).toBe(true)
+  const b = (await run(app, 'tabs.create', { url: fx.url('/page/Right'), activate: false })) as string
+  await settledPanes(shell, 1)
+  // Every pane card, every frame, from just before the split is made until well past a spring's length.
+  const recording = await record(shell, { panes: { selector: '[data-testid="split-pane"]', key: 'data-tab-id' } })
+  expect(await run(app, 'split.create', { tabIds: [a, b], focus: a })).toBeTruthy()
+  await expect(shell.locator('[data-testid="split-pane"]')).toHaveCount(2)
+  const r = await recording.until(900)
+  const first = r.frames[0]?.lists.panes ?? {}
+  const end = r.frames.at(-1)?.lists.panes ?? {}
+  expect(Object.keys(end).sort()).toEqual([a, b].sort())
+  expect(Object.keys(first)).toEqual([a])
+  const near = (p: Box | undefined, q: Box | undefined) =>
+    !!p &&
+    !!q &&
+    Math.abs(p.x - q.x) <= 0.5 &&
+    Math.abs(p.y - q.y) <= 0.5 &&
+    Math.abs(p.width - q.width) <= 0.5 &&
+    Math.abs(p.height - q.height) <= 0.5
+  // In each frame each card is where it was before the split or where it ends: never in between.
+  const between = r.frames.flatMap((f) =>
+    Object.entries(f.lists.panes ?? {})
+      .filter(([id, box]) => !near(box, end[id]) && !near(box, first[id]))
+      .map(([id, box]) => `${id === a ? 'page' : 'new pane'} at ${Math.round(f.t)} ms: ${JSON.stringify(box)}`),
+  )
+  expect(between).toEqual([])
+  // The page had room to change: it went from the whole card to its half.
+  expect((end[a]?.width ?? 0) < (first[a]?.width ?? 0) - 100).toBe(true)
 })
 
 // ---- The bar's split-pane and Mini Window variants (CB-23) ----
@@ -1371,6 +1411,73 @@ test('[MW-04][MW-15] a Mini Window opens with a quick scale-and-fade: its UI gro
   }, id)
   expect(card.view).toEqual({ x: 6, y: 40, width: card.width - 12, height: card.height - 46 })
   await expect(ui.getByTestId('mini')).toHaveCSS('transform', 'none')
+})
+
+test('[MW-04][FL-28] with reduced motion a Mini Window opens at its full size at once: its UI never scales or fades, and its page shows from the first frame the window does', async () => {
+  await orbit.app.close()
+  orbit = await launchOrbit({ reducedMotion: true })
+  const { app } = orbit
+  await run(app, 'mini.prepare', {})
+  let ui: Page | undefined
+  await expect
+    .poll(async () => {
+      ui = app.windows().find((p) => p.url().includes('view=mini'))
+      return ui ? await ui.getByTestId('mini').count() : 0
+    })
+    .toBe(1)
+  if (!ui) throw new Error('no Mini Window UI')
+  // The UI's size and opacity every few ms, and any animation of its size (MW-04's grow).
+  type Look = { scale: number; opacity: number; growing: boolean }
+  await ui.evaluate(() => {
+    const root = document.querySelector('[data-testid="mini"]') as HTMLElement
+    const looks: Look[] = []
+    ;(window as unknown as { __looks: Look[] }).__looks = looks
+    const began = performance.now()
+    const timer = setInterval(() => {
+      const cs = getComputedStyle(root)
+      const growing = root
+        .getAnimations()
+        .some((a) => (a.effect as KeyframeEffect | null)?.getKeyframes().some((k) => k.transform !== undefined))
+      looks.push({
+        scale: cs.transform === 'none' ? 1 : new DOMMatrixReadOnly(cs.transform).a,
+        opacity: Number(cs.opacity),
+        growing,
+      })
+      if (performance.now() - began > 4000) clearInterval(timer)
+    }, 4)
+  })
+  // The window and its page view, every 2 ms in main.
+  type Shown = { t: number; shown: boolean; page: boolean | null }
+  await app.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows().find((b) => b.webContents.getURL().includes('view=mini'))
+    const samples: Shown[] = []
+    ;(globalThis as unknown as { __miniShown: Shown[] }).__miniShown = samples
+    const began = Date.now()
+    const timer = setInterval(() => {
+      if (!win || win.isDestroyed() || Date.now() - began > 4000) return clearInterval(timer)
+      const page = win.contentView.children[0]
+      samples.push({ t: Date.now() - began, shown: win.isVisible(), page: page ? page.getVisible() : null })
+    }, 2)
+  })
+
+  const id = (await run(app, 'mini.open', { url: fx.url('/page/Still') })) as string
+  await expect.poll(async () => (await miniPage(id)).visible).toBe(true)
+  // Past the time a grow takes (about 200 ms) after the window showed.
+  const shownSamples = () => app.evaluate(() => (globalThis as unknown as { __miniShown: Shown[] }).__miniShown)
+  await expect
+    .poll(async () => {
+      const shown = (await shownSamples()).filter((x) => x.shown)
+      return (shown.at(-1)?.t ?? 0) - (shown[0]?.t ?? 0)
+    })
+    .toBeGreaterThan(600)
+  // The page is in the window and showing from its first frame on screen, and stays so.
+  const shown = (await shownSamples()).filter((x) => x.shown)
+  expect(shown[0]).toMatchObject({ shown: true, page: true })
+  expect(shown.filter((x) => x.page !== true)).toEqual([])
+  // Its UI never grew or faded.
+  const looks = await ui.evaluate(() => (window as unknown as { __looks: Look[] }).__looks)
+  expect(looks.length).toBeGreaterThan(0)
+  expect(looks.filter((l) => l.growing || l.scale !== 1 || l.opacity !== 1)).toEqual([])
 })
 
 type TrayGlobal = { __orbitTray: TrayTestHooks }

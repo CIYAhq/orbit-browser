@@ -1071,6 +1071,37 @@ type WindowHooks = {
   __asked?: AbortController
 }
 
+/** Moves Orbit's first window. */
+function placeWindow(app: ElectronApplication, bounds: Box): Promise<void> {
+  return app.evaluate((_e, b) => {
+    const { __orbit } = globalThis as unknown as WindowHooks
+    __orbit.ctx.windows.get(__orbit.windowIds()[0] as string)?.setBounds(b)
+  }, bounds)
+}
+
+/** An alert over Orbit's first window, like the one before deleting a folder; `answerAlert` closes it. */
+function showAlert(app: ElectronApplication): Promise<void> {
+  return app.evaluate(({ dialog }) => {
+    const g = globalThis as unknown as WindowHooks
+    const win = g.__orbit.ctx.windows.get(g.__orbit.windowIds()[0] as string)
+    const asked = new AbortController()
+    g.__asked = asked
+    if (win) {
+      const options = { message: 'Delete “Reading”?', buttons: ['Delete', 'Cancel'], signal: asked.signal }
+      dialog.showMessageBox(win, options).catch(() => {})
+    }
+  })
+}
+
+/** Closes the alert; whether the window takes input again. */
+function answerAlert(app: ElectronApplication): Promise<boolean | undefined> {
+  return app.evaluate(() => {
+    const g = globalThis as unknown as WindowHooks
+    g.__asked?.abort()
+    return g.__orbit.ctx.windows.get(g.__orbit.windowIds()[0] as string)?.isEnabled()
+  })
+}
+
 test("[MD-06] the player keeps clear of Orbit's alerts and dialogs: it moves to the nearest clear corner, or out of sight when none is, and goes back when they close", async () => {
   orbit = await launchOrbit()
   const { app } = orbit
@@ -1082,29 +1113,8 @@ test("[MD-06] the player keeps clear of Orbit's alerts and dialogs: it moves to 
   const home = cornerBox(area, 'bottom-right', 320, 180)
   expect(info.bounds).toEqual(home)
 
-  const placeWindow = (bounds: Box) =>
-    app.evaluate((_e, b) => {
-      const { __orbit } = globalThis as unknown as WindowHooks
-      __orbit.ctx.windows.get(__orbit.windowIds()[0] as string)?.setBounds(b)
-    }, bounds)
-  /** An alert over Orbit's window, like the one before deleting a folder; answer() closes it. */
-  const ask = () =>
-    app.evaluate(({ dialog }) => {
-      const g = globalThis as unknown as WindowHooks
-      const win = g.__orbit.ctx.windows.get(g.__orbit.windowIds()[0] as string)
-      const asked = new AbortController()
-      g.__asked = asked
-      if (win) {
-        const options = { message: 'Delete “Reading”?', buttons: ['Delete', 'Cancel'], signal: asked.signal }
-        dialog.showMessageBox(win, options).catch(() => {})
-      }
-    })
-  const answer = () =>
-    app.evaluate(() => {
-      const g = globalThis as unknown as WindowHooks
-      g.__asked?.abort()
-      return g.__orbit.ctx.windows.get(g.__orbit.windowIds()[0] as string)?.isEnabled()
-    })
+  const ask = () => showAlert(app)
+  const answer = () => answerAlert(app)
   const shown = async () => {
     const p = await player(app)
     return { tabId: p.tabId, visible: p.visible, bounds: p.bounds }
@@ -1113,7 +1123,7 @@ test("[MD-06] the player keeps clear of Orbit's alerts and dialogs: it moves to 
 
   // Orbit's window sits in the bottom-right of the screen, under the player. An alert over it: the
   // player moves to the nearest corner clear of it, the top-right one, still playing...
-  await placeWindow({ x: area.x + area.width - 600, y: area.y + area.height - 500, width: 600, height: 500 })
+  await placeWindow(app, { x: area.x + area.width - 600, y: area.y + area.height - 500, width: 600, height: 500 })
   await ask()
   await expect.poll(shown).toEqual(at(cornerBox(area, 'top-right', 320, 180)))
   expect(await paused(v.page, '#v')).toBe(false)
@@ -1144,7 +1154,7 @@ test("[MD-06] the player keeps clear of Orbit's alerts and dialogs: it moves to 
     })
     .toBe(true)
   const big = (await player(app)).bounds as Box
-  await placeWindow({
+  await placeWindow(app, {
     x: area.x + Math.round((area.width - 800) / 2),
     y: area.y + Math.round((area.height - 600) / 2),
     width: 800,
@@ -1155,6 +1165,49 @@ test("[MD-06] the player keeps clear of Orbit's alerts and dialogs: it moves to 
   expect(await paused(v.page, '#v')).toBe(false)
   await expect.poll(answer).toBe(true)
   await expect.poll(shown).toEqual(at(big))
+})
+
+test("[MD-06][FL-28] with reduced motion the player steps aside for Orbit's alert at once, with no glide, and steps back at once when it closes", async () => {
+  orbit = await launchOrbit({ reducedMotion: true })
+  const { app } = orbit
+  const v = await openPlaying(app, '/media/long-video/Film')
+  await pipPage(app)
+  await leave(app)
+  const info = await expectPlayer(app, v.id)
+  const area = info.workArea as Box
+  const home = cornerBox(area, 'bottom-right', 320, 180)
+  const aside = cornerBox(area, 'top-right', 320, 180)
+  expect(info.bounds).toEqual(home)
+  // Orbit's window under the player: an alert over it sends the player to the top-right corner.
+  await placeWindow(app, { x: area.x + area.width - 600, y: area.y + area.height - 500, width: 600, height: 500 })
+  const at = (s: Sample, b: Box) => s.x === b.x && s.y === b.y && s.width === b.width && s.height === b.height
+  /** The player, sampled every few ms while `change` happens and for a while after. */
+  const watch = async (change: () => Promise<unknown>, to: Box) => {
+    const sampling = samplePlayer(app, 1200)
+    await change()
+    const samples = await sampling
+    await expect.poll(async () => (await player(app)).bounds).toEqual(to)
+    return samples
+  }
+
+  for (const [label, change, from, to] of [
+    ['aside', () => showAlert(app), home, aside],
+    ['back', () => answerAlert(app), aside, home],
+  ] as const) {
+    const samples = await watch(change, to)
+    // In one step from one corner to the other: never in between, never gliding.
+    const between = samples.filter((s) => s.visible && !at(s, from) && !at(s, to))
+    expect(between, label).toEqual([])
+    expect(
+      samples.some((s) => s.animating),
+      label,
+    ).toBe(false)
+    expect(
+      samples.some((s) => s.visible && at(s, to)),
+      label,
+    ).toBe(true)
+  }
+  expect(await paused(v.page, '#v')).toBe(false)
 })
 
 test('[MD-08] the player menu turns automatic picture-in-picture off for today or always; playback continues in the sidebar', async () => {
