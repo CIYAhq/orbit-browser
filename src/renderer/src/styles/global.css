@@ -474,6 +474,10 @@ html.is-resizing * {
   height: 22px;
   border-radius: 6px;
   color: var(--text-muted);
+  /* The button's own circle fades in with the instant timing (FL-08). */
+  transition:
+    background-color var(--motion-instant) var(--ease-instant),
+    color var(--motion-instant) var(--ease-instant);
 }
 
 .tab-row__close {
@@ -1440,6 +1444,9 @@ html.is-dragging-tab * {
   border-radius: 6px;
   color: var(--text-muted);
   opacity: 0;
+  transition:
+    background-color var(--motion-instant) var(--ease-instant),
+    color var(--motion-instant) var(--ease-instant);
 }
 
 .folder-row:hover .folder-row__search,
@@ -1452,10 +1459,27 @@ html.is-dragging-tab * {
   color: var(--text);
 }
 
-.tab-row__close:active,
-.tab-row__audio:active,
-.folder-row__search:active {
+/*
+ * A row button's press (FL-08): the glyph is drawn at 0.9 at once and springs back with the pop curve
+ * on release. The click fires on release as ever; nothing waits for the glyph.
+ */
+.tab-row__close > svg,
+.tab-row__audio > svg,
+.folder-row__search > svg {
+  transition: transform var(--motion-pop) var(--ease-pop);
+}
+
+.tab-row__close:active > svg,
+.tab-row__audio:active > svg,
+.folder-row__search:active > svg {
   transform: scale(0.9);
+  transition-duration: 0s;
+}
+
+.reduce-motion .tab-row__close > svg,
+.reduce-motion .tab-row__audio > svg,
+.reduce-motion .folder-row__search > svg {
+  transition: none;
 }
 
 .folder-search {

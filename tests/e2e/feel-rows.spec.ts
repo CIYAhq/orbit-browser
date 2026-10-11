@@ -480,6 +480,79 @@ test('[FL-07] pinned while the pinned section is out of sight, or moved to anoth
   expect((await state(app)).spaces[other]?.today).toEqual([second])
 })
 
+test('[FL-08] the × fades its circle in, presses to 0.9 at once, and its row starts leaving as soon as main closes the tab', async () => {
+  const { shell } = orbit
+  const ids = await blankTabs(5)
+  /** One round: hover the row of `id`, then its ×, press and release it; the frames of all three. */
+  const round = async (id: string) => {
+    const close = `[data-testid="today-list"] [data-tab-id="${id}"] [data-testid="tab-close"]`
+    // Over the row, away from the ×: the × shows, its circle not yet.
+    const rowBox = await row(shell, id).boundingBox()
+    if (!rowBox) throw new Error('no row')
+    await shell.mouse.move(rowBox.x + 30, rowBox.y + rowBox.height / 2)
+    await expect(shell.locator(close)).toHaveCSS('opacity', '1')
+    await settled(shell)
+    const box = await shell.locator(close).boundingBox()
+    const glyphBox = await shell.locator(`${close} svg`).boundingBox()
+    if (!box || !glyphBox) throw new Error('no ×')
+    const rec = await record(shell, {
+      close: { selector: close, style: ['background-color'] },
+      glyph: `${close} svg`,
+      row: `[data-testid="today-list"] [data-testid="tab-row"][data-tab-id="${id}"]`,
+    })
+    // A hover long enough for the circle to come in, and a press held a moment.
+    await shell.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 2 })
+    await shell.waitForTimeout(250)
+    await shell.mouse.down()
+    await shell.waitForTimeout(150)
+    await shell.mouse.up()
+    const r = await rec.until(1200)
+    const over = r.inputs.find(
+      (i) => i.type === 'pointermove' && (i.x ?? 0) >= box.x && (i.x ?? 0) <= box.x + box.width,
+    )
+    const down = r.inputs.find((i) => i.type === 'pointerdown')
+    const up = r.inputs.find((i) => i.type === 'pointerup')
+    if (!over || !down || !up) throw new Error('the pointer never reached the ×')
+    // Hover: the circle fades in with the instant timing (about 90 ms), so some frames show it part-way.
+    const circle = (f: (typeof r.frames)[number]) => alpha(f.els.close?.style?.['background-color'])
+    const full = Math.max(...r.frames.filter((f) => f.i < down.frame).map(circle))
+    const partWay = r.frames.filter(
+      (f) => f.i >= over.frame && f.i < down.frame && circle(f) > 0.002 && circle(f) < full - 0.002,
+    ).length
+    const lit = responseTo(r, over, (f) => circle(f) >= full - 0.002)?.ms ?? Number.POSITIVE_INFINITY
+    // Press: the glyph is drawn at about 0.9 in the first frame after the press.
+    const scale = (f: (typeof r.frames)[number]) => (f.els.glyph?.width ?? glyphBox.width) / glyphBox.width
+    const pressed = responseTo(r, down, (f) => scale(f) <= 0.92)?.frames ?? Number.POSITIVE_INFINITY
+    const smallest = Math.min(...r.frames.map(scale))
+    // Release: the click closes the tab in main, and the row's exit (FL-09: fade, slide left,
+    // collapse) shows in the first frame after main's answer: one round trip, so the second frame.
+    const x0 = r.frames[0]?.els.row?.x ?? 0
+    const leaving =
+      responseTo(r, up, (f) => !f.els.row || f.els.row.opacity < 0.99 || f.els.row.x < x0 - 0.5)?.frames ??
+      Number.POSITIVE_INFINITY
+    return { partWay, lit, pressed, smallest, leaving }
+  }
+  // A round that misses a budget is measured again on the next row (D46).
+  let next = 1
+  const { best, all } = await bestOf(
+    () => round(ids[next++] as string),
+    (m) => m.partWay >= 1 && m.lit <= (90 + 2 * FRAME) * FRAME_SLACK && m.pressed <= 1 && m.leaving <= 2 * FRAME_SLACK,
+  )
+  console.log(
+    `[feel] FL-08 rounds: ${all.map((m) => `lit ${Math.round(m.lit)} ms, pressed ${m.pressed}, leaving ${m.leaving} frames`).join('; ')}`,
+  )
+  note('FL-08', 'hover → circle fully in', best.lit, '≈ 90 ms (instant timing)')
+  note('FL-08', 'frames with the circle part-way in', best.partWay, '≥ 1 (a fade, not a switch)', 'frames')
+  note('FL-08', 'press → glyph at 0.9', best.pressed, '1', 'frames')
+  note('FL-08', 'smallest glyph scale', best.smallest, '≈ 0.9', '×')
+  note('FL-08', 'release → row starts leaving', best.leaving, '2 (main closes it in between)', 'frames')
+  expect(best.partWay, 'frames with the hover circle part-way in').toBeGreaterThanOrEqual(1)
+  expect(best.lit).toBeLessThanOrEqual((90 + 2 * FRAME) * FRAME_SLACK)
+  expect(best.pressed, 'frames from the press to the glyph at 0.9').toBeLessThanOrEqual(1)
+  expect(best.smallest).toBeCloseTo(0.9, 2)
+  expect(best.leaving, 'frames from the release to the exit').toBeLessThanOrEqual(2 * FRAME_SLACK)
+})
+
 /** Whether a slot is leaving (data-exiting) in frame `i`: the classes don't say, so look at the DOM's order. */
 function isExiting(r: Recording, i: number, key: string): boolean {
   const f = r.frames[i]
