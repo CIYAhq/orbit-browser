@@ -2,7 +2,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CommandName } from '../../../shared/rpc'
 import { invoke } from '../api'
-import { EASE, POP, SNAPPY, tween } from '../motion'
+import { EASE, POP, SNAPPY, tween, useReducedMotion } from '../motion'
 
 interface Toast {
   id: number
@@ -24,18 +24,25 @@ const MAX_TOASTS = 3
 /**
  * FL-22's motion: in, a toast rises about 12 px, fades in and grows from 0.96 with the pop spring;
  * out, it fades and drops about 8 px (about 160 ms). A new toast pushes the older ones up with the
- * snappy spring. With reduced motion, motion keeps the fades and drops the moves: ShellApp renders the
- * toasts under OrbitMotionConfig (FL-28).
+ * snappy spring.
+ *
+ * With reduced motion (FL-28) a toast only fades, in and out, where it rests, and the push is at
+ * once. Its start and end hold no move at all: motion jumps a reduced move to its end in a frame of
+ * its own, so a toast could show 12 px low in its first frame, and drop 8 px as it starts to leave.
+ * ShellApp also renders the toasts under OrbitMotionConfig.
  */
 const ENTER = { opacity: 0, y: 12, scale: 0.96 }
 const SHOWN = { opacity: 1, y: 0, scale: 1, transition: { ...POP, opacity: tween('quick') } }
 const LEAVE = { opacity: 0, y: 8, scale: 1, transition: { duration: 0.16, ease: EASE.quick } }
+const FADE_IN = { opacity: 0, y: 0, scale: 1 }
+const FADE_OUT = { opacity: 0, y: 0, scale: 1, transition: { duration: 0.16, ease: EASE.quick } }
 
 /** Short confirmations from the main process (e.g. "Copied URL"), shown at the bottom of the sidebar. */
 export function Toasts() {
   const [toasts, setToasts] = useState<Toast[]>([])
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>())
   const hovered = useRef<number | null>(null)
+  const reduced = useReducedMotion()
   const dismiss = useCallback((id: number) => {
     clearTimeout(timers.current.get(id))
     timers.current.delete(id)
@@ -76,13 +83,13 @@ export function Toasts() {
         {toasts.map((t) => (
           <motion.div
             key={t.id}
-            layout="position"
+            layout={reduced ? false : 'position'}
             className={`toast${t.action ? ' has-action' : ''}`}
             data-testid="toast"
             data-toast-id={t.id}
-            initial={ENTER}
+            initial={reduced ? FADE_IN : ENTER}
             animate={SHOWN}
-            exit={LEAVE}
+            exit={reduced ? FADE_OUT : LEAVE}
             transition={{ layout: SNAPPY }}
             onPointerEnter={() => {
               hovered.current = t.id

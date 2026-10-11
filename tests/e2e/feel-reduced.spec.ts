@@ -67,18 +67,19 @@ async function reduce(how: 'switch' | 'system', shell: Page): Promise<void> {
 }
 
 for (const how of ['switch', 'system'] as const) {
-  test(`[FL-28][FL-22] reduced motion (${how === 'switch' ? 'Orbit’s switch' : 'the system setting'}): a toast fades in where it rests, at its size, and pushes the older one up at once`, async () => {
+  test(`[FL-28][FL-22] reduced motion (${how === 'switch' ? 'Orbit’s switch' : 'the system setting'}): a toast fades in where it rests, at its size, pushes the older one up at once, and fades out where it rests`, async () => {
     const { shell } = orbit
     await reduce(how, shell)
     const rec = await record(
       shell,
       { toasts: { selector: '[data-testid="toast"]', key: 'data-toast-id' } },
-      { maxMs: 3000 },
+      { maxMs: 6000 },
     )
     await toast('First toast')
     await shell.waitForTimeout(400)
     await toast('Second toast')
-    await shell.waitForTimeout(400)
+    // The first leaves 3 s after it came (FL-22).
+    await expect(shell.getByTestId('toast')).toHaveCount(1, { timeout: 6000 })
     const r = await rec.stop()
     const seen: string[] = []
     for (const f of r.frames)
@@ -97,8 +98,12 @@ for (const how of ['switch', 'system'] as const) {
     const scale0 = start.width / end.width
     const peak = Math.max(...alone.map((f) => (f.lists.toasts?.[one]?.width ?? 0) / end.width))
     const opaque = alone.find((f) => (f.lists.toasts?.[one]?.opacity ?? 0) >= 0.99)
-    // Pushed up as the second comes: the frames in which the older toast moves.
-    const pushed = motionOf(series(r, 'toasts', (b) => b.y, one).filter((p) => p.t >= (alone.at(-1)?.t ?? 0)))
+    // Pushed up as the second comes: the frames in which the older toast moves, until it has long
+    // settled (it leaves about 2.6 s after the second came).
+    const settled = secondIn.t + 1000
+    const pushed = motionOf(
+      series(r, 'toasts', (b) => b.y, one).filter((p) => p.t >= (alone.at(-1)?.t ?? 0) && p.t <= settled),
+    )
     note('FL-28', `toast (${how}): first frame below its place`, rise, '0 px (no rise)', 'px')
     note('FL-28', `toast (${how}): first frame scale`, scale0, '1 (no scale)', '×')
     note('FL-28', `toast (${how}): largest scale`, peak, '1 (no spring)', '×')
@@ -109,10 +114,20 @@ for (const how of ['switch', 'system'] as const) {
       'a short fade (≈ 100–150 ms) or none',
     )
     note('FL-28', `toast (${how}): frames the older toast moves when pushed`, pushed.moving, '1 (at once)', 'frames')
+    // Out: it fades where it rests (FL-22's 8 px drop is a move).
+    const later = r.frames.filter((f) => f.t >= settled && (f.lists.toasts?.[one]?.opacity ?? 0) > 0.01)
+    const rest = later[0]?.lists.toasts?.[one]
+    if (!rest) throw new Error('the first toast was gone before it settled')
+    const drop = Math.max(...later.map((f) => Math.abs((f.lists.toasts?.[one]?.y ?? rest.y) - rest.y)))
+    const fading = later.filter((f) => (f.lists.toasts?.[one]?.opacity ?? 1) < 0.99)
+    note('FL-28', `toast (${how}): furthest from its place while it fades out`, drop, '0 px (no drop)', 'px')
+    note('FL-28', `toast (${how}): frames of the fade out`, fading.length, 'a fade (≥ 2)', 'frames')
     expect(Math.abs(rise), 'no rise').toBeLessThanOrEqual(0.5)
     expect(scale0, 'no scale').toBeGreaterThanOrEqual(0.995)
     expect(peak, 'no spring').toBeLessThanOrEqual(1.005)
     expect(pushed.travel, 'the older toast moves up').toBeGreaterThan(20)
     expect(pushed.moving, 'the older toast moves up at once').toBe(1)
+    expect(drop, 'no drop as it leaves').toBeLessThanOrEqual(0.5)
+    expect(fading.length, 'it fades out').toBeGreaterThanOrEqual(2)
   })
 }

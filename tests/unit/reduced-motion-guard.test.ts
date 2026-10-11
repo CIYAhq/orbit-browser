@@ -264,15 +264,24 @@ describe('[FL-28] reduced motion reaches every animation (feel review follow-up 
 })
 
 describe('the guard catches what it should', () => {
-  it('a component rendering motion outside any config, rendered by a root, is caught; under the config it is not', () => {
+  it('a component rendering motion outside any config, rendered by a root, is caught; under the config, or reading reduced motion, it is not', () => {
+    // Toasts as M1 found them: outside the config, reading nothing.
     const shell = join(RENDERER, 'src/shell/ShellApp.tsx')
+    const toasts = join(RENDERER, 'src/shell/Toasts.tsx')
     const src = text.get(shell) as string
+    const own = text.get(toasts) as string
     expect(src).toContain('<OrbitMotionConfig>')
+    expect(own).toContain('useReducedMotion()')
+    const bare = src.replace(/<OrbitMotionConfig>\s*(<Toasts \/>)\s*<\/OrbitMotionConfig>/, '$1')
     try {
-      text.set(shell, src.replace(/<OrbitMotionConfig>\s*(<Toasts \/>)\s*<\/OrbitMotionConfig>/, '$1'))
+      text.set(shell, bare)
+      text.set(toasts, own.replace('useReducedMotion()', 'false'))
       expect(unguarded(graph())).toContain('shell/Toasts.tsx: Toasts')
+      text.set(toasts, own)
+      expect(unguarded(graph())).not.toContain('shell/Toasts.tsx: Toasts')
     } finally {
       text.set(shell, src)
+      text.set(toasts, own)
     }
     expect(unguarded(graph())).not.toContain('shell/Toasts.tsx: Toasts')
   })
