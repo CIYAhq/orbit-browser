@@ -1,7 +1,7 @@
 /**
- * Feel of the window's own furniture (feel.md FL-22 toasts, FL-25 popovers), measured frame by frame
- * with the shared sampler (frames.ts). Each test logs its numbers (`[feel]` lines): docs/FEEL.md has them
- * against their targets.
+ * Feel of the window's own furniture (feel.md FL-15 icon buttons, FL-22 toasts, FL-25 popovers),
+ * measured frame by frame with the shared sampler (frames.ts). Each test logs its numbers (`[feel]`
+ * lines): docs/FEEL.md has them against their targets.
  */
 import { expect, test } from '@playwright/test'
 import { motionOf, note, type Recording, record, responseTo, series } from './frames'
@@ -170,4 +170,55 @@ test('[FL-25] a folder’s search popover opens from 0.97 with the snappy timing
   expect(opened?.ms ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual((150 + 3 * FRAME) * FRAME_SLACK)
   expect(closing.length, 'the popover fades out').toBeGreaterThanOrEqual(2)
   expect(gone?.ms ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual((130 + 3 * FRAME) * FRAME_SLACK)
+})
+
+test('[FL-15] an icon button presses to 0.94 at once and springs back on release; a disabled one stays still', async () => {
+  const { shell } = orbit
+  const button = shell.getByTestId('library-button')
+  const back = shell.getByTestId('nav-back')
+  await expect(back).toBeDisabled()
+  const box = await button.boundingBox()
+  const backBox = await back.boundingBox()
+  if (!box || !backBox) throw new Error('no buttons')
+  await shell.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await shell.waitForTimeout(200)
+  const rec = await record(shell, { button: '[data-testid="library-button"]', back: '[data-testid="nav-back"]' })
+  // Pressed, then released away from it: the press and the release, without opening the Library.
+  await shell.mouse.down()
+  await shell.waitForTimeout(200)
+  await shell.mouse.move(box.x + box.width / 2, box.y - 120, { steps: 2 })
+  await shell.mouse.up()
+  await shell.waitForTimeout(400)
+  await shell.mouse.move(backBox.x + backBox.width / 2, backBox.y + backBox.height / 2)
+  await shell.mouse.down()
+  await shell.waitForTimeout(150)
+  await shell.mouse.up()
+  const r = await rec.until(1600)
+  const [down, downBack] = r.inputs.filter((i) => i.type === 'pointerdown')
+  const up = r.inputs.find((i) => i.type === 'pointerup')
+  if (!down || !downBack || !up) throw new Error('the presses never reached the shell')
+  const scale = (f: Recording['frames'][number]) => (f.els.button?.width ?? box.width) / box.width
+  const pressed = responseTo(r, down, (f) => scale(f) <= 0.95)
+  const smallest = Math.min(...r.frames.filter((f) => f.i < up.frame).map(scale))
+  // Back: from this frame on it stays at full size, past the pop curve's overshoot.
+  const back1 = r.frames.find((f) => f.i >= up.frame && f.i < downBack.frame && Math.abs(scale(f) - 1) > 0.002)
+    ? responseTo(r, up, (f) =>
+        r.frames.filter((g) => g.i >= f.i && g.i < downBack.frame).every((g) => Math.abs(scale(g) - 1) <= 0.002),
+      )
+    : undefined
+  const between = r.frames.filter((f) => f.i >= up.frame && back1 && f.i < back1.frame.i && scale(f) > smallest + 0.002)
+  const still = Math.max(
+    ...r.frames
+      .filter((f) => f.i >= downBack.frame)
+      .map((f) => Math.abs((f.els.back?.width ?? backBox.width) - backBox.width)),
+  )
+  note('FL-15', 'press → button at 0.94', pressed?.ms, 'at once (a 60 ms press)')
+  note('FL-15', 'smallest scale while pressed', smallest, '≈ 0.94', '×')
+  note('FL-15', 'release → settled at full size', back1?.ms, '≈ 240 ms (pop)')
+  note('FL-15', 'disabled button: size change on a press', still, '0', 'px')
+  expect(pressed?.ms ?? Number.POSITIVE_INFINITY, 'press → 0.94').toBeLessThanOrEqual((60 + 2 * FRAME) * FRAME_SLACK)
+  expect(smallest).toBeCloseTo(0.94, 2)
+  expect(between.length, 'the release springs back over frames, not at once').toBeGreaterThanOrEqual(2)
+  expect(back1?.ms ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual((240 + 3 * FRAME) * FRAME_SLACK)
+  expect(still, 'a disabled button does not move').toBeLessThanOrEqual(0.01)
 })

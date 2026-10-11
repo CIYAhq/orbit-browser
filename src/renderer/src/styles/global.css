@@ -236,7 +236,8 @@ html.is-resizing * {
   color: var(--text-muted);
   transition:
     background var(--dur-fast) ease,
-    color var(--dur-fast) ease;
+    color var(--dur-fast) ease,
+    transform var(--motion-pop) var(--ease-pop);
 }
 
 .icon-button:hover:not(:disabled) {
@@ -244,8 +245,16 @@ html.is-resizing * {
   color: var(--text);
 }
 
+/* Every icon button presses to 0.94 at once and releases with the pop curve; a disabled one stays still (FL-15). */
 .icon-button:active:not(:disabled) {
   transform: scale(0.94);
+  transition-duration: var(--dur-fast), var(--dur-fast), 60ms;
+}
+
+/* Reduced motion (FL-28): the press still shows, with no spring either way. */
+.reduce-motion .icon-button,
+.reduce-motion .icon-button:active:not(:disabled) {
+  transition-duration: var(--dur-fast), var(--dur-fast), 0s;
 }
 
 .icon-button:disabled {
