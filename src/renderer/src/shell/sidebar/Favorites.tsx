@@ -1,15 +1,15 @@
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
-import { forwardRef, memo, useMemo, useState } from 'react'
+import { forwardRef, memo, type Ref, useMemo, useState } from 'react'
 import { MAX_FAVORITES } from '../../../../shared/defaults'
 import { isSplitId, isTabId } from '../../../../shared/ids'
 import { isAwayFromPinned, tabTitle } from '../../../../shared/tabs'
 import { invoke, isMac } from '../../api'
+import { AT_ONCE, POP, REDUCED_FADE, SNAPPY, useReducedMotion } from '../../motion'
 import { activeTabId } from '../../selectors'
 import { useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
 import { SplitFavoriteTile } from '../split/SplitFavoriteTile'
 import { pressItem } from './drag'
-import { POP, SNAPPY } from './motion-tokens'
 import { clearSelection, useDrag } from './ui-state'
 
 /** Stable empty list (a fresh [] per call would re-render forever). */
@@ -21,6 +21,14 @@ const MAX_COLUMNS = 4
 const TILE_SPRING = SNAPPY
 
 /**
+ * With reduced motion (FL-28) a tile only fades, in and out, where it rests and at its size; the
+ * grid re-flows at once and a press doesn't nudge it. Each tile and the grid ask
+ * `useReducedMotion()`, as motion reads OrbitMotionConfig only as an element mounts and the tiles stay
+ * on screen while the setting changes.
+ */
+const TILE_FADE = { opacity: 0, scale: 1 }
+
+/**
  * The Favorites grid at the top of the sidebar (FV-01, FV-02), shared by every Space of
  * a profile. Tiles fill the width (up to 4 per row, fewer stretch), wrap beyond that, and
  * open a gap while a tab is dragged over the grid.
@@ -30,6 +38,7 @@ export const Favorites = memo(
     const ids = useOrbit((s) => s.profiles[profileId]?.favorites ?? NO_ITEMS)
     const favIndex = useDrag((s) => s.favIndex)
     const hidden = useDrag((s) => s.hidden)
+    const reduced = useReducedMotion()
     // Tabs and split views (a Favorite split shows its panes' icons in one tile, SV-23).
     const favorites = useMemo(() => ids.filter((id) => isTabId(id) || isSplitId(id)), [ids])
     const visible = favorites.filter((id) => !(hidden[id] && favIndex !== null))
@@ -56,12 +65,12 @@ export const Favorites = memo(
               ) : (
                 <motion.div
                   key="placeholder"
-                  layout
+                  layout={!reduced}
                   className="favorite favorite--placeholder"
                   data-testid="favorite-placeholder"
-                  initial={{ opacity: 0, scale: 0.9 }}
+                  initial={reduced ? TILE_FADE : { opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  transition={TILE_SPRING}
+                  transition={reduced ? REDUCED_FADE : TILE_SPRING}
                 >
                   {visible.length === 0 && <span className="favorites__hint">Drop to add to Favorites</span>}
                 </motion.div>
@@ -74,23 +83,33 @@ export const Favorites = memo(
   }),
 )
 
-const FavoriteTile = memo(function FavoriteTile({ tabId }: { tabId: string }) {
+/**
+ * `ref` reaches the tile's element so the grid's AnimatePresence can take a leaving tile out of the
+ * flow at its size (popLayout): it shrinks and fades where it was while the grid closes up (FL-20).
+ */
+const FavoriteTile = memo(function FavoriteTile({ tabId, ref }: { tabId: string; ref?: Ref<HTMLButtonElement> }) {
   const tab = useOrbit((s) => s.tabs[tabId])
   const active = useOrbit((s) => activeTabId(s) === tabId)
   const hidden = useDrag((s) => !!s.hidden[tabId])
   // Tiles that arrive by drag appear at once under the ghost; others pop in (FL-20).
   const [instant] = useState(() => hidden)
+  const reduced = useReducedMotion()
   if (!tab) return null
   const away = isAwayFromPinned(tab)
   const title = tabTitle(tab)
   return (
     <motion.button
-      layout
+      ref={ref}
+      layout={!reduced}
       transition={TILE_SPRING}
-      initial={instant ? false : { scale: 0.85, opacity: 0 }}
-      animate={{ scale: 1, opacity: hidden ? 0 : 1, transition: hidden ? { duration: 0 } : POP }}
-      exit={{ scale: 0.85, opacity: 0, transition: { duration: 0.15 } }}
-      whileTap={{ scale: 0.94 }}
+      initial={instant ? false : reduced ? TILE_FADE : { scale: 0.85, opacity: 0 }}
+      animate={{ scale: 1, opacity: hidden ? 0 : 1, transition: hidden ? AT_ONCE : reduced ? REDUCED_FADE : POP }}
+      exit={
+        reduced
+          ? { ...TILE_FADE, transition: REDUCED_FADE }
+          : { scale: 0.85, opacity: 0, transition: { duration: 0.15 } }
+      }
+      whileTap={reduced ? undefined : { scale: 0.94 }}
       type="button"
       className={`favorite${active ? ' is-active' : ''}${tab.asleep ? ' is-asleep' : ''}${away ? ' is-away' : ''}`}
       data-testid="favorite-tile"

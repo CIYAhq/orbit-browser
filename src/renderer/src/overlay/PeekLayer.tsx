@@ -24,13 +24,14 @@ import {
 import type { OverlayState } from '../../../shared/state'
 import { invoke, perfMark } from '../api'
 import { useKeymap } from '../keys/live'
+import { REDUCED, reducedMotion } from '../motion'
 import './peek.css'
 
 type PeekOverlay = Extract<OverlayState, { kind: 'peek' }>
 type Phase = NonNullable<PeekOverlay['phase']> | 'open'
 
-/** Reduced motion: the card fades in and out in place. */
-const FADE_MS = 130
+/** Reduced motion: the card fades in and out in place (FL-28). */
+const FADE_MS = REDUCED.fadeMs
 const BUTTON = 28
 const BUTTON_GAP = 8
 /** The grab handle above the card (PK-06): its hit area, centred over the card's top edge. */
@@ -38,8 +39,6 @@ const HANDLE_HIT_W = 160
 const HANDLE_HIT_H = 30
 /** A trackpad swipe has ended when no wheel event came for this long. */
 const WHEEL_END_MS = 120
-
-const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
 
 /** One drawn frame of the card: where it is, its corners, and how visible the chrome and dim are. */
 interface Frame {
@@ -141,7 +140,7 @@ class PeekAnimator {
     this.stop()
     const a = this.area()
     const card = peekCard(a)
-    const reduced = reduceMotion.matches
+    const reduced = reducedMotion()
     const settled = this.settler()
 
     if (phase === 'open') {
@@ -220,7 +219,7 @@ class PeekAnimator {
       page: true,
     }
     const settled = this.settler()
-    if (reduceMotion.matches) {
+    if (reducedMotion()) {
       this.tween(
         FADE_MS,
         (t) => this.draw({ rect: start.rect, radius: start.radius, dim: start.dim * (1 - t), chrome: 0, page: false }),
@@ -318,7 +317,7 @@ class PeekAnimator {
         page: true,
       })
     }
-    if (reduceMotion.matches) {
+    if (reducedMotion()) {
       this.tween(FADE_MS, step)
       return
     }
@@ -355,7 +354,10 @@ class PeekAnimator {
     d.wheelTimer = window.setTimeout(() => this.drag === d && this.endDrag(t), WHEEL_END_MS)
   }
 
-  /** Runs a unit spring (0 → 1) frame by frame; `done` fires once it rests. */
+  /**
+   * Runs a unit spring (0 → 1) frame by frame; `done` fires once it rests. Its clock starts now, so
+   * the first frame after the change already moves (FL-29), as a new phase must.
+   */
   private spring(
     cfg: Spring,
     step: (p: number, elapsed: number) => void,
@@ -364,16 +366,16 @@ class PeekAnimator {
   ): void {
     let x = 0
     let v = initialVelocity
-    let last = 0
-    let first = 0
+    const first = performance.now()
+    let last = first
     const tick = (now: number) => {
-      if (!first) first = last = now
+      // A frame's time can be a little before the call that started the spring.
       const next = advanceSpring(cfg, x, v, (now - last) / 1000)
       x = next.x
       v = next.v
-      last = now
+      last = Math.max(last, now)
       const resting = springResting(x, v)
-      step(resting ? 1 : x, now - first)
+      step(resting ? 1 : x, Math.max(0, now - first))
       if (resting) {
         this.raf = 0
         done?.()
@@ -382,12 +384,11 @@ class PeekAnimator {
     this.raf = requestAnimationFrame(tick)
   }
 
-  /** A timed ease-out (exits are quicker than entrances, FL-01). */
+  /** A timed ease-out (exits are quicker than entrances, FL-01). Its clock starts now, as the spring's does. */
   private tween(ms: number, step: (e: number) => void, done?: () => void): void {
-    let first = 0
+    const first = performance.now()
     const tick = (now: number) => {
-      if (!first) first = now
-      const t = Math.min(1, (now - first) / ms)
+      const t = Math.min(1, Math.max(0, now - first) / ms)
       step(1 - (1 - t) ** 3)
       if (t >= 1) {
         this.raf = 0

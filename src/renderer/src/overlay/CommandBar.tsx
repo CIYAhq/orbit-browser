@@ -9,7 +9,6 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  useSyncExternalStore,
 } from 'react'
 import { flushSync } from 'react-dom'
 import {
@@ -22,6 +21,7 @@ import {
 } from '../../../shared/commands/commandbar'
 import type { CommandBarMode } from '../../../shared/state'
 import { invoke, isMac, perfMark } from '../api'
+import { EASE, EXIT_FACTOR, ONE_FRAME_S, useReducedMotion } from '../motion'
 import { activeTabId } from '../selectors'
 import { getOrbitState, useOrbit } from '../store'
 import { Favicon } from '../ui/Favicon'
@@ -106,29 +106,23 @@ const blankMiniRows = () => miniRowsThatFit(true)
 const pageMiniRows = () => miniRowsThatFit(false)
 
 /**
+ * FL-16's own timing, between the quick and snappy tokens: in over 150 ms on the quick curve, with
+ * no overshoot; out in 0.7 × that (105 ms), and in 80 ms once a result is chosen. The entrance
+ * starts one frame in: the key was pressed a frame before the bar could mount, and a fade from 0
+ * would leave the bar's first frame empty (FL-29: visible in the frame after the key). With reduced
+ * motion the same timing only fades (FL-28).
+ */
+const BAR_MS = 150
+const BAR_IN = { duration: BAR_MS / 1000, ease: EASE.quick, delay: -ONE_FRAME_S }
+const BAR_OUT = { duration: (BAR_MS * EXIT_FACTOR) / 1000, ease: EASE.quick }
+const BAR_CHOSEN = { duration: 0.08, ease: EASE.quick }
+
+/**
  * The command bar (CB-01…CB-23): one field and one ranked result list. Ranking
  * runs in the main process per keystroke; this component keeps the field
  * responsive (native echo, inline completion re-applied synchronously) and only
  * swaps rows whose content changed.
  */
-const REDUCED_MOTION = '(prefers-reduced-motion: reduce)'
-
-/**
- * The OS "reduce motion" setting as it is at render time. motion's own hook takes a change only
- * from the media query's change event, which arrives at the next rendering step, so a bar opened
- * right after the setting changed could still scale in (FL-28).
- */
-function useReducedMotionNow(): boolean {
-  return useSyncExternalStore(
-    (onChange) => {
-      const query = matchMedia(REDUCED_MOTION)
-      query.addEventListener('change', onChange)
-      return () => query.removeEventListener('change', onChange)
-    },
-    () => matchMedia(REDUCED_MOTION).matches,
-  )
-}
-
 export function CommandBar({
   mode,
   initialQuery,
@@ -151,7 +145,7 @@ export function CommandBar({
   const maxRows = useMaxRows(mini ? (mini.blank ? blankMiniRows : pageMiniRows) : rowsThatFit)
   const present = useIsPresent()
   // FL-28: with reduced motion the bar only fades (no scale or drop, not even for one frame).
-  const reduced = useReducedMotionNow()
+  const reduced = useReducedMotion()
   const spaceId = useOrbit((s) => s.windows[window.orbit.windowId]?.spaceId)
   const suggestOn = useOrbit((s) => !!s.settings.searchSuggestions)
   const currentFavicon = useOrbit((s) => {
@@ -642,8 +636,8 @@ export function CommandBar({
         className="cmdbar-scrim"
         aria-hidden
         initial={{ opacity: 0 }}
-        animate={{ opacity: 1, transition: { duration: 0.14 } }}
-        exit={{ opacity: 0, transition: { duration: 0.1 } }}
+        animate={{ opacity: 1, transition: BAR_IN }}
+        exit={{ opacity: 0, transition: BAR_OUT }}
       />
       <div className="cmdbar-layer">
         <m.div
@@ -654,20 +648,11 @@ export function CommandBar({
           data-mode={mode}
           data-scope={scope?.kind ?? ''}
           initial={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.97, y: -4 }}
-          animate={
-            reduced
-              ? { opacity: 1, transition: { duration: 0.1 } }
-              : {
-                  opacity: 1,
-                  scale: 1,
-                  y: 0,
-                  transition: { type: 'spring', stiffness: 632, damping: 45, mass: 1, opacity: { duration: 0.12 } },
-                }
-          }
+          animate={{ opacity: 1, scale: 1, y: 0, transition: BAR_IN }}
           exit={
             reduced
-              ? { opacity: 0, transition: { duration: 0.08 } }
-              : { opacity: 0, scale: 0.98, transition: { duration: st.chosen ? 0.08 : 0.1, ease: [0.2, 0, 0, 1] } }
+              ? { opacity: 0, transition: st.chosen ? BAR_CHOSEN : BAR_OUT }
+              : { opacity: 0, scale: 0.98, transition: st.chosen ? BAR_CHOSEN : BAR_OUT }
           }
         >
           <div className="cmdbar__input-row">

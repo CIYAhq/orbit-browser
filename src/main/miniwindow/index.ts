@@ -1,15 +1,6 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import {
-  app,
-  BrowserWindow,
-  globalShortcut,
-  Menu,
-  nativeTheme,
-  screen,
-  systemPreferences,
-  type WebContents,
-} from 'electron'
+import { app, BrowserWindow, globalShortcut, Menu, nativeTheme, screen, type WebContents } from 'electron'
 import { toElectronAccelerator } from '../../shared/actions'
 import { createWindowState } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
@@ -22,6 +13,7 @@ import { NEUTRAL_THEME, paletteFor } from '../../shared/theme'
 import { insertItem, removeItem, sectionOf } from '../../shared/tree'
 import { engineForWindow, parseInput, siteOf } from '../../shared/url'
 import type { MainContext } from '../context'
+import { reducedMotion } from '../motion'
 import { NAV_WORLD } from '../nav/focus'
 import { archiveFloating, floatingTab, keepFloatingPagesOutOfTabClose } from '../peek/floating'
 import { runPageAction } from '../peek/page-actions'
@@ -165,14 +157,6 @@ function raise(win: BrowserWindow | undefined): void {
   if (win.isMinimized()) win.restore()
   win.show()
   win.focus()
-}
-
-function reducedMotion(): boolean {
-  try {
-    return systemPreferences.getAnimationSettings().prefersReducedMotion
-  } catch {
-    return false
-  }
 }
 
 export function registerMiniWindow(ctx: MainContext): void {
@@ -353,7 +337,7 @@ export function registerMiniWindow(ctx: MainContext): void {
   }
 
   const fadeIn = (win: BrowserWindow, ms: number) => {
-    if (!canFade || reducedMotion()) {
+    if (!canFade || reducedMotion(ctx)) {
       win.show()
       return
     }
@@ -377,7 +361,7 @@ export function registerMiniWindow(ctx: MainContext): void {
    */
   const growOpen = (mini: Mini, shown: () => void) => {
     const win = mini.win
-    if (reducedMotion()) {
+    if (reducedMotion(ctx)) {
       win.show()
       shown()
       return
@@ -427,7 +411,7 @@ export function registerMiniWindow(ctx: MainContext): void {
   const closeWindow = (mini: Mini, opts: { shrink?: boolean } = {}) => {
     const win = mini.win
     if (win.isDestroyed()) return
-    if (!canFade || reducedMotion() || !win.isVisible()) {
+    if (!canFade || reducedMotion(ctx) || !win.isVisible()) {
       win.close()
       return
     }

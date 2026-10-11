@@ -951,8 +951,7 @@ test('[SP-21][TB-09] a tab dropped right after an edge-dwell Space switch lands 
   for (let i = 0; i < 3; i++) inB.push(await newTab(app, fx.url(`/page/InB${i}`), { spaceId: b, activate: false }))
   const mover = await newTab(app, fx.url('/page/Mover'))
   await settled(shell)
-  // A row that has just finished growing in takes no presses for a frame or two: its slot goes
-  // back to `content-visibility: auto` and hit testing skips the row (PR #10 review M2).
+  // Pressed once it has grown in and hit testing finds the row itself (PR #10 review M2).
   await expect
     .poll(() =>
       shell.evaluate((id) => {

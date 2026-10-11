@@ -1,12 +1,16 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { perfMark } from './api'
+import { installReducedMotion } from './motion/reduced'
 import { bootSettingsLaneView, isSettingsLaneView } from './settings/boot'
 import { installShortcutFallback } from './shortcuts'
 import { initStore } from './store'
+import './motion/motion.css'
 import './styles/global.css'
 
 async function boot(): Promise<void> {
+  // Every view follows reduced motion (the OS setting or Orbit's, FL-28) from its first frame.
+  installReducedMotion()
   // Settings (settings lane): a window of its own, without the browser shell's code.
   if (isSettingsLaneView(window.orbit.view)) return bootSettingsLaneView()
   const view = window.orbit.view

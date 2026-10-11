@@ -570,10 +570,9 @@ html[data-platform="darwin"] .im .im-flow__body {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .im-state--running {
-    animation: none;
-  }
+/* Reduced motion (FL-28): the OS setting or Orbit's own, as the root's class (motion/reduced.ts). */
+.reduce-motion .im-state--running {
+  animation: none;
 }
 
 .im-skipped h2 {

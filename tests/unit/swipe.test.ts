@@ -8,11 +8,11 @@ import {
   rubberBand,
   SETTLE_SPRING,
   STANDARD_SPRING,
-  springFrom,
   swipeOffset,
   VelocityTracker,
   viewportPosition,
 } from '../../src/renderer/src/shell/spaces/physics'
+import { springFrom } from '../../src/shared/motion'
 
 const W = 240
 
@@ -20,7 +20,9 @@ describe('[FL-13][SP-08] swipe physics', () => {
   it('springs come from FL-01 response/damping ratio (standard ≈ 386 / 35)', () => {
     expect(STANDARD_SPRING.stiffness).toBeCloseTo(385.6, 0)
     expect(STANDARD_SPRING.damping).toBeCloseTo(34.6, 0)
-    expect(SETTLE_SPRING.damping / (2 * Math.sqrt(SETTLE_SPRING.stiffness))).toBeCloseTo(0.95, 2)
+    // The settle: 0.30 s / 0.90, at rest well inside FL-13's 350 ms.
+    expect((2 * Math.PI) / Math.sqrt(SETTLE_SPRING.stiffness)).toBeCloseTo(0.3, 3)
+    expect(SETTLE_SPRING.damping / (2 * Math.sqrt(SETTLE_SPRING.stiffness))).toBeCloseTo(0.9, 2)
     expect(RUBBER_SPRING.damping / (2 * Math.sqrt(RUBBER_SPRING.stiffness))).toBeCloseTo(1, 2)
     expect(springFrom(0.3, 1).stiffness).toBeCloseTo(438.6, 0)
   })

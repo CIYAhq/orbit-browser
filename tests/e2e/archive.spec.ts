@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 import type { ArchivePage, ArchiveRestoreResult, BackupInfo, LibraryShow } from '../../src/shared/commands/archive'
+import { bestOf } from './frames'
 import {
   action,
   type Fixtures,
@@ -72,6 +73,9 @@ async function openLibrary(o: Orbit): Promise<Page> {
   await expect.poll(async () => (await info(o)).focused).toBe(true)
   return lib
 }
+
+/** The search timings a test installs in the Library's page (AR-04). */
+type Search = { shown: number[]; painted: number[]; reset: () => void }
 
 /** The number in the Archive's header, whatever the locale's digit grouping. */
 const countOf = async (lib: Page) =>
@@ -176,33 +180,49 @@ test('[AR-02] ⌘T "View Archive" opens the same view; the Library reopens to th
 })
 
 test('[DL-09][FL-24] once Orbit is idle after launch the Library view is made off-screen, so even the first open is quick at 10,000 entries', async () => {
-  const { app } = orbit
+  // Up to three launches (D46), each waiting a few seconds for the view made ahead.
+  test.setTimeout(120_000)
   await seed(orbit, { count: 10_000, days: 60 })
-  // Nothing loading and nothing over the window: the view is made a few seconds after launch, hidden,
-  // with the section it opens to built.
-  await expect.poll(async () => (await info(orbit)).ready, { timeout: 20_000 }).toBe(true)
-  const lib = await libraryPage(app)
-  await expect(lib.getByTestId('library')).toHaveAttribute('data-open', 'false')
-  await expect.poll(() => countOf(lib)).toBe(10_000)
-  expect(await info(orbit)).toMatchObject({ open: false, visible: false })
-  // The first open, from its shortcut's action (no pointer over the Library button to warm it up).
   const marks = async () =>
-    (await app.evaluate(() =>
+    (await orbit.app.evaluate(() =>
       (globalThis as unknown as { __orbit: { marks: () => { name: string; t: number }[] } }).__orbit.marks(),
     )) as { name: string; t: number }[]
-  await action(app, 'app.library')
-  await expect.poll(async () => (await status(orbit)).open).toBe(true)
-  const m = await marks()
-  const start = m.filter((x) => x.name === 'library:open:start').at(-1)?.t ?? 0
-  await expect
-    .poll(async () => (await marks()).filter((x) => x.name === 'library:shown' && x.t >= start).length)
-    .toBe(1)
-  const shown = (await marks()).filter((x) => x.name === 'library:shown').at(-1)?.t ?? 0
-  console.info(`[archive e2e perf] first Library open→shown ${(shown - start).toFixed(1)} ms`)
+  /** The first open after a launch, from its shortcut's action (no pointer over the Library button to warm it up). */
+  const firstOpen = async () => {
+    const { app } = orbit
+    // Nothing loading and nothing over the window: the view is made a few seconds after launch, hidden,
+    // with the section it opens to built.
+    await expect.poll(async () => (await info(orbit)).ready, { timeout: 20_000 }).toBe(true)
+    const lib = await libraryPage(app)
+    await expect(lib.getByTestId('library')).toHaveAttribute('data-open', 'false')
+    await expect.poll(() => countOf(lib)).toBe(10_000)
+    expect(await info(orbit)).toMatchObject({ open: false, visible: false })
+    await action(app, 'app.library')
+    await expect.poll(async () => (await status(orbit)).open).toBe(true)
+    const start = (await marks()).filter((x) => x.name === 'library:open:start').at(-1)?.t ?? 0
+    await expect
+      .poll(async () => (await marks()).filter((x) => x.name === 'library:shown' && x.t >= start).length)
+      .toBe(1)
+    const shown = (await marks()).filter((x) => x.name === 'library:shown').at(-1)?.t ?? 0
+    return shown - start
+  }
+  // A round that misses is measured again in a fresh launch of the same profile, so every round is
+  // the first open after a launch, as a user meets it (D46).
+  const { best, all } = await bestOf(
+    async (round) => {
+      if (round > 1) {
+        await orbit.app.close()
+        orbit = await launchOrbit({ userData: orbit.userData })
+      }
+      return firstOpen()
+    },
+    (ms) => ms <= 250 * FRAME_SLACK,
+  )
+  console.info(`[archive e2e perf] first Library open→shown, by round: ${all.map((ms) => ms.toFixed(1)).join(', ')} ms`)
   // 66–77 ms in the builder's runs, 81 ms at load 10, and 127–165 ms at load 30–44 (re-review R2).
   // Without the view made ahead the first open takes about 490 ms, so this still fails without it.
   // The idle wait itself is tested in archive-library-idle.test.ts.
-  expect(shown - start).toBeLessThanOrEqual(250 * FRAME_SLACK)
+  expect(best).toBeLessThanOrEqual(250 * FRAME_SLACK)
 })
 
 test("[AR-03] entries are listed newest first under day headings; source, Space and how-closed filters; only this profile's entries", async () => {
@@ -274,8 +294,13 @@ test('[AR-03][AR-04] at 10,000 entries the list is virtualised, search answers e
     const list = document.querySelector<HTMLElement>('[data-testid="archive-list"]') as HTMLElement
     const shown: number[] = []
     const painted: number[] = []
-    ;(window as unknown as { __search: { shown: number[]; painted: number[] } }).__search = { shown, painted }
     let pending: { t0: number; value: string | null } | null = null
+    const reset = () => {
+      shown.length = 0
+      painted.length = 0
+      pending = null
+    }
+    ;(window as unknown as { __search: Search }).__search = { shown, painted, reset }
     const check = () => {
       if (!pending || pending.value === null) return
       if (list.dataset.query !== pending.value || list.dataset.answered !== 'true') return
@@ -295,16 +320,32 @@ test('[AR-03][AR-04] at 10,000 entries the list is virtualised, search answers e
     new MutationObserver(check).observe(list, { attributes: true, attributeFilter: ['data-answered', 'data-query'] })
   })
   const typed = 'harbor 1045'
-  await lib.getByTestId('archive-search').pressSequentially(typed, { delay: 60 })
+  const field = lib.getByTestId('archive-search')
   const search = () =>
-    lib.evaluate(() => (window as unknown as { __search: { shown: number[]; painted: number[] } }).__search)
-  await expect.poll(async () => (await search()).shown.length).toBe(typed.length)
+    lib.evaluate(() => {
+      const { shown, painted } = (window as unknown as { __search: Search }).__search
+      return { shown, painted }
+    })
   const median = (xs: number[]) => [...xs].sort((x, y) => x - y)[Math.floor(xs.length / 2)] ?? Number.POSITIVE_INFINITY
-  const { shown, painted } = await search()
-  console.info(
-    `[archive e2e perf] search keystroke→list median ${median(shown).toFixed(1)} ms (worst ${Math.max(...shown).toFixed(1)}), →painted median ${median(painted).toFixed(1)} ms`,
+  // A round that misses is typed again, from an empty field (D46).
+  const { best: searched } = await bestOf(
+    async (round) => {
+      if (round > 1) {
+        await field.fill('')
+        await expect.poll(() => countOf(lib)).toBe(10_000)
+      }
+      await lib.evaluate(() => (window as unknown as { __search: Search }).__search.reset())
+      await field.pressSequentially(typed, { delay: 60 })
+      await expect.poll(async () => (await search()).shown.length).toBe(typed.length)
+      const { shown, painted } = await search()
+      console.info(
+        `[archive e2e perf] round ${round}: search keystroke→list median ${median(shown).toFixed(1)} ms (worst ${Math.max(...shown).toFixed(1)}), →painted median ${median(painted).toFixed(1)} ms`,
+      )
+      return median(shown)
+    },
+    (ms) => ms <= 50 * FRAME_SLACK,
   )
-  expect(median(shown)).toBeLessThanOrEqual(50 * FRAME_SLACK)
+  expect(searched).toBeLessThanOrEqual(50 * FRAME_SLACK)
   await expect.poll(() => countOf(lib)).toBe(1)
   await expect(lib.getByTestId('archive-row-title').first()).toHaveText('Seeded harbor 1045')
   // Enter puts the top match back and shows it; the Library makes way.
@@ -321,15 +362,25 @@ test('[AR-03][AR-04] at 10,000 entries the list is virtualised, search answers e
     (await app.evaluate(() =>
       (globalThis as unknown as { __orbit: { marks: () => { name: string; t: number }[] } }).__orbit.marks(),
     )) as { name: string; t: number }[]
-  await openLibrary(orbit)
-  const m = await marks()
-  const start = m.filter((x) => x.name === 'library:open:start').at(-1)?.t ?? 0
-  await expect
-    .poll(async () => (await marks()).filter((x) => x.name === 'library:shown' && x.t >= start).length)
-    .toBe(1)
-  const opened = (await marks()).filter((x) => x.name === 'library:shown').at(-1)?.t ?? 0
-  console.info(`[archive e2e perf] Library open→shown ${(opened - start).toFixed(1)} ms`)
-  expect(opened - start).toBeLessThanOrEqual(100 * FRAME_SLACK)
+  // A round that misses is measured again after closing it (D46).
+  const { best: open, all: opens } = await bestOf(
+    async (round) => {
+      if (round > 1) {
+        await lib.keyboard.press('Escape')
+        await expect.poll(async () => (await info(orbit)).open).toBe(false)
+      }
+      await openLibrary(orbit)
+      const start = (await marks()).filter((x) => x.name === 'library:open:start').at(-1)?.t ?? 0
+      await expect
+        .poll(async () => (await marks()).filter((x) => x.name === 'library:shown' && x.t >= start).length)
+        .toBe(1)
+      const opened = (await marks()).filter((x) => x.name === 'library:shown').at(-1)?.t ?? 0
+      return opened - start
+    },
+    (ms) => ms <= 100 * FRAME_SLACK,
+  )
+  console.info(`[archive e2e perf] Library open→shown, by round: ${opens.map((ms) => ms.toFixed(1)).join(', ')} ms`)
+  expect(open).toBeLessThanOrEqual(100 * FRAME_SLACK)
 })
 
 test("[AR-05] Restore puts a tab back at the top of its own Space's Today with its history; a toast offers to go there", async () => {

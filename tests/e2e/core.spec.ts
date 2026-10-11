@@ -435,6 +435,23 @@ test('[TB-22] main-process evaluates and handles run between tasks, method short
     },
   }
   expect(await orbit.app.evaluate(calc.add, 1)).toBe(2)
+  // A getter, a computed method name and a bound function are no expression either way: Playwright's
+  // own error, before anything runs in main (PR #19 review F6).
+  const key = 'computed'
+  const odd = {
+    get value() {
+      return 1
+    },
+    [key](_electron: unknown) {
+      return 1
+    },
+  }
+  const getter = Object.getOwnPropertyDescriptor(odd, 'value')?.get as () => number
+  for (const fn of [getter, odd[key], inTimer.bind(null)]) {
+    await expect(async () => orbit.app.evaluate(fn as never)).rejects.toThrow(
+      'Passed function is not well-serializable!',
+    )
+  }
 })
 
 test('[TB-02] opening tabs keeps every UI mirror in step without resyncs (review M2, F4)', async () => {

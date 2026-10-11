@@ -1,10 +1,14 @@
 import { ChevronRight, Folder, FolderOpen, Search, Undo2, Volume2, VolumeX, X } from 'lucide-react'
 import { AnimatePresence, animate, motion, useIsPresent, useMotionValue, type Variants } from 'motion/react'
 import {
+  createContext,
   memo,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
+  useContext,
+  useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react'
@@ -13,13 +17,25 @@ import type { ItemId, OrbitState, TabId } from '../../../../shared/state'
 import { isAwayFromPinned, rowTitle } from '../../../../shared/tabs'
 import { splitOfTab, tabsInItem, visibleTabOrder } from '../../../../shared/tree'
 import { invoke, isMac } from '../../api'
+import {
+  AT_ONCE,
+  EASE,
+  REDUCED,
+  reducedMotion,
+  SNAPPY,
+  SNAPPY_EXIT,
+  STANDARD,
+  tween,
+  useReducedMotion,
+  waapi,
+} from '../../motion'
 import { activeTabId } from '../../selectors'
 import { getOrbitState, useMirror, useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
 import { CaptureIndicator } from '../media/CaptureIndicator'
 import { pressItem } from './drag'
-import { QUICK_EASE, reducedMotion, SNAPPY, SNAPPY_EASE, STANDARD } from './motion-tokens'
 import { RenameField } from './RenameField'
+import { RowWindowContext, useInRowWindow } from './row-window'
 import { SplitRow } from './SplitRow'
 import {
   clearSelection,
@@ -27,6 +43,7 @@ import {
   useDrag,
   useFolderSearch,
   useKeyboardFocus,
+  usePressedTab,
   useRename,
   useSelection,
 } from './ui-state'
@@ -35,9 +52,64 @@ import {
 export const INDENT = 14
 
 const ROW_SPRING = SNAPPY
-const EASE_OUT = SNAPPY_EASE
+/**
+ * FL-12: a chevron turns over about 150–180 ms; a folder or the pinned section opens with the
+ * snappy spring and closes a little quicker (its exit spring). Springs, so a click mid-way turns the
+ * height around from its current speed (FL-01).
+ */
+export const CHEVRON = { duration: 0.16, ease: EASE.snappy }
+export const REVEAL = { height: SNAPPY, opacity: tween('quick') }
+export const CONCEAL = { height: SNAPPY_EXIT, opacity: tween('quick', { exit: true }) }
+
+/**
+ * A folder's children or the pinned section, opening and closing (FL-12): the box grows with the
+ * snappy spring while its rows fade in one after another (`.is-revealing`), and shrinks a little
+ * quicker as it fades. Only a box the user opens staggers (`stagger`, decided as it mounts), not one
+ * drawn open with the sidebar. With reduced motion (FL-28) the box opens and closes at once, also
+ * one opened before the setting turned on: it asks `useReducedMotion()`, as motion reads
+ * OrbitMotionConfig only as an element mounts.
+ */
+export function RevealBox({
+  className,
+  stagger,
+  children,
+}: {
+  className: string
+  stagger: boolean
+  children: React.ReactNode
+}) {
+  const reduced = useReducedMotion()
+  const [revealing, setRevealing] = useState(() => stagger && !reduced)
+  return (
+    <motion.div
+      className={`${className}${revealing ? ' is-revealing' : ''}`}
+      initial={reduced ? false : { height: 0, opacity: revealing ? 1 : 0 }}
+      animate={{ height: 'auto', opacity: 1, transition: REVEAL }}
+      exit={{ height: 0, opacity: 0, transition: reduced ? AT_ONCE : CONCEAL }}
+      onAnimationComplete={() => setRevealing(false)}
+    >
+      {children}
+    </motion.div>
+  )
+}
+/** The gap between rows in a list (`.item-list`'s `gap`). */
+const LIST_GAP = 1
+/** A tab row's height (`--row-h`). */
+const ROW_HEIGHT = 32
 /** Rows beyond this many in a batch leave together (FL-11 caps the sweep at about 450 ms). */
 const MAX_STAGGER_ROWS = 12
+
+/** What a row slot's enter and exit depend on. */
+type SlotMotion = { stagger?: boolean; index?: number; travel?: boolean } | undefined
+
+/**
+ * A row travelling to another section (FL-07) moves with the standard spring, and the room it
+ * leaves and the room it takes close and open with that spring too: the rows around re-flow with
+ * it, and rows below both places stay put. The copy left behind is never drawn.
+ */
+const TRAVEL_ROOM = { height: STANDARD, marginBottom: STANDARD, opacity: { duration: 0 } }
+/** Where a travelling row's room starts: none, the row itself drawn (it is on its way). */
+const TRAVEL_FROM = { height: 0, marginBottom: -LIST_GAP, opacity: 1 }
 
 /**
  * Row enter/exit (FL-06, FL-09, FL-11): the row's height grows or collapses with the snappy
@@ -45,22 +117,46 @@ const MAX_STAGGER_ROWS = 12
  * row slides left 12 px as it fades; a Clear batch sweeps 24 px, 25 ms apart.
  */
 const rowVariants: Variants = {
-  hidden: { height: 0, opacity: 0 },
-  shown: {
+  // A row with no height also gives back the list's 1 px gap beside it (`marginBottom`), so the rows
+  // below move by its whole room with the spring, never by a last pixel when it leaves the DOM.
+  hidden: { height: 0, marginBottom: -LIST_GAP, opacity: 0 },
+  shown: (c: SlotMotion) => ({
     height: 'auto',
+    marginBottom: 0,
     opacity: 1,
-    transition: { height: ROW_SPRING, opacity: { duration: 0.12, delay: 0.07, ease: QUICK_EASE } },
-  },
-  exit: (c: { stagger?: boolean; index?: number } | undefined) => {
+    // FL-06: the content fades in over the last 60 % of the growth.
+    transition: c?.travel
+      ? TRAVEL_ROOM
+      : { height: ROW_SPRING, marginBottom: ROW_SPRING, opacity: tween('quick', { delay: 0.07 }) },
+  }),
+  exit: (c: SlotMotion) => {
+    if (reducedMotion()) {
+      // FL-28: no slide and no stagger. Closing rows, or a whole Clear, fade out together, then
+      // their room closes at once.
+      const fade = REDUCED.fadeMs / 1000
+      const close = { duration: 0, delay: fade }
+      return {
+        height: 0,
+        marginBottom: -LIST_GAP,
+        opacity: 0,
+        transition: { opacity: { duration: fade }, height: close, marginBottom: close },
+      }
+    }
+    if (c?.travel) return { height: 0, marginBottom: -LIST_GAP, opacity: 0, transition: TRAVEL_ROOM }
+    // FL-09: a closing row collapses while it fades and slides; a Clear's rows (FL-11) start
+    // collapsing a moment after their slide.
     const delay = c?.stagger ? Math.min(c.index ?? 0, MAX_STAGGER_ROWS) * 0.025 : 0
+    const collapse = { ...ROW_SPRING, delay: c?.stagger ? delay + 0.04 : 0 }
     return {
       height: 0,
+      marginBottom: -LIST_GAP,
       opacity: 0,
       x: c?.stagger ? -24 : -12,
       transition: {
-        height: { ...ROW_SPRING, delay: delay + 0.04 },
-        opacity: { duration: c?.stagger ? 0.16 : 0.13, ease: QUICK_EASE, delay },
-        x: { duration: c?.stagger ? 0.16 : 0.13, ease: QUICK_EASE, delay },
+        height: collapse,
+        marginBottom: collapse,
+        opacity: { duration: c?.stagger ? 0.16 : 0.13, ease: EASE.quick, delay },
+        x: { duration: c?.stagger ? 0.16 : 0.13, ease: EASE.quick, delay },
       },
     }
   },
@@ -88,6 +184,18 @@ function claimEnterAnimation(): boolean {
  * row mounted in its new list starts there and springs into place.
  */
 const departed = new Map<string, { top: number; left: number; at: number }>()
+/**
+ * Rows moving to a place scrolled out of sight (FL-07): they appear there at once, since nothing
+ * there is seen, and the list's scroll anchoring keeps the rows in sight still in that same frame.
+ */
+const arrivesUnseen = new Map<string, number>()
+
+/** Whether the row `id` mounting now arrives out of sight (taken once). */
+function takeUnseenArrival(id: string): boolean {
+  const at = arrivesUnseen.get(id)
+  arrivesUnseen.delete(id)
+  return at !== undefined && performance.now() - at < 250
+}
 
 function listsOf(state: OrbitState): Map<string, ItemId[]> {
   const lists = new Map<string, ItemId[]>()
@@ -106,21 +214,42 @@ useMirror.subscribe((next, prev) => {
   const before = listsOf(prev.state)
   const now = performance.now()
   for (const [id, d] of departed) if (now - d.at > 1000) departed.delete(id)
+  for (const [id, at] of arrivesUnseen) if (now - at > 1000) arrivesUnseen.delete(id)
   for (const [key, items] of listsOf(next.state)) {
     const old = before.get(key)
     if (old === items) continue
     // Only lists on screen: a row moving somewhere not drawn (a collapsed folder, another Space)
-    // just leaves (FL-07: it collapses out in place).
-    if (!document.querySelector(`[data-list="${key}"]`)) continue
+    // or scrolled out of sight just leaves (FL-07: it collapses out in place, and nothing scrolls).
+    const list = document.querySelector<HTMLElement>(`[data-list="${key}"]`)
+    if (!list) continue
     for (const id of items) {
       if (old?.includes(id)) continue
       const el = document.querySelector<HTMLElement>(`[data-slot][data-key="${id}"]:not([data-exiting])`)
       if (!el || el.dataset.container === key) continue
+      if (!arrivesInSight(list, items, id)) {
+        arrivesUnseen.set(id, now)
+        continue
+      }
       const r = el.getBoundingClientRect()
       departed.set(id, { top: r.top, left: r.left, at: now })
     }
   }
 })
+
+/** Whether the row `id`, arriving in `list` (to be `items`), will be drawn within the sidebar's visible band. */
+function arrivesInSight(list: HTMLElement, items: ItemId[], id: ItemId): boolean {
+  const view = list.closest('[data-testid="sidebar-scroll"]')?.getBoundingClientRect()
+  if (!view) return true
+  const i = items.indexOf(id)
+  const slot = (k: ItemId | undefined) =>
+    k === undefined ? null : list.querySelector<HTMLElement>(`:scope > [data-slot][data-key="${k}"]`)
+  // Its top: the bottom of the row it follows, the top of the row it comes before, or the list's top.
+  const top =
+    slot(items[i - 1])?.getBoundingClientRect().bottom ??
+    slot(items[i + 1])?.getBoundingClientRect().top ??
+    list.getBoundingClientRect().top
+  return top + ROW_HEIGHT / 2 >= view.top && top + ROW_HEIGHT / 2 <= view.bottom
+}
 
 /** Rows leaving together, in list order (drives the cascade delay). */
 const exitOrder = new Map<string, number>()
@@ -148,49 +277,65 @@ export const ItemList = memo(function ItemList({
     }
     prev.current = items
   }
+  // Its height moves the rows below it: the row window measures again when it changes (FL-21).
+  const win = useContext(RowWindowContext)
+  const ref = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => (win && ref.current ? win.watch(ref.current) : undefined), [win])
+  const mounted = useRef(false)
+  useEffect(() => {
+    mounted.current = true
+  }, [])
   return (
-    <div className="item-list" data-testid={testId} data-list={containerKey}>
-      <AnimatePresence initial={false}>
-        {items.map((id, index) => {
-          if (isTabId(id))
-            return (
-              <TabRow
-                key={id}
-                tabId={id}
-                depth={depth}
-                containerKey={containerKey}
-                index={index}
-                ancestors={ancestors}
-              />
-            )
-          if (isFolderId(id))
-            return (
-              <FolderRow
-                key={id}
-                folderId={id}
-                depth={depth}
-                containerKey={containerKey}
-                index={index}
-                ancestors={ancestors}
-              />
-            )
-          if (isSplitId(id))
-            return (
-              <SplitSlot
-                key={id}
-                splitId={id}
-                depth={depth}
-                containerKey={containerKey}
-                index={index}
-                ancestors={ancestors}
-              />
-            )
-          return null
-        })}
-      </AnimatePresence>
+    <div className="item-list" ref={ref} data-testid={testId} data-list={containerKey}>
+      <ListMounted.Provider value={mounted}>
+        <AnimatePresence initial={false}>
+          {items.map((id, index) => {
+            if (isTabId(id))
+              return (
+                <TabRow
+                  key={id}
+                  tabId={id}
+                  depth={depth}
+                  containerKey={containerKey}
+                  index={index}
+                  size={items.length}
+                  ancestors={ancestors}
+                />
+              )
+            if (isFolderId(id))
+              return (
+                <FolderRow
+                  key={id}
+                  folderId={id}
+                  depth={depth}
+                  containerKey={containerKey}
+                  index={index}
+                  size={items.length}
+                  ancestors={ancestors}
+                />
+              )
+            if (isSplitId(id))
+              return (
+                <SplitSlot
+                  key={id}
+                  splitId={id}
+                  depth={depth}
+                  containerKey={containerKey}
+                  index={index}
+                  size={items.length}
+                  ancestors={ancestors}
+                />
+              )
+            return null
+          })}
+        </AnimatePresence>
+      </ListMounted.Provider>
     </div>
   )
 })
+
+/** Whether the list had been drawn before: a row added to it later is drawn before it is measured. */
+const ListMounted = createContext<{ readonly current: boolean }>({ current: true })
 
 /** Row offset while a drag opens a gap; jumps (no animation) when the drop commits. */
 export function useRowShift(key: string) {
@@ -211,7 +356,10 @@ export function useRowShift(key: string) {
 interface SlotProps {
   depth: number
   containerKey: string
+  /** The item's place in its list (0 = the first). */
   index: number
+  /** How many items its list has. */
+  size: number
   ancestors: string
 }
 
@@ -225,12 +373,15 @@ function RowSlot({
   index,
   ancestors,
   className = 'row-slot',
+  far = false,
   onPointerDown,
 }: SlotProps & {
   id: string
   folder?: 'open' | 'closed'
   children: React.ReactNode
   className?: string
+  /** Far from the visible band, drawing nothing (FL-21). */
+  far?: boolean
   onPointerDown?: (e: ReactPointerEvent<HTMLDivElement>) => void
 }) {
   const y = useRowShift(id)
@@ -246,11 +397,12 @@ function RowSlot({
     return d && !hidden && !reducedMotion() && performance.now() - d.at < 250 ? d : null
   })
   const [flying, setFlying] = useState(!!travel)
-  // Rows that arrive or leave through a drag appear/disappear at once (the ghost covers them).
-  const [instant] = useState(() => !!travel || hidden || reducedMotion() || !claimEnterAnimation())
-  // Drawn while it grows in, even off-screen (.is-growing): a skipped row would keep the height it had
-  // when it left the screen, its last remembered size, once its height is auto again (FL-21).
-  const [growing, setGrowing] = useState(!instant)
+  // Rows that arrive or leave through a drag appear/disappear at once (the ghost covers them). A
+  // travelling row's room opens as it travels; the row itself is drawn whole all along.
+  const [instant] = useState(
+    () => hidden || reducedMotion() || takeUnseenArrival(id) || (!travel && !claimEnterAnimation()),
+  )
+  const [growing, setGrowing] = useState(!instant && !travel)
   useLayoutEffect(() => {
     if (!travel) return
     departed.delete(id)
@@ -270,24 +422,27 @@ function RowSlot({
       b.stop()
     }
   }, [travel, id, x, y])
+  // The copy left behind only makes room; the row itself is already travelling. Decided as it
+  // starts leaving: the row's arrival takes the record of where it was.
+  const leaving = useMemo(() => {
+    if (present) return false
+    const gone = departed.get(id)
+    return !!gone && performance.now() - gone.at < 250
+  }, [present, id])
   if (!present && hidden) return null
-  // The copy left behind only makes room; the row itself is already travelling.
-  const gone = departed.get(id)
-  const leaving = !present && !!gone && performance.now() - gone.at < 250
   const order = present ? undefined : exitOrder.get(id)
   return (
     <motion.div
       ref={ref}
-      className={`${className}${hidden || leaving ? ' is-drag-hidden' : ''}${flying ? ' is-travelling' : ''}${growing ? ' is-growing' : ''}${splitSide ? ` is-split-target is-split-${splitSide}` : ''}`}
+      className={`${className}${far ? ' is-far' : ''}${hidden || leaving ? ' is-drag-hidden' : ''}${flying ? ' is-travelling' : ''}${growing ? ' is-growing' : ''}${present ? '' : ' is-exiting'}${splitSide ? ` is-split-target is-split-${splitSide}` : ''}`}
       style={{ y, x }}
       variants={rowVariants}
-      custom={{ stagger: order !== undefined, index: order }}
+      custom={{ stagger: order !== undefined, index: order, travel: present ? !!travel : leaving }}
       onAnimationComplete={(definition) => {
         if (!present) exitOrder.delete(id)
-        // One more frame drawn at full height, so that is the size the row remembers.
-        else if (definition === 'shown' && growing) requestAnimationFrame(() => setGrowing(false))
+        else if (definition === 'shown' && growing) setGrowing(false)
       }}
-      initial={instant ? false : 'hidden'}
+      initial={travel ? TRAVEL_FROM : instant ? false : 'hidden'}
       animate="shown"
       exit="exit"
       onPointerDown={onPointerDown}
@@ -344,27 +499,72 @@ function onRowPointerDown(e: ReactPointerEvent<HTMLElement>, tabId: TabId) {
   // A press on a selected row keeps the selection (to drag the group); a plain click clears it.
   const inSelection = useSelection.getState().ids.includes(tabId)
   if (!inSelection) clearSelection()
+  pressSelect(tabId)
   void invoke('tabs.activate', { tabId })
   // A pane of a split view drags the whole split row.
   const item = splitOfTab(getOrbitState(), tabId) ?? tabId
   pressItem(e, item, 'list', inSelection ? clearSelection : undefined)
 }
 
+let pressTimer = 0
+
 /**
- * Hover fades (FL-04): in over ~90 ms, out over ~130 ms. Uses the Web Animations API on top of
- * the CSS :hover background, so nothing waits on it and no transition events are fired.
+ * FL-05: the pressed row is drawn selected in the frame after the press, and the row selected before
+ * loses its highlight in that frame too, without waiting for main's round trip. Main's state takes
+ * over as soon as it shows a different active tab; should it not (the press was refused), the real
+ * selection shows again after a moment.
+ */
+function pressSelect(tabId: TabId): void {
+  const was = activeTabId(getOrbitState())
+  if (was === tabId) return
+  usePressedTab.setState({ id: tabId, was })
+  clearTimeout(pressTimer)
+  pressTimer = window.setTimeout(() => usePressedTab.setState({ id: null, was: null }), 1000)
+}
+
+useMirror.subscribe((next, prev) => {
+  const pressed = usePressedTab.getState()
+  if (!pressed.id || next.state === prev.state || !next.state) return
+  if (activeTabId(next.state) === pressed.was) return
+  clearTimeout(pressTimer)
+  usePressedTab.setState({ id: null, was: null })
+})
+
+/** A row's selected look: the pressed row's, until main's state catches up; otherwise the state's. */
+function useShownActive(tabId: TabId): boolean {
+  const real = useOrbit((s) => activeTabId(s) === tabId)
+  const pressed = usePressedTab((p) => (p.id === tabId ? true : p.was === tabId ? false : undefined))
+  return pressed ?? real
+}
+
+/** Each row's running hover fade. */
+const hoverFades = new WeakMap<HTMLElement, Animation>()
+
+/**
+ * Hover fades (FL-04): in with the instant timing, out with the quick one. Uses the Web Animations
+ * API on top of the CSS :hover background, so nothing waits on it and no transition events are
+ * fired. A fade still running when the pointer turns round goes back from what the row shows (FL-01:
+ * a quick sweep never flashes a row up to full before it fades), and starts in the frame it is made.
  */
 function fadeHover(el: HTMLElement, entering: boolean) {
   if (reducedMotion() || useDrag.getState().phase !== 'idle') return
   if (el.classList.contains('is-active') || el.classList.contains('is-selected')) return
-  const hover = getComputedStyle(el).getPropertyValue('--hover').trim()
-  if (!hover) return
-  el.animate(
-    entering
-      ? [{ backgroundColor: 'transparent' }, { backgroundColor: hover }]
-      : [{ backgroundColor: hover }, { backgroundColor: 'transparent' }],
-    { duration: entering ? 90 : 130, easing: entering ? 'ease-out' : 'cubic-bezier(0.2, 0, 0, 1)' },
+  // The theme's hover colour by reference: no style read for each row the pointer crosses, which
+  // during a scroll under a still pointer is a row or two every frame (FL-21).
+  const hover = 'var(--hover)'
+  const running = hoverFades.get(el)
+  const from = running?.playState === 'running' ? getComputedStyle(el).backgroundColor : null
+  running?.cancel()
+  const fade = el.animate(
+    [
+      { backgroundColor: from ?? (entering ? 'transparent' : hover) },
+      { backgroundColor: entering ? hover : 'transparent' },
+    ],
+    entering ? waapi('instant') : waapi('quick'),
   )
+  const now = document.timeline.currentTime
+  if (typeof now === 'number') fade.startTime = now
+  hoverFades.set(el, fade)
 }
 
 function openContextMenu(e: ReactMouseEvent, id: ItemId) {
@@ -378,38 +578,93 @@ export const TabRow = memo(function TabRow({
   depth,
   containerKey,
   index,
+  size,
   ancestors,
 }: { tabId: string } & SlotProps) {
+  // Drawn near the list's visible band only (FL-21); a row added to a list already on screen is drawn
+  // at once, and the selected, focused, selected-for-a-group or renamed row always is.
+  const listMounted = useContext(ListMounted)
+  const near = useInRowWindow(tabId, listMounted.current)
+  const drawn = useKeptRow(tabId) || near
   return (
-    <RowSlot id={tabId} depth={depth} containerKey={containerKey} index={index} ancestors={ancestors}>
-      <TabRowBody tabId={tabId} depth={depth} />
+    <RowSlot
+      id={tabId}
+      far={!drawn}
+      depth={depth}
+      containerKey={containerKey}
+      index={index}
+      size={size}
+      ancestors={ancestors}
+      onPointerDown={(e) => {
+        // A press the slot itself hears (its edge, or a row not drawn yet) is a press on its row
+        // (PR #10 review F1).
+        if (e.target === e.currentTarget || !drawn) onRowPointerDown(e, tabId)
+      }}
+    >
+      {drawn ? (
+        <TabRowBody tabId={tabId} depth={depth} index={index} size={size} />
+      ) : (
+        <div className="row-placeholder" />
+      )}
     </RowSlot>
   )
 })
 
-/** The row itself (TB-01): icon, title (or breadcrumb, PN-03), audio, close. */
-export const TabRowBody = memo(function TabRowBody({ tabId, depth }: { tabId: string; depth: number }) {
+/** Rows drawn wherever they are: the selected one, the keyboard's, those in a group selection, one being renamed. */
+function useKeptRow(tabId: TabId): boolean {
+  const active = useShownActive(tabId)
+  const focused = useKeyboardFocus((s) => s.id === tabId)
+  const selected = useSelection((s) => s.ids.includes(tabId))
+  const renaming = useRename((s) => s.id === tabId)
+  return active || focused || selected || renaming
+}
+
+/**
+ * The row itself (TB-01): icon, title (or breadcrumb, PN-03), audio, close. It tells assistive
+ * technology its place in its list, as rows away from the visible band draw nothing (FL-21).
+ */
+export const TabRowBody = memo(function TabRowBody({
+  tabId,
+  depth,
+  index,
+  size,
+}: {
+  tabId: string
+  depth: number
+  /** Its place in its list (0 = the first); -1 when it isn't in it (a peek under a closed folder). */
+  index: number
+  size: number
+}) {
   const live = useOrbit((s) => s.tabs[tabId])
   // A closed tab's row keeps drawing its last look while it animates out (FL-09).
   const last = useRef(live)
   if (live) last.current = live
   const tab = live ?? last.current
-  const active = useOrbit((s) => activeTabId(s) === tabId)
+  const active = useShownActive(tabId)
   const selected = useSelection((s) => s.ids.includes(tabId))
   const focused = useKeyboardFocus((s) => s.id === tabId)
   const renaming = useRename((s) => (s.id === tabId ? s.mode : null))
   const [iconHover, setIconHover] = useState(false)
   // A tab that just opened in the background glows once so the eye finds it (FL-06).
   const [fresh] = useState(() => !!tab && !active && Date.now() - tab.createdAt < 1500)
+  const rowRef = useRef<HTMLDivElement>(null)
+  // Selected: the highlight shows in this frame, not after a hover fade still running over it (FL-05).
+  useLayoutEffect(() => {
+    if (active && rowRef.current) hoverFades.get(rowRef.current)?.cancel()
+  }, [active])
   if (!tab) return null
   const { prefix, title } = rowTitle(tab)
   const away = isAwayFromPinned(tab)
   const showReset = away && iconHover
   return (
     <div
+      ref={rowRef}
       role="treeitem"
       tabIndex={-1}
       aria-selected={active}
+      aria-level={depth + 1}
+      aria-posinset={index >= 0 ? index + 1 : undefined}
+      aria-setsize={index >= 0 ? size : undefined}
       aria-label={prefix ? `${prefix} / ${title}` : title}
       className={`tab-row${active ? ' is-active' : ''}${selected ? ' is-selected' : ''}${tab.asleep ? ' is-asleep' : ''}${tab.loading ? ' is-loading' : ''}${away ? ' is-away' : ''}${focused ? ' is-focused' : ''}${fresh ? ' is-new-background' : ''}`}
       style={{ paddingLeft: 8 + depth * INDENT }}
@@ -506,6 +761,7 @@ const FolderRow = memo(function FolderRow({
   depth,
   containerKey,
   index,
+  size,
   ancestors,
 }: { folderId: string } & SlotProps) {
   const liveFolder = useOrbit((s) => s.folders[folderId])
@@ -524,6 +780,13 @@ const FolderRow = memo(function FolderRow({
   const renaming = useRename((s) => s.id === folderId)
   const hidden = useDrag((s) => !!s.hidden[folderId])
   const collapsedBefore = useRef<boolean | null>(null)
+  // Drawn before: children shown from now on were opened by the user (FL-12).
+  const shown = useRef(false)
+  useEffect(() => {
+    shown.current = true
+  }, [])
+  // The chevron turns at once with reduced motion, also after the folder was drawn (FL-28).
+  const reduced = useReducedMotion()
   if (!folder) return null
   const childAncestors = ancestors ? `${ancestors},${folderId}` : folderId
   // A deleted folder animating out draws no children (they're gone or moved on).
@@ -537,12 +800,16 @@ const FolderRow = memo(function FolderRow({
         depth={depth}
         containerKey={containerKey}
         index={index}
+        size={size}
         ancestors={ancestors}
       >
         <div
           role="treeitem"
           tabIndex={-1}
           aria-expanded={open}
+          aria-level={depth + 1}
+          aria-posinset={index + 1}
+          aria-setsize={size}
           className={`folder-row${into ? ' is-drop-into' : ''}${focused ? ' is-focused' : ''}`}
           style={{ paddingLeft: 8 + depth * INDENT }}
           data-testid="folder-row"
@@ -571,7 +838,7 @@ const FolderRow = memo(function FolderRow({
             className="folder-row__chevron-wrap"
             initial={false}
             animate={{ rotate: open ? 90 : 0 }}
-            transition={{ duration: 0.16, ease: EASE_OUT }}
+            transition={reduced ? AT_ONCE : CHEVRON}
           >
             <ChevronRight size={13} />
           </motion.span>
@@ -609,28 +876,14 @@ const FolderRow = memo(function FolderRow({
       </RowSlot>
       <AnimatePresence initial={false}>
         {open && (
-          <motion.div
-            key="children"
-            className="folder__children"
-            initial={reducedMotion() ? false : { height: 0, opacity: 0 }}
-            animate={{
-              height: 'auto',
-              opacity: 1,
-              transition: { height: { duration: 0.2, ease: EASE_OUT }, opacity: { duration: 0.12 } },
-            }}
-            exit={{
-              height: 0,
-              opacity: 0,
-              transition: { height: { duration: 0.18, ease: EASE_OUT }, opacity: { duration: 0.1 } },
-            }}
-          >
+          <RevealBox key="children" className="folder__children" stagger={shown.current}>
             <ItemList
               containerKey={`folder:${folderId}`}
               items={folder.children}
               depth={depth + 1}
               ancestors={childAncestors}
             />
-          </motion.div>
+          </RevealBox>
         )}
       </AnimatePresence>
       {!open && peek && (
@@ -640,6 +893,7 @@ const FolderRow = memo(function FolderRow({
             depth={depth + 1}
             containerKey={`folder:${folderId}`}
             index={folder.children.indexOf(peek)}
+            size={folder.children.length}
             ancestors={childAncestors}
           />
         </div>
@@ -654,6 +908,7 @@ const SplitSlot = memo(function SplitSlot({
   depth,
   containerKey,
   index,
+  size,
   ancestors,
 }: { splitId: string } & SlotProps) {
   const exists = useOrbit((s) => !!s.splits[splitId])
@@ -664,6 +919,7 @@ const SplitSlot = memo(function SplitSlot({
       depth={depth}
       containerKey={containerKey}
       index={index}
+      size={size}
       ancestors={ancestors}
       className="row-slot row-slot--split"
       onPointerDown={(e) => {

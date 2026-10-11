@@ -383,6 +383,11 @@ export interface Settings {
   recentFiles: { downloads: boolean; screenshots: boolean }
   /** The OS's screenshots show in the Library's Media section (DL-11). */
   libraryScreenshots: boolean
+  /**
+   * Reduced motion even when the OS doesn't ask for it (FL-28, AP-17): slides, flights and springs
+   * become short cross-fades. Off: Orbit follows the OS setting.
+   */
+  reduceMotion: boolean
 }
 
 /** Secure DNS choices (ST-12): providers are src/main/settings/dns.ts's DOH_SERVERS. */

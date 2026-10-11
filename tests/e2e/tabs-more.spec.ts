@@ -413,9 +413,11 @@ test('[FL-21][SB-23] 200 tabs: the sidebar mounts and scrolls without long main-
     `long tasks: ${longTasks.map((d) => Math.round(d)).join(', ')}`,
   ).toEqual([])
   expect(longTasks.length).toBeLessThan(process.env.CI ? 8 : 4)
-  // A title change re-renders one row, not the list: measured as a single row's DOM update.
+  // A title change re-renders one row, not the list: measured as a single row's DOM update. Rows
+  // far from the visible band are not drawn (FL-21): this one shows its new title once scrolled to.
   const t = (await space(app)).today[100] as string
   await cmd(app, 'tabs.rename', { tabId: t, title: 'Renamed in place' })
+  await shell.locator(`[data-slot][data-key="${t}"]`).scrollIntoViewIfNeeded()
   await expect(row(shell, t).getByTestId('tab-title')).toHaveText('Renamed in place')
 })
 
@@ -431,7 +433,7 @@ test('[FL-21] a row that leaves the screen while it grows in still ends at its f
   await expect(shell.getByTestId('today-list').locator(':scope > [data-slot]')).toHaveCount(60, { timeout: 30_000 })
   await settled(shell, 30_000)
   // A new row grows in at the top. Caught mid-growth, the list scrolls far down and the row finishes
-  // off-screen, where rows aren't drawn (content-visibility): it must not keep the height it left with.
+  // off-screen, where rows aren't drawn (FL-21): it must not keep the height it left with.
   type Seen = { caught: number; offscreen: number }
   let seen: Seen | null = null
   for (let attempt = 0; attempt < 3 && !seen; attempt++) {
@@ -542,9 +544,14 @@ test('[FL-07][PN-02] a row pinned with Cmd+D travels to the pinned section inste
   await shell.keyboard.press(`${MOD}+D`)
   const slot = shell.getByTestId('pinned-list').locator(`[data-slot][data-key="${third}"]`)
   await expect(slot).toHaveClass(/is-travelling/)
-  // It starts where it was and settles into the pinned section.
+  // It starts where it was and settles into the pinned section. The room it left in Today is never
+  // drawn, and goes once its own spring settles, which can be a frame after the row lands.
   await expect(slot).not.toHaveClass(/is-travelling/)
-  const after = await row(shell, third).boundingBox()
+  await expect(shell.getByTestId('today-list').locator(`[data-slot][data-key="${third}"]`)).toHaveCount(0)
+  const after = await shell
+    .getByTestId('pinned-list')
+    .locator(`[data-testid="tab-row"][data-tab-id="${third}"]`)
+    .boundingBox()
   expect((after?.y ?? 0) < (before?.y ?? 0)).toBe(true)
   expect((await space(app)).pinned).toEqual([third])
 })

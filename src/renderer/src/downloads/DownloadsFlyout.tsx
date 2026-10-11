@@ -3,7 +3,7 @@ import { m, useIsPresent } from 'motion/react'
 import { type KeyboardEvent, memo, type ReactNode, useEffect, useRef, useState } from 'react'
 import type { DownloadEntry } from '../../../shared/commands/downloads'
 import { invoke, isMac } from '../api'
-import { SNAPPY } from '../shell/sidebar/motion-tokens'
+import { POPOVER, SNAPPY, useReducedMotion } from '../motion'
 import { useOrbit, useWindow } from '../store'
 import { usePalette } from '../theme'
 import { resumeOrRetry, useDownloadsList, useLiveEntry } from './data'
@@ -173,6 +173,8 @@ export function DownloadsFlyout() {
   const ref = useRef<HTMLDivElement>(null)
   // One going away (Esc, then Ctrl+J at once) fades out under the new one: it takes no clicks.
   const present = useIsPresent()
+  // With reduced motion it only fades, also when the setting changes while it is open (FL-28).
+  const reduced = useReducedMotion()
   useEffect(() => ref.current?.focus(), [])
 
   const list = entries ?? []
@@ -209,9 +211,9 @@ export function DownloadsFlyout() {
       aria-hidden={present ? undefined : true}
       tabIndex={-1}
       style={{ left, pointerEvents: present ? undefined : 'none' }}
-      initial={{ opacity: 0, y: -6, scale: 0.98 }}
+      initial={reduced ? { opacity: 0, y: 0, scale: 1 } : { opacity: 0, y: -6, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1, transition: SNAPPY }}
-      exit={{ opacity: 0, y: -4, scale: 0.98, transition: { duration: 0.12 } }}
+      exit={{ opacity: 0, y: reduced ? 0 : -4, scale: reduced ? 1 : 0.98, transition: POPOVER.out }}
       onKeyDown={onKeyDown}
     >
       <header className="dl-flyout__header">

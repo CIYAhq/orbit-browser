@@ -1,10 +1,11 @@
-import { AnimatePresence, domAnimation, LazyMotion, MotionConfig } from 'motion/react'
+import { AnimatePresence, domAnimation, LazyMotion } from 'motion/react'
 import { type CSSProperties, useEffect, useState } from 'react'
 import { DOWNLOADS_FLYOUT_PANEL } from '../../../shared/commands/downloads'
 import { SHORTCUT_SHEET } from '../../../shared/commands/keys'
 import { invoke } from '../api'
 import { DownloadsFlyout } from '../downloads/DownloadsFlyout'
 import { ShortcutSheet } from '../keys/ShortcutSheet'
+import { OrbitMotionConfig } from '../motion'
 import { isSpacePanel, SpacePanels } from '../shell/spaces/SpacePanels'
 import { useWindow } from '../store'
 import { paletteVars, usePalette } from '../theme'
@@ -34,7 +35,7 @@ export function OverlayApp() {
   }, [])
   return (
     <LazyMotion features={domAnimation} strict>
-      <MotionConfig reducedMotion="user">
+      <OrbitMotionConfig>
         <div
           className={`overlay overlay--${kind}`}
           style={paletteVars(palette) as CSSProperties}
@@ -78,7 +79,7 @@ export function OverlayApp() {
             )}
           </AnimatePresence>
         </div>
-      </MotionConfig>
+      </OrbitMotionConfig>
     </LazyMotion>
   )
 }

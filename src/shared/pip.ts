@@ -3,6 +3,7 @@
  * Pure functions in screen DIPs: the main process places, resizes and snaps the player window with
  * them. No Electron or DOM here, so it is unit-tested.
  */
+import { SPRING } from './motion'
 import type { Rect } from './rpc'
 import type { PipCorner, PipPlacement } from './state'
 
@@ -268,14 +269,14 @@ export function mixRect(a: Rect, b: Rect, t: number): Rect {
 
 /**
  * One step of a damped spring (mass 1) toward 0, for gliding the player to its corner with the
- * release velocity (FL-01 "standard": stiffness 386, damping 35). Returns the new offset and velocity.
+ * release velocity (FL-01 "standard"). Returns the new offset and velocity.
  */
 export function springStep(
   offset: number,
   velocity: number,
   dt: number,
-  stiffness = 386,
-  damping = 35,
+  stiffness = SPRING.standard.stiffness,
+  damping = SPRING.standard.damping,
 ): { offset: number; velocity: number } {
   // Semi-implicit Euler in small sub-steps: stable at frame-sized dt.
   let x = offset

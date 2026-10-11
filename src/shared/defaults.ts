@@ -41,6 +41,7 @@ export const DEFAULT_SETTINGS: Settings = {
   siteSearch: DEFAULT_SITE_SEARCH,
   searchSuggestions: false,
   searchTopResult: false,
+  reduceMotion: false,
   countFavoritesInShortcuts: true,
   lastTabOnCmd9: true,
   hardwareAcceleration: true,

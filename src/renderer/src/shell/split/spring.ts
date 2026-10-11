@@ -1,14 +1,16 @@
 import { type KeyframeGenerator, spring } from 'motion'
+import { reducedMotion } from '../../motion/reduced'
+import { SPRING, type Spring } from '../../motion/tokens'
 
-/** feel.md FL-01 "standard" spring (response 0.32 s, damping ratio 0.88). */
-export const STANDARD = { stiffness: 386, damping: 35, mass: 1 }
-/** feel.md FL-01 "snappy" spring (drop indicator moves, small re-flows). */
-export const SNAPPY = { stiffness: 632, damping: 45, mass: 1 }
+/** FL-01's standard spring (response 0.32 s, damping ratio 0.88): pane layout. */
+export const STANDARD = SPRING.standard
+/** FL-01's snappy spring (drop indicator moves, small re-flows). */
+export const SNAPPY = SPRING.snappy
 
-export type SpringParams = typeof STANDARD
+export type SpringParams = Spring
 
-const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
-export const prefersReducedMotion = (): boolean => reducedMotion.matches
+/** Reduced motion: the OS setting or Orbit's own (FL-28). */
+export const prefersReducedMotion = reducedMotion
 
 /**
  * One animated number driven by motion's spring physics. Retargeting keeps the current
