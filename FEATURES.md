@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 243 built (80 partial) · 330 tested · 0 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 244 built (79 partial) · 330 tested · 0 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 144 | 168 |
-| P1 | 219 | 84 | 145 |
+| P1 | 219 | 85 | 145 |
 | P2 | 79 | 15 | 17 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -187,7 +187,7 @@ Spec: `spec/commandbar.md`
 | CB-20 | Sidebar stays interactive while the bar is open | P1 | ✅ | ✅ e2e | – | a left click over the docked or the hover-revealed sidebar closes the bar and reaches the sidebar where it is drawn (one click selects a tab); right and middle clicks only close it; ⌘T with the revealed sidebar out opens the bar over it and the sidebar stays until the bar closes; the window's edge doesn't bring the sidebar in while the bar is open (SB-12), so its appearance never dismisses the bar |
 | CB-21 | Closing the bar and what happens to typed text | P0 | ✅ | ✅ e2e | – | Esc, ⌘T/⌘L again, click outside, window blur; text discarded; focus returns to the page, also when the window comes back after a background close |
 | CB-22 | Feel: open/close animation, latency and live updates | P0 | ✅ | ✅ e2e+unit | – | spring scale-fade entrance, quicker exit, reduced-motion fade; type-ahead and Enter buffered; IME-safe; per-keystroke latency measured |
-| CB-23 | The bar in other contexts (split pane, private window, Mini Window) | P1 | 🟡 partial | ✅ e2e | – | private (non-persistent) profiles: no history/archive rows, and their tabs, folders and Spaces never show in normal windows; ⌘L on an empty Space acts like ⌘T; split-pane and Mini Window variants not done |
+| CB-23 | The bar in other contexts (split pane, private window, Mini Window) | P1 | ✅ | ✅ e2e | – | split pane: the bar that fills a new pane (⌃⇧=, Add Split View) takes ⌘W, ⌘T, ⌘L and Esc first: each closes it and the empty pane goes; a URL or an open tab fills the pane; ⌘L on a pane edits that pane (SV-02, SV-15). Private (non-persistent) profiles: no history or archive rows, and their tabs, folders and Spaces never show in normal windows. Mini Window: the blank window's lookup bar and the address field over its page (⌘L or a click on the host) are the bar's compact variant: the same ranking, inline completion, site search and engine suggestions, from its profile's history and the typed text, with no open tabs, archive, Spaces, folders, actions or Settings sections (they act on the browser); a choice loads in that Mini Window. Over a page the list covers a still image of the page (the page's own view steps aside until the bar closes); ⌘W and ⌘L close the bar first, Esc too, and Enter with nothing to load gives the page the keyboard; ⌘T opens the main window's bar. ⌘L on an empty Space acts like ⌘T |
 
 ## Split View (prefix SV)
 
@@ -285,10 +285,10 @@ Spec: `spec/mini-window.md`
 |---|---|---|---|---|---|---|
 | MW-01 | What the Mini Window is | P0 | ✅ | ✅ e2e | – | separate small window, one floating tab, main window untouched |
 | MW-02 | Links from other apps open in a Mini Window by default | P0 | ✅ | ✅ e2e | – | open-url / second-instance / argv links open a Mini Window; same URL resurfaces it; routing rules first |
-| MW-03 | Look and anatomy | P0 | ✅ | ✅ e2e | – | slim top bar: controls, favicon+host (click/⌘L edits), Open in…, profile pill; inset page card; neutral theme |
+| MW-03 | Look and anatomy | P0 | ✅ | ✅ e2e | – | slim top bar: controls, favicon+host (click/⌘L opens the compact command bar on the page's address, CB-23), Open in…, profile pill; inset page card; neutral theme |
 | MW-04 | Opening animation and window placement | P1 | 🟡 partial | ✅ unit | – | last-used size/position, 24 px cascade, fade-in on macOS/Windows, best-effort above fullscreen on macOS; no 92% to 100% grow (resizing an OS window reflows the page every frame) |
 | MW-05 | Move the page into a Space ("Open in…") | P0 | ✅ | ✅ e2e | – | ⌘O to the most recent Space, Open in… / ⌘⌥O (⌘⇧O) native Space menu; live page, no reload |
-| MW-06 | Open a blank Mini Window for a quick lookup | P0 | ✅ | ✅ e2e+unit | – | ⌘⌥N opens a pre-rendered blank window with a focused lookup bar; Esc/⌘W close. System-wide on macOS only (outside e2e); on Windows/Linux Ctrl+Alt+N works inside Orbit, so other apps (and AltGr+N) keep the key |
+| MW-06 | Open a blank Mini Window for a quick lookup | P0 | ✅ | ✅ e2e+unit | – | ⌘⌥N opens a pre-rendered blank window with a focused lookup bar, the command bar's compact variant (CB-23): history and typed-text rows, inline completion, site search, engine suggestions; the choice loads here; Esc empties it, Esc on the empty bar or ⌘W closes the window. System-wide on macOS only (outside e2e); on Windows/Linux Ctrl+Alt+N works inside Orbit, so other apps (and AltGr+N) keep the key |
 | MW-07 | Open a link or a tab in a Mini Window on purpose | P1 | ✅ | ✅ e2e+unit | – | ⌘⌥-click a link, link menu Open Link in Mini Window, or ⌘⌥-click a sidebar row: Today rows move live, pinned/Favorite rows open a copy |
 | MW-08 | Several Mini Windows at once | P1 | ✅ | ✅ e2e | – | any number; Show/Hide All action and macOS dock menu |
 | MW-09 | Closing, auto-archive and the Archive | P0 | ✅ | ✅ e2e+unit | – | close and idle auto-close (settings.miniWindowArchiveAfterMs, 6 h, 0 = never; not while audible) archive with from 'mini' |

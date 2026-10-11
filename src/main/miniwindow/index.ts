@@ -51,6 +51,10 @@ interface Mini {
   moved?: boolean
   /** The page is in HTML fullscreen: its view covers the window. */
   fullscreen?: boolean
+  /** The command bar over the page is open (CB-23): it takes ⌘W and ⌘L first (KS-19). */
+  bar?: boolean
+  /** The page's view is hidden behind the bar's still image of it (CB-23). */
+  pageHidden?: boolean
 }
 
 /** Layout of the mini renderer (kept in step with mini.css): top bar height and card inset. */
@@ -261,6 +265,15 @@ export function registerMiniWindow(ctx: MainContext): void {
     view.setVisible(true)
     mini.win.contentView.addChildView(view)
     if (mini.win.isFocused()) view.webContents.focus()
+  }
+
+  /** The bar over the page is gone: the page's view comes back from behind its still image (CB-23). */
+  const uncover = (mini: Mini) => {
+    mini.bar = false
+    if (!mini.pageHidden) return
+    mini.pageHidden = false
+    const view = mini.tabId ? tabs.get(mini.tabId) : undefined
+    view?.setVisible(true)
   }
 
   const detachPage = (mini: Mini) => {
@@ -548,6 +561,7 @@ export function registerMiniWindow(ctx: MainContext): void {
     // The main window takes the page's view: it leaves the Mini Window first. The page is the
     // main window's from here on, while this window shrinks and fades out showing its old bar.
     send(mini, 'mini:leaving')
+    uncover(mini)
     detachPage(mini)
     mini.moved = true
     mini.tabId = undefined
@@ -589,6 +603,7 @@ export function registerMiniWindow(ctx: MainContext): void {
     if (!tabId || !tab || !state.profiles[profileId] || tab.profileId === profileId) return
     const url = tabs.contents(tabId)?.getURL() || tab.url
     const spaceId = spaceForProfile(state, profileId)
+    uncover(mini)
     detachPage(mini)
     tabs.savedHistory.delete(tabId)
     tabs.sleep(tabId)
@@ -665,11 +680,39 @@ export function registerMiniWindow(ctx: MainContext): void {
     if (items.length === 0) return
     Menu.buildFromTemplate(items).popup({ window: mini.win, x: Math.round(x), y: Math.round(y) })
   })
-  // Esc in the address field: the keyboard goes back to the page, which had it before ⌘L (KS-16, KS-20).
+  // The bar over the page closed (Esc, ⌘W, ⌘L, a choice): the keyboard goes back to the page, which
+  // had it before ⌘L (KS-16, KS-20). The page shows again first, so it can take the keyboard.
   commands.register('mini.focusPage', (_args, c) => {
     const mini = miniOf(c)
+    if (mini) uncover(mini)
     const contents = mini?.tabId ? tabs.contents(mini.tabId) : undefined
     if (contents && !contents.isDestroyed()) contents.focus()
+  })
+  // CB-23: the bar over the page. Its list covers the page: the renderer draws a still image of
+  // the page on the card, then main hides the page's view until the bar closes.
+  commands.register('mini.bar', async ({ open }, c) => {
+    const mini = miniOf(c)
+    if (!mini) return null
+    if (!open) {
+      uncover(mini)
+      return null
+    }
+    mini.bar = true
+    const view = mini.tabId ? tabs.get(mini.tabId) : undefined
+    if (!view || view.webContents.isDestroyed() || mini.fullscreen) return null
+    try {
+      const image = await view.webContents.capturePage()
+      return image.isEmpty() ? null : `data:image/jpeg;base64,${image.toJPEG(85).toString('base64')}`
+    } catch {
+      return null
+    }
+  })
+  commands.register('mini.hidePage', (_args, c) => {
+    const mini = miniOf(c)
+    const view = mini?.tabId ? tabs.get(mini.tabId) : undefined
+    if (!mini?.bar || !view || mini.fullscreen) return
+    view.setVisible(false)
+    mini.pageHidden = true
   })
   commands.register('mini.control', ({ op }, c) => {
     const mini = miniOf(c)
@@ -712,6 +755,12 @@ export function registerMiniWindow(ctx: MainContext): void {
   actions.intercept((id, c) => {
     const mini = miniOf(c)
     if (!mini) return false
+    // KS-19: the bar over the page takes ⌘W and ⌘L first, as the main window's bar does: each
+    // closes it (CB-23).
+    if (mini.bar && (id === 'tab.close' || id === 'url.edit')) {
+      send(mini, 'mini:close-bar')
+      return true
+    }
     switch (id) {
       case 'tab.close':
       case 'window.close':

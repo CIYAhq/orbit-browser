@@ -1,4 +1,5 @@
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
+import type { SearchResponse } from '../../src/shared/commands/commandbar'
 import { paneOrder } from '../../src/shared/split'
 import {
   activeTabId,
@@ -12,8 +13,8 @@ import {
   state,
   viewPage,
 } from './helpers'
-import { floatingInfo, floatingPage, windowState } from './nav-support'
-import { blockNetwork, clickInTab, findPage, overlayOf, startSites } from './peek-helpers'
+import { floatingInfo, floatingPage, pressInPage, windowState } from './nav-support'
+import { blockNetwork, clickInTab, findPage, type OrbitGlobal, overlayOf, startSites } from './peek-helpers'
 
 /** Views lane follow-ups: the command bar, split view, Peek, Mini Windows and media. */
 
@@ -532,4 +533,185 @@ test('[SV-26] a pane added while its neighbour still grows back from a close gro
     return
   }
   throw new Error(`frames never came in time to show the grow-in (${rounds.join('; ')})`)
+})
+
+// ---- The bar's split-pane and Mini Window variants (CB-23) ----
+
+test('[CB-23][SV-02][KS-19] the bar filling a new pane takes its keys first: ⌘W, ⌘T and ⌘L each close it, and the empty pane goes', async () => {
+  const { app, shell } = orbit
+  const [a, b] = [await newTab('Left'), await newTab('Right')]
+  const splitId = (await run(app, 'split.create', { tabIds: [a, b] })) as string
+  const overlay = await viewPage(app, 'overlay')
+  const panes = shell.getByTestId('split-pane')
+  await expect(panes).toHaveCount(2)
+  const focused = await activeTabId(app)
+  for (const key of ['W', 'T', 'L']) {
+    await shell.keyboard.press('Control+Shift+Equal')
+    await expect(input(overlay)).toBeFocused()
+    await expect(panes).toHaveCount(3)
+    await input(overlay).press(`${MOD}+${key}`)
+    await expect(bar(overlay)).toHaveCount(0)
+    await expect(panes).toHaveCount(2)
+    // Only the bar and its empty pane went: the split keeps its two tabs and its focused pane.
+    const s = await state(app)
+    const layout = s.splits[splitId]?.layout
+    expect(layout ? paneOrder(layout).sort() : []).toEqual([a, b].sort())
+    expect(await activeTabId(app)).toBe(focused)
+  }
+})
+
+/** The Playwright page of a Mini Window's own UI. */
+async function miniUi(windowId: string): Promise<Page> {
+  const deadline = Date.now() + 15_000
+  while (Date.now() < deadline) {
+    for (const p of orbit.app.windows()) {
+      if (!p.url().includes('view=mini')) continue
+      const id = await p
+        .evaluate(() => (window as unknown as { orbit: { windowId: string } }).orbit.windowId)
+        .catch(() => '')
+      if (id === windowId) return p
+    }
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  throw new Error(`No Mini Window UI for ${windowId}`)
+}
+
+/** A Mini Window's page: its tab, what its view shows, and whether the view is shown on the card. */
+function miniPage(windowId: string): Promise<{ tabId: string | null; url: string | null; visible: boolean }> {
+  return orbit.app.evaluate((_e, id) => {
+    const ctx = (globalThis as unknown as OrbitGlobal).__orbit.ctx
+    const w = ctx.store.state.windows[id]
+    const tabId = w ? (w.activeTab[w.spaceId] ?? null) : null
+    const view = tabId ? ctx.tabs.get(tabId) : undefined
+    const url = view && !view.webContents.isDestroyed() ? view.webContents.getURL() : null
+    return { tabId, url, visible: !!view?.getVisible() }
+  }, windowId)
+}
+
+/** Where the keyboard is: the address of the focused web contents. */
+function focusedUrl(): Promise<string | undefined> {
+  return orbit.app.evaluate(({ webContents }) => webContents.getFocusedWebContents()?.getURL())
+}
+
+/** Today's tabs in the main window's Space. */
+async function mainToday(): Promise<string[]> {
+  const s = await state(orbit.app)
+  const main = Object.values(s.windows).find((w) => w.kind === 'main')
+  return s.spaces[main?.spaceId ?? '']?.today ?? []
+}
+
+test("[CB-23][MW-06][CB-05] a blank Mini Window's lookup bar is the bar's compact variant: history and typed rows, nothing browser-wide; its choice loads there", async () => {
+  const { app } = orbit
+  await newTab('Lookup Target')
+  await newTab('Elsewhere')
+  const url = fx.url('/page/Lookup%20Target')
+  // The page is in history now, and open in the main window (not as its current page, which
+  // never shows as a history row there).
+  await expect
+    .poll(async () => {
+      const resp = (await run(app, 'search.query', {
+        query: 'Lookup Tar',
+        mode: 'new-tab',
+        mini: true,
+      })) as SearchResponse
+      return resp.results.map((r) => r.kind)
+    })
+    .toContain('history')
+  const today = await mainToday()
+  const id = (await run(app, 'mini.open', {})) as string
+  const ui = await miniUi(id)
+  const field = ui.getByTestId('mini-lookup')
+  await expect(field).toBeFocused()
+  const results = ui.getByTestId('command-result')
+  const kind = (k: string) => results.and(ui.locator(`[data-kind="${k}"]`))
+  await field.pressSequentially('Lookup Tar')
+  // Its history row, not its open tab: a choice here loads in this window (CB-05, CB-06).
+  await expect(kind('history')).toContainText(['Lookup Target'])
+  await expect(kind('tab')).toHaveCount(0)
+  // Actions, Spaces and Settings sections act on the browser: none is offered, and Tab on the
+  // empty field gives no actions mode (CB-13, CB-14).
+  await field.fill('settings')
+  await expect(kind('search').getByTestId('command-result-title')).toHaveText('settings')
+  await expect(kind('action')).toHaveCount(0)
+  await expect(kind('space')).toHaveCount(0)
+  await field.fill('')
+  await field.press('Tab')
+  await expect(ui.getByTestId('mini-bar')).toHaveAttribute('data-scope', '')
+  // Choosing the row loads it in this Mini Window; the main window gets no tab.
+  await field.pressSequentially('Lookup Tar')
+  await kind('history').first().click()
+  await expect.poll(async () => (await miniPage(id)).url).toBe(url)
+  await expect(field).toHaveCount(0)
+  await expect(ui.getByTestId('mini-address')).toContainText('localhost')
+  expect(await mainToday()).toEqual(today)
+  // Another blank one: Esc empties the field first; Esc on the empty field closes the window (MW-06).
+  const other = (await run(app, 'mini.open', {})) as string
+  const otherUi = await miniUi(other)
+  const lookup = otherUi.getByTestId('mini-lookup')
+  await expect(lookup).toBeFocused()
+  await lookup.pressSequentially('abc')
+  await lookup.press('Escape')
+  await expect(lookup).toHaveValue('')
+  expect((await state(app)).windows[other]).toBeDefined()
+  // The window closes while the key is still down: its key-up has nowhere to go.
+  await lookup.press('Escape').catch(() => {})
+  await expect.poll(async () => (await state(app)).windows[other]).toBeUndefined()
+})
+
+test("[CB-23][KS-19][MW-03] the bar over a Mini Window's page takes its keys first: ⌘W and ⌘L close it, not the window; Enter with nothing to load gives the page the keyboard (K3)", async () => {
+  const { app } = orbit
+  const path = '/page/In%20Mini'
+  const url = fx.url(path)
+  const id = (await run(app, 'mini.open', { url })) as string
+  await expect.poll(async () => (await miniPage(id)).url).toBe(url)
+  const tabId = (await miniPage(id)).tabId ?? ''
+  await expect.poll(async () => (await state(app)).tabs[tabId]?.loading).toBe(false)
+  const ui = await miniUi(id)
+  const field = ui.getByTestId('mini-address-input')
+  const mod = MOD === 'Meta' ? 'meta' : 'control'
+  const today = await mainToday()
+  // ⌘L in the page: the bar opens on the page's address, and its list covers a still image of
+  // the page (the page's own view steps aside).
+  await pressInPage(app, path, 'L', [mod])
+  await expect(field).toBeFocused()
+  await expect(field).toHaveValue(url)
+  await expect(ui.getByTestId('command-result').first()).toHaveAttribute('data-kind', 'current')
+  await expect(ui.getByTestId('mini-cover')).toBeVisible()
+  await expect.poll(async () => (await miniPage(id)).visible).toBe(false)
+  // ⌘W closes the bar, not the window: the page is back, with the keyboard.
+  await field.press(`${MOD}+W`)
+  await expect(field).toHaveCount(0)
+  await expect.poll(async () => (await miniPage(id)).visible).toBe(true)
+  await expect.poll(focusedUrl).toBe(url)
+  expect((await state(app)).windows[id]).toBeDefined()
+  // ⌘L opens it again, and ⌘L again closes it, as in the main window (KS-04).
+  await pressInPage(app, path, 'L', [mod])
+  await expect(field).toBeFocused()
+  await field.press(`${MOD}+L`)
+  await expect(field).toHaveCount(0)
+  await expect.poll(focusedUrl).toBe(url)
+  // K3: the address cleared and Enter: nothing to load, so the page gets the keyboard back.
+  await pressInPage(app, path, 'L', [mod])
+  await expect(field).toBeFocused()
+  await field.press('Backspace')
+  await expect(field).toHaveValue('')
+  await field.press('Enter')
+  await expect(field).toHaveCount(0)
+  await expect.poll(focusedUrl).toBe(url)
+  await expect.poll(async () => (await miniPage(id)).visible).toBe(true)
+  // A typed address loads in the Mini Window, which keeps the keyboard; the main window gets no tab.
+  const next = fx.url('/page/Next%20Page')
+  await pressInPage(app, path, 'L', [mod])
+  await expect(field).toBeFocused()
+  await field.fill(next)
+  await field.press('Enter')
+  await expect.poll(async () => (await miniPage(id)).url).toBe(next)
+  await expect(field).toHaveCount(0)
+  await expect.poll(focusedUrl).toBe(next)
+  expect(await mainToday()).toEqual(today)
+  // ⌘T there opens the bar in the main window (CB-23).
+  await pressInPage(app, '/page/Next%20Page', 'T', [mod])
+  await expect
+    .poll(async () => Object.values((await state(app)).windows).find((w) => w.kind === 'main')?.overlay.kind)
+    .toBe('commandbar')
 })

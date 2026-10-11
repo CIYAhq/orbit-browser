@@ -1,10 +1,20 @@
-import { ChevronDown, Lock, Search, UserRound } from 'lucide-react'
-import { type CSSProperties, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { ChevronDown, Lock, UserRound } from 'lucide-react'
+import {
+  type CSSProperties,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import type { Tab } from '../../../shared/state'
 import { NEUTRAL_THEME, paletteFor } from '../../../shared/theme'
 import { displayHost } from '../../../shared/url'
 import { invoke, isMac, perfMark } from '../api'
 import { useShortcutLabel } from '../keys/live'
+import { CommandBar, type MiniBar } from '../overlay/CommandBar'
 import { activeTabId } from '../selectors'
 import { useOrbit, useWindow } from '../store'
 import { paletteVars, useDark } from '../theme'
@@ -18,6 +28,7 @@ const CARD_RADIUS = 10
  * A Mini Window's chrome (MW-03): a slim top bar (window controls, the page's host which edits
  * the URL, "Open in…" and the profile when there are several) over the page card. Without a page
  * it shows the lookup bar, focused (MW-06). The page is a native view main keeps on the card.
+ * The lookup bar and the address field are the command bar's compact variant (CB-23).
  */
 export function MiniApp() {
   const win = useWindow()
@@ -47,6 +58,17 @@ export function MiniApp() {
   const openInRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => window.orbit.on('mini:edit-url', () => setEditing(true)), [])
+  /** The bar over the page is done; the page gets the keyboard back unless it went to another window. */
+  const closeBar = useCallback((how: 'chosen' | 'dismissed' | 'away') => {
+    setEditing(false)
+    if (how !== 'away') void invoke('mini.focusPage', {})
+  }, [])
+  // ⌘W or ⌘L while the bar is open closes it, as in the main window (KS-19).
+  useEffect(() => window.orbit.on('mini:close-bar', () => closeBar('dismissed')), [closeBar])
+  const barOpen = !!tab && editing && !leftWith
+  const cover = usePageCover(barOpen)
+  const pageBar = useMemo<MiniBar>(() => ({ blank: false, onClose: closeBar }), [closeBar])
+  const address = tab ? (tab.pendingUrl ?? tab.url) : ''
   useEffect(
     () =>
       window.orbit.on('mini:choose-space', () => {
@@ -68,7 +90,12 @@ export function MiniApp() {
       <header className="mini__bar">
         {isMac ? <div className="mini__traffic-space" /> : <MiniWindowControls />}
         {tab && editing ? (
-          <AddressField url={tab.url} onDone={() => setEditing(false)} />
+          <CommandBar
+            mode={address && address !== 'about:blank' ? 'edit-url' : 'new-tab'}
+            initialQuery={address === 'about:blank' ? '' : address}
+            dark={dark}
+            mini={pageBar}
+          />
         ) : tab ? (
           <Address tab={tab} onEdit={() => setEditing(true)} />
         ) : (
@@ -107,8 +134,23 @@ export function MiniApp() {
           </button>
         )}
       </header>
-      <main className="mini__frame" ref={frameRef} data-testid="mini-frame">
-        {!tab && <LookupBar />}
+      <main
+        className="mini__frame"
+        ref={frameRef}
+        data-testid="mini-frame"
+        onMouseDown={(e) => {
+          // A click on the page's still image dismisses the bar over it (as the main bar's backdrop does).
+          if (!barOpen) return
+          e.preventDefault()
+          closeBar('dismissed')
+        }}
+      >
+        {barOpen && cover.src && (
+          <div className="mini__cover" data-testid="mini-cover">
+            <img src={cover.src} alt="" draggable={false} onLoad={cover.onShown} />
+          </div>
+        )}
+        {!tab && <LookupBar dark={dark} />}
       </main>
     </div>
   )
@@ -131,87 +173,53 @@ function Address({ tab, onEdit }: { tab: Tab; onEdit: () => void }) {
   )
 }
 
-/** The page's URL, editable in place (click the host or press ⌘L). */
-function AddressField({ url, onDone }: { url: string; onDone: () => void }) {
-  const [text, setText] = useState(url === 'about:blank' ? '' : url)
-  const ref = useRef<HTMLInputElement>(null)
+/** The quick lookup bar of a blank Mini Window: type, Enter, and the result loads here (MW-06, CB-23). */
+function LookupBar({ dark }: { dark: boolean }) {
   useEffect(() => {
-    ref.current?.focus()
-    ref.current?.select()
+    perfMark('mini:lookup-ready')
   }, [])
-  return (
-    <form
-      className="mini__address-form"
-      onSubmit={(e) => {
-        e.preventDefault()
-        if (text.trim()) void invoke('mini.navigate', { input: text })
-        onDone()
-      }}
-    >
-      <input
-        ref={ref}
-        className="mini__address-input"
-        data-testid="mini-address-input"
-        value={text}
-        spellCheck={false}
-        onChange={(e) => setText(e.target.value)}
-        onBlur={onDone}
-        onKeyDown={(e) => {
-          // Esc gives the keyboard back to the page (KS-16). Not on blur: a click on the page has
-          // already moved it there.
-          if (e.key === 'Escape') {
-            e.preventDefault()
-            void invoke('mini.focusPage', {})
-            onDone()
-          }
-        }}
-      />
-    </form>
+  const bar = useMemo<MiniBar>(
+    () => ({
+      blank: true,
+      // Escape on the empty bar closes the window (MW-06); a choice loads here and replaces the bar.
+      onClose: (how) => {
+        if (how === 'dismissed') void invoke('mini.control', { op: 'close' })
+      },
+    }),
+    [],
   )
+  return <CommandBar mode="new-tab" initialQuery="" dark={dark} mini={bar} />
 }
 
-/** The quick lookup bar of a blank Mini Window: type, Enter, and the result loads here (MW-06). */
-function LookupBar() {
-  const [text, setText] = useState('')
-  const ref = useRef<HTMLInputElement>(null)
+/**
+ * While the bar over the page is open its list covers the page (CB-23). The page is a native
+ * view above the card, so the card shows a still image of it and main hides the view until the
+ * bar closes. Main also learns that the bar is open: ⌘W and ⌘L close the bar first (KS-19).
+ */
+function usePageCover(open: boolean): { src: string | null; onShown: () => void } {
+  const [src, setSrc] = useState<string | null>(null)
+  const live = useRef(false)
   useEffect(() => {
-    const focus = () => ref.current?.focus()
-    focus()
-    perfMark('mini:lookup-ready')
-    window.addEventListener('focus', focus)
-    return () => window.removeEventListener('focus', focus)
+    if (!open) return
+    live.current = true
+    void invoke('mini.bar', { open: true }).then((image) => {
+      if (live.current && image) setSrc(image)
+    })
+    return () => {
+      live.current = false
+      setSrc(null)
+      void invoke('mini.bar', { open: false })
+    }
+  }, [open])
+  // The view steps aside only once the image is on screen, so the card never shows empty.
+  const onShown = useCallback(() => {
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (live.current) void invoke('mini.hidePage', {})
+      }),
+    )
   }, [])
-  return (
-    <form
-      className="mini-lookup"
-      onSubmit={(e) => {
-        e.preventDefault()
-        if (text.trim()) void invoke('mini.navigate', { input: text })
-      }}
-    >
-      <Search size={18} className="mini-lookup__icon" />
-      <input
-        ref={ref}
-        className="mini-lookup__input"
-        data-testid="mini-lookup"
-        placeholder="Search or enter address"
-        value={text}
-        spellCheck={false}
-        autoComplete="off"
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          // Escape on the empty bar closes the window (MW-06).
-          if (e.key === 'Escape' && !text) {
-            e.preventDefault()
-            void invoke('mini.control', { op: 'close' })
-          } else if (e.key === 'Escape') {
-            e.preventDefault()
-            setText('')
-          }
-        }}
-      />
-    </form>
-  )
+  return { src, onShown }
 }
 
 function MiniWindowControls() {

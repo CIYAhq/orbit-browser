@@ -26,9 +26,7 @@ import { activeTabId } from '../selectors'
 import { getOrbitState, useOrbit } from '../store'
 import { Favicon } from '../ui/Favicon'
 import { ResultRow } from './commandbar/ResultRow'
-import { claimTypeahead, installTypeahead, releaseTypeahead } from './commandbar/typeahead'
-
-installTypeahead()
+import { claimTypeahead, releaseTypeahead } from './commandbar/typeahead'
 
 const ROW_H = 40
 const INPUT_H = 56
@@ -74,15 +72,38 @@ function rowsThatFit(): number {
   return Math.max(3, Math.min(MAX_ROWS, Math.floor((h - top - INPUT_H - 24 - 13) / ROW_H)))
 }
 
-function useMaxRows(): number {
-  const [rows, setRows] = useState(rowsThatFit)
+function useMaxRows(rowsFor: () => number = rowsThatFit): number {
+  const [rows, setRows] = useState(rowsFor)
   useEffect(() => {
-    const onResize = () => setRows(rowsThatFit())
+    const onResize = () => setRows(rowsFor())
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
-  }, [])
+  }, [rowsFor])
   return rows
 }
+
+/**
+ * A Mini Window's compact bar (CB-23): the lookup bar of a blank Mini Window (MW-06), or the
+ * address field over its page (MW-03). Same sources, ranking and keys as the main bar, but its
+ * choice loads in that Mini Window and nothing browser-wide is offered.
+ */
+export interface MiniBar {
+  blank: boolean
+  /**
+   * The bar is done: a row was chosen, it was dismissed (Esc, ⌘W, ⌘L, Enter with nothing to
+   * load), or the keyboard went elsewhere.
+   */
+  onClose: (how: 'chosen' | 'dismissed' | 'away') => void
+}
+
+/** Rows that fit in a Mini Window below its bar: at most six (compact). */
+function miniRowsThatFit(blank: boolean): number {
+  const h = window.innerHeight
+  const top = blank ? 40 + Math.round((h - 46) * 0.22) + 52 : 40
+  return Math.max(3, Math.min(6, Math.floor((h - top - 24) / ROW_H)))
+}
+const blankMiniRows = () => miniRowsThatFit(true)
+const pageMiniRows = () => miniRowsThatFit(false)
 
 /**
  * The command bar (CB-01…CB-23): one field and one ranked result list. Ranking
@@ -113,18 +134,21 @@ export function CommandBar({
   initialQuery,
   dark,
   warm = false,
+  mini,
 }: {
   mode: CommandBarMode
   initialQuery: string
   dark?: boolean
   /** An inert, hidden instance rendered once at overlay start-up so the first real open is as fast as later ones (CB-22). */
   warm?: boolean
+  /** A Mini Window's compact bar (CB-23). */
+  mini?: MiniBar
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [results, setResults] = useState<SearchResult[]>(warm ? WARM_ROWS : [])
   const [selected, setSelected] = useState(0)
   const [scope, setScopeState] = useState<Scope>(null)
-  const maxRows = useMaxRows()
+  const maxRows = useMaxRows(mini ? (mini.blank ? blankMiniRows : pageMiniRows) : rowsThatFit)
   const present = useIsPresent()
   // FL-28: with reduced motion the bar only fades (no scale or drop, not even for one frame).
   const reduced = useReducedMotionNow()
@@ -170,10 +194,11 @@ export function CommandBar({
     setSelected(i)
   }
 
-  function close() {
+  function close(how: 'dismissed' | 'away' = 'dismissed') {
     if (st.closed) return
     st.closed = true
-    void invoke('overlay.close', {})
+    if (mini) mini.onClose(how)
+    else void invoke('overlay.close', {})
   }
 
   function siteById(id: string): SiteSearchInfo | undefined {
@@ -182,6 +207,8 @@ export function CommandBar({
   }
 
   function choose(r: SearchResult | undefined, disposition?: OpenDisposition, topResult = false) {
+    // K3: Enter with nothing to load over a Mini Window's page gives the page the keyboard.
+    if (!r && mini && !mini.blank && !st.closed && !st.typed.trim()) return close()
     if (!r || st.closed) return
     if (r.kind === 'sitesearch') {
       const site = r.siteSearchId ? siteById(r.siteSearchId) : undefined
@@ -192,6 +219,7 @@ export function CommandBar({
     st.closed = true
     st.chosen = true
     void invoke('search.open', { result: r, mode, disposition, ...(topResult ? { topResult } : {}) })
+    mini?.onClose('chosen')
   }
 
   /** Applies (or drops) the inline completion for the current text (CB-08). */
@@ -236,6 +264,7 @@ export function CommandBar({
       siteSearchId: scope?.kind === 'site' ? scope.site.id : undefined,
       actionsOnly: scope?.kind === 'actions',
       noAutocomplete: st.noAuto || st.composing,
+      ...(mini ? { mini: true } : {}),
     })
       .then((resp) => applyResponse(seq, sentAt, resp))
       .catch((err) => {
@@ -353,20 +382,30 @@ export function CommandBar({
     const input = inputRef.current
     if (!input || warm) return
     st.closed = false
-    const buffered = claimTypeahead()
+    // A Mini Window's field takes keys itself from the start: nothing is buffered there.
+    const buffered = mini ? { token: 0, text: '', enter: false } : claimTypeahead()
     const editing = mode === 'edit-url' && initialQuery
     input.value = buffered.text ? (editing ? buffered.text : initialQuery + buffered.text) : initialQuery
     st.typed = input.value
     input.focus()
     if (editing && !buffered.text) input.select()
     else input.setSelectionRange(input.value.length, input.value.length)
-    requestAnimationFrame(() => perfMark('commandbar:open:painted'))
+    if (!mini) requestAnimationFrame(() => perfMark('commandbar:open:painted'))
     if (buffered.enter) st.pendingEnter = {}
     runQuery()
+    // A blank Mini Window is made ahead and shown later (MW-15): when it comes forward its field
+    // takes the keyboard, and its rows are brought up to date.
+    const onShown = () => {
+      if (st.closed) return
+      input.focus()
+      runQuery()
+    }
+    if (mini?.blank) window.addEventListener('focus', onShown)
     return () => {
       st.closed = true
       clearTimeout(st.suggestTimer)
-      releaseTypeahead(buffered.token)
+      window.removeEventListener('focus', onShown)
+      if (!mini) releaseTypeahead(buffered.token)
     }
   }, [])
 
@@ -385,7 +424,7 @@ export function CommandBar({
     const deleting = inputType.startsWith('delete')
     const v = input.value
     // "/ " at the start is the older way into actions mode (CB-14).
-    if (!st.scope && v === '/ ' && !deleting) {
+    if (!st.scope && !mini && v === '/ ' && !deleting) {
       setScope({ kind: 'actions' })
       return
     }
@@ -406,6 +445,14 @@ export function CommandBar({
     } else {
       st.completion = undefined
     }
+    runQuery()
+  }
+
+  /** Esc with text in a blank Mini Window's bar empties it; Esc on the empty bar closes the window (MW-06). */
+  function clearField(input: HTMLInputElement) {
+    input.value = ''
+    st.typed = ''
+    st.completion = undefined
     runQuery()
   }
 
@@ -435,12 +482,13 @@ export function CommandBar({
     } else if (e.key === 'Escape') {
       e.preventDefault()
       if (st.scope) setScope(null)
+      else if (mini?.blank && input.value) clearField(input)
       else close()
     } else if (e.key === 'Tab') {
       e.preventDefault()
       if (e.shiftKey || st.scope) return
       if (input.value === '') {
-        setScope({ kind: 'actions' })
+        if (!mini) setScope({ kind: 'actions' })
         return
       }
       const site = findSiteSearch(getOrbitState().settings.siteSearch ?? [], st.typed)
@@ -478,7 +526,115 @@ export function CommandBar({
         ? 'Run an action…'
         : mode === 'edit-url'
           ? 'Enter a URL or search'
-          : 'Search or enter address…'
+          : mini
+            ? 'Search or enter address'
+            : 'Search or enter address…'
+
+  const lead = scope ? (
+    <span className="cmdbar__chip" data-testid={live ? 'command-chip' : undefined}>
+      {scope.kind === 'actions' ? <Zap size={13} /> : <Search size={13} />}
+      {scope.kind === 'actions' ? 'Actions' : scope.site.name}
+      <button
+        type="button"
+        className="cmdbar__chip-x"
+        aria-label="Leave this mode"
+        onMouseDown={(e) => {
+          e.preventDefault()
+          setScope(null)
+        }}
+      >
+        <X size={11} />
+      </button>
+    </span>
+  ) : mode === 'edit-url' && currentFavicon ? (
+    <span className="cmdbar__lead">
+      <Favicon src={currentFavicon} size={mini ? 14 : 18} />
+    </span>
+  ) : (
+    <Search size={mini && !mini.blank ? 14 : 18} className="cmdbar__lead cmdbar__lead--search" />
+  )
+
+  // A Mini Window keeps the test ids its fields always had (MW-03, MW-06).
+  const fieldId = mini ? (mini.blank ? 'mini-lookup' : 'mini-address-input') : 'command-input'
+  const field = (
+    <input
+      ref={inputRef}
+      className="cmdbar__input"
+      data-testid={live ? fieldId : undefined}
+      placeholder={placeholder}
+      spellCheck={false}
+      autoComplete="off"
+      role="combobox"
+      aria-expanded={results.length > 0}
+      aria-controls="cmdbar-list"
+      aria-autocomplete="both"
+      aria-activedescendant={selected >= 0 && results.length ? `cmdbar-option-${selected}` : undefined}
+      onInput={onInput}
+      onKeyDown={onKeyDown}
+      onBlur={
+        // Over a Mini Window's page, the bar closes when the keyboard leaves it, as the address
+        // field did: to the page (it has the keyboard), to another window, or a click elsewhere.
+        mini && !mini.blank ? () => close(document.hasFocus() ? 'dismissed' : 'away') : undefined
+      }
+      onCopy={(e) => {
+        // The whole page address copied the long way: tip about ⌘⇧C, once (NV-17).
+        const el = e.currentTarget
+        const whole = el.selectionStart === 0 && el.selectionEnd === el.value.length
+        if (mode === 'edit-url' && initialQuery && whole && el.value === initialQuery) {
+          void invoke('nav.copyHint', {})
+        }
+      }}
+      onCompositionStart={() => {
+        st.composing = true
+      }}
+      onCompositionEnd={(e) => {
+        st.composing = false
+        st.typed = e.currentTarget.value
+        runQuery()
+      }}
+    />
+  )
+
+  const list = results.length > 0 && (
+    <div
+      className="cmdbar__results"
+      role="listbox"
+      id={warm ? undefined : 'cmdbar-list'}
+      data-testid={live ? 'command-results' : undefined}
+    >
+      {results.map((r, i) => (
+        <ResultRow
+          key={r.id}
+          r={r}
+          index={i}
+          selected={i === selected}
+          onHover={onRowHover}
+          onChoose={onRowChoose}
+          onRemove={onRowRemove}
+          live={live}
+        />
+      ))}
+    </div>
+  )
+
+  if (mini) {
+    return (
+      <div
+        className={`cmdbar cmdbar--mini ${mini.blank ? 'cmdbar--mini-blank' : 'cmdbar--mini-page'}${dark ? ' cmdbar--dark' : ''}`}
+        role="dialog"
+        aria-label={mini.blank ? 'Search or enter address' : 'Address'}
+        data-testid="mini-bar"
+        data-mode={mode}
+        data-scope={scope?.kind ?? ''}
+      >
+        <div className="cmdbar__input-row">
+          {lead}
+          {field}
+        </div>
+        {list}
+      </div>
+    )
+  }
 
   return (
     <>
@@ -515,82 +671,10 @@ export function CommandBar({
           }
         >
           <div className="cmdbar__input-row">
-            {scope ? (
-              <span className="cmdbar__chip" data-testid={live ? 'command-chip' : undefined}>
-                {scope.kind === 'actions' ? <Zap size={13} /> : <Search size={13} />}
-                {scope.kind === 'actions' ? 'Actions' : scope.site.name}
-                <button
-                  type="button"
-                  className="cmdbar__chip-x"
-                  aria-label="Leave this mode"
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    setScope(null)
-                  }}
-                >
-                  <X size={11} />
-                </button>
-              </span>
-            ) : mode === 'edit-url' && currentFavicon ? (
-              <span className="cmdbar__lead">
-                <Favicon src={currentFavicon} size={18} />
-              </span>
-            ) : (
-              <Search size={18} className="cmdbar__lead cmdbar__lead--search" />
-            )}
-            <input
-              ref={inputRef}
-              className="cmdbar__input"
-              data-testid={live ? 'command-input' : undefined}
-              placeholder={placeholder}
-              spellCheck={false}
-              autoComplete="off"
-              role="combobox"
-              aria-expanded={results.length > 0}
-              aria-controls="cmdbar-list"
-              aria-autocomplete="both"
-              aria-activedescendant={selected >= 0 && results.length ? `cmdbar-option-${selected}` : undefined}
-              onInput={onInput}
-              onKeyDown={onKeyDown}
-              onCopy={(e) => {
-                // The whole page address copied the long way: tip about ⌘⇧C, once (NV-17).
-                const el = e.currentTarget
-                const whole = el.selectionStart === 0 && el.selectionEnd === el.value.length
-                if (mode === 'edit-url' && initialQuery && whole && el.value === initialQuery) {
-                  void invoke('nav.copyHint', {})
-                }
-              }}
-              onCompositionStart={() => {
-                st.composing = true
-              }}
-              onCompositionEnd={(e) => {
-                st.composing = false
-                st.typed = e.currentTarget.value
-                runQuery()
-              }}
-            />
+            {lead}
+            {field}
           </div>
-          {results.length > 0 && (
-            <div
-              className="cmdbar__results"
-              role="listbox"
-              id={warm ? undefined : 'cmdbar-list'}
-              data-testid={live ? 'command-results' : undefined}
-            >
-              {results.map((r, i) => (
-                <ResultRow
-                  key={r.id}
-                  r={r}
-                  index={i}
-                  selected={i === selected}
-                  onHover={onRowHover}
-                  onChoose={onRowChoose}
-                  onRemove={onRowRemove}
-                  live={live}
-                />
-              ))}
-            </div>
-          )}
+          {list}
         </m.div>
       </div>
     </>
