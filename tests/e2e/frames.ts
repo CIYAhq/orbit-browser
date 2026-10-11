@@ -463,8 +463,8 @@ export async function bestOf<T>(
  */
 export function note(id: string, what: string, value: number | undefined, target: string, unit = 'ms'): void {
   const load = Math.round((loadavg()[0] ?? 0) * 10) / 10
-  // Ratios (no unit) keep three decimals, so a scale of 0.97 reads as such.
-  const places = unit ? 10 : 1000
+  // Ratios (no unit, or ×) keep three decimals, so a scale of 0.97 reads as such.
+  const places = unit && unit !== '×' ? 10 : 1000
   const shown =
     value === undefined || Number.isNaN(value) ? '–' : `${Math.round(value * places) / places}${unit ? ` ${unit}` : ''}`
   console.log(`[feel] ${id} ${what}: ${shown} (target ${target}; load ${load})`)
