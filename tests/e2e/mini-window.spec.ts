@@ -1,6 +1,6 @@
 import type { ElectronApplication, Page } from '@playwright/test'
 import { expect, test } from '@playwright/test'
-import { type Box, type Frame, record } from './frames'
+import { type Box, type Frame, record, rgba } from './frames'
 import { action, launchOrbit, type Orbit, run, state } from './helpers'
 import {
   blockNetwork,
@@ -494,9 +494,10 @@ test('[MW-04][MW-15] the ready window draws itself empty until it opens: a link 
       const rec = await record(
         ui,
         {
-          lookup: '.cmdbar--mini-blank',
-          address: '[data-testid="mini-address"]',
-          empty: '.mini--ready',
+          lookup: { selector: '.cmdbar--mini-blank', top: true },
+          address: { selector: '[data-testid="mini-address"]', top: true },
+          // The cover the ready window draws over itself (mini.css's `.mini--ready::after`).
+          cover: { selector: '.mini--ready', pseudo: '::after', style: ['content', 'background-color'] },
           root: { selector: '[data-testid="mini"]', style: ['transform'] },
         },
         { hidden: true, maxMs: 60_000 },
@@ -534,13 +535,23 @@ test('[MW-04][MW-15] the ready window draws itself empty until it opens: a link 
       const screen = [...(before ? [before] : []), ...frames.filter((f) => f.wall > shown && f.wall <= shown + 300)]
       // A computed transform reads `none` or `matrix(a, b, c, d, e, f)`: a scale's `a`.
       const scale = (f: Frame) => Number(/^matrix\(([^,]+),/.exec(f.els.root?.style?.transform ?? '')?.[1] ?? 1)
+      /**
+       * The window draws itself empty in a frame: its cover is drawn (it has content and an opaque
+       * colour) and no bar is above it, from what the frame draws, not from a class.
+       */
+      const empty = (f: Frame) => {
+        const cover = f.els.cover?.style
+        if (!cover || cover.content === 'none' || cover.content === 'normal') return false
+        if (rgba(cover['background-color'])[3] < 0.999) return false
+        return !f.els.lookup?.top && !f.els.address?.top
+      }
       /** The bar in sight in a frame: none while the window draws itself empty or (Linux) the grow has it unseen. */
       const bar = (f: Frame) => {
-        if (f.els.empty) return null
+        if (empty(f)) return null
         const seen = (b: Box | null | undefined) => !!b && b.opacity > 0.01
         return seen(f.els.lookup) ? 'the lookup bar' : seen(f.els.address) ? "the page's bar" : null
       }
-      const shows = screen.map((f) => `${bar(f) ?? (f.els.empty ? 'empty' : 'nothing')} at ${scale(f).toFixed(2)}`)
+      const shows = screen.map((f) => `${bar(f) ?? (empty(f) ? 'empty' : 'nothing')} at ${scale(f).toFixed(2)}`)
       const what = `${reduced ? 'reduced motion' : 'grow'}, ${kind}: ${shows.slice(0, 4).join(' → ')}`
       console.info(`[MW-04] ${what}`)
       if (process.platform === 'linux') expect(before, what).toBeDefined()
