@@ -90,6 +90,16 @@ const STILL_INPUTS = new Set(['mouseUp', 'mouseWheel', 'keyUp', 'gestureScrollEn
 
 let nonceCounter = 0
 
+/**
+ * The page of the Peek's view while it is alive. Once the page has gone (it closed itself, or its tab
+ * went to sleep), `view.webContents` reads undefined, even before 'destroyed' fires: it is checked
+ * before anything is called on it (D28).
+ */
+function pageOf(view: WebContentsView | undefined): WebContents | undefined {
+  const contents = view?.webContents as WebContents | undefined
+  return contents && !contents.isDestroyed() ? contents : undefined
+}
+
 export function registerPeek(ctx: MainContext): void {
   const { store, commands, actions, windows, tabs } = ctx
   const sessions = new Map<WindowId, Session>()
@@ -200,11 +210,11 @@ export function registerPeek(ctx: MainContext): void {
     } catch (err) {
       console.error('[peek] could not create the page', err)
     }
-    if (!view) {
+    if (!pageOf(view)) {
       discard(session)
       return null
     }
-    place(session, view)
+    place(session, view as WebContentsView)
     return tab.id
   }
 
@@ -214,12 +224,13 @@ export function registerPeek(ctx: MainContext): void {
    */
   const place = (s: Session, view: WebContentsView) => {
     const win = windows.get(s.windowId)
-    if (!win || win.isDestroyed()) return
+    const page = pageOf(view)
+    if (!win || win.isDestroyed() || !page) return
     s.view = view
     view.setBorderRadius(PEEK_RADIUS)
     placeView(s)
     win.contentView.addChildView(view)
-    view.webContents.focus()
+    page.focus()
     // Whatever the overlay does, the page ends on its card.
     s.revealTimer = setTimeout(() => {
       if (sessions.get(s.windowId) !== s || s.phase !== 'open' || s.shown) return
@@ -233,12 +244,13 @@ export function registerPeek(ctx: MainContext): void {
    * Puts the page view where the session's phase wants it: on the card at rest, or out of sight.
    * Out of sight, all of it but its corner pixel is outside the window, so its page still lays out
    * and draws, at the size it shows at next (a view wholly outside, or hidden, is given no size and
-   * draws nothing). Closing, it hides: it is going.
+   * draws nothing). Closing, it hides: it is going. A view whose page has gone is left be: the Peek
+   * closes with its page.
    */
   const placeView = (s: Session) => {
     const view = s.view
     const win = windows.get(s.windowId)
-    if (!view || view.webContents.isDestroyed() || !win || win.isDestroyed() || s.fullscreen) return
+    if (!view || !pageOf(view) || !win || win.isDestroyed() || s.fullscreen) return
     if (s.phase === 'closing') {
       if (view.getVisible()) view.setVisible(false)
       return
@@ -589,7 +601,7 @@ export function registerPeek(ctx: MainContext): void {
   setPeekPages((windowId) => {
     const s = sessions.get(windowId)
     const area = windows.pageArea(windowId) ?? s?.area
-    if (s?.phase !== 'open' || s.fullscreen || !s.view || !area) return undefined
+    if (s?.phase !== 'open' || s.fullscreen || !pageOf(s.view) || !area) return undefined
     const card = peekCard(area)
     return { tabId: s.tabId, card: { ...card, x: area.x + card.x, y: area.y + card.y } }
   })
@@ -862,10 +874,11 @@ export function registerPeek(ctx: MainContext): void {
     contents.on('input-event', (_e, input) => {
       if (STILL_INPUTS.has(input.type)) changed()
     })
-    // A Peek page that closes itself (window.close()) takes its card with it.
+    // A Peek page that closes itself (window.close()), or goes some other way (its tab put to sleep),
+    // takes its card with it. By now its view may read no page at all: that counts as this one gone.
     contents.once('destroyed', () => {
       const s = sessionOfTab(tabId)
-      if (s && s.view?.webContents === contents && sessions.get(s.windowId) === s) discard(s)
+      if (s?.view && (s.view.webContents === contents || !pageOf(s.view)) && sessions.get(s.windowId) === s) discard(s)
     })
     contents.on('will-navigate', (event) => onWillNavigate(tabId, contents, event))
     contents.on('before-input-event', (event, input) => onKey(tabId, event, input))
@@ -873,7 +886,7 @@ export function registerPeek(ctx: MainContext): void {
     contents.on('enter-html-full-screen', () => {
       const s = sessionOfTab(tabId)
       const win = s && windows.get(s.windowId)
-      if (!s?.view || !win) return
+      if (!s?.view || !pageOf(s.view) || !win) return
       s.fullscreen = true
       const [width = 0, height = 0] = win.getContentSize()
       s.view.setBounds({ x: 0, y: 0, width, height })

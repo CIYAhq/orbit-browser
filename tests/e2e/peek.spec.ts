@@ -1,6 +1,6 @@
 import { expect, type Page, test } from '@playwright/test'
 import { bestOf, type Recording, record } from './frames'
-import { FRAME_SLACK, launchOrbit, type Orbit, run, state, viewPage } from './helpers'
+import { action, FRAME_SLACK, launchOrbit, type Orbit, run, state, viewPage } from './helpers'
 import {
   blockNetwork,
   clickInTab,
@@ -403,6 +403,30 @@ test('[PK-05][PK-09] the × button and a click outside the card close the Peek',
   // A click on the dimmed page around the card.
   await overlay.mouse.click(8, 8)
   await expectClosed(source, second)
+})
+
+test('[PK-09][PK-06] a Peek whose page goes away while it is open closes with it, and laying the window out then throws nothing (D28)', async () => {
+  const { source, peekTab } = await openPeekFromPinned()
+  const peekPage = await findPage(orbit.app, '/site/Other')
+  const area = async () => JSON.stringify((await viewInfo(orbit.app, peekTab)).area)
+  const before = await area()
+  // The page closes itself: its only document, so it may. Its view then has no page.
+  await peekPage.evaluate(() => window.close()).catch(() => {})
+  await expect
+    .poll(() =>
+      orbit.app.evaluate(
+        (_e, id) => (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id) === undefined,
+        peekTab,
+      ),
+    )
+    .toBe(true)
+  // The window lays out again, twice: the Peek's layout runs if the Peek is still there.
+  await action(orbit.app, 'sidebar.toggle')
+  await expect.poll(area).not.toBe(before)
+  await action(orbit.app, 'sidebar.toggle')
+  await expect.poll(area).toBe(before)
+  await expectClosed(source, peekTab)
+  expect(orbit.takeUncaught()).toBe('')
 })
 
 test('[PK-10] ⌘Z right after closing, or ⌘⇧T, reopens the Peek at the same page', async () => {
