@@ -426,6 +426,78 @@ test('[FL-21] 300 tabs: rows coming on screen are drawn in that frame, by wheel,
   expect((await check.stop()).blank).toBeGreaterThan(10)
 })
 
+test('[FL-21] 200 tabs: every row in the accessibility tree tells its place in its list and the list’s size, drawn or not', async () => {
+  const { app, shell } = orbit
+  test.setTimeout(120_000)
+  await manyTabs(203)
+  const spaceId = (await state(app)).spaceOrder[0] as string
+  await expect(shell.getByTestId('today-list').locator(':scope > [data-slot]')).toHaveCount(203, { timeout: 30_000 })
+  // Three of them in a pinned folder (open), so Pinned holds one item and the folder three.
+  const all = (await state(app)).spaces[spaceId]?.today ?? []
+  const kids = all.slice(200)
+  await run(app, 'folders.create', { container: { kind: 'pinned', spaceId }, name: 'Box', items: kids })
+  await expect(shell.getByTestId('today-list').locator(':scope > [data-slot]')).toHaveCount(200, { timeout: 30_000 })
+  const folder = shell.getByTestId('folder-row')
+  if ((await folder.getAttribute('aria-expanded')) !== 'true') await folder.click()
+  await expect(folder).toHaveAttribute('aria-expanded', 'true')
+  await settled(shell, 30_000)
+  const today = (await state(app)).spaces[spaceId]?.today ?? []
+  expect(today).toHaveLength(200)
+  // The 151st selected (always drawn), and the list scrolled back to its top: rows 151 and the top ones are drawn.
+  const selected = today[150] as string
+  await run(app, 'tabs.activate', { tabId: selected })
+  await expect(row(shell, selected)).toBeInViewport()
+  await shell.waitForTimeout(600)
+  await shell.getByTestId('sidebar-scroll').evaluate((el) => {
+    el.scrollTop = 0
+  })
+  await shell.waitForTimeout(300)
+  // The tree as assistive technology gets it. CDP lists a node's level but not its set size or
+  // place: those are read from the elements the tree's items stand for, which Chromium hands on.
+  const cdp = await shell.context().newCDPSession(shell)
+  type AXNode = { role?: { value: string }; backendDOMNodeId?: number }
+  const { nodes } = (await cdp.send('Accessibility.getFullAXTree')) as { nodes: AXNode[] }
+  const items = await Promise.all(
+    nodes
+      .filter((n) => n.role?.value === 'treeitem' && n.backendDOMNodeId)
+      .map(async (n) => {
+        const { node } = await cdp.send('DOM.describeNode', { backendNodeId: n.backendDOMNodeId as number })
+        const list = node.attributes ?? []
+        const attr = (name: string) => {
+          const i = list.indexOf(name)
+          return i >= 0 && i % 2 === 0 ? (list[i + 1] as string) : null
+        }
+        return {
+          tab: attr('data-tab-id'),
+          folder: attr('data-testid') === 'folder-row',
+          level: attr('aria-level'),
+          pos: attr('aria-posinset'),
+          size: attr('aria-setsize'),
+        }
+      }),
+  )
+  await cdp.detach()
+  const inToday = items.filter((i) => i.tab && today.includes(i.tab))
+  const inFolder = items.filter((i) => i.tab && kids.includes(i.tab))
+  const folderRows = items.filter((i) => i.folder)
+  note('FL-21', 'Today rows in the accessibility tree (the rest not drawn)', inToday.length, '< 200', 'rows')
+  // Rows away from the band aren't in the tree: what this checks is that the ones that are say where they are.
+  expect(inToday.length).toBeLessThan(200)
+  expect(inToday.map((i) => i.tab)).toContain(selected)
+  for (const i of inToday) {
+    expect(i.size, `${i.tab}: Today's size`).toBe('200')
+    expect(i.pos, `${i.tab}: its place in Today`).toBe(String(today.indexOf(i.tab as string) + 1))
+    expect(i.level, `${i.tab}: level`).toBe('1')
+  }
+  expect(inFolder).toHaveLength(3)
+  for (const i of inFolder) {
+    expect(i.size, `${i.tab}: the folder's size`).toBe('3')
+    expect(i.pos, `${i.tab}: its place in the folder`).toBe(String(kids.indexOf(i.tab as string) + 1))
+    expect(i.level, `${i.tab}: level`).toBe('2')
+  }
+  expect(folderRows).toEqual([{ tab: null, folder: true, level: '1', pos: '1', size: '1' }])
+})
+
 test('[FL-21][FL-29] the first showing of a 200-tab Space that is not next door paints within budget', async () => {
   const { app, shell } = orbit
   test.setTimeout(120_000)

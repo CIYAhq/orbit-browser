@@ -14,7 +14,7 @@ import {
 import { isFolderId, isTabId } from '../../../../shared/ids'
 import { pageMayOpen } from '../../../../shared/link-routing'
 import type { Space, SpaceId } from '../../../../shared/state'
-import { containerKey, locate, sectionOf, splitOfTab } from '../../../../shared/tree'
+import { containerItems, containerKey, locate, sectionOf, splitOfTab } from '../../../../shared/tree'
 import { engineForSpace, parseInput } from '../../../../shared/url'
 import { invoke, isMac, runAction } from '../../api'
 import { importDroppedFile, importPastedLinks, revealInSidebar } from '../../import/sidebar'
@@ -215,15 +215,19 @@ const PinnedSection = memo(function PinnedSection({ space }: { space: Space }) {
     const a = activeTabId(s)
     if (!a || sectionOf(s, a) !== 'pinned' || s.tabs[a]?.spaceId !== space.id) return null
     const loc = locate(s, a)
-    return loc ? `${a}|${containerKey(loc.container)}|${loc.index}` : null
+    const size = loc ? (containerItems(s, loc.container)?.length ?? 0) : 0
+    return loc ? `${a}|${containerKey(loc.container)}|${loc.index}|${size}` : null
   })
   // Drawn before: the section shown from now on was opened by the user (FL-12).
   const shown = useRef(false)
   useEffect(() => {
     shown.current = true
   }, [])
-  const [peekId, peekContainer, peekIndex] = peekKey ? peekKey.split('|') : []
-  const peek = peekId && peekContainer ? { id: peekId, key: peekContainer, index: Number(peekIndex) } : null
+  const [peekId, peekContainer, peekIndex, peekSize] = peekKey ? peekKey.split('|') : []
+  const peek =
+    peekId && peekContainer
+      ? { id: peekId, key: peekContainer, index: Number(peekIndex), size: Number(peekSize) }
+      : null
   return (
     <>
       <AnimatePresence initial={false}>
@@ -240,7 +244,7 @@ const PinnedSection = memo(function PinnedSection({ space }: { space: Space }) {
       </AnimatePresence>
       {peek && (
         <div className="pinned-peek" data-testid="pinned-peek">
-          <TabRow tabId={peek.id} depth={0} containerKey={peek.key} index={peek.index} ancestors="" />
+          <TabRow tabId={peek.id} depth={0} containerKey={peek.key} index={peek.index} size={peek.size} ancestors="" />
         </div>
       )}
     </>

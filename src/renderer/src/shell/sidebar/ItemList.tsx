@@ -284,6 +284,7 @@ export const ItemList = memo(function ItemList({
                   depth={depth}
                   containerKey={containerKey}
                   index={index}
+                  size={items.length}
                   ancestors={ancestors}
                 />
               )
@@ -295,6 +296,7 @@ export const ItemList = memo(function ItemList({
                   depth={depth}
                   containerKey={containerKey}
                   index={index}
+                  size={items.length}
                   ancestors={ancestors}
                 />
               )
@@ -306,6 +308,7 @@ export const ItemList = memo(function ItemList({
                   depth={depth}
                   containerKey={containerKey}
                   index={index}
+                  size={items.length}
                   ancestors={ancestors}
                 />
               )
@@ -339,7 +342,10 @@ export function useRowShift(key: string) {
 interface SlotProps {
   depth: number
   containerKey: string
+  /** The item's place in its list (0 = the first). */
   index: number
+  /** How many items its list has. */
+  size: number
   ancestors: string
 }
 
@@ -558,6 +564,7 @@ export const TabRow = memo(function TabRow({
   depth,
   containerKey,
   index,
+  size,
   ancestors,
 }: { tabId: string } & SlotProps) {
   // Drawn near the list's visible band only (FL-21); a row added to a list already on screen is drawn
@@ -572,6 +579,7 @@ export const TabRow = memo(function TabRow({
       depth={depth}
       containerKey={containerKey}
       index={index}
+      size={size}
       ancestors={ancestors}
       onPointerDown={(e) => {
         // A press the slot itself hears (its edge, or a row not drawn yet) is a press on its row
@@ -579,7 +587,11 @@ export const TabRow = memo(function TabRow({
         if (e.target === e.currentTarget || !drawn) onRowPointerDown(e, tabId)
       }}
     >
-      {drawn ? <TabRowBody tabId={tabId} depth={depth} /> : <div className="row-placeholder" />}
+      {drawn ? (
+        <TabRowBody tabId={tabId} depth={depth} index={index} size={size} />
+      ) : (
+        <div className="row-placeholder" />
+      )}
     </RowSlot>
   )
 })
@@ -593,8 +605,22 @@ function useKeptRow(tabId: TabId): boolean {
   return active || focused || selected || renaming
 }
 
-/** The row itself (TB-01): icon, title (or breadcrumb, PN-03), audio, close. */
-export const TabRowBody = memo(function TabRowBody({ tabId, depth }: { tabId: string; depth: number }) {
+/**
+ * The row itself (TB-01): icon, title (or breadcrumb, PN-03), audio, close. It tells assistive
+ * technology its place in its list, as rows away from the visible band draw nothing (FL-21).
+ */
+export const TabRowBody = memo(function TabRowBody({
+  tabId,
+  depth,
+  index,
+  size,
+}: {
+  tabId: string
+  depth: number
+  /** Its place in its list (0 = the first); -1 when it isn't in it (a peek under a closed folder). */
+  index: number
+  size: number
+}) {
   const live = useOrbit((s) => s.tabs[tabId])
   // A closed tab's row keeps drawing its last look while it animates out (FL-09).
   const last = useRef(live)
@@ -622,6 +648,9 @@ export const TabRowBody = memo(function TabRowBody({ tabId, depth }: { tabId: st
       role="treeitem"
       tabIndex={-1}
       aria-selected={active}
+      aria-level={depth + 1}
+      aria-posinset={index >= 0 ? index + 1 : undefined}
+      aria-setsize={index >= 0 ? size : undefined}
       aria-label={prefix ? `${prefix} / ${title}` : title}
       className={`tab-row${active ? ' is-active' : ''}${selected ? ' is-selected' : ''}${tab.asleep ? ' is-asleep' : ''}${tab.loading ? ' is-loading' : ''}${away ? ' is-away' : ''}${focused ? ' is-focused' : ''}${fresh ? ' is-new-background' : ''}`}
       style={{ paddingLeft: 8 + depth * INDENT }}
@@ -718,6 +747,7 @@ const FolderRow = memo(function FolderRow({
   depth,
   containerKey,
   index,
+  size,
   ancestors,
 }: { folderId: string } & SlotProps) {
   const liveFolder = useOrbit((s) => s.folders[folderId])
@@ -754,12 +784,16 @@ const FolderRow = memo(function FolderRow({
         depth={depth}
         containerKey={containerKey}
         index={index}
+        size={size}
         ancestors={ancestors}
       >
         <div
           role="treeitem"
           tabIndex={-1}
           aria-expanded={open}
+          aria-level={depth + 1}
+          aria-posinset={index + 1}
+          aria-setsize={size}
           className={`folder-row${into ? ' is-drop-into' : ''}${focused ? ' is-focused' : ''}`}
           style={{ paddingLeft: 8 + depth * INDENT }}
           data-testid="folder-row"
@@ -843,6 +877,7 @@ const FolderRow = memo(function FolderRow({
             depth={depth + 1}
             containerKey={`folder:${folderId}`}
             index={folder.children.indexOf(peek)}
+            size={folder.children.length}
             ancestors={childAncestors}
           />
         </div>
@@ -857,6 +892,7 @@ const SplitSlot = memo(function SplitSlot({
   depth,
   containerKey,
   index,
+  size,
   ancestors,
 }: { splitId: string } & SlotProps) {
   const exists = useOrbit((s) => !!s.splits[splitId])
@@ -867,6 +903,7 @@ const SplitSlot = memo(function SplitSlot({
       depth={depth}
       containerKey={containerKey}
       index={index}
+      size={size}
       ancestors={ancestors}
       className="row-slot row-slot--split"
       onPointerDown={(e) => {
