@@ -17,6 +17,8 @@ type Hooks = {
   }
   __orbitTabs: {
     maintenance: (now?: number) => { archived: string[]; slept: string[] }
+    clockAhead: (ms: number) => void
+    launchPassDone: () => boolean
     rowMenu: (windowId?: string) => RowMenuInfo | null
     chooseRowMenu: (path: string, windowId?: string) => boolean
     toastView: (windowId?: string) => ToastViewInfo

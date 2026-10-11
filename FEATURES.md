@@ -4,11 +4,11 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 256 built (88 partial) · 347 tested · 0 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 259 built (85 partial) · 347 tested · 0 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
-| P0 | 174 | 150 | 173 |
+| P0 | 174 | 153 | 173 |
 | P1 | 219 | 91 | 157 |
 | P2 | 79 | 15 | 17 |
 
@@ -43,7 +43,7 @@ Spec: `spec/sidebar.md`
 | SB-21 | Dim the sidebar when the window is inactive | P1 | ✅ | ✅ e2e | – | an inactive window's sidebar (and its floating card) fades to 84% over 150 ms on blur and is back at once on focus; no fade with reduced motion |
 | SB-22 | Keyboard focus and navigation inside the sidebar | P2 | ✅ | ✅ e2e | – | Cmd/Ctrl+Shift+E focuses the sidebar; arrows, Enter, Escape, F2 |
 | SB-23 | Scrolling, auto-reveal of the active tab and overflow indicator | P1 | ✅ | ✅ e2e | – | selected tab scrolled into view (smooth, then settles); pill points to it while it is out of view; rows use content-visibility |
-| SB-24 | Sidebar colouring follows the Space theme | P0 | 🟡 partial | ✅ e2e+unit | – | theme gradient + grain on sidebar and frame, tinted selection; the neutral theme is a solid soft grey/near-black, not a translucent material yet |
+| SB-24 | Sidebar colouring follows the Space theme | P0 | ✅ | ✅ e2e+unit | – | theme gradient + grain on sidebar and frame, tinted selection; the neutral theme shows the desktop through the system material (macOS vibrancy, Windows 11 22H2+ Mica), a solid soft grey/near-black on Linux and older Windows, which have none in Electron; the floating sidebar card (SB-12) stays solid: Electron gives a view no material of its own |
 | SB-25 | Incognito window sidebar | P1 | ✅ | ✅ e2e+unit | – | private window sidebar: top bar and address, a Private label with icon and a plain note, then only its own tabs; no Spaces, Favorites or pinned tabs (and their actions do nothing); + and Cmd/Ctrl+T open the command bar, which a new private window starts with |
 | SB-26 | Platform notes (Windows / Linux) | P2 | – | – | – |  |
 | SB-27 | Link status pill | P1 | ✅ | ✅ e2e+unit | – | hovering (or focusing) a link shows a theme-styled pill with where it goes (no scheme) at the bottom-left of that page card, in its own small view; the full URL after 1.5 s on the link, kept for the next links while it stays up; moves to the other corner when the pointer comes within 24 px, out of the way if near both; goes 120 ms after the link is left; not on Peek pages |
@@ -98,7 +98,7 @@ Spec: `spec/tabs.md`
 | FV-10 | Favorites and numeric shortcuts | P1 | ✅ | ✅ e2e+unit | – | see TB-04 |
 | TD-01 | The Today section | P0 | ✅ | ✅ e2e | – |  |
 | TD-02 | Auto-archive rule | P0 | ✅ | ✅ e2e+unit | – | maintenance timer (1 min, launch, resume) with injected clock; media/selected exempt; splits as one |
-| TD-03 | Archive timing setting (per profile, so per Space) | P0 | 🟡 partial | ✅ e2e+unit | – | settings.archiveAfterMs plus optional profile.archiveAfterMs; settings UI is the settings lane's |
+| TD-03 | Archive timing setting (per profile, so per Space) | P0 | ✅ | ✅ e2e+unit | – | Settings > Profiles: Archive Today tabs after 12 hours (default), 24 hours, 7 days or 30 days per profile, no Never; other profiles follow Default until set (Same as Default); a Space follows its profile; a change applies at once to the Today tabs there are; Little-window tabs are MW's |
 | TD-04 | Clear all Today tabs | P0 | ✅ | ✅ e2e | – | Clear on divider hover, Cmd+Shift+K, keeps media tabs, cascade exit, Cmd+Z restores in order |
 | TD-05 | Archive tabs below | P1 | ✅ | ✅ e2e | – | menu Archive Tabs Below, undoable |
 | TD-06 | Per-Space scope of Today actions | P0 | ✅ | ✅ e2e+unit | – | Clear/archive-below/auto-archive per Space |
@@ -136,7 +136,7 @@ Spec: `spec/spaces.md`
 | SP-12 | Delete a Space | P0 | ✅ | ✅ e2e+unit | – | confirmation dialog, tabs archived with the Space name, Undo toast and Cmd+Z, last Space protected |
 | SP-13 | Spaces overview in the Library | P1 | – | – | – |  |
 | SP-14 | Open the theme picker | P0 | ✅ | ✅ e2e+unit | – | theme picker beside the sidebar (Space menu, right-click on the sidebar, Edit Theme action, new-Space flow, first run); edits apply live; Esc, Enter or a click outside keeps the result; Cmd+Z after it closes reverts what that opening changed (theme, and light/dark if changed there), Cmd+Shift+Z re-applies, from the sidebar or a page; no trackpad haptics (Electron has no haptics API) |
-| SP-15 | Theme colours and gradients | P0 | 🟡 partial | ✅ e2e+unit | – | colour area with up to three handles, gradients padded to three stops, light and dark renditions; neutral theme not translucent; no haptics API in Electron |
+| SP-15 | Theme colours and gradients | P0 | ✅ | ✅ e2e+unit | – | colour area with up to three handles, gradients padded to three stops, light and dark renditions; the neutral theme lets the system material through under a light veil (macOS vibrancy, Windows 11 22H2+ Mica; tested on Linux with a material named for the test run, not on a Mac or Windows machine); Linux and older Windows have no material in Electron, so it stays a solid grey there; no haptics API in Electron |
 | SP-16 | How the Space theme colours the sidebar, frame and other surfaces | P0 | 🟡 partial | ✅ e2e+unit | – | sidebar, frame margin and overlay surfaces (menus, pickers, dialogs, the sidebar's row menus since TB-14), toasts (in the sidebar and over the page card) tinted; the recent-tab switcher has no list to tint yet (TB-05) |
 | SP-17 | Grain, intensity, presets and reset | P1 | ✅ | ✅ e2e | – | intensity, grain, presets, reset to neutral |
 | SP-18 | Light / Dark / Automatic switch in the theme picker | P1 | ✅ | ✅ e2e+unit | – | one global Automatic/Light/Dark switch in the picker (D12) |
@@ -416,7 +416,7 @@ Spec: `spec/appearance.md`
 | AP-02 | Theme colours carry through the whole interface | P1 | – | ✅ e2e | – |  |
 | AP-03 | Restore the default (neutral) theme | P1 | – | ✅ unit | – |  |
 | AP-04 | Dark mode quality | P1 | – | ✅ unit | – |  |
-| AP-05 | Private-window appearance | P1 | ✅ | ✅ e2e | – | private windows are near-black whatever the theme (frame, sidebar, window background) with hover and selection tuned for black; Private label with icon in the sidebar, not over the page; no Space switcher or Favorites |
+| AP-05 | Private-window appearance | P1 | ✅ | ✅ e2e+unit | – | private windows are near-black whatever the theme (frame, sidebar, window background) with hover and selection tuned for black; Private label with icon in the sidebar, not over the page; no Space switcher or Favorites |
 | AP-06 | Inactive-window dimming | P1 | – | – | – |  |
 | AP-07 | Optional top toolbar (look and placement) | P1 | – | – | – |  |
 | AP-08 | Page-colour-aware chrome | P2 | – | – | – |  |

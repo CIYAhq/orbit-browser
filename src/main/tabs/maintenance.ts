@@ -6,13 +6,19 @@
  * Time comes from an injected clock so tests can jump ahead.
  */
 import { powerMonitor } from 'electron'
-import type { ItemId, TabId } from '../../shared/state'
+import type { ItemId, OrbitState, TabId } from '../../shared/state'
 import { tabsInItem } from '../../shared/tree'
 import type { MainContext } from '../context'
 import { autoArchiveCandidates, displayedTabs, sleepCandidates } from './model'
 import type { TabOps } from './ops'
 
 export const MAINTENANCE_INTERVAL_MS = 60_000
+
+/** Every archive period in force: the global one and each profile's own (TD-03). */
+function archivePeriods(state: OrbitState): string {
+  const own = Object.entries(state.profiles).map(([id, p]) => `${id}=${p.archiveAfterMs ?? ''}`)
+  return [state.settings.archiveAfterMs, ...own].join(',')
+}
 
 export class TabMaintenance {
   private timer: NodeJS.Timeout | undefined
@@ -30,7 +36,11 @@ export class TabMaintenance {
   start(): void {
     this.shown = displayedTabs(this.ctx.store.state)
     // A tab stops being "viewed" when it leaves the screen: that moment starts its idle clock.
-    this.unsubscribe = this.ctx.store.subscribe((next) => {
+    this.unsubscribe = this.ctx.store.subscribe((next, prev) => {
+      // A changed archive period applies at once to the Today tabs there are (TD-03).
+      if ((next.profiles !== prev.profiles || next.settings !== prev.settings) && this.timer) {
+        if (archivePeriods(next) !== archivePeriods(prev)) queueMicrotask(() => this.timer && this.run())
+      }
       const shown = displayedTabs(next)
       const left = [...this.shown].filter((id) => !shown.has(id) && next.tabs[id])
       this.shown = shown
@@ -49,8 +59,16 @@ export class TabMaintenance {
     this.timer.unref?.()
     powerMonitor.on('resume', this.onResume)
     // Launch counts too: idle time accrues while the app is closed.
-    this.launch = setTimeout(() => this.run(), 2_000)
+    this.launch = setTimeout(() => {
+      this.launch = undefined
+      this.run()
+    }, 2_000)
     this.launch.unref?.()
+  }
+
+  /** The pass shortly after launch is still to come. */
+  get launchPending(): boolean {
+    return this.launch !== undefined
   }
 
   stop(): void {

@@ -25,6 +25,7 @@ import type { SpaceCommands } from './commands/spaces'
 import type { SplitCommands } from './commands/split'
 import type { TabCommands } from './commands/tabs'
 import type { TweakCommands } from './commands/tweaks'
+import type { WindowMaterial } from './theme'
 
 export interface OrbitCommands
   extends CoreCommands,
@@ -97,6 +98,8 @@ export interface OrbitBridge {
   windowId: string
   view: RendererView
   platform: string
+  /** The shell's: the window's see-through material behind the neutral theme, if it has one (SB-24). */
+  material?: WindowMaterial
   invoke<K extends CommandName>(name: K, args: CommandArgs<K>): Promise<CommandResult<K>>
   send<K extends EventName>(name: K, payload: OrbitEvents[K]): void
   getState(): Promise<{ state: import('./state').OrbitState; seq: number }>

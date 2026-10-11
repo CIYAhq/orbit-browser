@@ -4,6 +4,7 @@
  */
 import { contextBridge, ipcRenderer } from 'electron'
 import type { OrbitBridge, RendererView, StatePatch } from '../shared/rpc'
+import type { WindowMaterial } from '../shared/theme'
 
 const arg = (name: string): string => {
   const prefix = `--${name}=`
@@ -31,6 +32,7 @@ const bridge: OrbitBridge = {
   windowId: arg('orbit-window-id'),
   view: (arg('orbit-view') || 'shell') as RendererView,
   platform: process.platform,
+  ...(arg('orbit-material') ? { material: arg('orbit-material') as WindowMaterial } : {}),
   invoke: (name, args) => ipcRenderer.invoke('orbit:invoke', name, args),
   send: (name, payload) => ipcRenderer.send('orbit:send', name, payload),
   getState: () => {

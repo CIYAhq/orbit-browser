@@ -3,6 +3,7 @@
  * the other lanes merged (lanes/finish-tabs.md).
  */
 import { expect, type Page, test } from '@playwright/test'
+import { DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
 import {
   type Fixtures,
   isMac,
@@ -16,6 +17,7 @@ import {
   viewPage,
 } from './helpers'
 import { pressInPage } from './nav-support'
+import { openSettings } from './settings-support'
 import {
   act,
   activeId,
@@ -555,4 +557,85 @@ test('[SP-14][TB-18] ⌘Z after the theme picker closed puts the Space’s theme
   // And from the sidebar.
   await shell.keyboard.press(`${isMac ? 'Meta' : 'Control'}+Z`)
   await expect.poll(colours).toEqual(['#d4322c'])
+})
+
+// ---------- SB-24, SP-15: the neutral theme over the window's material ----------
+
+/** The alpha of the shell's own drawing at a window point (each page is a view of its own, not in it). */
+function shellAlphaAt(x: number, y: number): Promise<number> {
+  return orbit.app.evaluate(
+    async ({ BrowserWindow }, [px, py]) => {
+      const win = BrowserWindow.getAllWindows()[0]
+      if (!win) return -1
+      const image = await win.webContents.capturePage({ x: px, y: py, width: 1, height: 1 })
+      return image.toBitmap()[3] ?? -1
+    },
+    [x, y] as const,
+  )
+}
+
+test('[SB-24][SP-15] over the window’s material the neutral theme lets it through under a veil; a coloured theme and the page card stay solid', async () => {
+  // Linux has none: the run names one so the rest of the way is checked here (macOS: vibrancy).
+  await orbit.app.close()
+  orbit = await launchOrbit({ env: { ORBIT_MATERIAL: 'vibrancy' } })
+  const { app } = orbit
+  const t = await newTab(app, fx.url('/page/Glass'))
+  await waitTab(app, t, '/page/Glass')
+  const spaceId = (await space(app)).id
+  // The neutral theme: no colours.
+  const neutral = { colors: [], intensity: 0.6, grain: 0 }
+  await run(app, 'spaces.update', { spaceId, theme: neutral })
+  const card = (await tabView(app, t))?.bounds
+  if (!card) throw new Error('no page card')
+  // The margin left of the page card: the theme's background, nothing over it.
+  const x = card.x - 3
+  const y = card.y + Math.round(card.height / 2)
+  await expect.poll(() => shellAlphaAt(x, y)).toBeLessThan(255)
+  // A veil of the neutral grey, not a hole.
+  expect(await shellAlphaAt(x, y)).toBeGreaterThan(64)
+  // The page card's backdrop is solid.
+  expect(await shellAlphaAt(card.x + 40, card.y + 40)).toBe(255)
+  await run(app, 'spaces.update', { spaceId, theme: RED })
+  await expect.poll(() => shellAlphaAt(x, y)).toBe(255)
+  await run(app, 'spaces.update', { spaceId, theme: neutral })
+  await expect.poll(() => shellAlphaAt(x, y)).toBeLessThan(255)
+})
+
+test('[SB-24][SP-15] without a material (Linux) the neutral theme stays a solid grey', async () => {
+  await orbit.app.close()
+  orbit = await launchOrbit({ env: { ORBIT_MATERIAL: 'none' } })
+  const { app } = orbit
+  const t = await newTab(app, fx.url('/page/Solid'))
+  await waitTab(app, t, '/page/Solid')
+  await run(app, 'spaces.update', { spaceId: (await space(app)).id, theme: { colors: [], intensity: 0.6, grain: 0 } })
+  const card = (await tabView(app, t))?.bounds
+  if (!card) throw new Error('no page card')
+  await expect.poll(() => shellAlphaAt(card.x - 3, card.y + Math.round(card.height / 2))).toBe(255)
+})
+
+// ---------- TD-03: archive timing per profile, applied at once ----------
+
+test('[TD-03][ST-05] archive timing set per profile in Settings applies at once: Default at 7 days keeps a tab idle 13 h; Work at 12 h archives only its Spaces’ tabs', async () => {
+  const { app } = orbit
+  const work = (await run(app, 'profiles.create', { name: 'Work' })) as string
+  const office = await cmd<string>(app, 'spaces.create', { name: 'Office', profileId: work, activate: false })
+  const homeTab = await newTab(app, fx.url('/page/HomeIdle'), { activate: false })
+  const workTab = await newTab(app, fx.url('/page/WorkIdle'), { spaceId: office, activate: false })
+  const page = await openSettings(app, { section: 'profiles' })
+  await page.getByTestId(`archive-after-${DEFAULT_PROFILE_ID}`).selectOption({ label: '7 days' })
+  await expect.poll(async () => (await state(app)).profiles[DEFAULT_PROFILE_ID]?.archiveAfterMs).toBe(7 * 86_400_000)
+  // 13 hours on (after the pass at launch, so only a change can archive now): Default's 7 days,
+  // which Work follows, keeps both.
+  await expect.poll(() => tabsHook<boolean>(app, 'launchPassDone')).toBe(true)
+  await tabsHook(app, 'clockAhead', 13 * 3_600_000)
+  expect((await tabsHook<{ archived: string[] }>(app, 'maintenance')).archived).toEqual([])
+  await page.getByTestId(`profile-${work}`).click()
+  const own = page.getByTestId(`archive-after-${work}`)
+  await expect(own.locator('option:checked')).toHaveText('Same as Default (7 days)')
+  // Work at 12 hours: its Space's idle tab goes to the Archive at once, not at the next pass.
+  await own.selectOption({ label: '12 hours' })
+  await expect.poll(async () => (await state(app)).tabs[workTab], { timeout: 3000 }).toBeUndefined()
+  const s = await state(app)
+  expect(s.tabs[homeTab]).toBeTruthy()
+  expect(s.archive.find((a) => a.url.includes('/page/WorkIdle'))?.reason).toBe('auto')
 })

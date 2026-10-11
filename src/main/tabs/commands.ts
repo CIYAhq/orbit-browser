@@ -38,6 +38,10 @@ import { registerToastView, type ToastViewInfo } from './toasts'
 /** Test-only handle (ORBIT_E2E=1): globalThis.__orbitTabs. */
 export interface TabTestHooks {
   maintenance: (now?: number) => { archived: string[]; slept: string[] }
+  /** Moves the maintenance clock ahead, as if that much time had passed (TD-02, TD-03). */
+  clockAhead: (ms: number) => void
+  /** The maintenance pass shortly after launch has run. */
+  launchPassDone: () => boolean
   /** The row menu open in a window (default: the focused one), as the overlay draws it (TB-14). */
   rowMenu: (windowId?: WindowId) => RowMenuInfo | null
   /** Chooses an item of the open row menu by its label path ("Move to > Work > Pinned"), as a click does. */
@@ -54,7 +58,9 @@ const PAGE_UNDO_MAX_AGE_MS = 60_000
 export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabMaintenance } {
   const { store, commands, actions, tabs, windows } = ctx
   const ops = new TabOps(ctx)
-  const maintenance = new TabMaintenance(ctx, ops)
+  /** Test runs move the maintenance clock ahead (clockAhead); otherwise it is the real one. */
+  let ahead = 0
+  const maintenance = new TabMaintenance(ctx, ops, () => Date.now() + ahead)
 
   const windowOf = (c: CallContext): WindowId | undefined => c.windowId ?? windows.focusedWindowId()
   /** Multi-selection per window, reported by the sidebar (TB-13). */
@@ -839,6 +845,10 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   if (ctx.e2e) {
     const hooks: TabTestHooks = {
       maintenance: (now) => maintenance.run(now),
+      clockAhead: (ms) => {
+        ahead += ms
+      },
+      launchPassDone: () => !maintenance.launchPending,
       rowMenu: (windowId) => rowMenus.info(windowId ?? windows.focusedWindowId() ?? windows.ids()[0]),
       chooseRowMenu: (path, windowId) =>
         rowMenus.chooseByLabel(windowId ?? windows.focusedWindowId() ?? windows.ids()[0], path),

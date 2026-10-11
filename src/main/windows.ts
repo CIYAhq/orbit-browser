@@ -19,6 +19,7 @@ import { splitLeaves, splitOfTab } from '../shared/tree'
 import type { MainContext } from './context'
 import { KEEP_KEYBOARD } from './keys/focus'
 import { keyRouter } from './keys/router'
+import { materialWindowOptions, windowMaterial } from './material'
 import { focusIsEditable } from './nav/focus'
 import { fastSwitchPanes } from './split/layout'
 
@@ -169,7 +170,12 @@ export function uiWebPreferences(windowId: WindowId, view: RendererView): Electr
     contextIsolation: true,
     nodeIntegration: false,
     spellcheck: false,
-    additionalArguments: [`--orbit-window-id=${windowId}`, `--orbit-view=${view}`],
+    additionalArguments: [
+      `--orbit-window-id=${windowId}`,
+      `--orbit-view=${view}`,
+      // The shell lets the window's material through the neutral theme (SB-24).
+      ...(view === 'shell' && windowMaterial() !== 'none' ? [`--orbit-material=${windowMaterial()}`] : []),
+    ],
     // A view that (re)loads never takes the keyboard (KS-16).
     ...KEEP_KEYBOARD,
   }
@@ -395,6 +401,8 @@ export class WindowManager {
       show: false,
       title: 'Orbit',
       backgroundColor: windowBackground(this.ctx.store.state, winState.spaceId) ?? '#e9eaf5',
+      // See-through behind the shell, with the system's material, where there is one (SB-24).
+      ...materialWindowOptions(windowMaterial()),
       ...(isMac ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: TRAFFIC_LIGHTS } : { frame: false }),
       webPreferences: { ...uiWebPreferences(id, 'shell'), backgroundThrottling: false },
     })
@@ -1609,6 +1617,8 @@ export class WindowManager {
 
   /** The native background shows at the window's edges while resizing: keep it the frame's colour. */
   private applyBackground(rec: WindowRecord): void {
+    // Over a material the window stays see-through: the shell paints the theme (SB-24).
+    if (windowMaterial() !== 'none') return
     const state = this.ctx.store.state
     const colour = windowBackground(state, state.windows[rec.id]?.spaceId)
     if (colour && !rec.win.isDestroyed()) rec.win.setBackgroundColor(colour)
