@@ -166,8 +166,10 @@ export function registerLeave(ctx: MainContext, ops: TabOps, dialogs: PageDialog
   /** A warning stopped a navigation (or a pop-up's close): asks, and on Leave goes on with it. */
   const askToLeave = async (page: WebContents, p: LeavePage, stopped: Stopped) => {
     if (p.asking) {
-      // A later navigation stopped while asking: Leave goes on with that one.
+      // A later navigation stopped while asking: Leave goes on with that one (the page's own: the
+      // preload notes which, as it does when asked).
       p.asking = stopped
+      if (stopped === 'page') void ask(page, STOPPED, '')
       return
     }
     p.asking = stopped

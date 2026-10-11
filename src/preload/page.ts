@@ -144,14 +144,33 @@ function patchPage(stateOf: StateOf, clicked: () => void, ask: AskDialog) {
   // take "" for a missing or undefined argument, `alert` only for a missing one.
   const asText = (args: unknown[], at: number, optional: boolean): string =>
     args.length <= at || (optional && args[at] === undefined) ? '' : `${args[at]}`
+  // The engine shows no dialog while the page is going: in its `beforeunload`, `pagehide` or
+  // `unload` handlers (Orbit's probe of `beforeunload` too). Orbit tells from the event the page's
+  // handler runs for, read through the engine's own getters (the page can't hide it), and adds no
+  // listener of its own: with a `beforeunload` listener the engine would ask every page before each
+  // navigation, so a busy page would hold up Back (D60), and an `unload` one would keep every page
+  // out of the back-forward cache.
+  const currentEvent = describe(window, 'event')?.get
+  const eventType = describe(Event.prototype, 'type')?.get
+  const going = (): boolean => {
+    if (!currentEvent || !eventType) return false
+    try {
+      const type: unknown = apply(eventType, apply(currentEvent, window, []), [])
+      return type === 'beforeunload' || type === 'pagehide' || type === 'unload'
+    } catch {
+      // No event: the page isn't in a handler.
+      return false
+    }
+  }
+  const askNow: AskDialog = (kind, message, value) => (going() ? null : ask(kind, message, value))
   const answers: Record<'alert' | 'confirm' | 'prompt', (args: unknown[]) => unknown> = {
     alert: (args) => {
-      ask('alert', asText(args, 0, false), '')
+      askNow('alert', asText(args, 0, false), '')
       return undefined
     },
-    confirm: (args) => ask('confirm', asText(args, 0, true), '') === true,
+    confirm: (args) => askNow('confirm', asText(args, 0, true), '') === true,
     prompt: (args) => {
-      const value = ask('prompt', asText(args, 0, true), asText(args, 1, true))
+      const value = askNow('prompt', asText(args, 0, true), asText(args, 1, true))
       return typeof value === 'string' ? value : null
     },
   }
@@ -167,7 +186,7 @@ function patchPage(stateOf: StateOf, clicked: () => void, ask: AskDialog) {
 
 type AskDialog = (kind: 'alert' | 'confirm' | 'prompt', message: string, value: string) => unknown
 
-/** Set while the page is going (beforeunload, pagehide, unload): the engine shows no dialog then. */
+/** Set while Orbit probes the page's `beforeunload` (`exposeLeave`): the page's dialogs are ignored then. */
 let dismissing = false
 
 const askDialog: AskDialog = (kind, message, value) => {
@@ -179,29 +198,8 @@ const askDialog: AskDialog = (kind, message, value) => {
   }
 }
 
-/**
- * The engine ignores `alert`, `confirm` and `prompt` while a page is going: so does Orbit's dialog.
- * These listeners come before the page's, so the flag is up for all of its handlers.
- */
-function watchDismissal(): void {
-  for (const type of ['beforeunload', 'pagehide', 'unload']) {
-    window.addEventListener(
-      type,
-      (event) => {
-        if (!event.isTrusted) return
-        dismissing = true
-        // A navigation the warning stopped leaves the page as it was.
-        setTimeout(() => {
-          dismissing = false
-        }, 0)
-      },
-      true,
-    )
-  }
-  window.addEventListener('pageshow', () => {
-    dismissing = false
-  })
-}
+/** Main asks which navigation a warning stopped just after it; one the page started longer ago isn't it. */
+const STOPPED_MS = 2_000
 
 interface StoppedNavigation {
   url: string
@@ -221,16 +219,19 @@ interface StoppedNavigation {
  *   its handlers cancel the event or set a `returnValue`. The handlers see an untrusted event, and
  *   their dialogs are ignored, as during the real one.
  * - `stopped()`: what the page's own navigation that a warning just stopped was (`reload`, `push`,
- *   `replace`, `traverse`), or "" when there is none this frame knows of: a navigation is known
- *   here from the Navigation API's `navigate` event, which comes just before `beforeunload`.
+ *   `replace`, `traverse`), or "" when there is none this frame knows of. A navigation is known
+ *   here from the Navigation API's `navigate` event, which comes in the same task as the
+ *   `beforeunload` the warning comes from; main asks right after the warning, so the page's last
+ *   navigation counts if it started within STOPPED_MS. (A `beforeunload` listener of Orbit's
+ *   would tell for sure, but would cost every page: see `going` in `patchPage`.)
  * - `redo()`: starts that navigation again (the user chose Leave; main lets the next warning
  *   through): a link or `location` loads its URL, a form is submitted again, a reload reloads.
  */
 function exposeLeave(): void {
   const nav = (window as { navigation?: EventTarget }).navigation
-  /** The last cross-document navigation the page started, until its task ends. */
-  let starting: StoppedNavigation | null = null
-  /** The navigation the last real `beforeunload` was for. */
+  /** The last cross-document navigation the page started, its event, and when (`performance.now()`). */
+  let starting: (StoppedNavigation & { event: Event; at: number }) | null = null
+  /** The navigation main last asked about: the one a warning stopped. */
   let stopped: StoppedNavigation | null = null
   nav?.addEventListener('navigate', (event) => {
     const e = event as Event & {
@@ -251,18 +252,14 @@ function exposeLeave(): void {
       type: e.navigationType ?? 'push',
       ...(form ? { form: new WeakRef(form) } : {}),
       ...(form && source instanceof HTMLElement && source !== form ? { submitter: new WeakRef(source) } : {}),
+      event,
+      at: performance.now(),
     }
-    setTimeout(() => {
-      starting = null
-    }, 0)
   })
-  window.addEventListener(
-    'beforeunload',
-    (event) => {
-      if (event.isTrusted) stopped = starting
-    },
-    true,
-  )
+  // The page's own same-document navigation that finished isn't one a warning stops.
+  nav?.addEventListener('navigatesuccess', () => {
+    starting = null
+  })
   const probe = (): boolean => {
     if (!navigator.userActivation?.hasBeenActive) return false
     const event = document.createEvent('BeforeUnloadEvent')
@@ -296,7 +293,17 @@ function exposeLeave(): void {
     return true
   }
   Object.defineProperty(globalThis, '__orbitLeave', {
-    value: Object.freeze({ probe, stopped: () => stopped?.type ?? '', redo }),
+    value: Object.freeze({
+      probe,
+      stopped: () => {
+        const last = starting
+        starting = null
+        // A navigation the page cancelled itself didn't reach its `beforeunload`.
+        stopped = last && !last.event.defaultPrevented && performance.now() - last.at <= STOPPED_MS ? last : null
+        return stopped?.type ?? ''
+      },
+      redo,
+    }),
   })
 }
 
@@ -392,8 +399,5 @@ if (location.protocol === 'orbit:') {
   } catch {
     // A page without its own world to patch keeps the engine's answers.
   }
-  if (window.top === window) {
-    watchDismissal()
-    exposeLeave()
-  }
+  if (window.top === window) exposeLeave()
 }

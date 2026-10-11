@@ -31,6 +31,8 @@ const html = (title: string, body: string, head = '') => `<!doctype html>
  *   as soon as it loads) and writes what the call returned to `#result` (JSON) and the title.
  * - `/warn`: warns before it goes (`beforeunload`), with a link (`#away`), a form (`#form`) and an
  *   area to click for a user gesture (`#area`).
+ * - `/going`: asks `confirm` in its `beforeunload` and `prompt` in its `pagehide`, and sends what they
+ *   returned to `/beacon?at=…&r=…` (JSON); a link (`#away`) and an area to click (`#area`).
  * - `/auth`: HTTP Basic sign-in (AUTH_USER, AUTH_PASSWORD).
  * - `/page/<name>`: a plain page.
  * - `/opener?to=…`: opens `to` in a pop-up window on a click of `#open`.
@@ -83,6 +85,25 @@ ${on === 'load' ? "addEventListener('load', () => setTimeout(ask, 0))" : ''}
 <script>addEventListener('beforeunload', (e) => { e.preventDefault() })</script>`,
         ),
       )
+      return
+    }
+    if (u.pathname === '/going') {
+      send(
+        html(
+          'Going',
+          `<p><a id="away" href="/page/Away">Away</a></p><div id="area"></div>
+<script>
+const note = (at, r) => navigator.sendBeacon('/beacon?at=' + at + '&r=' + encodeURIComponent(JSON.stringify(r)))
+addEventListener('beforeunload', () => note('beforeunload', confirm('Stay?')))
+addEventListener('pagehide', () => note('pagehide', prompt('Your name?', 'Ada')))
+</script>`,
+        ),
+      )
+      return
+    }
+    if (u.pathname === '/beacon') {
+      res.writeHead(204)
+      res.end()
       return
     }
     if (u.pathname === '/posted') {

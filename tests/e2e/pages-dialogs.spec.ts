@@ -294,6 +294,59 @@ test('[NV-24] leaving a page that warns asks first: a link, Orbit’s Reload and
   expect(await pageDialogs(app)).toEqual([])
 })
 
+test('[NV-24][KS-16] a page’s confirm or prompt while it goes is ignored, as the engine’s is, and Orbit adds no handler that would slow it', async () => {
+  const { app } = orbit
+  const url = fx.url('/going')
+  const beacons = (at: string) => fx.seen().filter((r) => r.startsWith(`POST /beacon?at=${at}&`))
+  const going = await newTab(app, url)
+  await waitTab(app, going, '/going')
+  await clickInPage(app, url, '#area')
+  await expect.poll(async () => (await leaveInfo(app, going))?.gestures ?? 0).toBeGreaterThan(0)
+  // Its link: the page's beforeunload and pagehide ask, get the engine's answers at once, and it goes.
+  await clickInPage(app, url, '#away')
+  await waitTab(app, going, '/page/Away')
+  await expect.poll(() => beacons('beforeunload')).toEqual([`POST /beacon?at=beforeunload&r=false`])
+  await expect.poll(() => beacons('pagehide')).toEqual([`POST /beacon?at=pagehide&r=null`])
+  expect(await pageDialogs(app)).toEqual([])
+
+  // Closing a tab Orbit asks whether the page would warn: its beforeunload runs, and its confirm is
+  // ignored there too.
+  const closing = await newTab(app, url)
+  await waitTab(app, closing, '/going')
+  await clickInPage(app, url, '#area')
+  await expect.poll(async () => (await leaveInfo(app, closing))?.gestures ?? 0).toBeGreaterThan(0)
+  await act(app, 'tab.close')
+  await expect.poll(async () => await tab(app, closing)).toBeUndefined()
+  await expect.poll(() => beacons('beforeunload').length).toBe(2)
+  expect(beacons('beforeunload')[1]).toBe(`POST /beacon?at=beforeunload&r=false`)
+  expect(await pageDialogs(app)).toEqual([])
+
+  // A busy page doesn't hold up a navigation Orbit starts: the engine runs a page's beforeunload
+  // first only when it has a handler, and Orbit adds none (D60). Nor an unload one, which would
+  // keep every page out of the back-forward cache.
+  const plain = fx.url('/page/Plain')
+  const id = await newTab(app, plain)
+  await waitTab(app, id, '/page/Plain')
+  const waited = await app.evaluate(
+    async ({ webContents }, [u, next]) => {
+      const page = webContents.getAllWebContents().find((w) => w.getURL() === u)
+      if (!page) return -1
+      void page.executeJavaScript('{ const end = Date.now() + 3000; while (Date.now() < end) {} }').catch(() => {})
+      await new Promise((r) => setTimeout(r, 200))
+      const t0 = Date.now()
+      const started = new Promise<number>((resolve) => {
+        page.once('did-start-navigation', () => resolve(Date.now() - t0))
+      })
+      page.loadURL(next).catch(() => {})
+      return started
+    },
+    [plain, fx.url('/page/Next')] as const,
+  )
+  expect(waited).toBeGreaterThanOrEqual(0)
+  expect(waited).toBeLessThan(1000)
+  await waitTab(app, id, '/page/Next')
+})
+
 test('[NV-24] closing a tab whose page warns asks over it: Cancel keeps the tab, Leave closes it', async () => {
   const { app } = orbit
   const warn = await warningTab(app)
