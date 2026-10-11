@@ -472,6 +472,8 @@ async function readyUi(app: ElectronApplication): Promise<Page> {
 }
 
 test('[MW-04][MW-15] the ready window draws itself empty until it opens: a link never shows the lookup bar, and a blank window first shows at the start of its grow', async () => {
+  // A hidden window can go seconds without drawing: each case may wait for one frame of it.
+  test.setTimeout(120_000)
   const { app } = orbit
   for (const reduced of [false, true]) {
     // Orbit's own Reduce Motion switch: no grow, so the window shows at its full size.
@@ -497,7 +499,7 @@ test('[MW-04][MW-15] the ready window draws itself empty until it opens: a link 
           empty: '.mini--ready',
           root: { selector: '[data-testid="mini"]', style: ['transform'] },
         },
-        { hidden: true },
+        { hidden: true, maxMs: 60_000 },
       )
       const lastWall = () =>
         ui.evaluate(
@@ -505,14 +507,17 @@ test('[MW-04][MW-15] the ready window draws itself empty until it opens: a link 
             (window as unknown as { __feelRec?: { frames: { wall: number }[] } }).__feelRec?.frames.at(-1)?.wall ?? 0,
         )
       // Warm and idle, as a ready window usually is when a link comes: it has drawn, and draws no more
-      // for now (on Linux a hidden window draws about once a second). Where a hidden window never
-      // draws, what it shows first can't be seen here.
+      // for now (on Linux a hidden window draws about once a second, or now and then, seconds apart).
+      // Where a hidden window never draws, what it shows first can't be seen here.
       if (process.platform === 'linux') {
         await expect
-          .poll(async () => {
-            const wall = await lastWall()
-            return wall > 0 && Date.now() - wall > 250
-          })
+          .poll(
+            async () => {
+              const wall = await lastWall()
+              return wall > 0 && Date.now() - wall > 250
+            },
+            { timeout: 25_000 },
+          )
           .toBe(true)
       }
       const url = sites.url(`/site/Warm-${kind}-${reduced ? 'still' : 'grow'}`)
