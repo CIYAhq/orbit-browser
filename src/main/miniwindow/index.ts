@@ -5,7 +5,9 @@ import { toElectronAccelerator } from '../../shared/actions'
 import { createWindowState } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
 import { routeFor } from '../../shared/link-routing'
+import { EASE } from '../../shared/motion'
 import { findTextFromSelection } from '../../shared/nav'
+import { cubicBezier } from '../../shared/pip'
 import { isPrivateTab } from '../../shared/private'
 import type { Rect } from '../../shared/rpc'
 import type { OrbitState, ProfileId, SpaceId, TabId, WindowId } from '../../shared/state'
@@ -336,6 +338,8 @@ export function registerMiniWindow(ctx: MainContext): void {
     }
   }
 
+  // The window fades in on the curve its UI grows on (the snappy token, FL-01), so the two move as one.
+  const fadeEase = cubicBezier(...EASE.snappy)
   const fadeIn = (win: BrowserWindow, ms: number) => {
     if (!canFade || reducedMotion(ctx)) {
       win.show()
@@ -347,7 +351,7 @@ export function registerMiniWindow(ctx: MainContext): void {
     const timer = setInterval(() => {
       if (win.isDestroyed()) return clearInterval(timer)
       const t = Math.min(1, (Date.now() - start) / ms)
-      win.setOpacity(1 - (1 - t) ** 3)
+      win.setOpacity(fadeEase(t))
       if (t >= 1) clearInterval(timer)
     }, 12)
   }

@@ -8,8 +8,12 @@
  * soon as it is ready still grows.
  */
 
-/** How long the grow takes (the spec's "about 200 ms"). */
-export const GROW_MS = 200
+import { cubicBezier, DURATION, EASE } from '../motion/tokens'
+
+/** How long the grow takes (the spec's "about 200 ms"): the snappy token (FL-01). */
+export const GROW_MS = DURATION.snappy
+/** The grow's curve, the snappy token's; main fades the window in on it too. */
+const GROW_EASE = cubicBezier(EASE.snappy)
 /** Dispatched on `window` when the grow ends or is dropped: what the UI measures is full size again. */
 export const GROWN_EVENT = 'orbit-mini-grown'
 
@@ -60,7 +64,6 @@ window.orbit.on('mini:grow', (payload) => {
     settle()
     return
   }
-  const easing = getComputedStyle(document.documentElement).getPropertyValue('--ease-out').trim() || 'ease-out'
-  const animation = root.animate([start, { transform: 'none', opacity: 1 }], { duration: GROW_MS, easing })
+  const animation = root.animate([start, { transform: 'none', opacity: 1 }], { duration: GROW_MS, easing: GROW_EASE })
   animation.finished.then(settle, settle)
 })

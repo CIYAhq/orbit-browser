@@ -309,12 +309,14 @@ async function startMediaFixtures(): Promise<Fixtures> {
       )
     // Media playing inside a frame: an embedded player (?src= a fixture path). With ?cross, the
     // frame comes from another site (127.0.0.1 in a page from localhost: a frame of its own process).
+    // With ?full, the frame fills the page (a page that is one big frame).
     if (parts[0] === 'media' && parts[1] === 'frame') {
       const src = u.searchParams.get('src') ?? ''
       if (!src.startsWith('/media/')) return html('<p>No frame.</p>')
       const origin = u.searchParams.has('cross') ? `http://127.0.0.1:${req.socket.localPort}` : ''
+      const fill = u.searchParams.has('full') ? ' style="position:fixed;inset:0;width:100%;height:100%;border:0"' : ''
       return html(
-        `<iframe id="f" src="${origin}${encodeURI(src)}" width="560" height="420" allow="autoplay; picture-in-picture; display-capture"></iframe>`,
+        `<iframe id="f" src="${origin}${encodeURI(src)}" width="560" height="420"${fill} allow="autoplay; picture-in-picture; display-capture"></iframe>`,
       )
     }
     if (parts[0] === 'page') return html('<p>A quiet page.</p>')
@@ -385,9 +387,13 @@ async function openFramePlaying(
   title: string,
   src: string,
   cross = false,
+  full = false,
 ): Promise<{ id: string; page: Page; frame: Frame }> {
   const path = `/media/frame/${title}`
-  const id = await newTab(app, fx.url(`${path}?src=${encodeURIComponent(src)}${cross ? '&cross' : ''}`))
+  const id = await newTab(
+    app,
+    fx.url(`${path}?src=${encodeURIComponent(src)}${cross ? '&cross' : ''}${full ? '&full' : ''}`),
+  )
   await waitTab(app, id, path)
   const p = await tabPage(app, path)
   let frame: Frame | undefined
@@ -567,20 +573,35 @@ async function dragPlayer(
 
 type Frames = { w: number; h: number; lifted: boolean }[]
 
-/** From now on, records each frame the page draws: its size, and whether its video floats. */
+/**
+ * From now on, records each frame the page draws: its size, and whether its video floats. Each is
+ * read as the frame will be drawn: after layout, from a ResizeObserver of an element whose size
+ * changes every frame. Observers run in the order they were made, so Orbit's media script's own
+ * (made when the page's media started) has run by then.
+ */
 async function recordFrames(p: Page | Frame): Promise<void> {
   await p.evaluate(() => {
-    const w = window as unknown as { __frames: Frames }
+    const w = window as unknown as { __frames: Frames; __recording?: boolean }
     w.__frames = []
-    const tick = () => {
+    if (w.__recording) return
+    w.__recording = true
+    const tick = document.createElement('div')
+    tick.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;visibility:hidden;pointer-events:none'
+    document.documentElement.appendChild(tick)
+    new ResizeObserver(() => {
       w.__frames.push({
         w: innerWidth,
         h: innerHeight,
         lifted: !!document.querySelector('video[data-orbit-pip]'),
       })
-      requestAnimationFrame(tick)
+    }).observe(tick)
+    let n = 0
+    const frame = () => {
+      n++
+      tick.style.width = `${1 + (n % 2)}px`
+      requestAnimationFrame(frame)
     }
-    requestAnimationFrame(tick)
+    requestAnimationFrame(frame)
   })
   await expect
     .poll(() => p.evaluate(() => (window as unknown as { __frames: Frames }).__frames.length))
@@ -599,6 +620,32 @@ async function framesBack(p: Page | Frame): Promise<{ frames: Frames; blank: Fra
     .toBeGreaterThan(2)
   const frames = await read()
   return { frames, blank: frames.filter((f) => f.w === size.w && f.h === size.h && f.lifted) }
+}
+
+/**
+ * Holds main's own calls that put a floating video back into its page, until the function this
+ * returns lets them go: the page has to do it by itself, from its size alone, before it draws its
+ * first frame back in its window (MD-01), as when the main process is busy.
+ */
+async function holdDrops(app: ElectronApplication): Promise<() => Promise<void>> {
+  await app.evaluate(() => {
+    type Exec = (agent: unknown, fn: string, ...rest: unknown[]) => Promise<unknown>
+    const g = globalThis as unknown as { __orbitMedia: MediaTestHooks; __heldDrops?: (() => Promise<unknown>)[] }
+    if (g.__heldDrops) return
+    const held: (() => Promise<unknown>)[] = []
+    g.__heldDrops = held
+    const manager = g.__orbitMedia.manager as unknown as { exec: Exec }
+    const exec = manager.exec
+    manager.exec = function (this: unknown, agent, fn, ...rest) {
+      if (fn !== 'drop') return exec.call(this, agent, fn, ...rest)
+      return new Promise((resolve) => held.push(() => exec.call(this, agent, fn, ...rest).then(resolve)))
+    }
+  })
+  return () =>
+    app.evaluate(async () => {
+      const g = globalThis as unknown as { __heldDrops?: (() => Promise<unknown>)[] }
+      await Promise.all((g.__heldDrops?.splice(0) ?? []).map((go) => go()))
+    })
 }
 
 const boxOf = (b: Box): Box => ({ x: b.x, y: b.y, width: b.width, height: b.height })
@@ -1024,6 +1071,37 @@ type WindowHooks = {
   __asked?: AbortController
 }
 
+/** Moves Orbit's first window. */
+function placeWindow(app: ElectronApplication, bounds: Box): Promise<void> {
+  return app.evaluate((_e, b) => {
+    const { __orbit } = globalThis as unknown as WindowHooks
+    __orbit.ctx.windows.get(__orbit.windowIds()[0] as string)?.setBounds(b)
+  }, bounds)
+}
+
+/** An alert over Orbit's first window, like the one before deleting a folder; `answerAlert` closes it. */
+function showAlert(app: ElectronApplication): Promise<void> {
+  return app.evaluate(({ dialog }) => {
+    const g = globalThis as unknown as WindowHooks
+    const win = g.__orbit.ctx.windows.get(g.__orbit.windowIds()[0] as string)
+    const asked = new AbortController()
+    g.__asked = asked
+    if (win) {
+      const options = { message: 'Delete “Reading”?', buttons: ['Delete', 'Cancel'], signal: asked.signal }
+      dialog.showMessageBox(win, options).catch(() => {})
+    }
+  })
+}
+
+/** Closes the alert; whether the window takes input again. */
+function answerAlert(app: ElectronApplication): Promise<boolean | undefined> {
+  return app.evaluate(() => {
+    const g = globalThis as unknown as WindowHooks
+    g.__asked?.abort()
+    return g.__orbit.ctx.windows.get(g.__orbit.windowIds()[0] as string)?.isEnabled()
+  })
+}
+
 test("[MD-06] the player keeps clear of Orbit's alerts and dialogs: it moves to the nearest clear corner, or out of sight when none is, and goes back when they close", async () => {
   orbit = await launchOrbit()
   const { app } = orbit
@@ -1035,29 +1113,8 @@ test("[MD-06] the player keeps clear of Orbit's alerts and dialogs: it moves to 
   const home = cornerBox(area, 'bottom-right', 320, 180)
   expect(info.bounds).toEqual(home)
 
-  const placeWindow = (bounds: Box) =>
-    app.evaluate((_e, b) => {
-      const { __orbit } = globalThis as unknown as WindowHooks
-      __orbit.ctx.windows.get(__orbit.windowIds()[0] as string)?.setBounds(b)
-    }, bounds)
-  /** An alert over Orbit's window, like the one before deleting a folder; answer() closes it. */
-  const ask = () =>
-    app.evaluate(({ dialog }) => {
-      const g = globalThis as unknown as WindowHooks
-      const win = g.__orbit.ctx.windows.get(g.__orbit.windowIds()[0] as string)
-      const asked = new AbortController()
-      g.__asked = asked
-      if (win) {
-        const options = { message: 'Delete “Reading”?', buttons: ['Delete', 'Cancel'], signal: asked.signal }
-        dialog.showMessageBox(win, options).catch(() => {})
-      }
-    })
-  const answer = () =>
-    app.evaluate(() => {
-      const g = globalThis as unknown as WindowHooks
-      g.__asked?.abort()
-      return g.__orbit.ctx.windows.get(g.__orbit.windowIds()[0] as string)?.isEnabled()
-    })
+  const ask = () => showAlert(app)
+  const answer = () => answerAlert(app)
   const shown = async () => {
     const p = await player(app)
     return { tabId: p.tabId, visible: p.visible, bounds: p.bounds }
@@ -1066,7 +1123,7 @@ test("[MD-06] the player keeps clear of Orbit's alerts and dialogs: it moves to 
 
   // Orbit's window sits in the bottom-right of the screen, under the player. An alert over it: the
   // player moves to the nearest corner clear of it, the top-right one, still playing...
-  await placeWindow({ x: area.x + area.width - 600, y: area.y + area.height - 500, width: 600, height: 500 })
+  await placeWindow(app, { x: area.x + area.width - 600, y: area.y + area.height - 500, width: 600, height: 500 })
   await ask()
   await expect.poll(shown).toEqual(at(cornerBox(area, 'top-right', 320, 180)))
   expect(await paused(v.page, '#v')).toBe(false)
@@ -1097,7 +1154,7 @@ test("[MD-06] the player keeps clear of Orbit's alerts and dialogs: it moves to 
     })
     .toBe(true)
   const big = (await player(app)).bounds as Box
-  await placeWindow({
+  await placeWindow(app, {
     x: area.x + Math.round((area.width - 800) / 2),
     y: area.y + Math.round((area.height - 600) / 2),
     width: 800,
@@ -1108,6 +1165,49 @@ test("[MD-06] the player keeps clear of Orbit's alerts and dialogs: it moves to 
   expect(await paused(v.page, '#v')).toBe(false)
   await expect.poll(answer).toBe(true)
   await expect.poll(shown).toEqual(at(big))
+})
+
+test("[MD-06][FL-28] with reduced motion the player steps aside for Orbit's alert at once, with no glide, and steps back at once when it closes", async () => {
+  orbit = await launchOrbit({ reducedMotion: true })
+  const { app } = orbit
+  const v = await openPlaying(app, '/media/long-video/Film')
+  await pipPage(app)
+  await leave(app)
+  const info = await expectPlayer(app, v.id)
+  const area = info.workArea as Box
+  const home = cornerBox(area, 'bottom-right', 320, 180)
+  const aside = cornerBox(area, 'top-right', 320, 180)
+  expect(info.bounds).toEqual(home)
+  // Orbit's window under the player: an alert over it sends the player to the top-right corner.
+  await placeWindow(app, { x: area.x + area.width - 600, y: area.y + area.height - 500, width: 600, height: 500 })
+  const at = (s: Sample, b: Box) => s.x === b.x && s.y === b.y && s.width === b.width && s.height === b.height
+  /** The player, sampled every few ms while `change` happens and for a while after. */
+  const watch = async (change: () => Promise<unknown>, to: Box) => {
+    const sampling = samplePlayer(app, 1200)
+    await change()
+    const samples = await sampling
+    await expect.poll(async () => (await player(app)).bounds).toEqual(to)
+    return samples
+  }
+
+  for (const [label, change, from, to] of [
+    ['aside', () => showAlert(app), home, aside],
+    ['back', () => answerAlert(app), aside, home],
+  ] as const) {
+    const samples = await watch(change, to)
+    // In one step from one corner to the other: never in between, never gliding.
+    const between = samples.filter((s) => s.visible && !at(s, from) && !at(s, to))
+    expect(between, label).toEqual([])
+    expect(
+      samples.some((s) => s.animating),
+      label,
+    ).toBe(false)
+    expect(
+      samples.some((s) => s.visible && at(s, to)),
+      label,
+    ).toBe(true)
+  }
+  expect(await paused(v.page, '#v')).toBe(false)
 })
 
 test('[MD-08] the player menu turns automatic picture-in-picture off for today or always; playback continues in the sidebar', async () => {
@@ -1956,12 +2056,46 @@ function playerColour(app: ElectronApplication, tabId: string): Promise<number> 
 /** The frame element that holds the frame's page up in the player ('' when none). */
 const liftedFrame = (p: Page) => p.evaluate(() => document.querySelector('[data-orbit-pip]')?.id ?? '')
 
-test('[MD-01][MD-03] a video playing in a frame (an embedded player) floats when its tab is left, and goes back into its frame', async () => {
+/**
+ * Back on the tab and away again, a few times. Each time back, the video goes back into its
+ * frame and no frame is drawn at the frame's own size with it still floating (MD-01: no blank
+ * frame). Main's own call to put it back is held each time, so the frame's page has to do it by
+ * itself, from its size alone, at any load.
+ */
+async function backToFrame(
+  app: ElectronApplication,
+  v: { id: string; page: Page; frame: Frame },
+  away: string,
+  rounds = 3,
+): Promise<void> {
+  const release = await holdDrops(app)
+  for (let round = 1; round <= rounds; round++) {
+    if (round > 1) {
+      await cmd(app, 'tabs.activate', { tabId: away })
+      await expectPlayer(app, v.id)
+      await expect.poll(() => floated(v.frame)).toBe('v')
+      await expect.poll(() => liftedFrame(v.page)).toBe('f')
+    }
+    await recordFrames(v.frame)
+    await cmd(app, 'tabs.activate', { tabId: v.id })
+    await expectNoPlayer(app)
+    await expect.poll(() => floated(v.frame)).toBe('')
+    await expect.poll(() => liftedFrame(v.page)).toBe('')
+    const { frames, blank } = await framesBack(v.frame)
+    expect(frames.some((f) => f.lifted)).toBe(true)
+    expect(blank, `round ${round}`).toEqual([])
+    await release()
+    expect(await paused(v.frame, '#v')).toBe(false)
+    await expect.poll(async () => (await media(app, v.id))?.pip).toBe(false)
+  }
+}
+
+test('[MD-01][MD-03] a video playing in a frame (an embedded player) floats when its tab is left, and goes back into its frame with no blank frame, at any load', async () => {
   orbit = await launchOrbit()
   const { app } = orbit
   const v = await openFramePlaying(app, 'Embedded%20Film', '/media/long-video/Film')
   await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
-  await leave(app)
+  const quiet = await leave(app)
   const info = await expectPlayer(app, v.id)
   expect(info.bounds).toEqual(cornerBox(info.workArea as Box, 'bottom-right', 320, 180))
   // The video floats out of its frame, and the frame out of the page, so the player shows the video.
@@ -1981,17 +2115,29 @@ test('[MD-01][MD-03] a video playing in a frame (an embedded player) floats when
   await expect.poll(() => paused(v.frame, '#v')).toBe(false)
 
   // Back on the tab, the video plays in its frame again, with no frame drawn at the frame's own
-  // size with the video still floating (MD-01: no blank frame).
-  await recordFrames(v.frame)
-  await cmd(app, 'tabs.activate', { tabId: v.id })
-  await expectNoPlayer(app)
-  await expect.poll(() => floated(v.frame)).toBe('')
-  await expect.poll(() => liftedFrame(v.page)).toBe('')
-  const { frames, blank } = await framesBack(v.frame)
-  expect(frames.some((f) => f.lifted)).toBe(true)
-  expect(blank).toEqual([])
-  expect(await paused(v.frame, '#v')).toBe(false)
-  await expect.poll(async () => (await media(app, v.id))?.pip).toBe(false)
+  // size with the video still floating (MD-01: no blank frame), even with main slow to help.
+  await backToFrame(app, v, quiet)
+})
+
+test('[MD-01] a video in a frame that fills its page goes back into its frame with no blank frame, though only the height of the frame changes', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const v = await openFramePlaying(app, 'Framed%20Film', '/media/long-video/Film', false, true)
+  await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
+  const size = () => v.frame.evaluate(() => ({ w: innerWidth, h: innerHeight }))
+  const home = await size()
+  const quiet = await leave(app)
+  await expectPlayer(app, v.id)
+  expect(await floated(v.frame)).toBe('v')
+  expect(await liftedFrame(v.page)).toBe('f')
+  // In the player the frame's page is as wide as in its window, only taller: the borrowed view's
+  // extra height. Its root element keeps its size (as tall as its content), so only an element as
+  // big as its viewport shows the change.
+  const inPlayer = await size()
+  expect(inPlayer.w).toBe(home.w)
+  expect(inPlayer.h).toBeGreaterThan(home.h)
+  expect(await v.frame.evaluate(() => document.documentElement.getBoundingClientRect().height)).toBeLessThan(home.h)
+  await backToFrame(app, v, quiet)
 })
 
 test('[MD-01][MD-16] a video in a frame from another site floats out of its place in the page; returning puts it back with no blank frame', async () => {
@@ -2015,7 +2161,7 @@ test('[MD-01][MD-16] a video in a frame from another site floats out of its plac
     BrowserWindow.getAllWindows()[0]?.getContentBounds(),
   )) as Box
 
-  await leave(app)
+  const quiet = await leave(app)
   const info = await expectPlayer(app, v.id)
   expect(await floated(v.frame)).toBe('v')
   expect(await liftedFrame(v.page)).toBe('f')
@@ -2027,16 +2173,8 @@ test('[MD-01][MD-16] a video in a frame from another site floats out of its plac
   expect(Math.abs(from.y - (content.y + pane.y + frameAt.y + videoAt.y))).toBeLessThanOrEqual(2)
 
   // Back on the tab: the video is in its frame again and no frame was drawn at the frame's own
-  // size with the video still floating (MD-01: no blank frame).
-  await recordFrames(v.frame)
-  await cmd(app, 'tabs.activate', { tabId: v.id })
-  await expect.poll(() => floated(v.frame)).toBe('')
-  await expectNoPlayer(app)
-  const { frames, blank } = await framesBack(v.frame)
-  expect(frames.some((f) => f.lifted)).toBe(true)
-  expect(blank).toEqual([])
-  expect(await liftedFrame(v.page)).toBe('')
-  expect(await paused(v.frame, '#v')).toBe(false)
+  // size with the video still floating (MD-01: no blank frame), even with main slow to help.
+  await backToFrame(app, v, quiet)
 })
 
 test('[MD-07] removing the frame of a video in the player closes the player', async () => {
@@ -2384,6 +2522,187 @@ test("[MD-02][MD-07] Orbit's mark on its own picture-in-picture lasts only as lo
   await settle()
   expect(await activeId(app)).toBe(y.id)
   expect(await raises(app)).toBe(0)
+})
+
+// ---- One picture-in-picture at a time (D75) ----
+
+/**
+ * Each document of a tab, as main last heard from it: whether it shows picture-in-picture, and
+ * how its last one ended (how many it has ended, and why).
+ */
+function pipReports(app: ElectronApplication, tabId: string): Promise<{ pip: boolean; n: number; reason: string }[]> {
+  return app.evaluate((_e, id) => {
+    type Doc = { snap?: { pip?: boolean; pipEnd?: { n: number; reason: string } | null } }
+    const g = globalThis as unknown as { __orbitMedia: MediaTestHooks }
+    const tabs = (g.__orbitMedia.manager as unknown as { tabs: Map<string, { page?: Doc; frames: Map<unknown, Doc> }> })
+      .tabs
+    const t = tabs.get(id)
+    const docs = t ? [...(t.page ? [t.page] : []), ...t.frames.values()] : []
+    return docs.map((d) => ({ pip: !!d.snap?.pip, n: d.snap?.pipEnd?.n ?? 0, reason: d.snap?.pipEnd?.reason ?? '' }))
+  }, tabId)
+}
+
+/** A playing video, in a tab's page or in a frame of it, and how to reach it. */
+interface Playing {
+  name: string
+  id: string
+  /** The video's document. */
+  doc: Page | Frame
+  /** The tab's page. */
+  page: Page
+  /** The window it's in (0: the first). */
+  w: number
+}
+
+type Opener = 'action' | 'menu' | 'page'
+
+let speeds = 0
+
+/**
+ * Picture-in-picture on `first`, then on `second` (selected), opened by Orbit's action, by its
+ * page menu or by the page itself. The engine closes the first's window as it opens the second's:
+ * nothing goes back to the first, no window comes forward, and when Orbit opened the second it
+ * ended the first itself (D75).
+ */
+async function oneAtATime(
+  app: ElectronApplication,
+  first: Playing,
+  second: Playing,
+  opener: Opener,
+  openFirst: () => Promise<void>,
+): Promise<void> {
+  const label = `${first.name} then ${second.name} by ${opener}`
+  /** Past the page script's wait, a speed change in that document main must have seen (a new speed each time). */
+  const settle = async (p: Playing) => {
+    const rate = 1 + ((speeds++ % 60) + 1) / 64
+    await p.doc.evaluate((r) => {
+      setTimeout(() => {
+        ;(document.getElementById('v') as HTMLVideoElement).playbackRate = r
+      }, 500)
+    }, rate)
+    await expect.poll(async () => (await media(app, p.id))?.rate, { message: label }).toBe(rate)
+  }
+  await openFirst()
+  await expect.poll(() => enginePip(first.doc), { message: label }).toBe(true)
+  // Main has the first's own report of it.
+  await expect.poll(async () => (await pipReports(app, first.id)).some((d) => d.pip), { message: label }).toBe(true)
+  const before = await pipReports(app, first.id)
+  await cmd(app, 'tabs.activate', { tabId: second.id }, second.w)
+  if (opener === 'action') await act(app, 'media.togglePip', second.w)
+  else if (opener === 'page')
+    await second.doc.evaluate(async () => {
+      await (document.getElementById('v') as HTMLVideoElement).requestPictureInPicture()
+    })
+  else {
+    // The page's own menu on the video (in its frame, for a frame's).
+    let at = await second.doc.evaluate(() => {
+      const r = (document.getElementById('v') as HTMLVideoElement).getBoundingClientRect()
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+    })
+    if (second.doc !== second.page) {
+      const box = await second.page.evaluate(() => {
+        const el = document.getElementById('f') as HTMLIFrameElement
+        const r = el.getBoundingClientRect()
+        return { x: r.x + el.clientLeft, y: r.y + el.clientTop }
+      })
+      at = { x: at.x + box.x, y: at.y + box.y }
+    }
+    await second.page.mouse.click(at.x, at.y, { button: 'right' })
+    // This tab's menu, unticked: not one kept from before.
+    await expect
+      .poll(async () => {
+        const m = await pageMenu(app)
+        return m?.tabId === second.id && m.labels.includes('Picture in Picture') && !m.checked['Picture in Picture']
+      })
+      .toBe(true)
+    expect(await choosePageMenu(app, 'Picture in Picture')).toBe(true)
+  }
+  await expect.poll(() => enginePip(second.doc), { message: label }).toBe(true)
+  await expect.poll(() => enginePip(first.doc), { message: label }).toBe(false)
+  await settle(first)
+  expect(await activeId(app, second.w), label).toBe(second.id)
+  expect(await raises(app), label).toBe(0)
+  if (opener !== 'page') {
+    // Orbit ended the first itself, with its own exit: a new ending, Orbit's.
+    const after = await pipReports(app, first.id)
+    expect(
+      after.some((e, i) => e.reason === 'orbit' && e.n > (before[i]?.n ?? 0)),
+      `${label}: ${JSON.stringify(before)} -> ${JSON.stringify(after)}`,
+    ).toBe(true)
+  }
+  // The second ends; nothing comes forward either.
+  await act(app, 'media.togglePip', second.w)
+  await expect.poll(() => enginePip(second.doc), { message: label }).toBe(false)
+  await settle(second)
+  expect(await activeId(app, second.w), label).toBe(second.id)
+  expect(await raises(app), label).toBe(0)
+}
+
+test("[MD-02][MD-07] in a split, a picture-in-picture the engine closes because another pane's opened isn't Back to tab: whoever opens the second, in a page or a frame, its pane stays selected and no window comes forward (D75)", async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  // Automatic picture-in-picture off, as in the review's case (each pane plays on regardless).
+  await act(app, 'media.toggleAutoPip')
+  const a = await openPlaying(app, '/media/long-video/First')
+  const b = await openPlaying(app, '/media/long-video/Second')
+  const f = await openFramePlaying(app, 'Framed%20Third', '/media/long-video/Third', true)
+  for (const id of [a.id, b.id, f.id]) await expect.poll(async () => (await media(app, id))?.video).toBe(true)
+  expect(await cmd<string | null>(app, 'split.create', { tabIds: [a.id, b.id, f.id], focus: a.id })).toBeTruthy()
+  // Its panes in place (a new split lays them out with a spring), so a click lands where it aims.
+  for (const id of [a.id, b.id, f.id]) await stableView(app, orbit.shell, id)
+  // The window has focus, so a wrong select shows even where only a focused window's tab is selected.
+  await countRaises(app)
+  await haveFocus(app, true)
+  const A: Playing = { name: 'A', id: a.id, doc: a.page, page: a.page, w: 0 }
+  const B: Playing = { name: 'B', id: b.id, doc: b.page, page: b.page, w: 0 }
+  const F: Playing = { name: 'F (a frame)', id: f.id, doc: f.frame, page: f.page, w: 0 }
+  /** Orbit's own Picture in Picture on a pane: its mark may raise the window on Back to tab (D71). */
+  const byOrbit = (p: Playing) => async () => {
+    await cmd(app, 'tabs.activate', { tabId: p.id })
+    await act(app, 'media.togglePip')
+  }
+  for (const opener of ['action', 'page', 'menu'] as const) await oneAtATime(app, A, B, opener, byOrbit(A))
+  for (const opener of ['action', 'page'] as const) await oneAtATime(app, F, B, opener, byOrbit(F))
+  for (const opener of ['page', 'menu'] as const) await oneAtATime(app, A, F, opener, byOrbit(A))
+})
+
+test("[MD-02][MD-07] in two tabs, a picture-in-picture the engine closes because another tab's opened isn't Back to tab: a tab in the background, or in another window (D75)", async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  await act(app, 'media.toggleAutoPip')
+  const a = await openPlaying(app, '/media/long-video/First')
+  const b = await openPlaying(app, '/media/long-video/Second')
+  for (const id of [a.id, b.id]) await expect.poll(async () => (await media(app, id))?.video).toBe(true)
+  await countRaises(app)
+  await haveFocus(app, true)
+  const A: Playing = { name: 'A (in the background)', id: a.id, doc: a.page, page: a.page, w: 0 }
+  const B: Playing = { name: 'B', id: b.id, doc: b.page, page: b.page, w: 0 }
+  // A's page opens its own picture-in-picture while B is selected (a click on its button just
+  // before the switch): the engine's window, which Orbit's player doesn't take over.
+  const byPage = (p: Playing) => async () => {
+    await p.doc.evaluate(async () => {
+      await (document.getElementById('v') as HTMLVideoElement).requestPictureInPicture()
+    })
+  }
+  for (const opener of ['action', 'page', 'menu'] as const) await oneAtATime(app, A, B, opener, byPage(A))
+
+  // In another window: B moves to a new window, A stays selected in the first.
+  await act(app, 'window.new')
+  await expect
+    .poll(async () => (await app.evaluate(() => (globalThis as unknown as WindowHooks).__orbit.windowIds())).length)
+    .toBe(2)
+  const c = await cmd<string>(app, 'tabs.create', { url: fx.url('/media/long-video/Third'), activate: true }, 1)
+  await waitTab(app, c, '/media/long-video/Third')
+  const cp = await tabPage(app, '/media/long-video/Third')
+  await expect.poll(() => cp.evaluate(() => document.body.dataset.state ?? ''), { timeout: 20_000 }).toBe('playing')
+  await cmd(app, 'tabs.activate', { tabId: a.id })
+  const A1: Playing = { name: 'A (window 1)', id: a.id, doc: a.page, page: a.page, w: 0 }
+  const C2: Playing = { name: 'C (window 2)', id: c, doc: cp, page: cp, w: 1 }
+  const byOrbit = async () => {
+    await cmd(app, 'tabs.activate', { tabId: a.id })
+    await act(app, 'media.togglePip')
+  }
+  for (const opener of ['action', 'page', 'menu'] as const) await oneAtATime(app, A1, C2, opener, byOrbit)
 })
 
 // ---- The switches in other panels (MD-08: site controls NV-16, Settings › Advanced ST-10) ----

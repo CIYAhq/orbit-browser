@@ -635,6 +635,9 @@ export class MediaManager {
     const ours = agent.orbitPip === true
     agent.orbitPip = false
     if (reason !== 'back') return
+    // The engine shows one picture-in-picture at a time: one it closed because another opened, in
+    // a page or by Orbit, isn't "Back to tab" (D75).
+    if (this.engineElsewhere(agent)) return
     // The engine window's "Back to tab": select the source tab in its window (and Space).
     const windowId = this.ctx.windows.windowOfTab(tabId) ?? this.ctx.windows.focusedWindowId()
     if (!windowId) return
@@ -660,6 +663,25 @@ export class MediaManager {
       (sectionOf(state, tabId) === 'favorite' && state.spaces[spaceId]?.profileId === tab.profileId)
     if (shown) void this.ctx.commands.run('tabs.activate', { tabId }, { windowId })
     return shown
+  }
+
+  /** Another document's latest report shows the engine's picture-in-picture (D75). */
+  private engineElsewhere(agent: Agent): boolean {
+    for (const t of this.tabs.values())
+      for (const a of this.agentsOf(t)) if (a !== agent && a.snap?.pip && !a.snap.player) return true
+    return false
+  }
+
+  /**
+   * Before Orbit opens the engine's picture-in-picture in `opener`'s document (none: a tab's page
+   * through the page menu): the engine shows one at a time and closes any other as it opens. Orbit
+   * ends those first with its own exit, so their documents report it as Orbit's (D75).
+   */
+  private async endEnginePips(opener: Agent | undefined): Promise<void> {
+    const others: Agent[] = []
+    for (const t of this.tabs.values())
+      for (const a of this.agentsOf(t)) if (a !== opener && a.snap?.pip && !a.snap.player) others.push(a)
+    await Promise.all(others.map((a) => this.exec(a, 'pip', [false, false])))
   }
 
   /** Orbit closed the tab's picture-in-picture, or handed it to its player: no mark outlives it (D74). */
@@ -703,6 +725,11 @@ export class MediaManager {
     if (!this.shown.has(tabId)) return this.player.open(tabId, { auto: false, from })
     const t = this.tabs.get(tabId)
     for (const agent of t ? this.pipOrder(t, false) : []) {
+      // A document with a video to show ends any other picture-in-picture first (D75).
+      if (!agent.snap?.pip) {
+        if ((await this.exec<boolean>(agent, 'pip', [true, false, true])) !== true) continue
+        await this.endEnginePips(agent)
+      }
       if ((await this.exec<boolean>(agent, 'pip', [true, false], true)) !== true) continue
       this.markOnly(agent)
       this.markPip(tabId, true)
@@ -724,6 +751,7 @@ export class MediaManager {
     } catch {}
     if (!on) this.unmark(tabId)
     if (!sub) {
+      if (on) await this.endEnginePips(this.tabs.get(tabId)?.page)
       const code = on
         ? `(() => { const el = document.elementFromPoint(${x}, ${y}); const v = el && (el.tagName === 'VIDEO' ? el : el.closest('video')); return v ? v.requestPictureInPicture().then(() => true, () => false) : false })()`
         : 'document.exitPictureInPicture().then(() => true, () => false)'
@@ -743,6 +771,7 @@ export class MediaManager {
           py -= box?.y ?? 0
         }
         // Orbit's own menu opened it: its "Back to tab" may bring the window forward, once (D71).
+        if (on) await this.endEnginePips(agent)
         if ((await this.exec(agent, 'pipAt', [on, px, py], true)) === true && on) this.markOnly(agent)
       }
     }
