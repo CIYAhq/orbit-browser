@@ -48,7 +48,7 @@ import {
 } from '../../shared/tree'
 import { noteArchiveHistory, provideSidebarUndo } from '../archive/inbox'
 import type { MainContext } from '../context'
-import { isUnplacedImportTab } from '../import/unplaced'
+import { hiddenByImport } from '../import/unplaced'
 import {
   addPaneInDraft,
   favoritesFull,
@@ -152,8 +152,6 @@ export class TabOps {
    * to sleep it now.
    */
   sleepGuard?: (tabId: TabId) => boolean
-  /** Off only in the test that stands for a route main doesn't guard (D65 (2)): see `hiddenByImport`. */
-  guardImports = true
   /** Tabs whose close waits on the engine: the main windows that showed each (D77 (4)). */
   private shownWhenClosing = new Map<TabId, WindowId[]>()
 
@@ -177,8 +175,7 @@ export class TabOps {
    * (D65 (2)).
    */
   hiddenByImport(id: ItemId | undefined): boolean {
-    if (!id || !this.guardImports || !isTabId(id) || !isUnplacedImportTab(id)) return false
-    return !locate(this.state, id) && !splitOfTab(this.state, id)
+    return hiddenByImport(this.state, id)
   }
 
   spaceOfWindow(windowId: WindowId | undefined): SpaceId {

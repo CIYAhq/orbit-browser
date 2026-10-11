@@ -94,14 +94,21 @@ export function registerBlankWindows(ctx: MainContext, ops: TabOps): void {
     }
   }
 
-  store.subscribe((next, prev) => {
-    if (next.windows === prev.windows) return
-    const shown = new Set(Object.values(next.windows).map((w) => w.spaceId))
-    const gone = Object.values(next.spaces)
+  /** Blank Spaces no window shows. */
+  const unshown = (state: OrbitState): SpaceId[] => {
+    const shown = new Set(Object.values(state.windows).map((w) => w.spaceId))
+    return Object.values(state.spaces)
       .filter((s) => s.blank && !shown.has(s.id))
       .map((s) => s.id)
+  }
+  store.subscribe((next, prev) => {
+    if (next.windows === prev.windows) return
+    const gone = unshown(next)
     if (gone.length > 0) setImmediate(() => dropSpaces(gone))
   })
+  // Loaded with no window (a crash part-way through closing it): the same, once every area is ready.
+  const lost = unshown(store.state)
+  if (lost.length > 0) setImmediate(() => dropSpaces(lost))
 
   actions.register('window.newBlank', (c) => {
     open(c.windowId)

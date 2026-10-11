@@ -158,14 +158,36 @@ export function registerRowMenus(ctx: MainContext): RowMenus {
     return { x: Math.max(0, p.x - content.x), y: Math.max(0, p.y - content.y) }
   }
 
+  /**
+   * The keyboard goes back where it was when the menu opened (KS-16): the sidebar for a menu opened
+   * there, else the page. Only once the overlay has gone, and not past another overlay.
+   */
+  const giveBack = (windowId: WindowId, menu: OpenMenu) => {
+    const returnTo = menu.returnTo
+    const win = windows.get(windowId)
+    if (
+      store.state.windows[windowId]?.overlay.kind === 'none' &&
+      returnTo &&
+      !returnTo.isDestroyed() &&
+      win &&
+      !win.isDestroyed() &&
+      win.isFocused()
+    ) {
+      returnTo.focus()
+    }
+  }
+
+  /** Closes the window's menu (a bound key, an item chosen): the keyboard goes back before an item runs. */
   const close = (windowId: WindowId) => {
-    if (!open.has(windowId)) return
+    const menu = open.get(windowId)
+    if (!menu) return
     open.delete(windowId)
     if (rowMenuOf(store.state.windows[windowId]?.overlay)) void commands.run('overlay.close', {}, { windowId })
+    giveBack(windowId, menu)
   }
 
   // A menu goes when its overlay does (Escape, a click outside, another overlay), and the keyboard
-  // goes back where it was (KS-16): the sidebar for a menu opened there, else the page.
+  // goes back where it was.
   store.subscribe((next, prev) => {
     if (next.windows === prev.windows) return
     for (const [windowId, menu] of open) {
@@ -173,19 +195,7 @@ export function registerRowMenus(ctx: MainContext): RowMenus {
       const shown = rowMenuOf(next.windows[windowId]?.overlay)
       if (shown?.menu === menu.model.menu) continue
       open.delete(windowId)
-      const returnTo = menu.returnTo
-      const win = windows.get(windowId)
-      if (
-        !shown &&
-        next.windows[windowId]?.overlay.kind === 'none' &&
-        returnTo &&
-        !returnTo.isDestroyed() &&
-        win &&
-        !win.isDestroyed() &&
-        win.isFocused()
-      ) {
-        returnTo.focus()
-      }
+      if (!shown) giveBack(windowId, menu)
     }
   })
 

@@ -99,7 +99,7 @@ describe('blank windows (TB-17)', () => {
     expect(mayReopenIn(state, closed, main)).toBe(true)
   })
 
-  it('[TB-17][TB-22] saved and loaded, it is kept with its tabs and stays out of the Space list; one no window shows is gone', () => {
+  it('[TB-17][TB-22] saved and loaded, it is kept with its tabs and stays out of the Space list, with its window or without', () => {
     const { state, spaceId, other, thrown, blank, blankSpace: sp } = setup()
     const loaded = normalizeState(JSON.parse(JSON.stringify(state)))
     expect(loaded.spaceOrder).toEqual([spaceId, other])
@@ -108,12 +108,14 @@ describe('blank windows (TB-17)', () => {
     expect(loaded.tabs[thrown]?.spaceId).toBe(sp)
     expect(loaded.windows[blank]?.spaceId).toBe(sp)
     expect(loaded.windows[blank]?.activeTab[sp]).toBe(thrown)
-    // Its window gone (a crash part-way through closing it): the Space and its tabs go too.
+    // Its window gone (a crash part-way through closing it): the Space and its tabs are kept, out of the Space list,
+    // for main to send its tabs to the Archive once it has loaded (tabs/blank.ts), as when its window closes.
     const lost = JSON.parse(JSON.stringify(state)) as OrbitState
     delete lost.windows[blank]
     const again = normalizeState(lost)
-    expect(again.spaces[sp]).toBeUndefined()
-    expect(again.tabs[thrown]).toBeUndefined()
+    expect(again.spaces[sp]?.blank).toBe(true)
+    expect(again.spaces[sp]?.today).toEqual([thrown])
+    expect(again.tabs[thrown]?.spaceId).toBe(sp)
     expect(again.spaceOrder).toEqual([spaceId, other])
     // Listed in the Space order (a file edited by hand, say), it comes out of it.
     const listed = JSON.parse(JSON.stringify(state)) as OrbitState

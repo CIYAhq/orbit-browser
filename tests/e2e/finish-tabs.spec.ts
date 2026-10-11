@@ -2,12 +2,13 @@
  * The finish-tabs lane: behaviours of tabs, folders, Favorites, Spaces and profiles finished after
  * the other lanes merged (lanes/finish-tabs.md).
  */
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 import type { SearchResult } from '../../src/shared/commands/commandbar'
 import { DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
 import { switcherOf } from '../../src/shared/tab-switcher'
+import { engineForSpace, parseInput } from '../../src/shared/url'
 import { type Box, bestOf, frameAfterWall, mainInputs, motionOf, ms, note, record, series, viewShown } from './frames'
 import {
   type Fixtures,
@@ -22,7 +23,16 @@ import {
   tabView,
   viewPage,
 } from './helpers'
-import { clickInPage, closeWindow, flushState, pressInPage, uiPageOf, windowList } from './nav-support'
+import {
+  choosePageMenu,
+  clickInPage,
+  closeWindow,
+  flushState,
+  pageMenu,
+  pressInPage,
+  uiPageOf,
+  windowList,
+} from './nav-support'
 import { dialogPage, leaveInfo, pageDialogs, startInTab, startPagesFixtures, waitDialog } from './pages-support'
 import { findPage, mainWindow, overlayOf, pressInTab, startSites } from './peek-helpers'
 import { openSettings } from './settings-support'
@@ -258,6 +268,48 @@ test('[TB-14][KS-19][KS-16] while a row menu is open it has the keyboard: no key
   await keys(['D'], ['Enter'])
   await expect.poll(tabCount).toBe(count + 1)
   expect(await pressed()).toEqual(['x'])
+})
+
+test('[TB-14][KS-19][KS-16] a row menu opened while the sidebar has the keyboard gives it back to the sidebar, however it closes: Enter, a click or a bound key', async () => {
+  const { app } = orbit
+  const t = await newTab(app, fx.url('/page/MenuFromSidebar'))
+  await waitTab(app, t, '/page/MenuFromSidebar')
+  const overlay = await viewPage(app, 'overlay')
+  const tabCount = async () => Object.keys((await state(app)).tabs).length
+  const count = await tabCount()
+  const fromSidebar = async () => {
+    await act(app, 'sidebar.focus')
+    await expect.poll(focusedUrl).toContain('view=shell')
+    await cmd(app, 'tabs.contextMenu', { id: t, at: { x: 60, y: 220 } })
+    await expect(menu(overlay)).toBeVisible()
+    await expect.poll(focusedUrl).toContain('view=overlay')
+  }
+  const backInSidebar = async (how: string) => {
+    await expect.poll(overlayKind, how).toBe('none')
+    await expect.poll(focusedUrl, how).toContain('view=shell')
+    await pause(300)
+    expect(await focusedUrl(), `${how}, a moment later`).toContain('view=shell')
+  }
+  // Enter on an item.
+  await fromSidebar()
+  for (let i = 0; i < 20; i++) {
+    await keys(['Down'])
+    if ((await focusedItem(overlay).getAttribute('data-label', { timeout: 2_000 })) === 'Mute Tab') break
+  }
+  await expect(focusedItem(overlay)).toHaveAttribute('data-label', 'Mute Tab')
+  await keys(['Enter'])
+  await expect.poll(async () => (await state(app)).tabs[t]?.muted).toBe(true)
+  await backInSidebar('Enter on Mute Tab')
+  // A click on an item.
+  await fromSidebar()
+  await overlay.locator('[data-testid="row-menu-item"][data-label="Unmute Tab"]').click()
+  await expect.poll(async () => (await state(app)).tabs[t]?.muted).toBeFalsy()
+  await backInSidebar('a click on Unmute Tab')
+  // A key bound to an Orbit action: it closes the menu, and nothing else.
+  await fromSidebar()
+  await keys(['W', [isMac ? 'meta' : 'control']])
+  await backInSidebar(`${PRIMARY}+W`)
+  expect(await tabCount()).toBe(count)
 })
 
 test('[TB-14][FL-21] a row’s menu keeps its row drawn: scrolled far out of sight, the menu stays where it opened and acts on that row', async () => {
@@ -884,6 +936,57 @@ test('[TB-09][SV-14] in a split, the pane whose field takes a dropped link becom
   expect(JSON.stringify(splits[0]?.layout)).not.toContain(b)
 })
 
+test('[TB-09] a row only passing over a page tells it nothing: before a drop, its drag events list the link’s types with empty values', async () => {
+  const { app, shell } = orbit
+  const b = await newTab(app, fx.url('/page/Private'))
+  const a = await newTab(app, fx.url('/page/Passed'))
+  await waitTab(app, b, '/page/Private')
+  await waitTab(app, a, '/page/Passed')
+  await expect.poll(async () => (await tabView(app, a))?.visible).toBe(true)
+  await settled(shell)
+  const { note: field, chat, page } = await linkPlaces(a, 'Passed')
+  // Everything the page's own listeners can read from the drag events it gets.
+  await page.evaluate(() => {
+    const seen: { type: string; types: string[]; values: string[] }[] = []
+    ;(window as unknown as { seen: typeof seen }).seen = seen
+    for (const type of ['dragenter', 'dragover', 'dragleave', 'drop']) {
+      window.addEventListener(
+        type,
+        (e) => {
+          const data = (e as DragEvent).dataTransfer
+          const types = [...(data?.types ?? [])]
+          seen.push({ type, types, values: types.map((t) => data?.getData(t) ?? '') })
+        },
+        true,
+      )
+    }
+  })
+  type Seen = { type: string; types: string[]; values: string[] }
+  const seen = () => page.evaluate(() => (window as unknown as { seen: Seen[] }).seen)
+  const frame = await shell.getByTestId('content-frame').boundingBox()
+  if (!frame) throw new Error('missing the content frame')
+  // Over the note field and the chat box on its way to the page's edge, and let go there: a split.
+  await lift(b)
+  await shell.mouse.move(field.x, field.y, { steps: 10 })
+  await shell.mouse.move(field.x + 5, field.y, { steps: 2 })
+  await expect(indicator()).toHaveCount(0)
+  await shell.mouse.move(chat.x, chat.y, { steps: 4 })
+  await shell.mouse.move(chat.x + 5, chat.y, { steps: 2 })
+  await expect.poll(async () => (await seen()).filter((e) => e.type === 'dragover').length).toBeGreaterThan(2)
+  await shell.mouse.move(frame.x + frame.width * 0.9, frame.y + frame.height / 2, { steps: 4 })
+  await expect(indicator()).toBeVisible()
+  await shell.mouse.up()
+  await expect(shell.getByTestId('split-row')).toHaveCount(1)
+  const events = await seen()
+  expect(events.map((e) => e.type)).toEqual(expect.arrayContaining(['dragenter', 'dragover', 'dragleave']))
+  expect(events.map((e) => e.type)).not.toContain('drop')
+  for (const e of events) {
+    expect(e.types.toSorted(), e.type).toEqual(['text/plain', 'text/uri-list'])
+    expect(e.values, e.type).toEqual(['', ''])
+  }
+  expect(JSON.stringify(events)).not.toContain('/page/Private')
+})
+
 // ---------- NV-08: a link dragged from a page onto the sidebar ----------
 
 /**
@@ -891,12 +994,21 @@ test('[TB-09][SV-14] in a split, the pane whose field takes a dropped link becom
  * link dragged from a page gives the element there, each carrying the link.
  */
 function linkDrag(type: 'dragenter' | 'dragover' | 'dragleave' | 'drop', x: number, y: number, url: string) {
+  return dragData(type, x, y, { 'text/uri-list': url, 'text/plain': url })
+}
+
+/** The same, with what the drag carries given by type: a page may offer any text, under either type. */
+function dragData(
+  type: 'dragenter' | 'dragover' | 'dragleave' | 'drop',
+  x: number,
+  y: number,
+  carried: Record<string, string>,
+) {
   return orbit.shell.evaluate(
-    ([type, x, y, url]) => {
+    ([type, x, y, carried]) => {
       const el = document.elementFromPoint(x, y) ?? document.body
       const data = new DataTransfer()
-      data.setData('text/uri-list', url)
-      data.setData('text/plain', url)
+      for (const [kind, value] of Object.entries(carried)) data.setData(kind, value)
       el.dispatchEvent(
         new DragEvent(type, {
           bubbles: true,
@@ -908,7 +1020,7 @@ function linkDrag(type: 'dragenter' | 'dragover' | 'dragleave' | 'drop', x: numb
         }),
       )
     },
-    [type, x, y, url] as const,
+    [type, x, y, carried] as const,
   )
 }
 
@@ -1028,6 +1140,53 @@ test('[NV-08][TB-02] a link dragged from a page onto the sidebar opens as a tab 
     })
     .toEqual([away])
   expect(Object.values((await state(app)).windows).map((w) => w.spaceId)).toEqual([sp.id])
+})
+
+test('[NV-08][TB-02] what a page’s drag opens on the sidebar (D87): a web address only; other text a search on the list, and nothing on the Favorites; a data: address nothing anywhere', async () => {
+  const { app, shell } = orbit
+  const sp = await space(app)
+  const t = await newTab(app, fx.url('/page/DropOnto'))
+  await waitTab(app, t, '/page/DropOnto')
+  await settled(shell)
+  const box = await row(shell, t).boundingBox()
+  const list = await shell.getByTestId('sidebar-scroll').boundingBox()
+  if (!box || !list) throw new Error('missing the row or the list')
+  const x = box.x + box.width / 2
+  const onList = box.y + box.height * 0.75
+  const onFavorites = list.y - 6
+  const dropAt = async (y: number, carried: Record<string, string>) => {
+    for (const type of ['dragenter', 'dragover', 'drop'] as const) await dragData(type, x, y, carried)
+  }
+  const urls = async () => Object.values((await state(app)).tabs).map((tb) => tb.url)
+  const favorites = async () => (await state(app)).profiles[DEFAULT_PROFILE_ID]?.favorites ?? []
+  const before = await urls()
+  // A page-offered address of another scheme, as its link or as its text: on the list, nothing; on the Favorites, nothing.
+  const offered = ['data:text/html,<h1>Offered</h1>', 'view-source:http://localhost/', 'javascript:alert(1)']
+  for (const address of offered) {
+    for (const y of [onList, onFavorites]) {
+      await dropAt(y, { 'text/uri-list': address, 'text/plain': address })
+      await dropAt(y, { 'text/plain': address })
+    }
+  }
+  // Text that is no address, on the Favorites: nothing.
+  const words = 'orbit dropped words'
+  await dropAt(onFavorites, { 'text/plain': words })
+  await expect(shell.getByTestId('favorite-placeholder')).toHaveCount(0)
+  // On the list: a search for it, in a new tab where it was dropped, as if typed in the command bar.
+  await dropAt(onList, { 'text/plain': words })
+  const search = parseInput(words, engineForSpace(await state(app), sp.id)).url
+  await expect.poll(urls).toEqual(expect.arrayContaining([search]))
+  const made = (await urls()).filter((u) => !before.includes(u))
+  expect(made).toEqual([search])
+  expect(await favorites()).toEqual([])
+  // A web address still opens, on the list or as a Favorite.
+  await dropAt(onFavorites, { 'text/uri-list': fx.url('/page/Kept'), 'text/plain': fx.url('/page/Kept') })
+  await expect
+    .poll(async () => {
+      const s = await state(app)
+      return (s.profiles[DEFAULT_PROFILE_ID]?.favorites ?? []).map((id) => s.tabs[id]?.url)
+    })
+    .toEqual([fx.url('/page/Kept')])
 })
 
 // ---------- TB-17: the blank window ----------
@@ -1198,6 +1357,116 @@ test('[TB-17][TB-22][TB-07] a blank window open at quit comes back with its tabs
   const urls = Object.values((await state(orbit.app)).tabs).map((t) => t.url)
   expect(urls).not.toContain(fx.url('/page/Far'))
   expect(urls).not.toContain(fx.url('/page/Away'))
+})
+
+test('[TB-17][TB-22] a blank window missing at load (a crash part-way through closing it): its Space goes, and its tabs go to the Archive', async () => {
+  const { app, userData } = orbit
+  const sp = (await space(app)).id
+  await act(app, 'window.newBlank')
+  await expect.poll(async () => (await windowIds()).length).toBe(2)
+  const [first, id] = (await windowIds()) as [string, string]
+  const blank = (await state(app)).windows[id]?.spaceId as string
+  const lost = await cmd<string>(app, 'tabs.create', { url: fx.url('/page/Lost') }, 1)
+  await waitTab(app, lost, '/page/Lost')
+  await flushState(app)
+  await app.close()
+  // The state file as such a crash leaves it: the blank window's Space and its tab, with no window.
+  const file = join(userData, 'orbit-state.json')
+  const saved = JSON.parse(readFileSync(file, 'utf8')) as { windows: Record<string, unknown> }
+  delete saved.windows[id]
+  writeFileSync(file, JSON.stringify(saved))
+
+  orbit = await launchOrbit({ userData })
+  await expect.poll(async () => (await state(orbit.app)).spaces[blank]).toBeUndefined()
+  const s = await state(orbit.app)
+  expect(Object.keys(s.windows)).toEqual([first])
+  expect(s.tabs[lost]).toBeUndefined()
+  expect(s.archive.map((e) => e.url)).toContain(fx.url('/page/Lost'))
+  expect(s.spaceOrder).toEqual([sp])
+})
+
+test('[TB-17][NV-08][NV-12] a link a blank window’s page opens in a new window opens in a new blank window of its profile, where the page keeps its session (D88)', async () => {
+  const { app } = orbit
+  const first = (await shownSpace()) as string
+  // The blank window comes from a Space in a profile of its own, and the first window then goes back to
+  // the Default profile's Space: a normal window there would show the link in another session.
+  const work = await cmd<string>(app, 'profiles.create', { name: 'Work' })
+  await cmd(app, 'spaces.create', { name: 'Work', profileId: work })
+  await act(app, 'window.newBlank')
+  await expect.poll(async () => (await windowIds()).length).toBe(2)
+  const blankId = (await windowIds())[1] as string
+  await cmd(app, 'spaces.switch', { spaceId: first })
+  expect((await state(app)).spaces[(await state(app)).windows[blankId]?.spaceId ?? '']?.profileId).toBe(work)
+  const from = await cmd<string>(app, 'tabs.create', { url: fx.url('/page/Session') }, 1)
+  await waitTab(app, from, '/page/Session')
+  const page = await tabPage(app, '/page/Session')
+  await page.evaluate(async () => {
+    const jar = (window as unknown as { cookieStore: { set: (name: string, value: string) => Promise<void> } })
+      .cookieStore
+    await jar.set('kept', 'yes')
+    const a = document.createElement('a')
+    a.id = 'shifted'
+    a.href = '/page/SessionShifted'
+    a.textContent = 'Shifted'
+    document.body.prepend(a)
+  })
+  /** The window opened last: a blank window of the Work profile, showing `url` in a page that has the cookie. */
+  const opened = async (count: number, url: string) => {
+    await expect.poll(async () => (await windowIds()).length).toBe(count)
+    const id = (await windowIds())[count - 1] as string
+    const s = await state(app)
+    const spaceId = s.windows[id]?.spaceId as string
+    expect(s.spaces[spaceId]?.blank, 'a blank window').toBe(true)
+    expect(s.spaces[spaceId]?.profileId, 'its profile').toBe(work)
+    expect(s.spaceOrder).not.toContain(spaceId)
+    const shown = s.windows[id]?.activeTab[spaceId] as string
+    expect(s.tabs[shown]?.url).toBe(url)
+    await waitTab(app, shown, new URL(url).pathname)
+    expect(await (await tabPage(app, new URL(url).pathname)).evaluate(() => document.cookie)).toContain('kept=yes')
+  }
+  // The page menu's Open Link in New Window.
+  await clickInPage(app, fx.url('/page/Session'), '#next', [], 'right')
+  await expect.poll(async () => (await pageMenu(app))?.labels ?? []).toContain('Open Link in New Window')
+  expect(await choosePageMenu(app, 'Open Link in New Window')).toBe(true)
+  await opened(3, fx.url('/page/Session-next'))
+  // ⇧-click, with Peek's own ⇧-click turned off in Settings (peek.md): then it opens a new window (NV-08).
+  await run(app, 'settings.update', { peekShiftClick: false })
+  await clickInPage(app, fx.url('/page/Session'), '#shifted', ['shift'])
+  await opened(4, fx.url('/page/SessionShifted'))
+})
+
+test('[TB-07][NV-11] tabs.recentlyClosed lists a private window’s closed tab to private windows only: not to a normal window, nor with no window', async () => {
+  const { app } = orbit
+  const mine = await newTab(app, fx.url('/page/ClosedHere'))
+  await waitTab(app, mine, '/page/ClosedHere')
+  await act(app, 'window.newPrivate')
+  await expect.poll(async () => (await windowList(app)).map((w) => w.kind)).toEqual(['main', 'private'])
+  const [normal, priv] = (await windowList(app)).map((w) => w.id) as [string, string]
+  const secret = await cmd<string>(app, 'tabs.create', { url: fx.url('/page/ClosedPrivately') }, 1)
+  await waitTab(app, secret, '/page/ClosedPrivately')
+  await cmd(app, 'tabs.close', { tabId: secret }, 1)
+  await cmd(app, 'tabs.close', { tabId: mine }, 0)
+  await expect.poll(async () => (await state(app)).tabs[secret]).toBeUndefined()
+  /** The command as a window sends it, or as main runs it with no window. */
+  const listed = async (windowId: string | null) =>
+    (
+      (await app.evaluate(
+        (_e, [w]) =>
+          (
+            globalThis as unknown as {
+              __orbit: { run: (n: string, a: unknown, w?: string) => Promise<unknown> }
+            }
+          ).__orbit.run('tabs.recentlyClosed', {}, w ?? undefined),
+        [windowId] as const,
+      )) as { tabId: string }[]
+    ).map((r) => r.tabId)
+  const fromNormal = await listed(normal)
+  expect(fromNormal).toContain(mine)
+  expect(fromNormal).not.toContain(secret)
+  const fromNone = await listed(null)
+  expect(fromNone).toContain(mine)
+  expect(fromNone).not.toContain(secret)
+  expect(await listed(priv)).toContain(secret)
 })
 
 // ---------- TB-05: the recent-tab switcher (⌃Tab) ----------
@@ -1566,7 +1835,8 @@ test('[FL-26][TB-05] the list appears in a frame at the second Tab, or after a h
       hold: heldList ? r.wall0 + heldList.run - held.wall : Number.POSITIVE_INFINITY,
     }
   }
-  const budget = FRAME_SLACK > 1 ? 3 : 2
+  // The spec's one frame, as the feel specs write it (feel-rows.spec.ts).
+  const budget = FRAME_SLACK > 1 ? 2 : 1
   // The list's first frame shows it before its fade's clock starts, so frame to frame the fade
   // reads one frame longer than it is (as feel-reduced.spec.ts allows).
   const fadeBudget = (100 + FRAME) * FRAME_SLACK
@@ -1833,30 +2103,38 @@ test('[FD-07][FL-12] a folder without an icon shows a folder in full colour, clo
   const fronts = () =>
     glyph.locator('.folder-glyph__front').evaluateAll((els) => els.map((el) => Number(getComputedStyle(el).opacity)))
   await expect.poll(fronts).toEqual([1, 0])
-  await settled(shell)
-  const rec = await record(shell, {
-    shut: `[data-folder-id="${folderId}"] .folder-glyph__shut`,
-    lid: `[data-folder-id="${folderId}"] .folder-glyph__lid`,
-  })
-  await shell.locator(`[data-folder-id="${folderId}"] [data-testid="folder-row"]`).first().click()
-  const r = await rec.until(600)
-  await expect.poll(fronts).toEqual([0, 1])
-  const fade = motionOf(
-    series(r, 'lid', (b) => b.opacity * 100),
-    1,
-  )
-  const both = r.frames.filter((f) => (f.els.lid?.opacity ?? 0) > 0.1 && (f.els.shut?.opacity ?? 0) > 0.1).length
+  // One round: the folder, closed, opened by a click. The time is judged on the best of up to three rounds (D46).
+  const round = async () => {
+    await cmd(app, 'folders.setCollapsed', { folderId, collapsed: true })
+    await expect.poll(fronts).toEqual([1, 0])
+    await settled(shell)
+    const rec = await record(shell, {
+      shut: `[data-folder-id="${folderId}"] .folder-glyph__shut`,
+      lid: `[data-folder-id="${folderId}"] .folder-glyph__lid`,
+    })
+    await shell.locator(`[data-folder-id="${folderId}"] [data-testid="folder-row"]`).first().click()
+    const r = await rec.until(600)
+    await expect.poll(fronts).toEqual([0, 1])
+    const fade = motionOf(
+      series(r, 'lid', (b) => b.opacity * 100),
+      1,
+    )
+    const both = r.frames.filter((f) => (f.els.lid?.opacity ?? 0) > 0.1 && (f.els.shut?.opacity ?? 0) > 0.1).length
+    return { travel: fade.travel, moving: fade.moving, both, took: (fade.end ?? 0) - (fade.start ?? 0) }
+  }
+  const { best, all } = await bestOf(round, (m) => m.moving >= 3 && m.both >= 1 && m.took <= 250 * FRAME_SLACK)
   note(
     'FD-07',
     'folder icon, closed → open: cross-fade, first to last changing frame',
-    (fade.end ?? 0) - (fade.start ?? 0),
+    best.took,
     'about 150 ms (FL-12)',
   )
+  // It ends open every time.
+  for (const m of all) expect(m.travel).toBeCloseTo(100, 0)
   // A cross-fade, not a swap: it changes over several frames, in some of which both show.
-  expect(fade.travel).toBeCloseTo(100, 0)
-  expect(fade.moving).toBeGreaterThanOrEqual(3)
-  expect(both).toBeGreaterThanOrEqual(1)
-  expect((fade.end ?? 0) - (fade.start ?? 0)).toBeLessThanOrEqual(250 * FRAME_SLACK)
+  expect(best.moving).toBeGreaterThanOrEqual(3)
+  expect(best.both).toBeGreaterThanOrEqual(1)
+  expect(best.took).toBeLessThanOrEqual(250 * FRAME_SLACK)
 })
 
 // ---------- TB-16: limits in the background beyond the sleep timer ----------
@@ -1901,6 +2179,41 @@ test('[TB-16] a tab in the background that keeps a core busy is frozen after thr
   // no page on screen: here the page keeps running. Without Playwright it stops at once.
   await cmd(app, 'tabs.activate', { tabId: busy })
   await expect.poll(async () => (await tabsHook<ResourceInfo>(app, 'resources')).frozen.includes(busy)).toBe(false)
+})
+
+test('[TB-16][PK-01] an open Peek’s page is on screen: kept busy, it is never frozen; low on memory, it never sleeps', async () => {
+  const { app } = orbit
+  const under = await newTab(app, fx.url('/page/UnderBusyPeek'))
+  await waitTab(app, under, '/page/UnderBusyPeek')
+  // Another site, so another process.
+  const url = fx.url('/page/BusyPeek').replace('//localhost:', '//127.0.0.1:')
+  const peek = await cmd<string>(app, 'peek.open', { url })
+  await expect.poll(focusedUrl).toBe(url)
+  await busyPage('/page/BusyPeek')
+  const pass = async () => {
+    await pause(1_000)
+    return tabsHook<ResourceInfo>(app, 'resources')
+  }
+  await tabsHook(app, 'resources')
+  let info = await pass()
+  expect(info.usage[peek]).toBeGreaterThanOrEqual(50)
+  // Three passes freeze a page in the background: a few more.
+  for (let i = 0; i < 4; i++) info = await pass()
+  expect(info.frozen).not.toContain(peek)
+  // Idle six minutes, with the system low on memory: tabs in the background sleep at once.
+  await tabsHook(app, 'clockAhead', 6 * 60_000)
+  expect((await tabsHook<ResourceInfo>(app, 'resources', { total: 8 * GB, available: 0.5 * GB })).lowMemory).toBe(true)
+  await tabsHook(app, 'maintenance')
+  expect(await overlayKind()).toBe('peek')
+  expect((await state(app)).tabs[peek]?.asleep).toBeFalsy()
+  expect(await liveTabs(app)).toContain(peek)
+  // The page area changes (the sidebar hidden and shown): the card follows it, its page still there.
+  await act(app, 'sidebar.toggle')
+  await act(app, 'sidebar.toggle')
+  await expect.poll(async () => Object.values((await state(app)).windows)[0]?.sidebar.visible).toBe(true)
+  await pause(500)
+  expect(orbit.takeUncaught(), "main's uncaught exceptions").toBe('')
+  expect((await tabsHook<ResourceInfo>(app, 'resources', null)).lowMemory).toBe(false)
 })
 
 test('[TB-16] when the system is low on memory, tabs idle five minutes in the background sleep at once, whatever the timer', async () => {

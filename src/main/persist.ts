@@ -142,11 +142,11 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
   if (typeof state.settings.libraryScreenshots !== 'boolean') {
     state.settings.libraryScreenshots = DEFAULT_SETTINGS.libraryScreenshots
   }
-  // A blank window's Space (TB-17) stays out of the Space order; one no window shows any more is
-  // gone, and its tabs with it (nothing else places them).
-  for (const [id, space] of Object.entries(state.spaces)) {
+  // A blank window's Space (TB-17) stays out of the Space order. One no window shows any more (a
+  // crash part-way through closing its window) is kept with its tabs: once Orbit has loaded, it goes
+  // and its tabs go to the Archive, as when its window closes (tabs/blank.ts).
+  for (const space of Object.values(state.spaces)) {
     if (space.blank !== true) delete space.blank
-    else if (!Object.values(state.windows).some((w) => w.spaceId === id)) delete state.spaces[id]
   }
   // spaceOrder must list exactly the existing spaces.
   state.spaceOrder = [...new Set(state.spaceOrder)].filter((id) => state.spaces[id] && !state.spaces[id].blank)

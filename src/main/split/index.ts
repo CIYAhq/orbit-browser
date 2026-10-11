@@ -23,6 +23,7 @@ import { isAwayFromPinned } from '../../shared/tabs'
 import { paletteFor } from '../../shared/theme'
 import { insertItem, locate, sectionOf, splitOfTab } from '../../shared/tree'
 import type { MainContext } from '../context'
+import { hiddenByImport } from '../import/unplaced'
 import { SPLIT_PANE_MENU_KEYS, withKeyHints } from '../keys/menu-hints'
 import type { CallContext } from '../registry'
 import { makeTab } from '../tabs/model'
@@ -139,6 +140,7 @@ export function registerSplit(ctx: MainContext): void {
   commands.register('split.create', ({ tabIds, orientation, focus }, c) => {
     const windowId = windowOf(c)
     const state = store.state
+    if (tabIds.some((id) => hiddenByImport(state, id))) return null
     const ordered = sidebarSorted(
       state,
       [...new Set(tabIds)].filter((id) => state.tabs[id]),
@@ -173,6 +175,7 @@ export function registerSplit(ctx: MainContext): void {
 
   commands.register('split.addTab', ({ tabId, target, side = 'right', focus = true }, c) => {
     const windowId = windowOf(c)
+    if (hiddenByImport(store.state, tabId) || hiddenByImport(store.state, target)) return null
     let result: ReturnType<typeof addPaneInDraft> = 'invalid'
     // A split row as the target: the new pane goes after its last pane (or before its first for 'left'/'top').
     const anchor = splitAnchor(store.state, target, side) ?? target
@@ -190,7 +193,7 @@ export function registerSplit(ctx: MainContext): void {
   commands.register('split.openUrl', ({ url, target, side = 'right', referrer }, c) => {
     const windowId = windowOf(c)
     const anchor = store.state.tabs[target]
-    if (!anchor) return null
+    if (!anchor || hiddenByImport(store.state, target)) return null
     if (leavesOf(store.state, splitOfTab(store.state, target)).length >= MAX_PANES) {
       ctx.toast(windowId, SPLIT_FULL_MESSAGE)
       return null

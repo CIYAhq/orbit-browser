@@ -127,10 +127,14 @@ function splitLeavesOf(state: OrbitState, tabId: TabId): TabId[] {
   return s ? splitLeaves(s.layout) : [tabId]
 }
 
-/** Tabs currently on screen: each window's selected tab, with all panes of its split view. */
+/**
+ * Tabs currently on screen: each window's selected tab, with all panes of its split view, and the page of its open
+ * Peek (so nothing freezes it or puts it to sleep while it shows, TB-16).
+ */
 export function displayedTabs(state: OrbitState): Set<TabId> {
   const out = new Set<TabId>()
   for (const win of Object.values(state.windows)) {
+    if (win.overlay.kind === 'peek' && state.tabs[win.overlay.tabId]) out.add(win.overlay.tabId)
     const id = win.activeTab[win.spaceId]
     if (!id || !state.tabs[id]) continue
     const split = splitOfTab(state, id)

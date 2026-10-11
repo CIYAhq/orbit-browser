@@ -9,9 +9,11 @@
  */
 import { animate, motionValue } from 'motion/react'
 import { isFolderId, isSplitId, isTabId } from '../../../../shared/ids'
+import { sidebarDropUrl } from '../../../../shared/link-drop'
 import { layoutLeaves, MAX_PANES, rowDropSide } from '../../../../shared/split'
 import type { ContainerRef, ItemId, OrbitState, SpaceId } from '../../../../shared/state'
 import { containerItems, locate, parseContainerKey, visibleTabOrder } from '../../../../shared/tree'
+import { engineForSpace } from '../../../../shared/url'
 import { invoke } from '../../api'
 import { EASE, REDUCED_SETTLE, reducedMotion, STANDARD, tween } from '../../motion'
 import { activeTabId } from '../../selectors'
@@ -908,11 +910,25 @@ export function endLinkDrag(): void {
   }, 500)
 }
 
+/** The room a drop opened closes with nothing in it: the rows spring back. */
+function closeRoom(): void {
+  useDrag.setState({ ...IDLE_DRAG, phase: 'cancelling' })
+  window.setTimeout(() => {
+    if (!linkSession && !session && useDrag.getState().phase === 'cancelling') useDrag.setState(IDLE_DRAG)
+  }, 500)
+}
+
 /**
- * The link `url` dropped at window point `x`, `y`: it opens as a tab where the room was, in the
- * same frame as the room closes (NV-08, TB-02). Elsewhere on the sidebar, at the top of Today.
+ * What a page's drag (`uriList`, `text`) dropped at window point `x`, `y` opens: a tab where the
+ * room was, in the same frame as the room closes (NV-08, TB-02); elsewhere on the sidebar, at the top
+ * of Today. What it may open there is `sidebarDropUrl`'s to say (D87): otherwise the room closes.
  */
-export async function dropLink(x: number, y: number, url: string, spaceId: SpaceId): Promise<void> {
+export async function dropLink(
+  x: number,
+  y: number,
+  dragged: { uriList: string; text: string },
+  spaceId: SpaceId,
+): Promise<void> {
   if (session) return
   linkDragOver(x, y)
   const s = linkSession
@@ -932,6 +948,13 @@ export async function dropLink(x: number, y: number, url: string, spaceId: Space
             ? { to: parseContainerKey(target.container), index: target.rawIndex, spaceId }
             : { spaceId }
   const to = place.to
+  const engine = engineForSpace(getOrbitState(), place.spaceId)
+  const kind = to?.kind === 'favorites' ? 'favorites' : to?.kind === 'folder' ? 'folder' : 'list'
+  const url = sidebarDropUrl(dragged.uriList, dragged.text, engine, kind)
+  if (!url) {
+    closeRoom()
+    return
+  }
   if (!to || target?.type === 'into') {
     useDrag.setState(IDLE_DRAG)
     // Into another Space it opens there out of sight, as a tab dropped on its icon moves there.
@@ -964,10 +987,7 @@ export async function dropLink(x: number, y: number, url: string, spaceId: Space
     // Refused (Favorites full: main says so): the room closes.
     landed = true
     unsubscribe()
-    useDrag.setState({ ...IDLE_DRAG, phase: 'cancelling' })
-    window.setTimeout(() => {
-      if (!linkSession && !session && useDrag.getState().phase === 'cancelling') useDrag.setState(IDLE_DRAG)
-    }, 500)
+    closeRoom()
     return
   }
   // The state with the tab comes before the answer; should it not, the room closes anyway.

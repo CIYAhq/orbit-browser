@@ -7,14 +7,12 @@ import {
 } from 'react'
 import { isBlankSpace } from '../../../../shared/blank'
 import { DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH } from '../../../../shared/defaults'
-import { pageMayOpen } from '../../../../shared/link-routing'
 import type { SpaceId, WindowState } from '../../../../shared/state'
-import { engineForSpace, parseInput } from '../../../../shared/url'
 import { invoke } from '../../api'
 import { DownloadsTray } from '../../downloads/DownloadsTray'
 import { importDroppedFile } from '../../import/sidebar'
 import { UpdateBanner } from '../../settings/UpdateBanner'
-import { getOrbitState, useOrbit } from '../../store'
+import { useOrbit } from '../../store'
 import { PrivateSidebar } from '../chrome/PrivateSidebar'
 import { MediaTray } from '../media/MediaTray'
 import { SpaceStrip } from '../spaces/SpaceStrip'
@@ -96,26 +94,17 @@ function onLinkDragOver(e: ReactDragEvent) {
 }
 
 function onLinkDrop(e: ReactDragEvent, spaceId: SpaceId) {
-  const uri = e.dataTransfer
-    .getData('text/uri-list')
-    .split('\n')
-    .find((l) => l && !l.startsWith('#'))
-  const text = uri?.trim() || e.dataTransfer.getData('text/plain').trim()
+  const uriList = e.dataTransfer.getData('text/uri-list')
+  const plain = e.dataTransfer.getData('text/plain')
+  const uri = uriList.split('\n').find((l) => l && !l.startsWith('#'))
+  const text = uri?.trim() || plain.trim()
   if (importDroppedFile(e, text, spaceId) || !text) {
     endLinkDrag()
     return
   }
   e.preventDefault()
-  // Text that is no address opens a search for it (TB-02).
-  const parsed = parseInput(text, engineForSpace(getOrbitState(), spaceId))
-  // Where it was dragged from isn't known, and a web page may have offered it: a local file's
-  // address opens only when typed or pasted (D49). The engine gives no address for a file dragged
-  // from the system.
-  if (!pageMayOpen(undefined, parsed.url)) {
-    endLinkDrag()
-    return
-  }
-  void dropLink(e.clientX, e.clientY, parsed.url, spaceId)
+  // What it opens, if anything, depends on where it lands (D87): `dropLink` asks `sidebarDropUrl`.
+  void dropLink(e.clientX, e.clientY, { uriList, text: plain }, spaceId)
 }
 
 /** Mouse back/forward buttons over the sidebar move between Spaces (SP-09). */

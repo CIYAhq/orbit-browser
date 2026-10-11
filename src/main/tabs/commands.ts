@@ -24,6 +24,7 @@ import {
 } from '../../shared/tree'
 import { engineForWindow, parseInput } from '../../shared/url'
 import type { MainContext } from '../context'
+import { guardImportTabs } from '../import/unplaced'
 import { KEEP_KEYBOARD } from '../keys/focus'
 import { TAB_MENU_KEYS, withKeyHints } from '../keys/menu-hints'
 import { printPage, savePage, viewSource } from '../pages/entry'
@@ -814,9 +815,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
         if (memory !== undefined) resources.memory = memory
         return resources.pass()
       },
-      importGuard: (on) => {
-        ops.guardImports = on
-      },
+      importGuard: (on) => guardImportTabs(on),
     }
     ;(globalThis as unknown as { __orbitTabs: TabTestHooks }).__orbitTabs = hooks
   }

@@ -8,8 +8,8 @@ import {
   parseLinkList,
   TOO_LARGE,
 } from '../../../shared/commands/import'
-import { pageMayOpen } from '../../../shared/link-routing'
-import { engineForSpace, parseInput } from '../../../shared/url'
+import { sidebarDropUrl } from '../../../shared/link-drop'
+import { engineForSpace } from '../../../shared/url'
 import { invoke } from '../api'
 import { useKeyboardFocus } from '../shell/sidebar/ui-state'
 import { getOrbitState } from '../store'
@@ -43,11 +43,11 @@ export function importDroppedFile(e: ReactDragEvent, text: string, spaceId: stri
       parsed = { kind: 'error', name: file.name, message: 'Orbit couldn’t read this file' }
     }
     if (parsed.kind === 'error' && text) {
-      const { url } = parseInput(text, engineForSpace(getOrbitState(), spaceId))
-      // As a dropped link (SidebarItems' onLinkDrop): a web page may have offered it, so a local
-      // file's address opens only when typed or pasted (D49, D58). The import window says why the
-      // file itself can't be read.
-      if (pageMayOpen(undefined, url)) {
+      // As a dropped link on the list (Sidebar's onLinkDrop): a web page may have offered it, so only a
+      // web address, or a search for text that is none, opens (D87; D49, D58). The import window says
+      // why the file itself can't be read.
+      const url = sidebarDropUrl('', text, engineForSpace(getOrbitState(), spaceId), 'list')
+      if (url) {
         await invoke('tabs.create', { url, spaceId })
         return
       }

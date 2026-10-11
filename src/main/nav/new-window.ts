@@ -3,14 +3,16 @@ import { createWindowState } from '../../shared/defaults'
 import { isPrivateWindow } from '../../shared/private'
 import type { SpaceId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
+import { blankSpace } from '../tabs/blank'
 import type { TabOps, TabPage } from '../tabs/ops'
 
 /**
  * A normal window showing `url` in a new tab at the top of Today (⇧-click, "Open Link in New
  * Window"; NV-08, NV-12). It shows the Space of the window the link came from, a step down and
  * right of it, in full screen when that one is (NV-10). Every normal window lists the same tabs
- * (TB-17), so the tab is in the other windows' sidebars too, shown only here. `page` is how the tab
- * gets its page, when not by loading the URL as typed (review B-F1).
+ * (TB-17), so the tab is in the other windows' sidebars too, shown only here. A blank window's link
+ * opens in a new blank window of its profile instead, so its page keeps its session (D88). `page`
+ * is how the tab gets its page, when not by loading the URL as typed (review B-F1).
  */
 export function openUrlInNewWindow(
   ctx: MainContext,
@@ -22,8 +24,11 @@ export function openUrlInNewWindow(
   const { store, windows } = ctx
   const state = store.state
   const from = fromWindowId ? state.windows[fromWindowId] : undefined
-  const spaceId: SpaceId | undefined =
-    from && from.kind === 'main' && !isPrivateWindow(state, from.id) && !isBlankWindow(state, from.id)
+  const blankProfile = from && isBlankWindow(state, from.id) ? state.spaces[from.spaceId]?.profileId : undefined
+  const blank = blankProfile ? blankSpace(blankProfile) : undefined
+  const spaceId: SpaceId | undefined = blank
+    ? blank.id
+    : from && from.kind === 'main' && !isPrivateWindow(state, from.id) && !isBlankWindow(state, from.id)
       ? from.spaceId
       : (Object.values(state.windows).find(
           (w) => w.kind === 'main' && !isPrivateWindow(state, w.id) && !isBlankWindow(state, w.id),
@@ -32,6 +37,7 @@ export function openUrlInNewWindow(
   const winState = createWindowState(spaceId)
   winState.bounds = windows.cascadeFrom(fromWindowId)
   store.update((d) => {
+    if (blank) d.spaces[blank.id] = blank
     d.windows[winState.id] = winState
   })
   ops.createTab({ url, spaceId, windowId: winState.id, activate: true, ...page })

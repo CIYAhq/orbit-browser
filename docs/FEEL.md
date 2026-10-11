@@ -245,10 +245,7 @@
   - Under load 3–4 the long lists still have frames of two intervals, so p99 is two intervals: 5 such frames per 200-tab fling, and 12 per 500-tab scroll (was 102).
   - The longest task during a first showing is 57 ms (was 258 ms).
   - Rows that aren't drawn leave no hole for a screen reader: every row says its place in its list and the list's size (`aria-posinset`, `aria-setsize`), and its depth. Arrow keys, Home and End walk every row, drawn or not (review M3). Three runs at load 2.2–3.
-- **FL-22:** built as FL-22 says, with three exceptions:
-  - toasts show at the bottom of the sidebar, not over the page card, so they are hidden with the sidebar;
-  - plain toasts let clicks through, and only a toast with a button holds on hover;
-  - they don't use the Space theme (AP-14).
+- **FL-22:** built as FL-22 says, with one exception: plain toasts let clicks through, and only a toast with a button holds on hover.
 - **FL-23:** audited, not changed. The pill shows at 150 ms, and never for a fast load.
 - **FL-25:** the folder search popover now shows in its first frame and closes with the quick fade. Before, it took 2 frames to show and was gone at once.
 - **FL-26:** built with TB-05's list (the finish-tabs lane). The first Tab opens the switcher in the overlay without drawing it. The list is drawn at the second Tab or after a 150 ms hold, and fades in over 90 ms (`--motion-instant`) with no slide. The highlight has no transition.

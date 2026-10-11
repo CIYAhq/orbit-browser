@@ -60,10 +60,11 @@ export const LINK_TARGETS_SCRIPT = `(() => {
 /**
  * The page's side of a sidebar row's link over one of its targets (TB-09). Orbit's rows drag with
  * the pointer, not with the system's drag and drop, so the page is told with the events a system
- * drag gives it, each carrying the link: \`dragenter\` and \`dragover\` while the row is over an element,
- * \`dragleave\` when it leaves, \`drop\` on release. A page that handles the drop itself (cancels it)
- * has it; otherwise the field gets the link typed in, as a drop from another app would. A dropped
- * link never navigates the page.
+ * drag gives it: \`dragenter\` and \`dragover\` while the row is over an element, \`dragleave\` when it
+ * leaves, \`drop\` on release. As in a system drag, only \`drop\` carries the link: before it the
+ * page sees its types with empty values, so a row only passing over a page tells it nothing. A page
+ * that handles the drop itself (cancels it) has it; otherwise the field gets the link typed in, as a
+ * drop from another app would. A dropped link never navigates the page. \`url\` is needed for 'drop' only.
  */
 export function linkDropScript(phase: LinkDropPhase, index: number, x: number, y: number, url: string): string {
   return `(() => {
@@ -72,8 +73,9 @@ export function linkDropScript(phase: LinkDropPhase, index: number, x: number, y
   if (!s) return false;
   const fire = (type, el) => {
     const data = new DataTransfer();
-    data.setData('text/uri-list', url);
-    data.setData('text/plain', url);
+    const value = type === 'drop' ? url : '';
+    data.setData('text/uri-list', value);
+    data.setData('text/plain', value);
     data.effectAllowed = 'copyLink';
     const event = new DragEvent(type, { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, dataTransfer: data });
     return !el.dispatchEvent(event);
@@ -219,7 +221,7 @@ export function registerLinkDrop(ctx: MainContext): void {
     // The point in the page's own pixels, as the page was drawn when asked.
     const px = (x - page.bounds.x) / page.zoom
     const py = (y - page.bounds.y) / page.zoom
-    const result = await run(page.contents, linkDropScript(phase, index, px, py, url))
+    const result = await run(page.contents, linkDropScript(phase, index, px, py, phase === 'drop' ? url : ''))
     if (phase === 'drop' && (result === 'page' || result === 'field') && !page.contents.isDestroyed()) {
       // The page that took the link has the keyboard, to send it on (Enter in a chat box); in a
       // split, its pane is the focused one, as after a click into it (SV-14).

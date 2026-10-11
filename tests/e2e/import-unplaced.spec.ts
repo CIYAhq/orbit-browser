@@ -216,6 +216,15 @@ test('[IM-14] a window that names a tab the import hasn’t shown gets nothing s
   expect
     .soft(await run(app, 'tabs.splitWith', { tabId: mine, target: other, side: 'left' }), 'splitWith onto it')
     .toBeNull()
+  // Into a split view by the split commands: made with it, added as a pane or as the pane added to, or a new page
+  // opened beside it. Into a Mini Window of its own.
+  expect.soft(await run(app, 'split.create', { tabIds: [mine, hidden] }), 'split.create').toBeNull()
+  expect.soft(await run(app, 'split.addTab', { tabId: other, target: mine }), 'split.addTab').toBeNull()
+  expect.soft(await run(app, 'split.addTab', { tabId: mine, target: other }), 'split.addTab onto it').toBeNull()
+  expect
+    .soft(await run(app, 'split.openUrl', { url: server.url('/beside'), target: hidden }), 'split.openUrl beside it')
+    .toBeNull()
+  expect.soft(await run(app, 'mini.fromTab', { tabId: hidden }), 'mini.fromTab').toBeNull()
   // Out to a window of its own; copied; its menu; closed or deleted (the Archive would list it); selected.
   expect.soft(await run(app, 'tabs.toNewWindow', { tabId: hidden }), 'toNewWindow').toBeNull()
   await expect.soft(run(app, 'tabs.duplicate', { tabId: hidden }), 'duplicate').rejects.toThrow('No such tab')
