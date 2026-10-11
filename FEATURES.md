@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 241 built (82 partial) · 330 tested · 0 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 242 built (81 partial) · 330 tested · 0 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 144 | 168 |
-| P1 | 219 | 82 | 145 |
+| P1 | 219 | 83 | 145 |
 | P2 | 79 | 15 | 17 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -217,7 +217,7 @@ Spec: `spec/split-view.md`
 | SV-20 | Swap and move panes | P2 | ✅ | ✅ e2e+unit | – | drag a pane by its strip grip: centre swaps, an edge moves it there (live preview); Move Pane Left/Right/Up/Down in the pane menu |
 | SV-21 | The split row in the sidebar | P0 | ✅ | ✅ e2e+unit | – | one row with a favicon+title segment per pane in reading order, segment click focuses; each segment shows its pane's audio and recording indicators (TB-15, MD-11), and a named row shows them after the name; a custom name and/or icon (picked from the split's menu, Change Icon…) replaces the segments: the icon stands in for the favicons, the pane titles stay unless named; the command bar lists an open split as one row (title: the name or the pane titles, every pane's favicon, label Split, hint Switch to split), found by any pane or its name, choosing it shows the split with the best-matching pane focused (tie: the pane used last); the panes' pages aren't offered again from history or the Archive, and the split on screen isn't offered at all, like the current tab |
 | SV-22 | The split as one unit: context menu | P1 | 🟡 partial | ✅ e2e+unit | – | split menu: rename, Change Icon… (emoji, removable), per-pane submenus (focus, mute, copy link, move out, close), flip, equalize, duplicate, pin/unpin, Add to Favorites, move to Space, Archive Tabs Below (in Today; greyed out on the last item), separate, close; Share is the spec's later phase and isn't built |
-| SV-23 | Pinned and Favorite splits | P1 | 🟡 partial | ✅ e2e+unit | – | pinning keeps panes/sizes/orientation; drops onto pinned tabs stay pinned; Favorite splits show a combined tile, or the split's custom icon (set from its menu), and drag like tiles; resetting every pane and Peek from pinned splits not built |
+| SV-23 | Pinned and Favorite splits | P1 | ✅ | ✅ e2e+unit | – | pinning keeps panes, sizes and orientation; drops onto pinned tabs stay pinned; each pane keeps its own pinned URL, and the split's menu (Reset to Pinned URLs) or a double-click on its Favorite tile brings every pane back (Reset Tab on one pane still resets that pane); a link to another site in either pane of a pinned or Favorite split opens a Peek over the split from that pane; Favorite splits show a combined tile (with the away dot when a pane wandered off), or the split's custom icon, and drag like tiles; a Favorite split keeps its focused pane across Spaces |
 | SV-24 | Splits persist | P0 | ✅ | ✅ e2e+unit | – | panes, order, orientation, sizes and focused pane survive relaunch; a Today split closed or auto-archived as one unit restores from the Archive as one unit, with its layout and sizes |
 | SV-25 | Limits and edge cases | P1 | ✅ | ✅ e2e+unit | – | fifth pane refused with a toast on every route; no split from an empty window; HTML full screen (core) fills the window, hides the strip and returns to the split |
 | SV-26 | Feel: create, resize, close | P1 | 🟡 partial | ✅ e2e+unit | – | springs for create/close/flip, closing card fades, 1:1 resize, drop indicator fade/slide, frame colour until loaded, split row entrance; a pane added while a pane closes, or while a neighbour still grows back, grows in from its edge beside the neighbour (PR #19 review F10); the sidebar's row merge (two rows into one, and back on separate) isn't built: it waits for the feel lane's sidebar list (PR #25) |

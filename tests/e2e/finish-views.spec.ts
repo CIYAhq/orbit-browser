@@ -12,6 +12,7 @@ import {
   state,
   viewPage,
 } from './helpers'
+import { blockNetwork, clickInTab, findPage, overlayOf, startSites } from './peek-helpers'
 
 /** Views lane follow-ups: the command bar, split view, Peek, Mini Windows and media. */
 
@@ -205,6 +206,117 @@ test('[SV-22][TD-05] a split row in Today offers Archive Tabs Below: the items u
   await row.click({ button: 'right' })
   await expect.poll(() => shownMenu(app)).toContain('Archive Tabs Below')
   expect(await clickShownMenu(app, 'Archive Tabs Below')).toBe(false)
+})
+
+// ---- Pinned and Favorite splits (SV-23) ----
+
+test('[SV-23][PN-04] a pinned split resets as one: every pane goes back to its own pinned page, from its menu or a double-click on its Favorite tile', async () => {
+  const { app, shell } = orbit
+  const a = await newTab('Alpha')
+  const b = await newTab('Bravo')
+  const splitId = (await run(app, 'split.create', { tabIds: [a, b] })) as string
+  const before = await state(app)
+  const home = [before.tabs[a]?.url, before.tabs[b]?.url]
+  const spaceId = before.tabs[a]?.spaceId as string
+  expect(await run(app, 'split.move', { splitId, to: { kind: 'pinned', spaceId } })).toBe(true)
+  const urls = async () => {
+    const t = (await state(app)).tabs
+    return [t[a]?.url, t[b]?.url]
+  }
+  await expect
+    .poll(async () => {
+      const t = (await state(app)).tabs
+      return [t[a]?.pinnedUrl, t[b]?.pinnedUrl]
+    })
+    .toEqual(home)
+  // Both panes wander off to other pages.
+  const wander = async () => {
+    await run(app, 'tabs.navigate', { tabId: a, url: fx.url('/page/Elsewhere%20A') })
+    await run(app, 'tabs.navigate', { tabId: b, url: fx.url('/page/Elsewhere%20B') })
+    await expect
+      .poll(async () => {
+        const t = (await state(app)).tabs
+        return [t[a]?.title, t[b]?.title]
+      })
+      .toEqual(['Elsewhere A', 'Elsewhere B'])
+  }
+  await wander()
+
+  // The split's menu brings both back (once the row has left Today for the pinned section).
+  await recordMenus(app)
+  const row = shell.locator(`[data-testid="split-row"][data-split-id="${splitId}"]`)
+  await expect(row).toHaveCount(1)
+  await row.click({ button: 'right' })
+  await expect.poll(() => shownMenu(app)).toContain('Reset to Pinned URLs')
+  expect(await clickShownMenu(app, 'Reset to Pinned URLs')).toBe(true)
+  await expect.poll(urls).toEqual(home)
+  // At home there's nothing to reset: the item is there but can't be chosen.
+  await app.evaluate(() => {
+    ;(globalThis as unknown as { __shownMenu?: unknown }).__shownMenu = undefined
+  })
+  await row.click({ button: 'right' })
+  await expect.poll(() => shownMenu(app)).toContain('Reset to Pinned URLs')
+  expect(await clickShownMenu(app, 'Reset to Pinned URLs')).toBe(false)
+
+  // As a Favorite, its tile shows that its panes wandered off, and a double-click brings both back.
+  const profileId = before.spaces[spaceId]?.profileId as string
+  expect(await run(app, 'split.move', { splitId, to: { kind: 'favorites', profileId } })).toBe(true)
+  const tile = shell.locator(`[data-testid="favorite-tile"][data-split-id="${splitId}"]`)
+  await expect(tile).toBeVisible()
+  await expect(tile.getByTestId('favorite-away')).toHaveCount(0)
+  await wander()
+  await expect(tile.getByTestId('favorite-away')).toHaveCount(1)
+  await tile.dblclick()
+  await expect.poll(urls).toEqual(home)
+  await expect(tile.getByTestId('favorite-away')).toHaveCount(0)
+})
+
+test('[SV-23][PK-02] a link to another site in either pane of a Favorite split opens a Peek from that pane; the split keeps its focus across Spaces', async () => {
+  const { app, shell } = orbit
+  const sites = await startSites()
+  try {
+    await blockNetwork(app)
+    const s = await state(app)
+    const win = Object.values(s.windows).find((w) => w.kind === 'main')
+    const profileId = s.spaces[win?.spaceId as string]?.profileId as string
+    const favorites = { kind: 'favorites', profileId }
+    const left = (await run(app, 'tabs.create', { url: sites.url('/site/Left'), container: favorites })) as string
+    const right = (await run(app, 'tabs.create', {
+      url: sites.url('/site/Right'),
+      container: favorites,
+      activate: false,
+    })) as string
+    expect(await run(app, 'split.addTab', { tabId: right, target: left, side: 'right', focus: false })).toBeTruthy()
+    await expect(shell.getByTestId('split-pane')).toHaveCount(2)
+    await expect.poll(() => activeTabId(app)).toBe(left)
+
+    // A click on the other pane's link: that pane takes the focus and the Peek opens from it.
+    const page = await findPage(app, '/site/Right')
+    const link = await page.locator('#other').boundingBox()
+    if (!link) throw new Error('no link')
+    await clickInTab(app, right, { x: link.x + link.width / 2, y: link.y + link.height / 2 })
+    await expect.poll(async () => (await overlayOf(app)).kind).toBe('peek')
+    const overlay = await overlayOf(app)
+    expect(overlay.kind === 'peek' ? overlay.sourceTabId : undefined).toBe(right)
+    const peekTab = overlay.kind === 'peek' ? overlay.tabId : ''
+    await expect.poll(async () => (await state(app)).tabs[peekTab]?.url).toBe(sites.other('/site/Other'))
+    const after = (await state(app)).tabs
+    expect(after[right]?.url).toBe(sites.url('/site/Right'))
+    expect(after[left]?.url).toBe(sites.url('/site/Left'))
+    await run(app, 'peek.close', {})
+    await expect.poll(async () => (await overlayOf(app)).kind).toBe('none')
+    await expect.poll(() => activeTabId(app)).toBe(right)
+
+    // Another Space and back: the split comes back with the same pane focused.
+    const other = (await run(app, 'spaces.create', { name: 'Elsewhere' })) as string
+    await expect.poll(async () => (await state(app)).windows[win?.id as string]?.spaceId).toBe(other)
+    await run(app, 'spaces.switch', { spaceId: win?.spaceId })
+    await expect.poll(async () => (await state(app)).windows[win?.id as string]?.spaceId).toBe(win?.spaceId)
+    await expect.poll(() => activeTabId(app)).toBe(right)
+    await expect(shell.getByTestId('split-pane')).toHaveCount(2)
+  } finally {
+    await sites.close()
+  }
 })
 
 // ---- The action catalogue (CB-13) ----

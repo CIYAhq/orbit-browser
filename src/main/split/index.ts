@@ -19,6 +19,7 @@ import {
   swapPanes,
 } from '../../shared/split'
 import type { ContainerRef, OrbitState, SplitId, SplitLayout, TabId, WindowId } from '../../shared/state'
+import { isAwayFromPinned } from '../../shared/tabs'
 import { paletteFor } from '../../shared/theme'
 import { insertItem, locate, sectionOf, splitOfTab } from '../../shared/tree'
 import type { MainContext } from '../context'
@@ -578,6 +579,17 @@ export function registerSplit(ctx: MainContext): void {
     })
   })
 
+  // A pinned or Favorite split resets as one (SV-23): each pane away from its own pinned page
+  // goes back to it, as one pinned tab's reset does (PN-04).
+  commands.register('split.reset', ({ splitId }, c) => {
+    const split = store.state.splits[splitId]
+    if (!split) return
+    for (const tabId of paneOrder(split.layout)) {
+      const tab = store.state.tabs[tabId]
+      if (tab && isAwayFromPinned(tab)) void commands.run('tabs.resetToPinned', { tabId }, { windowId: windowOf(c) })
+    }
+  })
+
   commands.register('split.addPane', ({ side = 'right' }, c) => addPane(windowOf(c), side))
 
   commands.register('split.move', ({ splitId, to, index }, c) =>
@@ -689,6 +701,16 @@ export function registerSplit(ctx: MainContext): void {
       items.push({
         label: 'Pin Split',
         click: () => void moveSplit(splitId, { kind: 'pinned', spaceId }, Number.MAX_SAFE_INTEGER, windowId),
+      })
+    }
+    if (section === 'pinned' || section === 'favorite') {
+      items.push({
+        label: 'Reset to Pinned URLs',
+        enabled: leaves.some((tabId) => {
+          const tab = state.tabs[tabId]
+          return !!tab && isAwayFromPinned(tab)
+        }),
+        click: () => void commands.run('split.reset', { splitId }, { windowId }),
       })
     }
     if (spaceId && section === 'pinned') {

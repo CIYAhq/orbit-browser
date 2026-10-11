@@ -53,6 +53,8 @@ export interface SplitCommands {
   'split.rename': { args: { splitId: SplitId; name: string | null }; result: void }
   /** Gives a split an emoji icon in place of its panes' favicons; null removes it (SV-21, SV-22). */
   'split.setIcon': { args: { splitId: SplitId; icon: string | null }; result: void }
+  /** Brings every pane of a pinned or Favorite split back to its own pinned page (SV-23). */
+  'split.reset': { args: { splitId: SplitId }; result: void }
   /** Right-click menu of a split row (SV-22). */
   'split.contextMenu': { args: { splitId: SplitId }; result: void }
   /** The split-controls menu of a pane (SV-12). */
