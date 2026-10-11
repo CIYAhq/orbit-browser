@@ -10,7 +10,7 @@ import { bestOf } from './frames'
 import { FRAME_SLACK, launchOrbit, MOD, type Orbit, state, tabPage, tabView } from './helpers'
 import { choosePageMenu, pageMenu, uiPageOf, windowState } from './nav-support'
 import { openSettings } from './settings-support'
-import { act, activeId, cmd, newTab, tab, tabsHook, waitTab } from './tabs-support'
+import { act, activeId, chooseRowMenu, cmd, newTab, rowMenu, tab, tabsHook, waitTab } from './tabs-support'
 
 // ---- Local media fixtures (on ports 3330–3349) ----
 
@@ -1550,42 +1550,6 @@ test('[MD-13][MD-14] leaving a call floats the participant with call controls; c
 
 // ---- Media in Split View (MD-01, MD-11) ----
 
-type ElectronMenu = { items: { label: string; enabled: boolean; submenu?: ElectronMenu | null; click: () => void }[] }
-
-/** From now on, native popup menus are recorded instead of shown (the split row's right-click menu). */
-async function recordMenus(app: ElectronApplication): Promise<void> {
-  await app.evaluate(({ Menu }) => {
-    const g = globalThis as unknown as { __shownMenu?: unknown }
-    Menu.prototype.popup = function popup(this: unknown) {
-      g.__shownMenu = this
-    }
-  })
-}
-
-/** The last recorded popup menu's items, as "Item > Subitem" paths. */
-function shownMenu(app: ElectronApplication): Promise<string[]> {
-  return app.evaluate(() => {
-    const walk = (m: ElectronMenu | null | undefined, prefix: string): string[] =>
-      (m?.items ?? []).flatMap((i) => [prefix + i.label, ...walk(i.submenu, `${prefix}${i.label} > `)])
-    return walk((globalThis as unknown as { __shownMenu?: ElectronMenu }).__shownMenu, '')
-  })
-}
-
-/** Clicks an item of the last recorded popup menu by its path; false when it is missing or disabled. */
-function clickShownMenu(app: ElectronApplication, path: string): Promise<boolean> {
-  return app.evaluate((_e, labels) => {
-    let menu = (globalThis as unknown as { __shownMenu?: ElectronMenu }).__shownMenu
-    let item: ElectronMenu['items'][number] | undefined
-    for (const label of labels.split(' > ')) {
-      item = menu?.items.find((i) => i.label === label)
-      menu = item?.submenu ?? undefined
-    }
-    if (!item?.enabled) return false
-    item.click()
-    return true
-  }, path)
-}
-
 /** A tab view's bounds once they stop changing (a new split lays its panes out with a spring). */
 async function stableView(app: ElectronApplication, shell: Page, tabId: string): Promise<Box> {
   let box: Box | undefined
@@ -1622,7 +1586,8 @@ test('[MD-11][TB-15] in a split, the split row menu mutes one pane on its own: o
   const { app, shell } = orbit
   const one = await openPlaying(app, '/media/audio/First%20Song')
   const two = await openPlaying(app, '/media/audio/Second%20Song')
-  expect(await cmd<string | null>(app, 'split.create', { tabIds: [one.id, two.id] })).toBeTruthy()
+  const splitId = await cmd<string | null>(app, 'split.create', { tabIds: [one.id, two.id] })
+  expect(splitId).toBeTruthy()
   const row = shell.getByTestId('split-row')
   const segment = (id: string) => row.locator(`[data-testid="split-segment"][data-tab-id="${id}"]`)
   await expect(row.getByTestId('split-segment')).toHaveCount(2)
@@ -1632,11 +1597,15 @@ test('[MD-11][TB-15] in a split, the split row menu mutes one pane on its own: o
     await expect(segment(t.id).getByRole('button', { name: 'Mute pane' })).toBeVisible()
   }
 
-  // Right-click the split row: each pane has its own entry, by its title, with Mute in it.
-  await recordMenus(app)
+  // Right-click the split row: each pane has its own entry, by its title, with Mute in it. The row's
+  // menu is Orbit's own, in the overlay (TB-14).
+  const shownMenu = async () => {
+    const menu = await rowMenu(app)
+    return menu?.key === splitId ? menu.labels : []
+  }
   await segment(one.id).locator('.split-segment__title').click({ button: 'right' })
-  await expect.poll(() => shownMenu(app)).toEqual(expect.arrayContaining(['First Song > Mute', 'Second Song > Mute']))
-  expect(await clickShownMenu(app, 'Second Song > Mute')).toBe(true)
+  await expect.poll(shownMenu).toEqual(expect.arrayContaining(['First Song > Mute', 'Second Song > Mute']))
+  expect(await chooseRowMenu(app, 'Second Song > Mute')).toBe(true)
 
   // Only that pane goes silent; both keep playing.
   await expect.poll(async () => (await tab(app, two.id))?.muted).toBe(true)
@@ -1650,8 +1619,8 @@ test('[MD-11][TB-15] in a split, the split row menu mutes one pane on its own: o
 
   // The same menu turns its sound back on.
   await segment(one.id).locator('.split-segment__title').click({ button: 'right' })
-  await expect.poll(() => shownMenu(app)).toContain('Second Song > Unmute')
-  expect(await clickShownMenu(app, 'Second Song > Unmute')).toBe(true)
+  await expect.poll(shownMenu).toContain('Second Song > Unmute')
+  expect(await chooseRowMenu(app, 'Second Song > Unmute')).toBe(true)
   await expect.poll(async () => (await tab(app, two.id))?.muted).toBeFalsy()
   expect(await audioMuted(app, two.id)).toBe(false)
 })
