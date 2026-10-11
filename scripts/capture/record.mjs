@@ -6,6 +6,10 @@
  *
  * Needs an ffmpeg with x11grab (set ORBIT_FFMPEG to its path) and a display:
  *   xvfb-run -a -s "-screen 0 1440x900x24" node scripts/capture/record.mjs <scenario> [--out clips/<scenario>.mp4] [--shots dir]
+ *     [--fps 30] [--port 3380]
+ *
+ * --fps sets the recording's frame rate (60 to judge motion frame by frame). --port is where the fixture
+ * server starts looking for a free port, so a capture can stay inside its own range.
  *
  * Scenarios live in scripts/capture/scenarios/<name>.mjs and export
  * `default async function (t)`; see helpers in `makeToolkit` below.
@@ -25,13 +29,17 @@ const opt = (name, fallback) => {
   return i >= 0 ? argv[i + 1] : fallback
 }
 if (!scenario) {
-  console.error('usage: record.mjs <scenario> [--out file.mp4] [--shots dir] [--size 1440x900]')
+  console.error(
+    'usage: record.mjs <scenario> [--out file.mp4] [--shots dir] [--size 1440x900] [--fps 30] [--port 3380]',
+  )
   process.exit(2)
 }
 const scenarioName = basename(scenario, '.mjs')
 const OUT = resolve(opt('out', `clips/${scenarioName}.mp4`))
 const SHOTS = opt('shots') ? resolve(opt('shots')) : undefined
 const [W, H] = opt('size', '1440x900').split('x').map(Number)
+const FPS = opt('fps', '30')
+const PORT = Number(opt('port', '3380'))
 const FFMPEG = process.env.ORBIT_FFMPEG ?? 'ffmpeg'
 const DISPLAY = process.env.DISPLAY
 if (!DISPLAY) throw new Error('No DISPLAY: run under xvfb-run')
@@ -85,7 +93,7 @@ main{padding:40px;max-width:1100px}h1{font-size:40px;margin:8px 0 6px;letter-spa
 </style></head><body><header><div class="logo"></div><b>${esc(name)}</b><nav><span>Home</span><span>Library</span><span>Settings</span></nav></header>
 <main><h1>${esc(name)}</h1><p class="lead">A local demo page for Orbit screen captures, served from 127.0.0.1.</p><div class="grid">${cards}</div></main></body></html>`)
   })
-  let port = 3380
+  let port = PORT
   await new Promise((ok, fail) => {
     server.on('error', (err) =>
       err.code === 'EADDRINUSE' && port < 3399 ? server.listen(++port, '127.0.0.1') : fail(err),
@@ -108,7 +116,7 @@ function startRecorder(file) {
       '-draw_mouse',
       '1',
       '-framerate',
-      '30',
+      FPS,
       '-video_size',
       `${W}x${H}`,
       '-i',
