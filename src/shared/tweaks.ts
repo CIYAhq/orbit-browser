@@ -110,8 +110,11 @@ export const DEFAULT_TWEAK_STYLE: TweakStyle = {
   hidden: [],
 }
 
-/** A new Tweak for a host, named after it (BO-01), on, with nothing changed yet. */
-export function newTweak(id: string, host: string, now: number): Tweak {
+/**
+ * A new Tweak for a host, named after it (BO-01), on, with nothing changed yet. `origin` is the page's
+ * it was made on (`tweakOriginOf`), for Open Site (BO-15).
+ */
+export function newTweak(id: string, host: string, now: number, origin = hostOrigin(host)): Tweak {
   return {
     id,
     host,
@@ -125,6 +128,7 @@ export function newTweak(id: string, host: string, now: number): Tweak {
     jsAllowed: true,
     jsInPrivate: false,
     style: { ...DEFAULT_TWEAK_STYLE, hidden: [] },
+    origin,
   }
 }
 
@@ -154,6 +158,27 @@ export function tweakHostOf(url: string | undefined | null): string | null {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
   const host = parsed.hostname.toLowerCase().replace(/\.$/, '')
   return isTweakHost(host) ? host : null
+}
+
+/** A host given by number: an IPv4 or IPv6 address. */
+const isIpHost = (host: string) => host.includes(':') || /^\d+(\.\d+){3}$/.test(host)
+const isLocalHost = (host: string) => host === 'localhost' || host.endsWith('.localhost') || isIpHost(host)
+
+/** Where Open Site goes for a host whose page origin isn't known (BO-15): https, or http on this device and for addresses by number. */
+export function hostOrigin(host: string): string {
+  return `${isLocalHost(host) ? 'http' : 'https'}://${host}`
+}
+
+/** The origin of a page a Tweak for `host` was made on (http or https, that host, any port); else the host's own. */
+export function tweakOriginOf(url: unknown, host: string): string {
+  if (typeof url === 'string' && tweakHostOf(url) === host) {
+    try {
+      return new URL(url).origin
+    } catch {
+      // Not an address: the host's own below.
+    }
+  }
+  return hostOrigin(host)
 }
 
 function normalizeHidden(raw: unknown): TweakHidden[] {
@@ -215,6 +240,7 @@ export function normalizeTweak(id: string, raw: unknown): Tweak | null {
     jsAllowed: bool(raw.jsAllowed, false),
     jsInPrivate: bool(raw.jsInPrivate, false),
     style: normalizeTweakStyle(raw.style),
+    origin: tweakOriginOf(raw.origin, host),
   }
 }
 
@@ -403,8 +429,6 @@ export function tweakIndex(tweaks: Record<string, Tweak>): Map<string, Tweak[]> 
   return index
 }
 
-const isIpHost = (host: string) => host.includes(':') || /^\d+(\.\d+){3}$/.test(host)
-
 /** Whether a host can have subdomains: not an address by number (BO-17). */
 export const subdomainsPossible = (host: string): boolean => !isIpHost(host)
 
@@ -436,6 +460,11 @@ export function tweaksFor(tweaks: Record<string, Tweak>, host: string | null): T
   }
   if (!out) return own ?? []
   return out.sort(byCreated)
+}
+
+/** Every Tweak for the Library's list (BO-15): by site, alphabetically, a site's oldest first. */
+export function tweaksByHost(tweaks: Record<string, Tweak>): Tweak[] {
+  return Object.values(tweaks).sort((a, b) => (a.host < b.host ? -1 : a.host > b.host ? 1 : byCreated(a, b)))
 }
 
 /** The Tweaks that apply to a host now: on, and Tweaks on as a whole (BO-16). */

@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 290 built (80 partial) · 376 tested · 74 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 292 built (80 partial) · 377 tested · 74 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 152 | 173 |
-| P1 | 219 | 118 | 177 |
+| P1 | 219 | 120 | 178 |
 | P2 | 79 | 20 | 26 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -450,13 +450,13 @@ Spec: `spec/boosts.md`
 | BO-12 | Name, rename and reset all edits | P1 | ✅ | ✅ e2e+unit | – | the title is the Tweak's name with a ▾ menu: Rename… edits it in place (Enter keeps, Esc cancels), Reset all edits… asks first, then clears colours, font, size, case, hidden elements and code; the name and switches stay. The menu works from the keyboard; Esc closes it, not the panel |
 | BO-13 | Shuffle (random style) | P2 | ✅ | ✅ e2e+unit | – | Shuffle in the name ▾ menu applies a random look live: any hue at a moderate strength, an accent a pleasing step away, sometimes inverted, one of the fonts, the site's size or a little larger, mostly the site's case. The menu stays open to shuffle again; hidden elements and code are never touched |
 | BO-14 | Enable / disable a customization (per site) | P1 | ✅ | ✅ e2e+unit | – | the site controls panel lists the site's Tweaks by name with a paintbrush, coloured when on and grey when off; the name turns one off or on at once, without a reload, each on its own, keeping all its settings; the › opens it in the editor. The address field's paintbrush shows in the accent colour while one is on and grey when all are off, and turns them all off or on |
-| BO-15 | Manage all customizations (list view in the Library) | P1 | – | – | – |  |
-| BO-16 | Global on/off switch for all customizations | P1 | – | ✅ unit | – |  |
+| BO-15 | Manage all customizations (list view in the Library) | P1 | ✅ | ✅ e2e+unit | – | the Library's Tweaks section lists every Tweak on this device by site, a site's oldest first: its name, its site (where the name doesn't say it, and "and its subdomains"), a JS badge where it has JavaScript (struck through where that isn't allowed on this device) and a switch that turns it off or on at once. Right-click or ⋯ (the Library's own menu): Edit shows the site's tab in the Space, or opens the site, and opens the editor once the page can take it; Open Site shows that tab, else opens a new tab where the Tweak was made (scheme, host and port); Rename… in place; Delete… asks first, and its styles leave open pages at once (its JavaScript's effects with their next load). Keys: up and down, Enter edits, Space switches, F2 renames, Delete asks, Shift+F10 opens the menu. The command bar's View Tweaks opens it. With none, a short explanation and Tweak This Site for the page underneath |
+| BO-16 | Global on/off switch for all customizations | P1 | ✅ | ✅ e2e+unit | – | Settings → Advanced: "Apply Tweaks on websites I visit", on by default. Off, every open page loses its Tweaks at once and the editor closes; the address field's paintbrush and the + menu's and the tab menu's New Tweak go; the command bar's says Tweaks are off; the site controls panel and the Library say so, the Library with Turn On. Each Tweak keeps its own on or off for when they are back on. The organisation policy is P2 and not built |
 | BO-17 | Scope: which pages a customization applies to | P1 | ✅ | ✅ e2e+unit | – | a Tweak is for its host's pages: any path, query and in-page navigation, not another host, the parent domain or a subdomain. "Also apply to subdomains" (off by default, at the panel's foot) brings in subdomains' open pages at once; it isn't offered for an address by number and is fixed while the page is on a subdomain it brings in. Every profile gets the same Tweaks; in a private window the CSS applies and the JavaScript runs only once "Also run in private windows" is ticked. Matching is a map lookup per label of the host |
 | BO-18 | How customizations apply on page load (timing, safety) | P1 | 🟡 partial | ✅ e2e+unit | – | the page preload asks main for the site's sheets before the page's first paint (D40), so no frame shows the page without its Tweak (frame-capture test on a slow page's hard reload and first visit); main swaps in its own copies at document ready. Survives reloads, back and forward, a reopened tab, a woken tab and a restart. JavaScript runs from main once per load at document ready, main frame only, where allowed (BO-11, BO-17): not again on an in-page navigation, never in a frame from another site; the Space colours come with BO-19 |
 | BO-19 | Use Space theme colours inside customization CSS | P2 | – | ✅ unit | – |  |
 | BO-20 | Sharing customizations and the customization gallery | P2 | – | ✅ e2e | – |  |
-| BO-21 | Customization commands in the command bar | P1 | 🟡 partial | ✅ e2e | – | in the command bar, none bound to a key: New Tweak… (also "customize", "customization", "site style"), Edit Tweak (the site's one in the editor; with several, the site controls list them to pick from; with none, a note says so), Turn Off and Turn On Tweaks for This Site (with a note). View Tweaks comes with BO-15, Export Tweak… with BO-20 |
+| BO-21 | Customization commands in the command bar | P1 | 🟡 partial | ✅ e2e | – | in the command bar, none bound to a key: New Tweak… (also "customize", "customization", "site style"), Edit Tweak (the site's one in the editor; with several, the site controls list them to pick from; with none, a note says so), Turn Off and Turn On Tweaks for This Site (with a note), View Tweaks (the Library's list, BO-15). Export Tweak… comes with BO-20 |
 | BO-22 | Legacy code-only customization builder | OOS | ⛔ out of scope | – | – | the spec leaves it out |
 
 ## Chrome extension support

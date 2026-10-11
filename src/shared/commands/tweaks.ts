@@ -110,6 +110,18 @@ export interface TweakCommands {
   'tweaks.setEnabled': { args: { id: string; enabled: boolean }; result: void }
   /** Deletes a Tweak (BO-15): its styles leave open pages at once. */
   'tweaks.delete': { args: { id: string }; result: void }
+  /**
+   * The Library's Open Site and Edit (BO-15): shows the Tweak's site in the calling window, in a tab
+   * of its Space already showing it (the shown one, else the one used last) or else a new tab at the
+   * origin the Tweak was made on, and closes the Library. With `edit`, the editor opens on the Tweak
+   * once the page can take it. False where it didn't get that far.
+   */
+  'tweaks.open': { args: { id: string; edit?: boolean }; result: boolean }
+  /**
+   * Tweaks on or off for every site (BO-16, Settings → Advanced). Off, no Tweak applies anywhere and
+   * no new one can be made; each Tweak keeps its own on or off for when they are back on.
+   */
+  'tweaks.setGlobal': { args: { enabled: boolean }; result: void }
   /** The editor panel's state, for its page as it starts (main pushes changes on `tweakEditor`). */
   'tweaks.editorState': { args: Record<string, never>; result: TweakEditorState }
   /** Closes the calling window's editor panel (✕, Done, Esc): every edit is already saved (BO-02). */
@@ -128,7 +140,7 @@ export interface TweakEvents {
 
 /**
  * Tweak actions (BO-21): in the command bar, assignable in Settings → Shortcuts, none bound by
- * default (BO-01). They act on the window's shown page.
+ * default (BO-01). They act on the window's shown page; View Tweaks opens the Library's list (BO-15).
  */
 export const TWEAK_ACTIONS: ActionDef[] = [
   {
@@ -164,5 +176,11 @@ export const TWEAK_ACTIONS: ActionDef[] = [
     title: 'Turn On Tweaks for This Site',
     category: 'Page',
     keywords: ['customize', 'customization', 'enable customizations', 'site style'],
+  },
+  {
+    id: 'tweak.view',
+    title: 'View Tweaks',
+    category: 'App',
+    keywords: ['customize', 'customizations', 'view customizations', 'site style', 'tweaks', 'library'],
   },
 ]

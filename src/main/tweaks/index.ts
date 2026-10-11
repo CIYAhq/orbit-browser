@@ -1,6 +1,6 @@
 import { newId } from '../../shared/ids'
 import { peekShown } from '../../shared/nav'
-import type { TabId, WindowId } from '../../shared/state'
+import type { Tab, TabId, Tweak, WindowId } from '../../shared/state'
 import {
   applyTweakPatch,
   clearTweak,
@@ -9,6 +9,7 @@ import {
   removeHidden,
   tweakAppliesTo,
   tweakHostOf,
+  tweakOriginOf,
   tweaksFor,
 } from '../../shared/tweaks'
 import type { MainContext } from '../context'
@@ -25,6 +26,9 @@ export const TWEAK_MESSAGES = {
   peek: 'Open the page in a tab to tweak it',
   none: 'This site has no Tweaks',
 } as const
+
+/** How long the Library's Edit waits for the Tweak's site to load before giving up (BO-15). */
+const OPEN_WAIT_MS = 20_000
 
 /** Test-only handle (ORBIT_E2E=1): globalThis.__orbitTweaks. */
 export interface TweakTestHooks {
@@ -104,7 +108,7 @@ export function registerTweaks(ctx: MainContext): void {
       return current.id
     }
     const id = newId('x')
-    const tweak = newTweak(id, host, Date.now())
+    const tweak = newTweak(id, host, Date.now(), tweakOriginOf(store.state.tabs[tabId]?.url, host))
     store.update((draft) => {
       draft.tweaks[id] = tweak
     })
@@ -183,6 +187,47 @@ export function registerTweaks(ctx: MainContext): void {
     })
   })
 
+  /** A tab of the window's Space on a Tweak's site: one shown, else the one used last. */
+  const siteTab = (windowId: WindowId, tweak: Tweak): TabId | null => {
+    const state = store.state
+    const spaceId = state.windows[windowId]?.spaceId
+    const shown = shownTabs(state, windowId)
+    let last: Tab | undefined
+    for (const tab of Object.values(state.tabs)) {
+      if (tab.spaceId !== spaceId || tab.error || !tweakAppliesTo(tweak, tweakHostOf(tab.url))) continue
+      if (shown.has(tab.id)) return tab.id
+      if (!last || tab.lastActiveAt > last.lastActiveAt) last = tab
+    }
+    return last?.id ?? null
+  }
+
+  commands.register('tweaks.open', async ({ id, edit }, c) => {
+    const tweak = store.state.tweaks[id]
+    const windowId = windowOf(c)
+    if (!tweak || !windowId || !store.state.windows[windowId]) return false
+    if (edit && !store.state.settings.tweaksEnabled) {
+      ctx.toast(windowId, TWEAK_MESSAGES.off)
+      return false
+    }
+    let tabId = siteTab(windowId, tweak)
+    if (!tabId) tabId = await commands.run('tabs.create', { url: `${tweak.origin}/` }, { windowId })
+    else if (!shownTabs(store.state, windowId).has(tabId)) await commands.run('tabs.activate', { tabId }, { windowId })
+    await commands.run('library.close', {}, { windowId })
+    if (!edit) return true
+    // A tab just made, woken or still waiting for its server: the editor opens once its page can take it.
+    if (!(await pages.whenTweakable(tabId, OPEN_WAIT_MS))) return false
+    // Unless the user moved on meanwhile.
+    if (!store.state.tweaks[id] || !shownTabs(store.state, windowId).has(tabId)) return false
+    return commands.run('tweaks.edit', { id, tabId }, { windowId })
+  })
+
+  commands.register('tweaks.setGlobal', ({ enabled }) => {
+    if (typeof enabled !== 'boolean') return
+    store.update((draft) => {
+      draft.settings.tweaksEnabled = enabled
+    })
+  })
+
   commands.register('tweaks.editorState', (_args, c) => editor.state(c.windowId))
   commands.register('tweaks.closeEditor', (_args, c) => {
     if (c.windowId) editor.close(c.windowId)
@@ -237,6 +282,10 @@ export function registerTweaks(ctx: MainContext): void {
   }
   actions.register('tweak.siteOff', ({ windowId }) => setSite(windowId, false))
   actions.register('tweak.siteOn', ({ windowId }) => setSite(windowId, true))
+  // The Library's list of every Tweak (BO-15).
+  actions.register('tweak.view', async ({ windowId }) => {
+    await commands.run('library.open', { section: 'tweaks' }, { windowId })
+  })
 
   if (ctx.e2e) {
     const hooks: TweakTestHooks = {

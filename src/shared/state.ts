@@ -490,6 +490,8 @@ export interface Tweak {
   jsInPrivate: boolean
   /** The no-code controls (BO-03 to BO-10). */
   style: TweakStyle
+  /** The origin it was made on (scheme, host and port): where the Library's Open Site goes (BO-15). */
+  origin: string
 }
 
 /** A Tweak's no-code controls; every field at its default changes nothing. */

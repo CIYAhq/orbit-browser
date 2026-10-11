@@ -55,6 +55,8 @@ export interface TweakPages {
   tweakable(tabId: TabId): boolean
   /** The host of a tab's page, where tweakable. */
   hostOf(tabId: TabId): string | null
+  /** True once a tab shows a page Tweaks can change (now, or as its preload asks); false after `ms`. */
+  whenTweakable(tabId: TabId, ms: number): Promise<boolean>
   /** Runs a Tweak's JavaScript in a tab's page now (BO-11's "Run now"); false where it may not run. */
   runNow(tabId: TabId, tweakId: string): boolean
   /** Shows one hidden element again for now, or none (BO-10's restore marker preview). */
@@ -76,6 +78,8 @@ export interface TweakPages {
 export function registerTweakPages(ctx: MainContext): TweakPages {
   const { store, sessions, tabs } = ctx
   const records = new Map<number, PageRecord>()
+  /** Waiting for a page to become tweakable (`whenTweakable`): each checks its tab as a page asks. */
+  const waiting = new Set<() => void>()
   const profiles = new WeakMap<Session, ProfileId>()
   sessions.onSessionCreated((ses, profileId) => profiles.set(ses, profileId))
 
@@ -241,6 +245,12 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
     record.scripted = false
     record.showHidden = undefined
     if (!host) return []
+    // After the answer: the page paints first.
+    if (waiting.size > 0) {
+      setImmediate(() => {
+        for (const check of [...waiting]) check()
+      })
+    }
     const parts = partsFor(store.state, record)
     record.adopted = parts.length > 0
     return parts.map((p) => p.css)
@@ -267,6 +277,23 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
   return {
     tweakable: (tabId) => !!recordOf(tabId),
     hostOf: (tabId) => recordOf(tabId)?.host ?? null,
+    whenTweakable: (tabId, ms) =>
+      new Promise<boolean>((resolve) => {
+        if (recordOf(tabId)) {
+          resolve(true)
+          return
+        }
+        const finish = (ok: boolean) => {
+          waiting.delete(check)
+          clearTimeout(timer)
+          resolve(ok)
+        }
+        const check = () => {
+          if (recordOf(tabId)) finish(true)
+        }
+        const timer = setTimeout(() => finish(false), ms)
+        waiting.add(check)
+      }),
     runNow: (tabId, tweakId) => {
       const record = recordOf(tabId)
       const state = store.state

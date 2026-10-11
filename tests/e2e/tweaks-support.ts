@@ -17,6 +17,8 @@ export interface TweakFixtures {
   url: (path: string, host?: string) => string
   /** Requests the server saw (host, method and path), newest last. */
   seen: () => string[]
+  /** From now on the home page (`/`) answers `ms` late, as a slow server does (0: at once). */
+  slowHome: (ms: number) => void
   close: () => Promise<void>
 }
 
@@ -56,6 +58,8 @@ const BLOCK_COLORS = ['#1f5fd6', '#18a058', '#c2410c', '#7c3aed']
  *   document is ready, as a page from a slow server does.
  * - `/look/<name>`: text (`#text`), an icon (`#icon`), code (`#code`), a photo (`#photo`, a solid
  *   PHOTO square) and a field (`#field`): what the colour, font and case controls change or keep.
+ * - `/`: a home page (`#title` "Home"), where the Library's Open Site goes (BO-15); `slowHome` makes
+ *   it late, so its page asks for its sheets only then.
  * - `/cards/<name>`: a counting button (`#count`); a sidebar (`aside.sidebar`) with a widget
  *   (`#weather`) and two small stories; a feed (`main.feed`) with a promo link (`#promo`) and four
  *   stories (`article.story`); three links (`li.story`). Stories are padded: a point just inside one's
@@ -65,6 +69,7 @@ const BLOCK_COLORS = ['#1f5fd6', '#18a058', '#c2410c', '#7c3aed']
 export async function startTweakFixtures(base = 3370): Promise<TweakFixtures> {
   const seen: string[] = []
   const loads = new Map<string, number>()
+  let homeMs = 0
   const server: Server = createServer((req, res) => {
     const u = new URL(req.url ?? '/', 'http://localhost')
     seen.push(`${req.headers.host ?? ''} ${req.method} ${u.pathname}${u.search}`)
@@ -143,6 +148,19 @@ ${['one', 'two', 'three', 'four'].map(story).join('\n')}
       res.on('close', () => clearTimeout(timer))
       return
     }
+    if (u.pathname === '/') {
+      const send = () => {
+        res.writeHead(200, ok)
+        res.end(`${head('Home', bg)}<body>${FIRST_FRAME}<h1 id="title">Home</h1></body></html>`)
+      }
+      if (homeMs <= 0) {
+        send()
+        return
+      }
+      const timer = setTimeout(send, homeMs)
+      res.on('close', () => clearTimeout(timer))
+      return
+    }
     res.writeHead(404, { 'content-type': 'text/plain' })
     res.end('not found')
   })
@@ -151,6 +169,9 @@ ${['one', 'two', 'three', 'four'].map(story).join('\n')}
     port,
     url: (path, host = 'localhost') => `http://${host}:${port}${path}`,
     seen: () => [...seen],
+    slowHome: (ms) => {
+      homeMs = ms
+    },
     close: () =>
       new Promise((resolve) => {
         server.closeAllConnections()

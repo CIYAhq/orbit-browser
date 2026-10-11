@@ -13,6 +13,7 @@ import {
   enabledTweaksFor,
   FONT_PRESETS,
   fontCss,
+  hostOrigin,
   invertAffine,
   isEmptyTweak,
   isSafeSelector,
@@ -26,8 +27,10 @@ import {
   tweakAppliesTo,
   tweakHostOf,
   tweakIndex,
+  tweakOriginOf,
   tweakScript,
   tweakSheets,
+  tweaksByHost,
   tweaksFor,
   withImportant,
   withThemeVariables,
@@ -271,6 +274,45 @@ describe('[BO-10] what Hide-element mode saves', () => {
     expect(removeHidden(t, 'h1', 11)).toBe(false)
     expect(t.style.hidden.some((h) => h.selector === '#promo')).toBe(false)
     expect(t.updatedAt).toBe(10)
+  })
+})
+
+describe('[BO-15] the Library’s list', () => {
+  it('lists by site, alphabetically, a site’s Tweaks oldest first', () => {
+    const all = record(
+      tweak('a', 'shop.example', {}, 1),
+      tweak('b', 'news.example', {}, 5),
+      tweak('c', 'news.example', {}, 2),
+      tweak('d', 'blog.example', {}, 9),
+    )
+    expect(tweaksByHost(all).map((t) => t.id)).toEqual(['d', 'c', 'b', 'a'])
+    expect(tweaksByHost({})).toEqual([])
+  })
+
+  it('keeps the origin a Tweak was made on, for Open Site; a site without one opens on https, or http on this device', () => {
+    expect(tweakOriginOf('http://shop.example:8080/cart?x=1#top', 'shop.example')).toBe('http://shop.example:8080')
+    expect(tweakOriginOf('https://Shop.Example./a', 'shop.example')).toBe('https://shop.example.')
+    // Another host's page, or no page: the host's own.
+    expect(tweakOriginOf('https://other.example/', 'shop.example')).toBe('https://shop.example')
+    expect(tweakOriginOf('file:///tmp/a.html', 'shop.example')).toBe('https://shop.example')
+    expect(tweakOriginOf(undefined, 'shop.example')).toBe('https://shop.example')
+    expect(hostOrigin('localhost')).toBe('http://localhost')
+    expect(hostOrigin('app.localhost')).toBe('http://app.localhost')
+    expect(hostOrigin('192.168.1.20')).toBe('http://192.168.1.20')
+    expect(hostOrigin('[::1]')).toBe('http://[::1]')
+    expect(newTweak('t', 'news.example', 1).origin).toBe('https://news.example')
+    expect(newTweak('t', 'localhost', 1, 'http://localhost:5173').origin).toBe('http://localhost:5173')
+    // Loaded: kept when it is the host's, else the host's own.
+    expect(normalizeTweak('x', { host: 'localhost', origin: 'http://localhost:5173' })?.origin).toBe(
+      'http://localhost:5173',
+    )
+    expect(normalizeTweak('x', { host: 'news.example', origin: 'https://evil.example' })?.origin).toBe(
+      'https://news.example',
+    )
+    expect(normalizeTweak('x', { host: 'news.example', origin: 'javascript:alert(1)' })?.origin).toBe(
+      'https://news.example',
+    )
+    expect(normalizeTweak('x', { host: 'news.example' })?.origin).toBe('https://news.example')
   })
 })
 
