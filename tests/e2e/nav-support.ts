@@ -64,9 +64,10 @@ const escapeHtml = (text: string) => text.replace(/[&<>"]/g, (c) => `&#${c.charC
  * again (#closepopup).
  * `background` is its CSS background; `text` goes in a paragraph (#text); `open` is a page it
  * opens in a pop-up as soon as it loads, without a click; `away` is the address of one more link
- * (#away).
+ * (#away); `wait` is the address of an image (#wait) the page waits for: a `/slow/` one keeps the
+ * page loading after its scripts have run.
  */
-function page(title: string, background = '#f2fbf5', text = '', open = '', away = ''): string {
+function page(title: string, background = '#f2fbf5', text = '', open = '', away = '', wait = ''): string {
   const name = encodeURIComponent(title)
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>${title}</title><link rel="icon" href="${ICON}">
@@ -80,6 +81,7 @@ ${away ? `<p><a id="away" href="${escapeHtml(away)}">Away</a></p>` : ''}
 <p><a id="download" href="/download/${name}.txt" target="_blank">Download</a>
 <button id="popup" onclick="window.__popup = window.open('/page/Popup-${name}', 'pop', 'width=420,height=360')">Pop-up</button>
 <button id="closepopup" onclick="window.__popup && window.__popup.close()">Close pop-up</button></p>
+${wait ? `<img id="wait" alt="" src="${escapeHtml(wait)}">` : ''}
 <div style="height:2000px"></div>
 <script>
 window.__keys = []
@@ -162,12 +164,13 @@ function tone(seconds: number): Buffer {
  * - `/slow-reload/<title>`: the page at once on the first request, then slowly (30 s) on reloads.
  * - `/page/<title>?open=<path>`: the page, opening `<path>` in a pop-up as it loads (no click).
  * - `/page/<title>?away=<url>`: the page with a link (#away) to `<url>`.
+ * - `/page/<title>?wait=<path>`: the page with an image from `<path>`, which it waits for.
  * - `/download/<name>`: a small text file sent as a download (Content-Disposition: attachment).
  * - `/cookies`: a page that sets two cookies for its host, `strict=1` (SameSite=Strict) and
  *   `lax=1` (SameSite=Lax).
  * - `/media/<title>`: a page with a video and a tone (see `mediaPage()`); `/tone.wav`: the tone.
  */
-export async function startNavFixtures(): Promise<NavFixtures> {
+export async function startNavFixtures(portBase = NAV_PORT_BASE, portLast = 3399): Promise<NavFixtures> {
   const hits = new Map<string, number>()
   const cacheControl = new Map<string, string | undefined>()
   const sentFrom = new Map<string, SentFrom[]>()
@@ -199,6 +202,7 @@ export async function startNavFixtures(): Promise<NavFixtures> {
           u.searchParams.get('text') ?? '',
           u.searchParams.get('open') ?? '',
           u.searchParams.get('away') ?? '',
+          u.searchParams.get('wait') ?? '',
         ),
       )
     }
@@ -253,12 +257,13 @@ export async function startNavFixtures(): Promise<NavFixtures> {
     sockets.add(socket)
     socket.on('close', () => sockets.delete(socket))
   })
-  // Everything the tests run stays within 3300–3399: the first free port from this suite's base.
-  const base = NAV_PORT_BASE + (Number(process.env.TEST_PARALLEL_INDEX ?? 0) % 10)
+  // Everything the tests run stays within 3300–3399 (or the range a suite asks for): the first free
+  // port from this suite's base.
+  const base = portBase + (Number(process.env.TEST_PARALLEL_INDEX ?? 0) % 10)
   await new Promise<void>((resolveListen, reject) => {
     let port = base
     server.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE' && port < 3399) server.listen(++port, '127.0.0.1')
+      if (err.code === 'EADDRINUSE' && port < portLast) server.listen(++port, '127.0.0.1')
       else reject(err)
     })
     server.listen(port, '127.0.0.1', () => resolveListen())

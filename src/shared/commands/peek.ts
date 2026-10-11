@@ -39,6 +39,8 @@ export interface PeekCommands {
   'mini.menu': { args: { menu: 'open-in' | 'profile'; x: number; y: number }; result: void }
   /** Window buttons of a Mini Window (its page is archived on close, MW-09). */
   'mini.control': { args: { op: 'close' | 'minimize' | 'maximize' }; result: void }
+  /** Gives the keyboard back to the Mini Window's page: Esc in its address field (KS-16, KS-20). */
+  'mini.focusPage': { args: Record<string, never>; result: void }
 }
 
 export interface PeekEvents {

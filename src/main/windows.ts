@@ -17,6 +17,8 @@ import type {
 import { paletteFor } from '../shared/theme'
 import { splitLeaves, splitOfTab } from '../shared/tree'
 import type { MainContext } from './context'
+import { KEEP_KEYBOARD } from './keys/focus'
+import { keyRouter } from './keys/router'
 import { focusIsEditable } from './nav/focus'
 import { fastSwitchPanes } from './split/layout'
 
@@ -168,6 +170,8 @@ export function uiWebPreferences(windowId: WindowId, view: RendererView): Electr
     nodeIntegration: false,
     spellcheck: false,
     additionalArguments: [`--orbit-window-id=${windowId}`, `--orbit-view=${view}`],
+    // A view that (re)loads never takes the keyboard (KS-16).
+    ...KEEP_KEYBOARD,
   }
 }
 
@@ -1080,10 +1084,28 @@ export class WindowManager {
   /** Global keyboard shortcuts: every Orbit-owned web contents routes key presses through the action map. */
   attachShortcuts(contents: WebContents): void {
     contents.on('before-input-event', (event, input) => {
+      // Settings → Shortcuts is recording a new binding here (keys lane, ST-08): the key runs nothing.
+      if (keyRouter.record(contents, () => this.windowIdFor(contents), input)) {
+        event.preventDefault()
+        return
+      }
       if (input.type !== 'keyDown') return
-      const action = actionForInput(input, process.platform)
+      // W while switching to a recent tab closes the highlighted tab (keys lane, KS-06).
+      if (keyRouter.switcherKey(input, () => this.windowIdFor(contents) ?? this.focusedWindowId())) {
+        event.preventDefault()
+        return
+      }
+      // Where the key was pressed may decide the action (keys lane: ⌘O opens a file outside a Peek, KS-12).
+      const action = keyRouter.actionIn(
+        actionForInput(input, process.platform),
+        () => this.windowIdFor(contents) ?? this.focusedWindowId(),
+      )
       if (!action || !this.ctx.actions.has(action.id)) {
         this.runOutsideText(contents, input)
+        return
+      }
+      // A web page may get the action's keys first (keys lane, KS-02, KS-16).
+      if (keyRouter.leaveToPage(contents, input, action, () => this.windowIdFor(contents) ?? this.focusedWindowId())) {
         return
       }
       event.preventDefault()

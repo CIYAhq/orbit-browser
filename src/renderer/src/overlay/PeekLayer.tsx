@@ -23,6 +23,7 @@ import {
 } from '../../../shared/peek-geometry'
 import type { OverlayState } from '../../../shared/state'
 import { invoke, perfMark } from '../api'
+import { useKeymap } from '../keys/live'
 import { REDUCED, reducedMotion } from '../motion'
 import './peek.css'
 
@@ -418,6 +419,8 @@ class PeekAnimator {
  * itself is a native view main keeps exactly on the card.
  */
 export function PeekLayer({ overlay }: { overlay: PeekOverlay }) {
+  // The buttons' tooltips follow remapped shortcuts (KS-18).
+  useKeymap()
   const backdropRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const controlsRef = useRef<HTMLDivElement>(null)

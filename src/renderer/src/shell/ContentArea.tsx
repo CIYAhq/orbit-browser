@@ -1,10 +1,10 @@
 import { Command } from 'lucide-react'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { formatAccelerator } from '../../../shared/actions'
 import { type DividerBox, layoutBoxes, layoutLeaves, leaf, nodeAt } from '../../../shared/split'
 import type { OrbitState, SplitLayout, WindowState } from '../../../shared/state'
 import { splitOfTab } from '../../../shared/tree'
 import { invoke } from '../api'
+import { useShortcutLabel } from '../keys/live'
 import { activeTabId } from '../selectors'
 import { useOrbit } from '../store'
 import { DROP_PANE, type DropPreview, dividerKey, FRAME_RADIUS, PaneEngine } from './split/engine'
@@ -205,14 +205,19 @@ function Divider({
 }
 
 function EmptyState() {
-  const shortcut = formatAccelerator(window.orbit.platform === 'darwin' ? 'Cmd+T' : 'Ctrl+T', window.orbit.platform)
+  // The New Tab shortcut as the user has it (KS-18).
+  const shortcut = useShortcutLabel('tab.new')
   return (
     <div className="pane pane--empty" data-testid="empty-state">
       <div className="frame__empty">
         <Command size={28} strokeWidth={1.4} />
-        <p>
-          Press <kbd>{shortcut}</kbd> to open a tab
-        </p>
+        {shortcut ? (
+          <p>
+            Press <kbd>{shortcut}</kbd> to open a tab
+          </p>
+        ) : (
+          <p>Open a tab from the sidebar</p>
+        )}
       </div>
     </div>
   )

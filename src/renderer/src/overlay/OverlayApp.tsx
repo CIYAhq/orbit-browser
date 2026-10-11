@@ -1,8 +1,10 @@
 import { AnimatePresence, domAnimation, LazyMotion } from 'motion/react'
 import { type CSSProperties, useEffect, useState } from 'react'
 import { DOWNLOADS_FLYOUT_PANEL } from '../../../shared/commands/downloads'
+import { SHORTCUT_SHEET } from '../../../shared/commands/keys'
 import { invoke } from '../api'
 import { DownloadsFlyout } from '../downloads/DownloadsFlyout'
+import { ShortcutSheet } from '../keys/ShortcutSheet'
 import { OrbitMotionConfig } from '../motion'
 import { isSpacePanel, SpacePanels } from '../shell/spaces/SpacePanels'
 import { useWindow } from '../store'
@@ -61,6 +63,9 @@ export function OverlayApp() {
           )}
           {overlay?.kind === 'panel' && overlay.panel === 'site-controls' && (
             <SiteControls key={overlay.nonce} overlay={overlay} dark={palette?.dark} />
+          )}
+          {overlay?.kind === 'panel' && overlay.panel === SHORTCUT_SHEET && (
+            <ShortcutSheet key={overlay.nonce} dark={palette?.dark} />
           )}
           {overlay?.kind === 'peek' && <PeekLayer key={overlay.nonce} overlay={overlay} />}
           {/* The downloads flyout (downloads lane, DL-14). */}

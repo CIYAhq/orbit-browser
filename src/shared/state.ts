@@ -342,6 +342,14 @@ export interface Settings {
   countFavoritesInShortcuts: boolean
   /** ⌘9 selects the last tab (true) or the 9th item (false) (TB-04). */
   lastTabOnCmd9: boolean
+  /**
+   * Key bindings the user changed on this device (KS-01, ST-08): action id → its whole list of
+   * bindings (accelerator strings; empty when every key was taken away). Actions not listed use
+   * their defaults. Kept by src/main/keys; never synced.
+   */
+  shortcuts?: Record<string, string[]>
+  /** Who gets an action's keys first when a page also handles them, where the user chose (KS-02). */
+  shortcutPriority?: Record<string, 'websites' | 'orbit'>
   /** Use graphics acceleration when available (ST-12). Takes effect at the next start. */
   hardwareAcceleration: boolean
   /** Secure DNS (ST-12): the engine's automatic upgrade, off, or always one DNS-over-HTTPS provider. */

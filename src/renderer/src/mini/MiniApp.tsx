@@ -4,6 +4,7 @@ import type { Tab } from '../../../shared/state'
 import { NEUTRAL_THEME, paletteFor } from '../../../shared/theme'
 import { displayHost } from '../../../shared/url'
 import { invoke, isMac, perfMark } from '../api'
+import { useShortcutLabel } from '../keys/live'
 import { activeTabId } from '../selectors'
 import { useOrbit, useWindow } from '../store'
 import { paletteVars, useDark } from '../theme'
@@ -20,6 +21,8 @@ const CARD_RADIUS = 10
  */
 export function MiniApp() {
   const win = useWindow()
+  // "Open in…" shows the shortcut that moves the page into a Space, as the user has it (MW-05, KS-18).
+  const moveShortcut = useShortcutLabel('peek.expand')
   const live = useOrbit((s) => {
     const id = win ? activeTabId(s, win.id) : null
     return id ? s.tabs[id] : undefined
@@ -93,7 +96,7 @@ export function MiniApp() {
             type="button"
             className="mini__pill mini__open-in"
             data-testid="mini-open-in"
-            title={`Move this page into a Space (${isMac ? '⌘O' : 'Ctrl+O'})`}
+            title={moveShortcut ? `Move this page into a Space (${moveShortcut})` : 'Move this page into a Space'}
             onClick={(e) => {
               const r = e.currentTarget.getBoundingClientRect()
               void invoke('mini.menu', { menu: 'open-in', x: r.left, y: r.bottom + 4 })
@@ -154,8 +157,11 @@ function AddressField({ url, onDone }: { url: string; onDone: () => void }) {
         onChange={(e) => setText(e.target.value)}
         onBlur={onDone}
         onKeyDown={(e) => {
+          // Esc gives the keyboard back to the page (KS-16). Not on blur: a click on the page has
+          // already moved it there.
           if (e.key === 'Escape') {
             e.preventDefault()
+            void invoke('mini.focusPage', {})
             onDone()
           }
         }}

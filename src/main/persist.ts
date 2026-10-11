@@ -19,6 +19,7 @@ import type { ItemId, OrbitState, ProfileId, SpaceId, SplitLayout, TabId } from 
 import { STATE_SCHEMA } from '../shared/state'
 import { normalizeSpaceTheme } from '../shared/theme'
 import { fallbackTitle } from '../shared/url'
+import { normalizeKeySettings } from './keys/bindings'
 import { normalizeSettingsPrefs } from './settings/normalize'
 import type { Store } from './store'
 
@@ -169,6 +170,7 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
   }
   normalizeDownloads(state)
   normalizeSettingsPrefs(state)
+  normalizeKeySettings(state.settings, process.platform)
   return state
 }
 

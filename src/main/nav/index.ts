@@ -6,6 +6,7 @@ import { historyEntryLabel, historyMenuIndexes, shownTabId } from '../../shared/
 import { isPrivateTab, isPrivateWindow } from '../../shared/private'
 import type { TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
+import { escapeThenStop } from '../keys/escape'
 import type { CallContext } from '../registry'
 import type { TabOps, TabPage } from '../tabs/ops'
 import { type LinkPillInfo, registerLinkPill } from './link-pill'
@@ -344,16 +345,24 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
   registerPageBridge(ctx, permissions)
 
   ctx.hooks.tabCreated.push((tabId, contents) => {
-    // Esc stops a loading page (NV-04). The page still gets the key; an open overlay (command bar,
-    // find bar, Peek) holds keyboard focus and takes Esc before the page could see it (KS-19).
+    // Esc stops a loading page (NV-04), unless the page uses it: the page gets the key first, and
+    // Orbit stops the load once the page's preload says no handler took it (D59, keys lane). An
+    // open overlay (command bar, find bar, Peek) holds keyboard focus and takes Esc before the page
+    // could see it (KS-19).
     contents.on('before-input-event', (_event, input) => {
       if (input.type !== 'keyDown' || input.key !== 'Escape') return
       if (input.meta || input.control || input.alt || input.shift) return
       if (!store.state.tabs[tabId]?.loading) return
       const windowId = windows.windowOfTab(tabId)
       if (windowId && store.state.windows[windowId]?.overlay.kind !== 'none') return
-      pending.markStopped(tabId)
-      contents.stop()
+      escapeThenStop(
+        contents,
+        () => !!store.state.tabs[tabId]?.loading,
+        () => {
+          pending.markStopped(tabId)
+          contents.stop()
+        },
+      )
     })
     // The mouse's back/forward buttons over a page need nothing here: the page itself goes back or
     // forward one entry on release (Chromium), unless it handles the buttons (NV-01). Over the

@@ -387,8 +387,11 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
   // ---- Recently Closed (AR-09) ----
 
   const reopenAction = ACTIONS_BY_ID['tab.reopenClosed']
-  const reopenShortcut = reopenAction ? shortcutsFor(reopenAction, process.platform)[0] : undefined
-  const reopenKey = reopenShortcut ? toElectronAccelerator(reopenShortcut) : undefined
+  // Read as the menu opens: the user may have remapped it (KS-01, KS-18).
+  const reopenKeyNow = () => {
+    const shortcut = reopenAction ? shortcutsFor(reopenAction, process.platform)[0] : undefined
+    return shortcut ? toElectronAccelerator(shortcut) : undefined
+  }
   // The app menu's Recently Closed submenu follows the list (macOS has the only app menu).
   watchRecentlyClosed(ctx, () => {
     if (process.platform === 'darwin') installMenu(ctx)
@@ -397,6 +400,7 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
     const windowId = windowOf(c)
     await refreshRecentlyClosed(ctx)
     const list = recentlyClosedItems(ctx, () => windowId)
+    const reopenKey = reopenKeyNow()
     const items: MenuItemConstructorOptions[] = [
       ...list,
       { type: 'separator' },

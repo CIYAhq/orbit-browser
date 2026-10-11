@@ -1,4 +1,5 @@
 import { actionForInput } from '../../shared/actions'
+import { followKeymap, recordingKeys } from './keys/live'
 
 /**
  * Fallback shortcut router for Orbit's own UI pages. Real key presses are
@@ -7,10 +8,13 @@ import { actionForInput } from '../../shared/actions'
  * input from automation) is mapped through the same keymap.
  */
 export function installShortcutFallback(): void {
+  // This page's hints and this fallback use the user's bindings (KS-01).
+  followKeymap()
   window.addEventListener(
     'keydown',
     (e) => {
-      if (e.defaultPrevented || e.isComposing) return
+      // Settings → Shortcuts takes the keys while it records a new binding (ST-08).
+      if (e.defaultPrevented || e.isComposing || recordingKeys()) return
       const action = actionForInput(
         { key: e.key, code: e.code, meta: e.metaKey, control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey },
         window.orbit.platform,

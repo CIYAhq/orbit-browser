@@ -649,6 +649,12 @@ export function registerMiniWindow(ctx: MainContext): void {
     if (items.length === 0) return
     Menu.buildFromTemplate(items).popup({ window: mini.win, x: Math.round(x), y: Math.round(y) })
   })
+  // Esc in the address field: the keyboard goes back to the page, which had it before ⌘L (KS-16, KS-20).
+  commands.register('mini.focusPage', (_args, c) => {
+    const mini = miniOf(c)
+    const contents = mini?.tabId ? tabs.contents(mini.tabId) : undefined
+    if (contents && !contents.isDestroyed()) contents.focus()
+  })
   commands.register('mini.control', ({ op }, c) => {
     const mini = miniOf(c)
     if (!mini || mini.win.isDestroyed()) return
@@ -674,12 +680,25 @@ export function registerMiniWindow(ctx: MainContext): void {
   actions.register('mini.toggleAll', toggleAll)
 
   // In a Mini Window, keys act on its page; sidebar, Space and tab-list keys do nothing (KS-20).
-  const APP_ACTIONS = new Set(['window.new', 'window.newMini', 'window.newPrivate', 'app.settings', 'app.archive'])
+  // Help → Keyboard Shortcuts, File → Open File… and the Library's keys (⌘Y / Ctrl+H for History,
+  // ⌘⇧L) act in the browser window behind (OB-12, KS-12, AR-10, keys lane).
+  const APP_ACTIONS = new Set([
+    'window.new',
+    'window.newMini',
+    'window.newPrivate',
+    'app.settings',
+    'app.archive',
+    'app.history',
+    'app.library',
+    'help.shortcuts',
+    'file.open',
+  ])
   actions.intercept((id, c) => {
     const mini = miniOf(c)
     if (!mini) return false
     switch (id) {
       case 'tab.close':
+      case 'window.close':
         closeWindow(mini)
         return true
       case 'peek.expand':
@@ -689,6 +708,8 @@ export function registerMiniWindow(ctx: MainContext): void {
         if (mini.tabId) send(mini, 'mini:choose-space')
         return true
       case 'url.edit':
+        // The keyboard goes to the address field too: the page had it (KS-20, keys lane).
+        if (!mini.win.isDestroyed()) mini.win.webContents.focus()
         send(mini, 'mini:edit-url')
         return true
       case 'tab.new': {
