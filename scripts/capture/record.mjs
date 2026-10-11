@@ -121,13 +121,13 @@ async function startFixtures() {
 :root{color-scheme:light}body{font:16px/1.55 system-ui,sans-serif;margin:0;background:#fafafa;color:#1d1d1f}
 header{display:flex;align-items:center;gap:12px;padding:18px 40px;background:#fff;border-bottom:1px solid #eee}
 header .logo{width:30px;height:30px;border-radius:8px;background:${accent}}header b{font-size:18px}
-header nav{margin-left:auto;display:flex;gap:22px;color:#666;font-size:14px}
+header nav{margin-left:auto;display:flex;gap:22px;color:#666;font-size:14px}header nav a{color:inherit;text-decoration:none}
 main{padding:40px;max-width:1100px}h1{font-size:40px;margin:8px 0 6px;letter-spacing:-0.02em}
 .lead{color:#555;max-width:60ch;margin:0 0 28px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
 .card{background:#fff;border:1px solid #eee;border-radius:14px;padding:18px}.card h3{margin:10px 0 4px;font-size:16px}
 .card p{margin:0;color:#666;font-size:14px}.dot{width:36px;height:36px;border-radius:10px;background:${accent}}
 a.file{color:inherit;text-decoration:none}a.file:hover{border-color:${accent}}
-</style></head><body><header><div class="logo"></div><b>${esc(name)}</b><nav><span>Home</span><span>Library</span><span>Settings</span></nav></header>
+</style></head><body><header><div class="logo"></div><b>${esc(name)}</b><nav><a href="/Updates">Updates</a><a href="/Team">Team</a><a href="/About">About</a></nav></header>
 <main><h1>${esc(name)}</h1><p class="lead">A local demo page for Orbit screen captures, served from 127.0.0.1.</p><div class="grid">${cards}</div></main></body></html>`
     const timer = setTimeout(() => {
       waits.delete(timer)
