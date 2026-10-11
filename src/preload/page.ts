@@ -14,6 +14,12 @@
  * nothing. See `exposeInternalPage`.
  *
  * In every page's main frame, it also tells main whether the page used an Esc (D59, `watchEscape`).
+ *
+ * In a web page's main frame, the page's `alert`, `confirm` and `prompt` ask main, which shows
+ * Orbit's dialog over that page only (NV-24): Electron has no `prompt`, and shows the others as
+ * app-wide boxes. A frame has no preload (D40), so a dialog a frame asks for itself is the engine's
+ * own box (and a frame's `prompt` returns null). It also answers main about the leave-page warning
+ * (`exposeLeave`).
  */
 import { contextBridge, ipcRenderer } from 'electron'
 import type { OrbitBridge, StatePatch } from '../shared/rpc'
@@ -40,7 +46,7 @@ const notificationClicked = () => {
  * the page's globals). Built-ins are taken up front, so a page that replaces them later can't reach
  * Orbit's functions through them.
  */
-function patchPage(stateOf: StateOf, clicked: () => void) {
+function patchPage(stateOf: StateOf, clicked: () => void, ask: AskDialog) {
   // Calls go through the captured `apply`, never a function's own `.call`: a page that replaces
   // `Function.prototype.call` (or `Reflect.apply`) would otherwise receive Orbit's functions.
   const apply = Reflect.apply
@@ -132,6 +138,166 @@ function patchPage(stateOf: StateOf, clicked: () => void) {
       })
     }
   }
+
+  // alert, confirm and prompt: Orbit's dialog over this page (NV-24). The arguments convert as the
+  // engine's do (a template literal throws on a Symbol, as DOMString does); `confirm` and `prompt`
+  // take "" for a missing or undefined argument, `alert` only for a missing one.
+  const asText = (args: unknown[], at: number, optional: boolean): string =>
+    args.length <= at || (optional && args[at] === undefined) ? '' : `${args[at]}`
+  const answers: Record<'alert' | 'confirm' | 'prompt', (args: unknown[]) => unknown> = {
+    alert: (args) => {
+      ask('alert', asText(args, 0, false), '')
+      return undefined
+    },
+    confirm: (args) => ask('confirm', asText(args, 0, true), '') === true,
+    prompt: (args) => {
+      const value = ask('prompt', asText(args, 0, true), asText(args, 1, true))
+      return typeof value === 'string' ? value : null
+    },
+  }
+  for (const name of ['alert', 'confirm', 'prompt'] as const) {
+    const native = window[name]
+    const own = describe(window, name)
+    if (typeof native !== 'function' || !own?.configurable) continue
+    const answer = answers[name]
+    // A Proxy keeps the engine's name, length and toString.
+    define(window, name, { ...own, value: new Proxy(native, { apply: (_target, _self, args) => answer(args) }) })
+  }
+}
+
+type AskDialog = (kind: 'alert' | 'confirm' | 'prompt', message: string, value: string) => unknown
+
+/** Set while the page is going (beforeunload, pagehide, unload): the engine shows no dialog then. */
+let dismissing = false
+
+const askDialog: AskDialog = (kind, message, value) => {
+  if (dismissing) return null
+  try {
+    return ipcRenderer.sendSync(PAGE_CHANNEL.dialog, kind, message, value)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The engine ignores `alert`, `confirm` and `prompt` while a page is going: so does Orbit's dialog.
+ * These listeners come before the page's, so the flag is up for all of its handlers.
+ */
+function watchDismissal(): void {
+  for (const type of ['beforeunload', 'pagehide', 'unload']) {
+    window.addEventListener(
+      type,
+      (event) => {
+        if (!event.isTrusted) return
+        dismissing = true
+        // A navigation the warning stopped leaves the page as it was.
+        setTimeout(() => {
+          dismissing = false
+        }, 0)
+      },
+      true,
+    )
+  }
+  window.addEventListener('pageshow', () => {
+    dismissing = false
+  })
+}
+
+interface StoppedNavigation {
+  url: string
+  type: string
+  /** The form a submission came from, and its submit button. */
+  form?: WeakRef<HTMLFormElement>
+  submitter?: WeakRef<HTMLElement>
+}
+
+/**
+ * The leave-page warning (NV-24), asked from main in this preload's own world, where the page can't
+ * see or replace it (src/main/pages/leave.ts): `globalThis.__orbitLeave` there.
+ *
+ * - `probe()`: whether the page would warn before it goes, where Orbit closes or discards a page
+ *   itself (closing a tab or a window, auto-archive), since the engine runs the real `beforeunload`
+ *   only for navigations. As Chromium, only a page that has had a user gesture warns, and only if
+ *   its handlers cancel the event or set a `returnValue`. The handlers see an untrusted event, and
+ *   their dialogs are ignored, as during the real one.
+ * - `stopped()`: what the page's own navigation that a warning just stopped was (`reload`, `push`,
+ *   `replace`, `traverse`), or "" when there is none this frame knows of: a navigation is known
+ *   here from the Navigation API's `navigate` event, which comes just before `beforeunload`.
+ * - `redo()`: starts that navigation again (the user chose Leave; main lets the next warning
+ *   through): a link or `location` loads its URL, a form is submitted again, a reload reloads.
+ */
+function exposeLeave(): void {
+  const nav = (window as { navigation?: EventTarget }).navigation
+  /** The last cross-document navigation the page started, until its task ends. */
+  let starting: StoppedNavigation | null = null
+  /** The navigation the last real `beforeunload` was for. */
+  let stopped: StoppedNavigation | null = null
+  nav?.addEventListener('navigate', (event) => {
+    const e = event as Event & {
+      destination?: { url?: string; sameDocument?: boolean }
+      navigationType?: string
+      formData?: FormData | null
+      sourceElement?: Element | null
+    }
+    if (!e.destination?.url || e.destination.sameDocument) return
+    const source = e.sourceElement ?? null
+    const form = e.formData
+      ? source instanceof HTMLFormElement
+        ? source
+        : (source as HTMLButtonElement | null)?.form
+      : null
+    starting = {
+      url: e.destination.url,
+      type: e.navigationType ?? 'push',
+      ...(form ? { form: new WeakRef(form) } : {}),
+      ...(form && source instanceof HTMLElement && source !== form ? { submitter: new WeakRef(source) } : {}),
+    }
+    setTimeout(() => {
+      starting = null
+    }, 0)
+  })
+  window.addEventListener(
+    'beforeunload',
+    (event) => {
+      if (event.isTrusted) stopped = starting
+    },
+    true,
+  )
+  const probe = (): boolean => {
+    if (!navigator.userActivation?.hasBeenActive) return false
+    const event = document.createEvent('BeforeUnloadEvent')
+    event.initEvent('beforeunload', false, true)
+    const was = dismissing
+    dismissing = true
+    try {
+      window.dispatchEvent(event)
+    } finally {
+      dismissing = was
+    }
+    return event.defaultPrevented || (typeof event.returnValue === 'string' && event.returnValue !== '')
+  }
+  const redo = (): boolean => {
+    const again = stopped
+    stopped = null
+    if (!again || again.type === 'traverse') return false
+    if (again.type === 'reload') location.reload()
+    else if (again.form) {
+      const form = again.form.deref()
+      const submitter = again.submitter?.deref()
+      if (!form?.isConnected) return false
+      try {
+        form.requestSubmit((submitter as HTMLButtonElement | undefined)?.form === form ? submitter : null)
+      } catch {
+        // The form changed: the user submits it again.
+        return false
+      }
+    } else if (again.type === 'replace') location.replace(again.url)
+    else location.assign(again.url)
+    return true
+  }
+  Object.defineProperty(globalThis, '__orbitLeave', {
+    value: Object.freeze({ probe, stopped: () => stopped?.type ?? '', redo }),
+  })
 }
 
 type PatchListener = (seq: number, patches: StatePatch[]) => void
@@ -222,8 +388,12 @@ if (location.protocol === 'orbit:') {
   }
 } else {
   try {
-    contextBridge.executeInMainWorld({ func: patchPage, args: [permissionState, notificationClicked] })
+    contextBridge.executeInMainWorld({ func: patchPage, args: [permissionState, notificationClicked, askDialog] })
   } catch {
     // A page without its own world to patch keeps the engine's answers.
+  }
+  if (window.top === window) {
+    watchDismissal()
+    exposeLeave()
   }
 }

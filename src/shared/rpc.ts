@@ -19,6 +19,7 @@ import type { ImportCommands } from './commands/import'
 import type { KeyCommands } from './commands/keys'
 import type { MediaCommands, MediaEvents } from './commands/media'
 import type { NavCommands } from './commands/nav'
+import type { PagesCommands } from './commands/pages'
 import type { PeekCommands, PeekEvents } from './commands/peek'
 import type { SettingsCommands } from './commands/settings'
 import type { SpaceCommands } from './commands/spaces'
@@ -43,7 +44,8 @@ export interface OrbitCommands
     ImportCommands,
     NavCommands,
     MediaCommands,
-    KeyCommands {}
+    KeyCommands,
+    PagesCommands {}
 
 export interface OrbitEvents extends CoreEvents, PeekEvents, MediaEvents {}
 
@@ -89,6 +91,8 @@ export type RendererView =
   | 'import'
   /** Downloads lane: an internal page, `orbit://<page>/` in a tab (DT-13). */
   | 'internal'
+  /** Pages lane: a page's dialog over its page (alert, confirm, prompt, leave-page, sign-in; NV-24). */
+  | 'dialog'
 
 /** The API the preload exposes on `window.orbit` to Orbit's own UI renderers. */
 export interface OrbitBridge {

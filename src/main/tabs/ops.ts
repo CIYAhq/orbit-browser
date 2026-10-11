@@ -119,9 +119,29 @@ function unarchive(d: OrbitState, tabId: TabId, archiveId: string | undefined): 
   }
 }
 
+/** How `closeTabs` closes. */
+export interface CloseTabsOptions {
+  remove?: boolean
+  reselect?: 'neighbor' | 'pinned'
+  undoLabel?: string | false
+  /** The user was asked already: no `closeGuard`. */
+  confirmed?: boolean
+}
+
 export class TabOps {
   readonly recentlyClosed: ClosedTab[] = []
   readonly undo = new UndoStack()
+  /**
+   * Asks before closing a page that warns before it goes (NV-24, pages lane): returns true when it
+   * takes the close over (it closes the tabs itself once the user answers, `confirmed`), false to
+   * close now.
+   */
+  closeGuard?: (tabIds: TabId[], reason: ArchivedTab['reason'], opts: CloseTabsOptions) => boolean
+  /**
+   * Whether a live tab's page may go without asking (NV-24, pages lane): auto-archive and sleep
+   * leave a page that would warn before it goes.
+   */
+  mayDiscard?: (tabId: TabId) => boolean
 
   constructor(
     private ctx: MainContext,
@@ -289,11 +309,8 @@ export class TabOps {
    * and Favorites stay and unload, resetting to their pinned URL (PN-06, FV-06).
    * `remove` also removes pinned tabs (delete from sidebar).
    */
-  closeTabs(
-    tabIds: TabId[],
-    reason: ArchivedTab['reason'],
-    opts: { remove?: boolean; reselect?: 'neighbor' | 'pinned'; undoLabel?: string | false } = {},
-  ): void {
+  closeTabs(tabIds: TabId[], reason: ArchivedTab['reason'], opts: CloseTabsOptions = {}): void {
+    if (!opts.confirmed && this.closeGuard?.(tabIds, reason, opts)) return
     const state = this.state
     const removing: TabId[] = []
     const unloading: TabId[] = []

@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 237 built (86 partial) · 330 tested · 0 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 237 built (87 partial) · 331 tested · 0 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 140 | 168 |
-| P1 | 219 | 82 | 145 |
+| P1 | 219 | 82 | 146 |
 | P2 | 79 | 15 | 17 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -251,7 +251,7 @@ Spec: `spec/navigation.md`
 | NV-21 | Save page and view source | P2 | – | – | – |  |
 | NV-22 | Translate a page | P2 | ⛔ out of scope | – | – | Orbit's engine has no built-in translation, and the spec allows no paid API (D45). ST-14's offer to translate, the Translate command and the address field's translate button go with it |
 | NV-23 | Reader mode | P2 | – | – | – |  |
-| NV-24 | Page dialogs (alert, confirm, prompt, leave-page, sign-in, file pickers) | P1 | – | – | – |  |
+| NV-24 | Page dialogs (alert, confirm, prompt, leave-page, sign-in, file pickers) | P1 | 🟡 partial | ✅ e2e+unit | – | alert, confirm and prompt show Orbit's own dialog over that page only (a tab, a split view pane, a Peek, a Mini Window, a pop-up): the sidebar, other tabs and the command bar stay usable, a tab's dialog waits while another tab shows and shows again on return, Enter answers, Esc cancels (closes an alert), Tab stays in the dialog, and the page gets the keyboard back; the page's text shows as text, cut at 10,000 characters; "Leave site?" ("Reload site?" for a reload) when a page that asks for it, after a user gesture as in Chromium, goes: a link, a form or location, Orbit's address, Back, Forward or Reload (Leave starts it again), closing its tab (shown first; Cancel keeps it) or its window (Cancel keeps it), a pop-up's window; a page's own history.back() or a frame's navigation it stopped goes on at the user's next try within 10 s; auto-archive and sleep keep a tab whose page warns, or waits on its dialog, until the user closes it; HTTP sign-in (Basic, Digest; a server or a proxy) over the page, Cancel shows the server's own page; file, folder, colour and date pickers are the engine's own (not run in tests: they wait for a person); a dialog a frame asks for is Electron's: alert and confirm in its own message box, not over the page, and prompt returns null (the preload runs in main frames only, D40); quitting doesn't ask; closing a Peek or a Mini Window doesn't ask yet (their close paths are the finish-views lane's) |
 | NV-25 | Share the current page | P2 | – | – | – |  |
 
 ## Peek link preview (prefix PK)

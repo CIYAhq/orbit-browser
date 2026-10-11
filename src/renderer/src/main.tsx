@@ -26,6 +26,21 @@ async function boot(): Promise<void> {
     )
     return
   }
+  // A page's dialog over that page (pages lane, NV-24): alert, confirm, prompt, leave-page, sign-in.
+  if (view === 'dialog') {
+    const app = import('./pages/DialogApp')
+    await initStore()
+    installShortcutFallback()
+    document.documentElement.dataset.view = view
+    document.documentElement.dataset.platform = window.orbit.platform
+    const { DialogApp } = await app
+    createRoot(document.getElementById('root') as HTMLElement).render(
+      <StrictMode>
+        <DialogApp />
+      </StrictMode>,
+    )
+    return
+  }
   // An internal page (DT-13): Orbit's UI in a normal tab. Keys go to it as to any page.
   if (view === 'internal') {
     const app = import('./internal/InternalApp')

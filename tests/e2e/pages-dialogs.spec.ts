@@ -1,0 +1,392 @@
+import { expect, test } from '@playwright/test'
+import { action, launchOrbit, type Orbit } from './helpers'
+import { clickInPage, closeWindow, cmdIn } from './nav-support'
+import {
+  AUTH_PASSWORD,
+  AUTH_USER,
+  dialogPage,
+  leaveInfo,
+  mayDiscard,
+  type PagesFixtures,
+  pageDialogs,
+  startPagesFixtures,
+  waitDialog,
+} from './pages-support'
+import { act, activeId, cmd, liveTabs, newTab, row, tab, tabsHook, waitTab } from './tabs-support'
+
+let fx: PagesFixtures
+let orbit: Orbit
+
+test.beforeAll(async () => {
+  fx = await startPagesFixtures()
+})
+test.afterAll(async () => {
+  await fx.close()
+})
+test.beforeEach(async () => {
+  orbit = await launchOrbit()
+})
+test.afterEach(async () => {
+  await orbit.app.close()
+})
+
+type Rect = { x: number; y: number; width: number; height: number }
+
+/** Runs a script in the page whose URL is `url`, without waiting on what it starts. */
+function inPage(app: Orbit['app'], url: string, code: string): Promise<unknown> {
+  return app.evaluate(
+    ({ webContents }, [u, c]) =>
+      webContents
+        .getAllWebContents()
+        .find((w) => w.getURL() === u)
+        ?.executeJavaScript(c),
+    [url, code] as const,
+  )
+}
+
+/** Waits until a tab's page title says what its `/ask` call returned. */
+async function answered(tabId: string, text: string) {
+  await expect.poll(async () => (await tab(orbit.app, tabId))?.title).toBe(`Answered ${text}`)
+}
+
+test('[NV-24] confirm shows over its page only; other tabs stay usable and it waits for its tab', async () => {
+  const { app, shell } = orbit
+  const other = await newTab(app, fx.url('/page/Other'))
+  await waitTab(app, other, '/page/Other')
+  const url = fx.url('/ask?kind=confirm&msg=Keep%20going%3F')
+  const asking = await newTab(app, url)
+  await waitTab(app, asking, '/ask')
+  await clickInPage(app, url, '#ask')
+
+  const shown = await waitDialog(app, (d) => d.tabId === asking && d.onScreen)
+  expect(shown.kind).toBe('confirm')
+  expect(shown.title).toBe(`localhost:${fx.port} says`)
+  expect(shown.message).toBe('Keep going?')
+  // Over the page's own area, and nothing else.
+  const pageBounds = await app.evaluate((_e, id) => {
+    const g = globalThis as unknown as { __orbit: { tabView: (id: string) => { bounds: unknown } | null } }
+    return g.__orbit.tabView(id)?.bounds
+  }, asking)
+  expect(shown.bounds).toEqual(pageBounds)
+  // It has the keyboard (KS-19).
+  await expect.poll(async () => (await waitDialog(app, (d) => d.id === shown.id)).focused).toBe(true)
+
+  // The sidebar still works: another tab comes up, and the dialog waits off screen.
+  await row(shell, other).click()
+  await expect.poll(async () => (await waitDialog(app, (d) => d.id === shown.id)).onScreen).toBe(false)
+  // Back on its tab, it shows again.
+  await row(shell, asking).click()
+  await expect.poll(async () => (await waitDialog(app, (d) => d.id === shown.id)).onScreen).toBe(true)
+
+  const view = await dialogPage(app, shown.id)
+  await expect(view.getByTestId('page-dialog-title')).toHaveText(`localhost:${fx.port} says`)
+  await expect(view.getByTestId('page-dialog-message')).toHaveText('Keep going?')
+  await view.getByTestId('page-dialog-ok').click()
+  await answered(asking, 'true')
+  await expect.poll(async () => (await waitDialog(app, () => true, 1000).catch(() => null)) === null).toBe(true)
+})
+
+/** The URL of the page that has the keyboard. */
+const focusedUrl = () =>
+  orbit.app.evaluate(({ webContents }) => webContents.getFocusedWebContents()?.getURL() ?? 'nothing')
+
+test('[NV-24][KS-19][KS-16] prompt and alert: Enter answers, Esc cancels, and the page gets the keyboard back', async () => {
+  const { app } = orbit
+  const url = fx.url('/ask?kind=prompt&msg=Your%20name&value=first')
+  const asking = await newTab(app, url)
+  await waitTab(app, asking, '/ask')
+  await clickInPage(app, url, '#ask')
+  const first = await waitDialog(app, (d) => d.tabId === asking && d.onScreen)
+  expect(first.kind).toBe('prompt')
+  const view = await dialogPage(app, first.id)
+  const field = view.getByTestId('page-dialog-input')
+  await expect(field).toHaveValue('first')
+  await expect(field).toBeFocused()
+  // The page's text starts selected: typing replaces it.
+  expect(await field.evaluate((el: HTMLInputElement) => [el.selectionStart, el.selectionEnd])).toEqual([0, 5])
+  await field.fill('typed')
+  await field.press('Enter')
+  await answered(asking, '"typed"')
+  await expect.poll(focusedUrl).toBe(url)
+
+  await clickInPage(app, url, '#ask')
+  const second = await waitDialog(app, (d) => d.tabId === asking && d.onScreen && d.id !== first.id)
+  await (await dialogPage(app, second.id)).keyboard.press('Escape')
+  await answered(asking, 'null')
+  await expect.poll(focusedUrl).toBe(url)
+
+  const alertUrl = fx.url('/ask?kind=alert&msg=Saved')
+  const alerting = await newTab(app, alertUrl)
+  await waitTab(app, alerting, '/ask')
+  await clickInPage(app, alertUrl, '#ask')
+  const alert = await waitDialog(app, (d) => d.tabId === alerting && d.onScreen)
+  expect(alert.kind).toBe('alert')
+  const alertView = await dialogPage(app, alert.id)
+  // One button only.
+  await expect(alertView.getByTestId('page-dialog-cancel')).toHaveCount(0)
+  await expect(alertView.getByTestId('page-dialog-ok')).toBeFocused()
+  await alertView.keyboard.press('Enter')
+  await answered(alerting, 'undefined')
+})
+
+test('[NV-24] a background tab’s dialog waits until its tab shows', async () => {
+  const { app, shell } = orbit
+  const url = fx.url('/ask?kind=confirm&msg=Later')
+  const asking = await newTab(app, url)
+  await waitTab(app, asking, '/ask')
+  const other = await newTab(app, fx.url('/page/Other'))
+  await waitTab(app, other, '/page/Other')
+  // The page asks from its own timer while another tab shows.
+  await inPage(app, url, 'setTimeout(ask, 0); 0')
+  const waiting = await waitDialog(app, (d) => d.tabId === asking)
+  expect(waiting.onScreen).toBe(false)
+  await row(shell, asking).click()
+  await expect.poll(async () => (await waitDialog(app, (d) => d.id === waiting.id)).onScreen).toBe(true)
+  await (await dialogPage(app, waiting.id)).getByTestId('page-dialog-cancel').click()
+  await answered(asking, 'false')
+})
+
+test('[NV-24] a split pane’s dialog covers that pane only', async () => {
+  const { app } = orbit
+  const left = await newTab(app, fx.url('/page/Left'))
+  await waitTab(app, left, '/page/Left')
+  const url = fx.url('/ask?kind=confirm&msg=Right%20side')
+  const right = await newTab(app, url)
+  await waitTab(app, right, '/ask')
+  await app.evaluate(
+    (_e, ids) => {
+      const g = globalThis as unknown as {
+        __orbit: { run: (n: string, a: unknown, w?: string) => Promise<unknown>; windowIds: () => string[] }
+      }
+      return g.__orbit.run('split.create', { tabIds: ids, focus: ids[1] }, g.__orbit.windowIds()[0])
+    },
+    [left, right],
+  )
+  const boundsOf = (id: string) =>
+    app.evaluate((_e, tabId) => {
+      const g = globalThis as unknown as {
+        __orbit: { tabView: (id: string) => { bounds: { x: number; y: number; width: number; height: number } } | null }
+      }
+      return g.__orbit.tabView(tabId)?.bounds ?? null
+    }, id)
+  // Side by side (the sidebar's order decides which pane is where).
+  const apart = (a: Rect | null, b: Rect | null) =>
+    !!a && !!b && a.width > 0 && b.width > 0 && (a.x + a.width <= b.x || b.x + b.width <= a.x)
+  await expect.poll(async () => apart(await boundsOf(left), await boundsOf(right))).toBe(true)
+  await clickInPage(app, url, '#ask')
+  const shown = await waitDialog(app, (d) => d.tabId === right && d.onScreen)
+  expect(shown.bounds).toEqual(await boundsOf(right))
+  expect(apart(shown.bounds ?? null, await boundsOf(left))).toBe(true)
+  await (await dialogPage(app, shown.id)).getByTestId('page-dialog-ok').click()
+  await answered(right, 'true')
+})
+
+test('[NV-24] a Peek’s and a Mini Window’s page show their dialogs over themselves', async () => {
+  const { app } = orbit
+  const under = await newTab(app, fx.url('/page/Under'))
+  await waitTab(app, under, '/page/Under')
+  const peekTab = (await app.evaluate((_e, u) => {
+    const g = globalThis as unknown as {
+      __orbit: { run: (n: string, a: unknown, w?: string) => Promise<unknown>; windowIds: () => string[] }
+    }
+    return g.__orbit.run('peek.open', { url: u }, g.__orbit.windowIds()[0])
+  }, fx.url('/ask?kind=confirm&msg=In%20a%20Peek&on=load'))) as string
+  expect(peekTab).toBeTruthy()
+  const peek = await waitDialog(app, (d) => d.tabId === peekTab && d.onScreen)
+  expect(peek.host).toBe('floating')
+  const pageBounds = (id: string) =>
+    app.evaluate((_e, tabId) => {
+      const g = globalThis as unknown as {
+        __orbit: { tabView: (id: string) => { bounds: { x: number; y: number; width: number; height: number } } | null }
+      }
+      return g.__orbit.tabView(tabId)?.bounds ?? null
+    }, id)
+  // It follows the card as it springs open.
+  await expect
+    .poll(async () => JSON.stringify((await waitDialog(app, (d) => d.id === peek.id)).bounds))
+    .toBe(JSON.stringify(await pageBounds(peekTab)))
+  await (await dialogPage(app, peek.id)).getByTestId('page-dialog-ok').click()
+  await answered(peekTab, 'true')
+
+  await app.evaluate((_e, u) => {
+    const g = globalThis as unknown as {
+      __orbit: { run: (n: string, a: unknown, w?: string) => Promise<unknown>; windowIds: () => string[] }
+    }
+    return g.__orbit.run('mini.open', { url: u }, g.__orbit.windowIds()[0])
+  }, fx.url('/ask?kind=confirm&msg=In%20a%20Mini%20Window&on=load'))
+  const mini = await waitDialog(app, (d) => d.message === 'In a Mini Window' && d.onScreen)
+  expect(mini.host).toBe('floating')
+  const miniTab = mini.tabId as string
+  expect((await tab(app, miniTab))?.floating).toBe('mini')
+  await expect
+    .poll(async () => JSON.stringify((await waitDialog(app, (d) => d.id === mini.id)).bounds))
+    .toBe(JSON.stringify(await pageBounds(miniTab)))
+  await (await dialogPage(app, mini.id)).getByTestId('page-dialog-cancel').click()
+  await answered(miniTab, 'false')
+})
+
+/** Opens `/warn` in a new tab and clicks in it: a page warns only after the user did something there. */
+async function warningTab(app: Orbit['app'], opts: { windowId?: string } = {}): Promise<string> {
+  const url = fx.url('/warn')
+  const id = opts.windowId ? await cmdIn<string>(app, opts.windowId, 'tabs.create', { url }) : await newTab(app, url)
+  await waitTab(app, id, '/warn')
+  await clickInPage(app, url, '#area')
+  await expect.poll(async () => (await leaveInfo(app, id))?.gestures ?? 0).toBeGreaterThan(0)
+  return id
+}
+
+/** Answers the leave-page dialog over a tab's page. */
+async function answerLeave(app: Orbit['app'], tabId: string, choice: 'ok' | 'cancel', kind = 'leave') {
+  const d = await waitDialog(app, (x) => x.tabId === tabId && x.onScreen && x.kind === kind)
+  const view = await dialogPage(app, d.id)
+  if (kind === 'reload') {
+    await expect(view.getByTestId('page-dialog-title')).toHaveText('Reload site?')
+    await expect(view.getByTestId('page-dialog-ok')).toHaveText('Reload')
+  } else {
+    await expect(view.getByTestId('page-dialog-title')).toHaveText('Leave site?')
+    await expect(view.getByTestId('page-dialog-ok')).toHaveText('Leave')
+  }
+  await expect(view.getByTestId('page-dialog-message')).toHaveText('Changes you made may not be saved.')
+  await view.getByTestId(choice === 'ok' ? 'page-dialog-ok' : 'page-dialog-cancel').click()
+  await expect.poll(async () => (await pageDialogs(app)).some((x) => x.id === d.id)).toBe(false)
+}
+
+test('[NV-24] leaving a page that warns asks first: a link, Orbit’s Reload and a form; Cancel stays, Leave goes on', async () => {
+  const { app } = orbit
+  const url = fx.url('/warn')
+  const warn = await warningTab(app)
+
+  // A link: Cancel stays on the page.
+  await clickInPage(app, url, '#away')
+  await answerLeave(app, warn, 'cancel')
+  expect((await tab(app, warn))?.url).toBe(url)
+  expect(fx.seen()).not.toContain('GET /page/Away')
+  // Leave goes where the link goes.
+  await clickInPage(app, url, '#away')
+  await answerLeave(app, warn, 'ok')
+  await waitTab(app, warn, '/page/Away')
+
+  // Orbit's Reload: "Reload site?", and Reload reloads.
+  await cmd(app, 'tabs.navigate', { tabId: warn, url })
+  await waitTab(app, warn, '/warn')
+  await clickInPage(app, url, '#area')
+  const loads = () => fx.seen().filter((r) => r === 'GET /warn').length
+  const before = loads()
+  await act(app, 'nav.reload')
+  await answerLeave(app, warn, 'cancel', 'reload')
+  expect(loads()).toBe(before)
+  await act(app, 'nav.reload')
+  await answerLeave(app, warn, 'ok', 'reload')
+  await expect.poll(loads).toBe(before + 1)
+  await waitTab(app, warn, '/warn')
+
+  // A form the page sends: Leave sends it.
+  await clickInPage(app, url, '#send')
+  await answerLeave(app, warn, 'ok')
+  await waitTab(app, warn, '/posted')
+  expect(fx.seen()).toContain('POST /posted')
+
+  // A page nobody touched leaves without asking (Chromium's rule).
+  await cmd(app, 'tabs.navigate', { tabId: warn, url })
+  await waitTab(app, warn, '/warn')
+  await cmd(app, 'tabs.navigate', { tabId: warn, url: fx.url('/page/Untouched') })
+  await waitTab(app, warn, '/page/Untouched')
+  expect(await pageDialogs(app)).toEqual([])
+})
+
+test('[NV-24] closing a tab whose page warns asks over it: Cancel keeps the tab, Leave closes it', async () => {
+  const { app } = orbit
+  const warn = await warningTab(app)
+  const other = await newTab(app, fx.url('/page/Other'))
+  await waitTab(app, other, '/page/Other')
+  // Closing it from the background: it shows first, then asks.
+  await cmd(app, 'tabs.close', { tabIds: [warn] })
+  await answerLeave(app, warn, 'cancel')
+  expect(await tab(app, warn)).toBeTruthy()
+  expect(await activeId(app)).toBe(warn)
+  await act(app, 'tab.close')
+  await answerLeave(app, warn, 'ok')
+  await expect.poll(async () => await tab(app, warn)).toBeUndefined()
+  expect(await tab(app, other)).toBeTruthy()
+  // A page nobody touched closes at once.
+  const untouched = await newTab(app, fx.url('/warn'))
+  await waitTab(app, untouched, '/warn')
+  await act(app, 'tab.close')
+  expect(await tab(app, untouched)).toBeUndefined()
+})
+
+test('[NV-24] closing a window with a page that warns asks first: Cancel keeps the window, Leave closes it', async () => {
+  const { app } = orbit
+  const ids = () =>
+    app.evaluate(() => (globalThis as unknown as { __orbit: { windowIds: () => string[] } }).__orbit.windowIds())
+  const before = await ids()
+  await action(app, 'window.new')
+  let windowId = ''
+  await expect
+    .poll(async () => {
+      windowId = (await ids()).find((w) => !before.includes(w)) ?? ''
+      return windowId
+    })
+    .not.toBe('')
+  const warn = await warningTab(app, { windowId })
+  await closeWindow(app, windowId)
+  await answerLeave(app, warn, 'cancel')
+  expect(await ids()).toContain(windowId)
+  expect(await tab(app, warn)).toBeTruthy()
+  await closeWindow(app, windowId)
+  await answerLeave(app, warn, 'ok')
+  await expect.poll(ids).not.toContain(windowId)
+})
+
+test('[NV-24][TD-01][TB-16] auto-archive and sleep leave a page that warns, or one waiting on its dialog, until the user closes it', async () => {
+  const { app } = orbit
+  const warn = await warningTab(app)
+  const askUrl = fx.url('/ask?kind=confirm&msg=Still%20there%3F')
+  const asking = await newTab(app, askUrl)
+  await waitTab(app, asking, '/ask')
+  const plain = await newTab(app, fx.url('/page/Plain'))
+  await waitTab(app, plain, '/page/Plain')
+  const shown = await newTab(app, fx.url('/page/Shown'))
+  await waitTab(app, shown, '/page/Shown')
+  await inPage(app, askUrl, 'setTimeout(ask, 0); 0')
+  await waitDialog(app, (d) => d.tabId === asking)
+
+  const later = Date.now() + 13 * 3600_000
+  // The first pass asks the page; every pass after leaves it.
+  for (const pass of [1, 2]) {
+    const r = await tabsHook<{ archived: string[]; slept: string[] }>(app, 'maintenance', later + pass)
+    expect(r.archived).not.toContain(warn)
+    expect(r.archived).not.toContain(asking)
+    expect(r.slept).not.toContain(warn)
+    expect(r.slept).not.toContain(asking)
+    if (pass === 1) expect(r.archived).toContain(plain)
+  }
+  expect(await mayDiscard(app, warn)).toBe(false)
+  expect(await mayDiscard(app, asking)).toBe(false)
+  expect(await tab(app, plain)).toBeUndefined()
+  expect(await tab(app, warn)).toBeTruthy()
+  expect(await tab(app, asking)).toBeTruthy()
+  expect(await liveTabs(app)).toEqual(expect.arrayContaining([warn, asking]))
+})
+
+test('[NV-24] HTTP sign-in asks over the page: Cancel gets the server’s refusal, Sign in signs in', async () => {
+  const { app } = orbit
+  const url = fx.url('/auth')
+  const t = await newTab(app, url)
+  const first = await waitDialog(app, (d) => d.tabId === t && d.onScreen && d.kind === 'auth')
+  expect(first.title).toBe('Sign in')
+  expect(first.message).toBe(`http://localhost:${fx.port} requires a username and password.`)
+  const view = await dialogPage(app, first.id)
+  await expect(view.getByTestId('page-dialog-note')).toHaveText('Your connection to this site is not private.')
+  await expect(view.getByTestId('page-dialog-user')).toBeFocused()
+  await view.getByTestId('page-dialog-cancel').click()
+  await expect.poll(async () => (await tab(app, t))?.title).toBe('No entry')
+
+  await act(app, 'nav.reload')
+  const second = await waitDialog(app, (d) => d.tabId === t && d.onScreen && d.kind === 'auth')
+  const again = await dialogPage(app, second.id)
+  await again.getByTestId('page-dialog-user').fill(AUTH_USER)
+  await again.getByTestId('page-dialog-password').fill(AUTH_PASSWORD)
+  await again.getByTestId('page-dialog-password').press('Enter')
+  await expect.poll(async () => (await tab(app, t))?.title).toBe('Signed in')
+})

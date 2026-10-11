@@ -33,7 +33,7 @@ function liveContents(view: WebContentsView | undefined): WebContents | undefine
 const NON_ACTIVATING_KEYS = new Set(['Escape', 'Shift', 'Control', 'Alt', 'Meta', 'Command', 'Cmd', 'CapsLock'])
 
 /** Input that counts as a user activation for opening tabs and pop-ups (NV-09, HTML user activation). */
-function isActivation(input: Electron.InputEvent): boolean {
+export function isActivation(input: Electron.InputEvent): boolean {
   if (input.type === 'mouseDown' || input.type === 'touchEnd' || input.type === 'gestureTap') return true
   if (input.type !== 'rawKeyDown' && input.type !== 'keyDown') return false
   if (input.modifiers?.includes('isautorepeat')) return false

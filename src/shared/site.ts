@@ -198,6 +198,13 @@ export const PAGE_CHANNEL = {
    * Esc in a loading tab, and only from that tab's main frame (src/main/keys/escape.ts).
    */
   escape: 'orbit-page:escape',
+  /**
+   * sendSync(kind, message, value): the page called `alert`, `confirm` or `prompt` (NV-24). Main
+   * shows Orbit's dialog over that page, answers only a tab's or a pop-up's main frame, and replies
+   * when the user does: the page waits meanwhile, as it would for the engine's dialog
+   * (src/main/pages/dialogs.ts).
+   */
+  dialog: 'orbit-page:dialog',
 } as const
 
 /** A tab comes forward for its notifications' clicks at most this often (a flood can't stall the shell). */
