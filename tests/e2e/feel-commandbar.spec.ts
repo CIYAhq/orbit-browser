@@ -51,9 +51,11 @@ const BAR = {
   scrim: { selector: '.cmdbar-scrim', style: ['background-color'] },
 }
 
-/** The overlay renderer is warmed up shortly after launch (CB-22): start once it is up. */
+/** The overlay renderer warms the bar up shortly after launch (CB-22): start once it has. */
 async function ready(o: Orbit): Promise<void> {
-  await (await viewPage(o.app, 'overlay')).getByTestId('overlay').waitFor({ state: 'attached' })
+  await (await viewPage(o.app, 'overlay')).locator('[data-testid="overlay"][data-warm="warm"]').waitFor({
+    state: 'attached',
+  })
 }
 
 /** Scale and vertical offset from a computed `transform` (identity for none). */
@@ -145,15 +147,57 @@ function rgbaAlpha(color: string | undefined): number {
   return parts.length === 4 ? (parts[3] as number) : parts.length === 3 ? 1 : 0
 }
 
-/** Opens the bar with `key` through main, recording the overlay; returns the entrance. */
-async function openMeasured(app: ElectronApplication, overlay: Page, key: 'T' | 'L') {
+/**
+ * Opens the bar with `key` through main, recording the overlay; returns the entrance, and with
+ * `opens` (timeOpens) the overlay's work for this open.
+ */
+async function openMeasured(app: ElectronApplication, overlay: Page, key: 'T' | 'L', opens?: OpenTimes) {
   const keys = await mainInputs(app)
   const rec = await record(overlay, BAR, { hidden: true, maxMs: 2000 })
   await keysThroughMain(app, 'view=shell', key, [MOD_KEY])
   const r = await rec.until(700)
   const down = (await keys()).find((k) => k.type === 'keyDown' && k.key.toLowerCase() === key.toLowerCase())
   if (!down) throw new Error('the shortcut never reached main')
-  return entrance(r, down.wall)
+  const t = opens ? await opens() : { patch: [], dom: [], resize: [] }
+  const patch = t.patch.find((x) => x >= down.wall - 1) ?? Number.NaN
+  const dom = t.dom.find((x) => x >= down.wall - 1) ?? Number.NaN
+  return { ...entrance(r, down.wall), work: dom - patch, resized: t.resize.some((x) => x >= down.wall - 1) }
+}
+
+/** The overlay's open times (timeOpens), on the wall clock. */
+type OpenTimes = () => Promise<{ patch: number[]; dom: number[]; resize: number[] }>
+
+/**
+ * Times every open in the overlay (CB-22), on the wall clock: when the update that opens the bar
+ * arrives, and when the bar is in the DOM. Between the two is the overlay's own work for an open.
+ * Also when the overlay was resized: an open that resizes it lays the whole overlay out again.
+ */
+async function timeOpens(overlay: Page): Promise<OpenTimes> {
+  await overlay.evaluate(() => {
+    type Patch = { path: (string | number)[] }
+    const w = window as unknown as {
+      __feelOpens?: { patch: number[]; dom: number[]; resize: number[] }
+      orbit: { onPatches: (fn: (seq: number, patches: Patch[]) => void) => unknown }
+    }
+    if (w.__feelOpens) return
+    const opens = { patch: [] as number[], dom: [] as number[], resize: [] as number[] }
+    w.__feelOpens = opens
+    const now = () => performance.timeOrigin + performance.now()
+    window.addEventListener('resize', () => opens.resize.push(now()))
+    w.orbit.onPatches((_seq, patches) => {
+      if (patches.some((p) => p.path.includes('overlay'))) opens.patch.push(now())
+    })
+    let had = false
+    new MutationObserver(() => {
+      const has = !!document.querySelector('[data-testid="command-bar"]')
+      if (has && !had) opens.dom.push(now())
+      had = has
+    }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-testid'] })
+  })
+  return () =>
+    overlay.evaluate(
+      () => (window as unknown as { __feelOpens: { patch: number[]; dom: number[]; resize: number[] } }).__feelOpens,
+    )
 }
 
 async function closeBar(app: ElectronApplication): Promise<void> {
@@ -162,32 +206,67 @@ async function closeBar(app: ElectronApplication): Promise<void> {
   await overlayGone(app)
 }
 
-test('[FL-16][FL-29] ⌘T and ⌘L: the bar shows in the first frame, focused, fading and scaling in over 120–160 ms with no overshoot', async () => {
-  const { app } = orbit
-  const overlay = await viewPage(app, 'overlay')
-  // The first open after launch, judged on its own (CB-22).
-  const first = await openMeasured(app, overlay, 'T')
-  note('FL-29', '⌘T → bar visible, first open after launch', first.visible, `1 frame (${FRAME.toFixed(1)} ms)`)
-  await closeBar(app)
-  type Round = ReturnType<typeof entrance>
-  const meets = (e: Round) => e.visible <= FRAME * FRAME_SLACK
-  const t = await bestOf<Round>(async () => {
-    const e = await openMeasured(app, overlay, 'T')
+test('[CB-22][FL-16][FL-29] ⌘T and ⌘L, the first open after a launch as later ones: the bar shows in the first frame, focused, fading and scaling in over 120–160 ms with no overshoot', async () => {
+  // Up to three rounds, each in a launch of its own.
+  test.setTimeout(180_000)
+  type Open = Awaited<ReturnType<typeof openMeasured>>
+  const BUDGET = FRAME * FRAME_SLACK + 2
+  const ENTRANCE = 160 * FRAME_SLACK + FRAME
+  const shows = (e: Open) => e.visible <= BUDGET && e.focusedAtFirst
+  /** A later ⌘T's entrance is judged in full: a busy frame can stretch it too. */
+  const entersWell = (e: Open) => shows(e) && e.duration <= ENTRANCE
+  /** One open and its close, with the overlay's work for the open. */
+  const open = async (app: ElectronApplication, overlay: Page, key: 'T' | 'L', opens: OpenTimes) => {
+    const e = await openMeasured(app, overlay, key, opens)
     await closeBar(app)
     return e
-  }, meets)
-  // ⌘L on a page (CB-03 edits its address).
-  const id = (await run(app, 'tabs.create', { url: fx.url('/page/Address') })) as string
-  await (await tabPage(app, '/page/Address')).waitForLoadState('load')
-  await expect.poll(async () => (await state(app)).tabs[id]?.title).toBe('Address')
-  const l = await bestOf<Round>(async () => {
-    const e = await openMeasured(app, overlay, 'L')
-    await closeBar(app)
-    return e
-  }, meets)
-  for (const [k, e] of t.all.entries()) {
-    console.log(`[feel] ⌘T round ${k + 1}: present ${e.present.toFixed(1)} ms, visible ${e.visible.toFixed(1)} ms`)
   }
+  /**
+   * One round, in a launch of its own: the first ⌘T after the launch, then later ones, then ⌘L on a
+   * page. The later ones are the best of up to three in the round, as a busy frame says little.
+   */
+  const measure = async (round: number) => {
+    const { app } = orbit
+    const overlay = await viewPage(app, 'overlay')
+    const opens = await timeOpens(overlay)
+    const first = await open(app, overlay, 'T', opens)
+    const t = await bestOf(() => open(app, overlay, 'T', opens), entersWell)
+    // ⌘L on a page (CB-03 edits its address).
+    const name = `Address${round}`
+    const id = (await run(app, 'tabs.create', { url: fx.url(`/page/${name}`) })) as string
+    await (await tabPage(app, `/page/${name}`)).waitForLoadState('load')
+    await expect.poll(async () => (await state(app)).tabs[id]?.title).toBe(name)
+    const l = await bestOf(() => open(app, overlay, 'L', opens), shows)
+    const later = [...t.all, ...l.all].map((e) => e.work).sort((a, b) => a - b)
+    return { first, t, l, later: later[later.length >> 1] ?? Number.NaN }
+  }
+  type Round = Awaited<ReturnType<typeof measure>>
+  // CB-22: the first open is as fast as later ones. The overlay's work for it, which a cold renderer
+  // makes two to three times longer, is held to the later opens' in the same launch, and it shows
+  // in the first frame as they do. (Nor may it resize the overlay: checked in every open below.)
+  const asFast = (r: Round) => r.first.work <= r.later * 1.5 + 2
+  const meets = (r: Round) => shows(r.first) && asFast(r) && entersWell(r.t.best) && shows(r.l.best)
+  // A round that misses is measured again in a fresh launch, up to three rounds (D46): each round's
+  // first open is then a first open after a launch, so a slow first use misses every round.
+  const rounds: Round[] = []
+  while (rounds.length < 3 && !rounds.some(meets)) {
+    if (rounds.length > 0) {
+      await orbit.app.close()
+      orbit = await launchOrbit({ userData: orbit.userData })
+      await ready(orbit)
+    }
+    const r = await measure(rounds.length + 1)
+    rounds.push(r)
+    const ms = (x: number) => `${x.toFixed(1)} ms`
+    console.log(
+      `[feel] round ${rounds.length}: first ⌘T visible ${ms(r.first.visible)}, work ${ms(r.first.work)}${r.first.resized ? ', resized the overlay' : ''}; later ⌘T visible ${r.t.all.map((e) => ms(e.visible)).join(', ')}; ⌘L visible ${r.l.all.map((e) => ms(e.visible)).join(', ')}; later opens' work (median) ${ms(r.later)}`,
+    )
+  }
+  const best = rounds.find(meets) ?? (rounds.at(-1) as Round)
+  const { first, t, l } = best
+  note('FL-29', '⌘T → bar visible, first open after launch', first.visible, `1 frame (${FRAME.toFixed(1)} ms)`)
+  note('CB-22', "overlay's work for the first open (update → bar in the DOM)", first.work, '≈ later opens')
+  note('CB-22', "overlay's work for later opens (median)", best.later, '–')
   note('FL-29', '⌘T → first frame with the bar', t.best.present, '–')
   note('FL-29', '⌘T → bar visible (opacity > 0)', t.best.visible, `1 frame (${FRAME.toFixed(1)} ms)`)
   note('FL-29', '⌘L → bar visible (opacity > 0)', l.best.visible, `1 frame (${FRAME.toFixed(1)} ms)`)
@@ -197,12 +276,24 @@ test('[FL-16][FL-29] ⌘T and ⌘L: the bar shows in the first frame, focused, f
   note('FL-16', 'entrance: largest scale (overshoot above 1)', t.best.maxScale, '≤ 1', '')
   note('FL-16', 'page dimming (scrim alpha)', t.best.dim, 'none or very slight', '')
   expect(first.focusedAtFirst && t.best.focusedAtFirst, 'the field had focus from the first visible frame').toBe(true)
-  expect(t.best.visible).toBeLessThanOrEqual(FRAME * FRAME_SLACK + 2)
-  expect(l.best.visible).toBeLessThanOrEqual(FRAME * FRAME_SLACK + 2)
-  expect(t.best.maxScale).toBeLessThanOrEqual(1.0005)
-  expect(t.best.maxY).toBeLessThanOrEqual(0.05)
-  expect(t.best.duration).toBeLessThanOrEqual(160 * FRAME_SLACK + FRAME)
-  expect(t.best.dim).toBeLessThanOrEqual(0.1)
+  expect(first.visible).toBeLessThanOrEqual(BUDGET)
+  expect(first.work, "the first open's work, against 1.5 × the later opens' + 2 ms").toBeLessThanOrEqual(
+    best.later * 1.5 + 2,
+  )
+  expect(t.best.visible).toBeLessThanOrEqual(BUDGET)
+  expect(l.best.visible).toBeLessThanOrEqual(BUDGET)
+  // What doesn't depend on load holds in every open of every round: the overlay has its size before
+  // the bar opens (the first open laid the whole overlay out again at the window's size), and the
+  // entrance's shape.
+  for (const r of rounds) {
+    for (const e of [r.first, ...r.t.all, ...r.l.all]) {
+      expect(e.resized, 'the overlay was resized while the bar opened').toBe(false)
+      expect(e.maxScale).toBeLessThanOrEqual(1.0005)
+      expect(e.maxY).toBeLessThanOrEqual(0.05)
+      expect(e.dim).toBeLessThanOrEqual(0.1)
+    }
+  }
+  expect(t.best.duration).toBeLessThanOrEqual(ENTRANCE)
 })
 
 test('[FL-16] ⌘T then "abc" at once: the field shows "abc", each key echoed in its frame', async () => {

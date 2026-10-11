@@ -1560,11 +1560,11 @@ html[data-view="overlay"] body {
 
 /* ---------- Command bar (CB-04, FL-16/17) ---------- */
 
-/* Hidden warm-up instance (rendered once at overlay start-up). */
+/* The warm-up's bars (CB-22): invisible, though their field can take focus, as a real bar's does. */
 .cmdbar-warm {
   position: fixed;
   inset: 0;
-  visibility: hidden;
+  opacity: 0;
   pointer-events: none;
 }
 

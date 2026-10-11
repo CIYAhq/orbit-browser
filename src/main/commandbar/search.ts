@@ -1,4 +1,5 @@
 import { clipboard, net } from 'electron'
+import { actionForInput } from '../../shared/actions'
 import type { SearchQueryArgs, SearchResult } from '../../shared/commands/commandbar'
 import type { CommandName } from '../../shared/rpc'
 import type { OrbitState, WindowId } from '../../shared/state'
@@ -179,6 +180,20 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
     contents.sendInputEvent({ type: 'mouseMove', ...at })
     contents.sendInputEvent({ type: 'mouseDown', ...at, button: 'left', clickCount: 1 })
     contents.sendInputEvent({ type: 'mouseUp', ...at, button: 'left', clickCount: 1 })
+  })
+
+  // CB-22: the keymap is built on its first use, which was the first key press after a launch (⌘T's):
+  // it is built now, while Orbit starts, and a new window's overlay, once it has warmed the bar
+  // (OverlayApp), has main look a ⌘T up again, so the first real one runs warm code. Then the
+  // overlay, shown at the window's size but out of the way while it warmed up, hides.
+  const lookUpNewTab = () => {
+    const mod = process.platform === 'darwin'
+    actionForInput({ key: 't', code: 'KeyT', meta: mod, control: !mod, alt: false, shift: false }, process.platform)
+  }
+  lookUpNewTab()
+  commands.register('search.warm', (_args, c) => {
+    for (let i = 0; i < 3; i++) lookUpNewTab()
+    if (c.windowId) windows.overlayWarm(c.windowId)
   })
 
   commands.register('search.siteSearches', () =>

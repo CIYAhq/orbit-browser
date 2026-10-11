@@ -222,6 +222,7 @@
   - The rubber band returns with the spring FL-13 gives it (response 0.3 s, ratio 1.0). From a third of the width that spring needs about 390 ms to come within 0.5 px, or 478 ms with the release wait. FL-29's 350 ms is for swipes that land on a Space, so the rubber band keeps FL-13's spring (D70).
 - **FL-15:** the release uses the pop spring (0.30 s, damping 0.70), as FL-15 asks; the spec gives it no time. From 0.94 the button is within 0.2 % of full size 193 ms after the release.
 - **FL-16:** the first ⌘T after a launch showed the bar in the second frame in two runs of three (14, 22 and 22 ms). Warm opens show it in the first frame.
+  - The feel-fix lane (CB-22) warms the overlay up at the window's size: over six launches at load 6–8 the first ⌘T showed the bar in 7–17 ms, and the overlay's own work for it took 3–7 ms, as later opens' (4–9). Before, over ten launches at load 3.5–9: 5–31 ms, and 8–17 ms of work against 4–8 for later opens.
 - **FL-18:**
   - The zone shows 3 frames after the move that finds it, for two reasons. A fade from 0 shows only from its second frame, and React renders a pointer move's state in a task of its own, which can miss the next frame. Over seven runs it took 2–4 frames.
   - The zone now moves to a new half at once, as FL-18 asks. SV-26's 120 ms ease defers to feel.md.

@@ -45,6 +45,10 @@ interface WindowRecord {
   /** Ignore renderer pane reports older than this state sequence (after a main-side fast switch). */
   minPaneSeq: number
   overlayShown: boolean
+  /** The overlay is shown outside the window while its renderer warms the bar up (CB-22). */
+  overlayWarming?: boolean
+  /** Hides the overlay if its renderer never says it is warm. */
+  overlayWarmTimer?: ReturnType<typeof setTimeout>
   /** Pending hide after the overlay's exit animation. */
   overlayHideTimer?: ReturnType<typeof setTimeout>
   /** The overlay closed while the window was in the background: give the page focus when it returns. */
@@ -123,6 +127,8 @@ interface Attachment {
 
 /** How long the overlay view stays up after closing so its exit animation can play (FL-16). */
 const OVERLAY_EXIT_MS = 110
+/** The longest the overlay waits, shown outside the window, for its renderer to warm up (CB-22). */
+const OVERLAY_WARM_MAX_MS = 3000
 /** The longest a view coming back into a window stays out of sight, waiting for its page to draw (holdArrivals). */
 const HOLD_MS = 250
 /** The page tools' renderer starts this long after the window shows (NV-05: ⌘F finds the bar ready). */
@@ -486,7 +492,7 @@ export class WindowManager {
       if (!rec.htmlFullscreen) this.applyPanes(id, rec.panes, rec.radius)
     })
     win.on('resize', () => {
-      if (rec.overlayShown) this.fitOverlay(rec)
+      if (rec.overlayShown || rec.overlayWarming) this.fitOverlay(rec)
       if (rec.floatingShown) this.fitFloating(rec)
       if (rec.htmlFullscreen) this.applyPanes(id, rec.panes, rec.radius)
     })
@@ -519,6 +525,7 @@ export class WindowManager {
     }
     win.on('closed', () => {
       clearTimeout(rec.overlayHideTimer)
+      clearTimeout(rec.overlayWarmTimer)
       clearTimeout(rec.floatingTimer)
       clearTimeout(rec.floatingPrewarm)
       clearTimeout(rec.floatingDispose)
@@ -1646,7 +1653,12 @@ export class WindowManager {
     if (rec.overlay) return rec.overlay
     const overlay = new WebContentsView({ webPreferences: uiWebPreferences(rec.id, 'overlay') })
     overlay.setBackgroundColor('#00000000')
-    overlay.setVisible(false)
+    // CB-22: shown at first, at the window's size but all but one corner pixel outside it, so its
+    // renderer lays out and draws the bar's warm-up at that size (a hidden view's renderer, or one
+    // wholly outside the window, gets no size, and the first open laid everything out again). It
+    // hides once warm (overlayWarm).
+    rec.overlayWarming = true
+    rec.overlayWarmTimer = setTimeout(() => this.overlayWarm(rec.id), OVERLAY_WARM_MAX_MS)
     rec.win.contentView.addChildView(overlay)
     this.registerUi(overlay.webContents, rec.id)
     this.reloadUiOnCrash(overlay.webContents, 'overlay')
@@ -1654,11 +1666,24 @@ export class WindowManager {
     this.hardenUi(overlay.webContents)
     loadRenderer(overlay.webContents, 'overlay')
     rec.overlay = overlay
+    this.fitOverlay(rec)
     return overlay
+  }
+
+  /** The overlay's renderer has warmed the bar up (CB-22): the overlay hides, in its place. */
+  overlayWarm(windowId: WindowId): void {
+    const rec = this.records.get(windowId)
+    if (!rec?.overlayWarming || rec.win.isDestroyed() || !viewContents(rec.overlay)) return
+    rec.overlayWarming = false
+    clearTimeout(rec.overlayWarmTimer)
+    if (rec.overlayShown) return
+    rec.overlay?.setVisible(false)
+    this.fitOverlay(rec)
   }
 
   private showOverlay(rec: WindowRecord): void {
     clearTimeout(rec.overlayHideTimer)
+    rec.overlayWarming = false
     rec.refocusPage = false
     const overlay = this.ensureOverlay(rec)
     this.fitOverlay(rec)
@@ -1694,9 +1719,11 @@ export class WindowManager {
 
   private fitOverlay(rec: WindowRecord): void {
     const [width = 0, height = 0] = rec.win.getContentSize()
+    // Warming up, it stays at the window's size with all but its corner pixel outside the window (CB-22).
+    const warming = rec.overlayWarming ? { x: width - 1, y: height - 1, width, height } : undefined
     // A Peek's overlay covers only the page area, so the sidebar stays usable beside it (PK-13).
     const area = this.ctx.store.state.windows[rec.id]?.overlay.kind === 'peek' ? this.pageArea(rec.id) : undefined
-    rec.overlay?.setBounds(area ?? { x: 0, y: 0, width, height })
+    rec.overlay?.setBounds(warming ?? area ?? { x: 0, y: 0, width, height })
   }
 
   /** The native background shows at the window's edges while resizing: keep it the frame's colour. */
