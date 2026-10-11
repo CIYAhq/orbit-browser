@@ -27,6 +27,7 @@ import type { MainContext } from '../context'
 import { KEEP_KEYBOARD } from '../keys/focus'
 import { TAB_MENU_KEYS, withKeyHints } from '../keys/menu-hints'
 import { printPage, savePage, viewSource } from '../pages/entry'
+import { onGesture } from '../pages/gestures'
 import type { CallContext } from '../registry'
 import { registerSpaceOrderUndo } from '../spaces/order-undo'
 import { tabSplitMenuItems } from '../split/menu'
@@ -549,11 +550,13 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   )
   const trackPopup = (popup: BrowserWindow, openerTabId: TabId) => {
     const wc = popup.webContents
+    // As a tab's (NV-09): a click or a key in any of its frames, one from another site's too (D77).
     let gesture = { at: 0, used: true }
-    wc.on('input-event', (_e, input) => {
-      if (['mouseDown', 'mouseUp', 'keyDown', 'rawKeyDown', 'gestureTap', 'touchEnd'].includes(input.type)) {
-        gesture = { at: Date.now(), used: false }
-      }
+    onGesture(wc, () => {
+      const now = Date.now()
+      // Two presses within 30 ms are one activation.
+      if (now - gesture.at < 30) gesture.at = now
+      else gesture = { at: now, used: false }
     })
     wc.setWindowOpenHandler((details) => {
       // As for a tab's page: a local file opens for no web page, and a toast names it (D49, round 2

@@ -31,17 +31,6 @@ function liveContents(view: WebContentsView | undefined): WebContents | undefine
   return contents && !contents.isDestroyed() ? contents : undefined
 }
 
-/** Keys that never count as a user activation (HTML: Escape and lone modifiers). */
-const NON_ACTIVATING_KEYS = new Set(['Escape', 'Shift', 'Control', 'Alt', 'Meta', 'Command', 'Cmd', 'CapsLock'])
-
-/** Input that counts as a user activation for opening tabs and pop-ups (NV-09, HTML user activation). */
-export function isActivation(input: Electron.InputEvent): boolean {
-  if (input.type === 'mouseDown' || input.type === 'touchEnd' || input.type === 'gestureTap') return true
-  if (input.type !== 'rawKeyDown' && input.type !== 'keyDown') return false
-  if (input.modifiers?.includes('isautorepeat')) return false
-  const key = (input as { keyCode?: string }).keyCode ?? ''
-  return !NON_ACTIVATING_KEYS.has(key)
-}
 const GESTURE_WINDOW_MS = 1000
 /** Every stored favicon is a data URL of at most this many characters (lane review MF-2). */
 const MAX_FAVICON_DATA_URL = 16 * 1024

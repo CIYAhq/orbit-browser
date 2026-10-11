@@ -2,6 +2,8 @@
  * The finish-tabs lane: behaviours of tabs, folders, Favorites, Spaces and profiles finished after
  * the other lanes merged (lanes/finish-tabs.md).
  */
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 import type { SearchResult } from '../../src/shared/commands/commandbar'
 import { DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
@@ -1722,4 +1724,80 @@ test('[SP-11][TB-18] ⌘Z after the Spaces are reordered puts them back and ⌘�
   await expect.poll(order).toEqual(after)
   await expect.poll(targets).toEqual(after)
   expect(await shownSpace()).toBe(a)
+})
+
+// ---------- TB-15: an audible Favorite's notes ----------
+
+/** Plays a quiet tone in the page whose URL has `urlPart`; closing its `window.__tone` stops it. */
+async function playTone(urlPart: string): Promise<void> {
+  await (await tabPage(orbit.app, urlPart)).evaluate(() => {
+    const audio = new AudioContext()
+    const tone = audio.createOscillator()
+    const gain = audio.createGain()
+    gain.gain.value = 0.05
+    tone.connect(gain).connect(audio.destination)
+    tone.start()
+    ;(window as unknown as { __tone: AudioContext }).__tone = audio
+  })
+}
+
+test('[TB-15] a Favorite playing sound shows small notes rising over its tile; muted, a still dot; silent again, nothing', async () => {
+  const { app, shell } = orbit
+  const id = await newTab(app, fx.url('/page/Tune'))
+  await waitTab(app, id, '/page/Tune')
+  await cmd(app, 'tabs.favorite', { tabId: id })
+  const tile = shell.locator(`[data-testid="favorite-tile"][data-fav-id="${id}"]`)
+  const notes = tile.getByTestId('favorite-notes')
+  await expect(tile).toBeVisible()
+  await expect(notes).toHaveCount(0)
+  await playTone('/page/Tune')
+  await expect.poll(async () => (await state(app)).tabs[id]?.audible).toBe(true)
+  await expect(notes).toBeVisible()
+  const motion = () =>
+    notes.locator('.favorite__note').evaluateAll((els) => els.map((el) => getComputedStyle(el).animationName))
+  expect(await motion()).toEqual(['favorite-note', 'favorite-note'])
+  await cmd(app, 'tabs.setMuted', { tabId: id, muted: true })
+  await expect(notes).toHaveCount(0)
+  await expect(tile.locator('.favorite__audio')).toHaveCount(1)
+  await cmd(app, 'tabs.setMuted', { tabId: id, muted: false })
+  await expect(notes).toBeVisible()
+  await (await tabPage(app, '/page/Tune')).evaluate(() =>
+    (window as unknown as { __tone: AudioContext }).__tone.close(),
+  )
+  await expect.poll(async () => (await state(app)).tabs[id]?.audible).toBe(false)
+  await expect(notes).toHaveCount(0)
+  await expect(tile.locator('.favorite__audio')).toHaveCount(0)
+})
+
+// ---------- PR-08: a deleted profile's folder on disk ----------
+
+test('[PR-08] deleting a profile in Settings removes its folder on disk at once, and at the next launch what its session wrote there as Orbit quit', async () => {
+  const { app, userData } = orbit
+  const client = await cmd<string>(app, 'spaces.create', { name: 'Client', activate: false })
+  const work = await cmd<string>(app, 'profiles.create', { name: 'Work', assignSpaceId: client })
+  // A page in the profile: its cookies, site data and cache have a folder of their own.
+  const home = await shownSpace()
+  await cmd(app, 'spaces.switch', { spaceId: client })
+  const id = await newTab(app, fx.url('/page/Work'))
+  await waitTab(app, id, '/page/Work')
+  const folder = join(userData, 'Partitions', `orbit-${work}`)
+  await expect.poll(() => existsSync(folder)).toBe(true)
+  await cmd(app, 'spaces.switch', { spaceId: home })
+  // The Space goes back to Default, so nothing uses the profile.
+  await cmd(app, 'spaces.update', { spaceId: client, profileId: DEFAULT_PROFILE_ID })
+  const page = await openSettings(app, { section: 'profiles' })
+  await page.getByTestId(`profile-${work}`).click()
+  await page.getByTestId('profile-delete').click()
+  // It names the profile and what goes: logins, cookies, history, Favorites (no extensions yet).
+  await expect(page.getByTestId('profile-delete-dialog')).toContainText('Work')
+  await expect(page.getByTestId('profile-delete-dialog')).toContainText('logins, cookies, history, Favorites')
+  await page.getByTestId('profile-delete-confirm').click()
+  await expect.poll(async () => (await state(app)).profiles[work]).toBeUndefined()
+  await expect.poll(() => existsSync(folder)).toBe(false)
+  // Its session writes there again as Orbit quits: the next launch removes it.
+  await app.close()
+  mkdirSync(folder, { recursive: true })
+  writeFileSync(join(folder, 'Cookies'), 'written as Orbit quit')
+  orbit = await launchOrbit({ userData })
+  expect(existsSync(folder)).toBe(false)
 })

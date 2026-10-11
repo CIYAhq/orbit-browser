@@ -8,6 +8,7 @@ import { tabsInItem } from '../../shared/tree'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
 import type { SavedHistory } from '../tabs/runtime'
+import { eraseLeftovers, erasePartition } from './erase'
 import {
   assignProfileInDraft,
   createProfileInDraft,
@@ -39,6 +40,8 @@ export function registerSpaces(ctx: MainContext): void {
 
   // Older state files: bring every Space to the current shape (D12 drops theme.mode).
   store.update((d) => normalizeSpacesInDraft(d))
+  // Deleted profiles' partition folders their sessions held or wrote to until Orbit quit (PR-08).
+  eraseLeftovers(ctx.paths.userData)
 
   /** Last Space any window switched to: what a window opened from nowhere shows (SP-24). */
   let lastSpaceId: SpaceId | undefined
@@ -274,13 +277,15 @@ export function registerSpaces(ctx: MainContext): void {
       result = deleteProfileInDraft(d, profileId)
     })
     if (!result) return false
-    // Its Favorites' pages close (no page keeps the deleted session), then its stored data goes.
+    // Its Favorites' pages close (no page keeps the deleted session), then its stored data goes, and
+    // its folder on disk (now, and at the next launch if its session holds it or writes to it again).
     for (const tabId of result.removed) ctx.tabs.destroy(tabId)
     const ses = session.fromPartition(profile.partition)
     void ses
       .clearStorageData()
       .then(() => ses.clearCache())
       .catch((err) => console.error('[spaces] could not clear profile data', err))
+      .then(() => erasePartition(ctx.paths.userData, ses.storagePath))
     return true
   })
 

@@ -248,7 +248,7 @@ function ProfileSettings({ profileId }: { profileId: ProfileId }) {
       {confirming && (
         <Dialog
           title={`Delete the profile “${name}”?`}
-          description="Its cookies, history, Favorites and site data are deleted from this computer. This can’t be undone."
+          description="Its logins, cookies, history, Favorites and site data are deleted from this computer. This can’t be undone."
           testId="profile-delete-dialog"
           onClose={() => setConfirming(false)}
           actions={

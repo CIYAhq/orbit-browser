@@ -140,7 +140,14 @@ const FavoriteTile = memo(function FavoriteTile({ tabId, ref }: { tabId: string;
       }}
     >
       {tab.icon ? <span className="favorite__emoji">{tab.icon}</span> : <Favicon src={tab.favicon} size={20} />}
-      {tab.audible && <span className="favorite__audio" />}
+      {/* Playing: small notes rise over the tile (TB-15); muted, a still dot. */}
+      {tab.audible && !tab.muted && (
+        <span className="favorite__notes" data-testid="favorite-notes" aria-hidden="true">
+          <span className="favorite__note">♪</span>
+          <span className="favorite__note">♫</span>
+        </span>
+      )}
+      {tab.audible && tab.muted && <span className="favorite__audio" />}
       {away && <span className="favorite__away" data-testid="favorite-away" />}
     </motion.button>
   )

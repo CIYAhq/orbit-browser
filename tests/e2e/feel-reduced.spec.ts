@@ -5,7 +5,7 @@
  */
 import { expect, type Page, test } from '@playwright/test'
 import { motionOf, note, type Recording, record, rotation, series } from './frames'
-import { action, FRAME_SLACK, launchOrbit, type Orbit, run, state, viewPage } from './helpers'
+import { action, FRAME_SLACK, launchOrbit, type Orbit, run, state, tabPage, viewPage } from './helpers'
 import { openSettings } from './settings-support'
 import { settled } from './tabs-support'
 
@@ -387,4 +387,25 @@ test('[FL-28][FL-26][TB-05] reduced motion turned on after the overlay is up: th
   expect(first?.els.list?.opacity, 'the list shows at once, at full strength').toBeGreaterThanOrEqual(0.999)
   await keys(['keyDown', 'Escape', ['control']], ['keyUp', 'Escape', ['control']], ['keyUp', 'Control', []])
   await expect.poll(async () => Object.values((await state(app)).windows)[0]?.overlay.kind).toBe('none')
+})
+
+test('[FL-28][TB-15] reduced motion turned on while a Favorite plays sound: its notes stand still', async () => {
+  const { app, shell } = orbit
+  const tab = (await run(app, 'tabs.create', { url: 'about:blank#tune', activate: true })) as string
+  await run(app, 'tabs.favorite', { tabId: tab })
+  await (await tabPage(app, 'about:blank#tune')).evaluate(() => {
+    const audio = new AudioContext()
+    const tone = audio.createOscillator()
+    const gain = audio.createGain()
+    gain.gain.value = 0.05
+    tone.connect(gain).connect(audio.destination)
+    tone.start()
+  })
+  const notes = shell.locator(`[data-fav-id="${tab}"] .favorite__note`)
+  await expect(notes).toHaveCount(2)
+  const looks = () =>
+    notes.evaluateAll((els) => els.map((el) => `${getComputedStyle(el).animationName} ${getComputedStyle(el).opacity}`))
+  expect((await looks()).map((l) => l.split(' ')[0])).toEqual(['favorite-note', 'favorite-note'])
+  await reduce('switch', shell)
+  await expect.poll(looks).toEqual(['none 1', 'none 1'])
 })
