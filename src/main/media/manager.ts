@@ -589,6 +589,9 @@ export class MediaManager {
     const snap = t && combineSnapshots(this.reports(t))
     const tab = state.tabs[tabId]
     if (!t || !snap || !tab?.media || t.contents.isDestroyed()) return
+    // A Peek's page leaves the screen as its Peek goes (closed, or replaced by another overlay), and
+    // the page goes with it: nothing of it floats.
+    if (tab.floating === 'peek') return
     // The engine's own window (opened on the tab) hands its video over to Orbit's player, with
     // Orbit's controls. The user asked for it, so the automatic-PiP choices don't apply. The
     // tab's state knows first (the page's report of it may still be on its way).

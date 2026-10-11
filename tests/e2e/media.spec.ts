@@ -1230,6 +1230,39 @@ test('[MD-01][MD-07] on screen, back from the player the page area shows no fram
   }
 })
 
+test('[MD-01][PK-13] a Peek whose video plays, replaced by the command bar, never asks the player to open: its page goes with it', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const source = await newTab(app, fx.url('/page/Source/Quiet'))
+  await waitTab(app, source, '/page/Source')
+  await cmd(app, 'peek.open', { url: fx.url('/media/long-video/Film') })
+  await expect.poll(async () => (await windowState(app)).overlay.kind).toBe('peek')
+  const overlay = (await windowState(app)).overlay
+  const peekTab = overlay.kind === 'peek' ? overlay.tabId : ''
+  const p = await tabPage(app, '/media/long-video')
+  await expect.poll(() => p.evaluate(() => document.body.dataset.state ?? ''), { timeout: 20_000 }).toBe('playing')
+  await expect.poll(async () => (await media(app, peekTab))?.video).toBe(true)
+  // Main: each tab the player is asked to open for.
+  await app.evaluate(() => {
+    const g = globalThis as unknown as { __orbitMedia: MediaTestHooks; __playerAsked?: string[] }
+    const player = g.__orbitMedia.manager.player
+    const asked: string[] = []
+    g.__playerAsked = asked
+    const open = player.open.bind(player)
+    player.open = (tabId, opts) => {
+      asked.push(tabId)
+      return open(tabId, opts)
+    }
+  })
+  // ⌘T: the command bar takes the overlay's place, and the Peek and its page go.
+  await act(app, 'tab.new')
+  await expect.poll(async () => (await windowState(app)).overlay.kind).toBe('commandbar')
+  await expect.poll(async () => (await state(app)).tabs[peekTab]).toBeUndefined()
+  // Leaving the screen this way is not leaving a tab: nothing floats.
+  expect(await app.evaluate(() => (globalThis as unknown as { __playerAsked: string[] }).__playerAsked)).toEqual([])
+  await expectNoPlayer(app)
+})
+
 test('[MD-04][MD-07][MD-10][MD-16] Back to tab and double-click return to the tab, flying back into the page; × keeps it playing in the sidebar, whose PiP button floats it again', async () => {
   orbit = await launchOrbit()
   const { app } = orbit
