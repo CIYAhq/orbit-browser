@@ -3,7 +3,7 @@
  * Pure functions in screen DIPs: the main process places, resizes and snaps the player window with
  * them. No Electron or DOM here, so it is unit-tested.
  */
-import { SPRING } from './motion'
+import { type Bezier, EASE, SPRING } from './motion'
 import type { Rect } from './rpc'
 import type { PipCorner, PipPlacement } from './state'
 
@@ -252,9 +252,9 @@ export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (t:
 }
 
 /** feel.md FL-01 "standard" CSS curve (sidebar, Space settle, preview open), used to enter PiP. */
-export const STANDARD_CURVE: [number, number, number, number] = [0.2, 0.9, 0.1, 1]
-/** CSS `ease-out`: with reduced motion a released player settles on it, with no overshoot (FL-28). */
-export const EASE_OUT_CURVE: [number, number, number, number] = [0, 0, 0.58, 1]
+export const STANDARD_CURVE: Bezier = EASE.standard
+/** CSS `ease-out` (FL-01's instant curve): with reduced motion a released player settles on it, with no overshoot (FL-28). */
+export const EASE_OUT_CURVE: Bezier = EASE.instant
 
 /** Interpolates two rects. */
 export function mixRect(a: Rect, b: Rect, t: number): Rect {
