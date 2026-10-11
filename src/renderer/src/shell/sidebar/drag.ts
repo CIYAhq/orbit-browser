@@ -9,7 +9,7 @@
  */
 import { animate, motionValue } from 'motion/react'
 import { isFolderId, isSplitId, isTabId } from '../../../../shared/ids'
-import { sidebarDropUrl } from '../../../../shared/link-drop'
+import { type SidebarDropPlace, sidebarDropUrl } from '../../../../shared/link-drop'
 import { layoutLeaves, MAX_PANES, rowDropSide } from '../../../../shared/split'
 import type { ContainerRef, ItemId, OrbitState, SpaceId } from '../../../../shared/state'
 import { containerItems, locate, parseContainerKey, visibleTabOrder } from '../../../../shared/tree'
@@ -916,6 +916,15 @@ function closeRoom(): void {
   window.setTimeout(() => {
     if (!linkSession && !session && useDrag.getState().phase === 'cancelling') useDrag.setState(IDLE_DRAG)
   }, 500)
+}
+
+/**
+ * Where on the sidebar a drop at window point `x`, `y` lands, for what it may open there (D87): the
+ * Favorites, as `dropLink` finds them, or else the tab list (a folder, a Space's icon and the rest of
+ * the sidebar take what the list does).
+ */
+export function dropPlaceAt(x: number, y: number): SidebarDropPlace {
+  return zoneAt(x, y).kind === 'favorites' && ctx.favorites && ctx.profileId ? 'favorites' : 'list'
 }
 
 /**

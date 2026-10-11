@@ -17,7 +17,7 @@ import { PrivateSidebar } from '../chrome/PrivateSidebar'
 import { MediaTray } from '../media/MediaTray'
 import { SpaceStrip } from '../spaces/SpaceStrip'
 import { UndoToast } from '../spaces/UndoToast'
-import { dropLink, endLinkDrag, isDragging, linkDragLeave, linkDragOver } from './drag'
+import { dropLink, dropPlaceAt, endLinkDrag, isDragging, linkDragLeave, linkDragOver } from './drag'
 import { SidebarItems } from './SidebarItems'
 import { SpaceBar } from './SpaceBar'
 import { TopBar } from './TopBar'
@@ -98,7 +98,7 @@ function onLinkDrop(e: ReactDragEvent, spaceId: SpaceId) {
   const plain = e.dataTransfer.getData('text/plain')
   const uri = uriList.split('\n').find((l) => l && !l.startsWith('#'))
   const text = uri?.trim() || plain.trim()
-  if (importDroppedFile(e, text, spaceId) || !text) {
+  if (importDroppedFile(e, text, spaceId, dropPlaceAt(e.clientX, e.clientY)) || !text) {
     endLinkDrag()
     return
   }

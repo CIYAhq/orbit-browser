@@ -225,6 +225,9 @@ test('[IM-14] a window that names a tab the import hasn’t shown gets nothing s
     .soft(await run(app, 'split.openUrl', { url: server.url('/beside'), target: hidden }), 'split.openUrl beside it')
     .toBeNull()
   expect.soft(await run(app, 'mini.fromTab', { tabId: hidden }), 'mini.fromTab').toBeNull()
+  // Focused as a pane: it is in no split (the fix check's repro, round 2).
+  await run(app, 'split.focusPane', { tabId: hidden })
+  expect.soft(await shown(), 'the tab shown after split.focusPane named a hidden one').not.toBe(hidden)
   // Out to a window of its own; copied; its menu; closed or deleted (the Archive would list it); selected.
   expect.soft(await run(app, 'tabs.toNewWindow', { tabId: hidden }), 'toNewWindow').toBeNull()
   await expect.soft(run(app, 'tabs.duplicate', { tabId: hidden }), 'duplicate').rejects.toThrow('No such tab')

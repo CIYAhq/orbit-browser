@@ -442,6 +442,30 @@ test('[TB-14][KS-16] Rename… in a row’s menu gives the sidebar the keyboard,
   await expect.poll(async () => (await state(app)).splits[split]?.name).toBe('Pair')
 })
 
+test('[TB-14][SV-22] a split row’s Change Icon…, though the page had the keyboard, gives it to the icon picker: what is typed finds the icon', async () => {
+  const { app, shell } = orbit
+  const t = await newTab(app, fx.url('/page/IconPage'))
+  const c = await newTab(app, fx.url('/page/SplitL'), { activate: false })
+  const d = await newTab(app, fx.url('/page/SplitR'), { activate: false })
+  const split = await cmd<string>(app, 'split.create', { tabIds: [c, d] })
+  await settled(shell)
+  const overlay = await viewPage(app, 'overlay')
+  await cmd(app, 'tabs.activate', { tabId: t })
+  await cmd(app, 'tabs.focusPage', {})
+  await expect.poll(focusedUrl).toBe(fx.url('/page/IconPage'))
+  await shell.locator(`[data-testid="split-row"][data-split-id="${split}"]`).click({ button: 'right' })
+  await expect(menu(overlay)).toHaveAttribute('data-key', split)
+  await overlay.locator('[data-testid="row-menu-item"][data-label="Change Icon…"]').click()
+  await expect.poll(overlayKind).toBe('none')
+  const picker = shell.getByTestId('icon-picker')
+  await expect(picker).toBeVisible()
+  await expect.poll(focusedUrl).toContain('view=shell')
+  await typeText('rocket')
+  await expect(picker.locator('.icon-picker__search')).toHaveValue('rocket')
+  await keys(['Enter'])
+  await expect.poll(async () => (await state(app)).splits[split]?.icon).toBe('🚀')
+})
+
 // ---------- SB-13, SP-02, SP-16: toasts over the page while the sidebar is hidden, in the Space's colours ----------
 
 /** A toast's colours against the theme its view has (`root` holds the palette's variables, SP-16). */

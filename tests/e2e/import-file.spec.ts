@@ -5,6 +5,7 @@ import { expect, type Page, test } from '@playwright/test'
 import { manyBookmarks, netscapeHtml, sampleTree } from '../../scripts/import-fixtures'
 import type { ImportJob } from '../../src/shared/commands/import'
 import type { OrbitState } from '../../src/shared/state'
+import { engineForSpace, parseInput } from '../../src/shared/url'
 import { MOD, type Orbit, run, state } from './helpers'
 import {
   clickDone,
@@ -223,6 +224,40 @@ test('[IM-13] a file with no bookmarks dropped with a local address opens no tab
   const page = await importPage(app)
   await expect(page.getByTestId('import-file-error')).toHaveText('notes.txt: No bookmarks found in this file')
   expect(await localTabs()).toEqual([])
+})
+
+test('[IM-13][TB-02] a file with no bookmarks dropped with words searches for them on the tab list, and on the Favorites opens nothing: judged where it lands (D87 (3))', async () => {
+  server = await loggedServer()
+  orbit = await launchImport()
+  const { app, shell } = orbit
+  const s = await state(app)
+  const spaceId = s.windows[Object.keys(s.windows)[0] as string]?.spaceId as string
+  const profileId = s.spaces[spaceId]?.profileId as string
+  // A Favorite, so the grid stands above the list.
+  await run(app, 'tabs.create', {
+    url: server.url('/favorite'),
+    spaceId,
+    container: { kind: 'favorites', profileId },
+    activate: false,
+  })
+  await expect(shell.getByTestId('favorite-tile')).toHaveCount(1)
+  const before = new Set(Object.keys((await state(app)).tabs))
+  const made = async () => Object.values((await state(app)).tabs).filter((t) => !before.has(t.id))
+  // A page's drag that carries a file of its own and some words.
+  const file = { name: 'notes.txt', text: 'Nothing here is a link.', type: 'text/plain' }
+  const words = { 'text/plain': 'orbit dropped words' }
+  await dropFile(shell, '[data-testid="favorites"]', file, words)
+  // The drop is handled once a tab opens or the import window says why it can't read the file.
+  await expect
+    .poll(async () => (await made()).length > 0 || app.windows().some((w) => w.url().includes('view=import')))
+    .toBe(true)
+  expect(await made(), 'tabs made by the drop on the Favorites').toEqual([])
+  const page = await importPage(app)
+  await expect(page.getByTestId('import-file-error')).toHaveText('notes.txt: No bookmarks found in this file')
+  // The same drop on the tab list searches for the words, as a dropped link's text does.
+  await dropFile(shell, '[data-testid="sidebar-scroll"]', file, words)
+  const search = parseInput('orbit dropped words', engineForSpace(await state(app), spaceId)).url
+  await expect.poll(async () => (await made()).map((t) => t.url)).toEqual([search])
 })
 
 test('[IM-13] hostile files of 1 MB are read off main’s thread: main never stalls 150 ms, and each says what it holds (D58)', async () => {

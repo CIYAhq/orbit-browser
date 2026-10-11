@@ -497,7 +497,9 @@ export function registerSplit(ctx: MainContext): void {
 
   commands.register('split.focusPane', ({ tabId }, c) => {
     const windowId = windowOf(c)
-    if (!windowId) return
+    // A pane of a split only, in a split the window may show (focusInDraft checks that: NV-11, TB-17). A tab the
+    // import hasn't shown is in none (D66 (1)).
+    if (!windowId || !splitOfTab(store.state, tabId)) return
     store.update((d) => focusInDraft(d, windowId, tabId))
   })
 
@@ -706,7 +708,12 @@ export function registerSplit(ctx: MainContext): void {
       // The sidebar's icon picker, as for a tab (TB-12); it can remove the icon too.
       {
         label: 'Change Icon…',
-        click: () => windowId && windows.sendToWindow(windowId, 'sidebar:icon', { id: splitId }),
+        click: () => {
+          if (!windowId) return
+          // As Rename…: the picker's search field takes the keyboard, though the page had it (TB-14).
+          windows.sidebarContents(windowId)?.focus()
+          windows.sendToWindow(windowId, 'sidebar:icon', { id: splitId })
+        },
       },
       ...(split.name
         ? [{ label: 'Show Pane Titles', click: () => void commands.run('split.rename', { splitId, name: null }) }]
