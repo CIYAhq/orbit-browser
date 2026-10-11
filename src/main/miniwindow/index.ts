@@ -248,11 +248,11 @@ export function registerMiniWindow(ctx: MainContext): void {
       outbox.delete(id)
     })
     // The UI loads again (a reload, or after a crash): what main sends waits until it is up, and
-    // what only the old UI showed goes: the bar over the page and the find field.
+    // what only the old UI showed goes: the bar over the page and the find field. Only a load that
+    // commits counts: one that will-navigate cancels leaves the old UI up (D74).
     let loads = 0
     win.webContents.on('render-process-gone', () => mounted.delete(id))
-    win.webContents.on('did-start-navigation', (details) => {
-      if (!details.isMainFrame || details.isSameDocument) return
+    win.webContents.on('did-navigate', () => {
       mounted.delete(id)
       const mini = loads++ > 0 ? minis.get(id) : undefined
       if (mini) {

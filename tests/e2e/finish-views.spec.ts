@@ -778,7 +778,7 @@ test('[CB-23][NV-05][MW-03] ⌘L and ⌘F that reach a new Mini Window before it
   await expect((await miniUi(findId)).getByTestId('mini-find-input')).toBeVisible()
 })
 
-test("[MW-03][CB-23][NV-05] a Mini Window's UI that reloads or crashes comes back: what main sent meanwhile reaches it, and its page shows again", async () => {
+test("[MW-03][CB-23][NV-05] a Mini Window's UI that reloads or crashes comes back: what main sent meanwhile reaches it, and its page shows again; a navigation main cancels changes nothing", async () => {
   const { app } = orbit
   const url = fx.url('/page/Reloading%20Mini')
   const id = (await run(app, 'mini.open', { url })) as string
@@ -786,7 +786,7 @@ test("[MW-03][CB-23][NV-05] a Mini Window's UI that reloads or crashes comes bac
   const ui = await miniUi(id)
   await expect(ui.getByTestId('mini-address')).toBeVisible()
   type Hooks = { __orbit: OrbitGlobal['__orbit'] & { action: Action } }
-  /** In main: crashes the Mini Window's UI, or reloads it and runs `action` there once the reload has begun. */
+  /** In main: crashes the Mini Window's UI, or reloads it and runs `action` there once the new UI has loaded, before it is up. */
   const restart = (how: 'reload' | 'crash', action = '') =>
     app.evaluate(
       async ({ BrowserWindow }, [wid, what, then]) => {
@@ -801,12 +801,31 @@ test("[MW-03][CB-23][NV-05] a Mini Window's UI that reloads or crashes comes bac
           await gone
           return
         }
-        const started = new Promise((resolve) => contents.once('did-start-navigation', resolve))
+        const committed = new Promise((resolve) => contents.once('did-navigate', resolve))
         contents.reload()
-        await started
+        await committed
         if (then) await hooks.action(then, wid)
       },
       [id, how, action] as const,
+    )
+  /** The Mini Window's UI starts a navigation away, which main cancels (Orbit's UI never navigates away). */
+  const strayNavigation = () =>
+    app.evaluate(
+      async ({ BrowserWindow }, [wid, to]) => {
+        const hooks = (globalThis as unknown as Hooks).__orbit
+        const contents = BrowserWindow.getAllWindows().find(
+          (b) => !b.isDestroyed() && hooks.ctx.windows.windowIdFor(b.webContents) === wid,
+        )?.webContents
+        if (!contents) throw new Error('no Mini Window UI')
+        const started = new Promise((resolve) => contents.once('did-start-navigation', resolve))
+        const asked = new Promise<boolean>((resolve) =>
+          contents.once('will-navigate', (e) => resolve(e.defaultPrevented)),
+        )
+        await contents.executeJavaScript(`location.href = ${JSON.stringify(to)}; true`)
+        await started
+        return asked
+      },
+      [id, fx.url('/page/Elsewhere')] as const,
     )
   const act = (action: string) =>
     app.evaluate(async (_e, [wid, name]) => (globalThis as unknown as Hooks).__orbit.action(name, wid), [
@@ -832,7 +851,7 @@ test("[MW-03][CB-23][NV-05] a Mini Window's UI that reloads or crashes comes bac
     )
   const back = () => expect.poll(() => uiHas('[data-testid="mini-address"]'), { timeout: 15_000 }).toBe(true)
 
-  // ⌘L comes in once a reload of the UI has begun: the bar opens once the UI is back.
+  // ⌘L comes in while a reloaded UI loads: the bar opens once the UI is up.
   await restart('reload', 'url.edit')
   const field = ui.getByTestId('mini-address-input')
   await expect(field).toBeVisible()
@@ -857,6 +876,12 @@ test("[MW-03][CB-23][NV-05] a Mini Window's UI that reloads or crashes comes bac
   expect(await uiHas('[data-testid="mini-find-input"]')).toBe(false)
   await act('page.findNext')
   await expect.poll(() => uiHas('[data-testid="mini-find-input"]')).toBe(true)
+  // A navigation away that main cancels leaves the UI as it is: what main sends next reaches it (D74).
+  expect(await strayNavigation()).toBe(true)
+  expect(await uiHas('[data-testid="mini-find-input"]')).toBe(true)
+  await act('url.edit')
+  await expect.poll(() => uiHas('[data-testid="mini-address-input"]')).toBe(true)
+  expect((await miniPage(id)).url).toBe(url)
 })
 
 // ---- New splits from the "+" menu and the split button (SV-07) ----
