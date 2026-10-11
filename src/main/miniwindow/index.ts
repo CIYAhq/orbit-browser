@@ -15,6 +15,7 @@ import { NEUTRAL_THEME, paletteFor } from '../../shared/theme'
 import { insertItem, removeItem, sectionOf } from '../../shared/tree'
 import { engineForWindow, parseInput, siteOf } from '../../shared/url'
 import type { MainContext } from '../context'
+import { hiddenByImport } from '../import/unplaced'
 import { reducedMotion } from '../motion'
 import { NAV_WORLD } from '../nav/focus'
 import { archiveFloating, floatingTab, keepFloatingPagesOutOfTabClose } from '../peek/floating'
@@ -612,7 +613,7 @@ export function registerMiniWindow(ctx: MainContext): void {
     const state = store.state
     const tab = state.tabs[tabId]
     // A private window's tab stays in private windows: a Mini Window is a normal-profile window (NV-11).
-    if (!tab || tab.floating || isPrivateTab(state, tabId)) return undefined
+    if (!tab || tab.floating || isPrivateTab(state, tabId) || hiddenByImport(state, tabId)) return undefined
     const section = sectionOf(state, tabId)
     if (section === 'today') return open(undefined, { adopt: tabId })
     const url = tabs.contents(tabId)?.getURL() || tab.url
@@ -946,6 +947,7 @@ export function registerMiniWindow(ctx: MainContext): void {
   // ⌘⇧L) act in the browser window behind (OB-12, KS-12, AR-10, keys lane).
   const APP_ACTIONS = new Set([
     'window.new',
+    'window.newBlank',
     'window.newMini',
     'window.newPrivate',
     'app.settings',

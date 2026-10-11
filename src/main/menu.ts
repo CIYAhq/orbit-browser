@@ -69,6 +69,7 @@ export function installMenu(ctx: MainContext): void {
       submenu: [
         item('tab.new'),
         item('window.new'),
+        item('window.newBlank'),
         item('window.newMini'),
         item('window.newPrivate'),
         item('file.open'),

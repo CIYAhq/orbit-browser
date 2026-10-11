@@ -1,9 +1,11 @@
 import { useEffect } from 'react'
-import type { DropTarget } from '../../../../shared/split'
+import { type DropTarget, leaf, type PaneBox } from '../../../../shared/split'
 import type { TabId } from '../../../../shared/state'
+import { splitOfTab } from '../../../../shared/tree'
 import { invoke } from '../../api'
 import { activeTabId } from '../../selectors'
 import { getOrbitState } from '../../store'
+import { type LinkDropMode, type PageLinks, pageLinks } from '../sidebar/page-link-drop'
 import type { DropPreview, PaneEngine } from './engine'
 
 const DRAG_THRESHOLD = 6
@@ -17,6 +19,11 @@ interface TabDrag {
   before: TabId | null
   active: boolean
   reverted: boolean
+  /** Where the page under the row takes its link, the link goes there instead (TB-09). */
+  links?: PageLinks
+  /** What the row does where it is now. */
+  mode: LinkDropMode
+  at?: { x: number; y: number }
 }
 
 const sameZone = (a: DropTarget | null, b: DropTarget | null) => a?.target === b?.target && a?.side === b?.side
@@ -32,16 +39,54 @@ export function useTabDrop(engine: PaneEngine, setDrop: (preview: DropPreview | 
     let drag: TabDrag | null = null
     let zone: (DropTarget & { full?: boolean }) | null = null
     const reset = () => {
+      drag?.links?.end()
       drag = null
       zone = null
       setDrop(null)
+    }
+    // The split the row would make here, unless the page there takes its link, or is still saying
+    // where it does (TB-09).
+    const show = (d: TabDrag, target = d.at ? engine.dropTargetFor(d.at.x, d.at.y, d.tabId) : null) => {
+      const next = d.mode === 'split' ? target : null
+      if (sameZone(next, zone) && !!next?.full === !!zone?.full) return
+      zone = next
+      setDrop(next && !next.full ? { ...next, tabId: d.tabId } : null)
+    }
+    // Over the page, once the page the drag began on is back (FL-05), its pages say where they take
+    // the row's link, as they are drawn before any preview makes room.
+    const follow = (d: TabDrag) => {
+      const at = d.at
+      if (!at || !d.links) return
+      if (!engine.contains(at.x, at.y)) {
+        d.links.away()
+        d.mode = 'split'
+        return
+      }
+      const panes = engine.paneBoxes()
+      const back = !d.reverted || !panes.some((p) => p.tabId === d.tabId)
+      if (back) d.links.panes(panes)
+      d.mode = back ? d.links.at(at.x, at.y) : 'split'
+    }
+    const startPanes = (d: TabDrag): PaneBox[] => {
+      if (!d.before || d.before === d.tabId) return engine.paneBoxes()
+      const s = getOrbitState()
+      const splitId = splitOfTab(s, d.before)
+      return engine.boxesOf((splitId && s.splits[splitId]?.layout) || leaf(d.before))
     }
     const onDown = (e: PointerEvent) => {
       if (e.button !== 0) return
       const el = (e.target as Element | null)?.closest?.(SOURCE) as HTMLElement | null
       const tabId = el?.dataset.tabId
       if (!el || !tabId || !el.closest('[data-testid="sidebar"]')) return
-      drag = { tabId, x: e.clientX, y: e.clientY, before: activeTabId(getOrbitState()), active: false, reverted: false }
+      drag = {
+        tabId,
+        x: e.clientX,
+        y: e.clientY,
+        before: activeTabId(getOrbitState()),
+        active: false,
+        reverted: false,
+        mode: 'split',
+      }
     }
     const onMove = (e: PointerEvent) => {
       if (!drag) return
@@ -52,7 +97,17 @@ export function useTabDrop(engine: PaneEngine, setDrop: (preview: DropPreview | 
       if (!drag.active) {
         if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < DRAG_THRESHOLD) return
         drag.active = true
+        const d = drag
+        d.links = pageLinks(d.tabId, () => {
+          if (drag !== d || !d.at || !d.links || !engine.contains(d.at.x, d.at.y)) return
+          d.mode = d.links.at(d.at.x, d.at.y)
+          show(d)
+        })
+        // Asked at once, before the row reaches the page: the pages it will be over are those of the
+        // page the drag began on, which comes back then (FL-05).
+        d.links?.panes(startPanes(d))
       }
+      drag.at = { x: e.clientX, y: e.clientY }
       const next = engine.dropTargetFor(e.clientX, e.clientY, drag.tabId)
       if (
         !next &&
@@ -67,15 +122,21 @@ export function useTabDrop(engine: PaneEngine, setDrop: (preview: DropPreview | 
         void invoke('tabs.activate', { tabId: drag.before })
         return
       }
-      if (sameZone(next, zone) && !!next?.full === !!zone?.full) return
-      zone = next
-      setDrop(next && !next.full ? { ...next, tabId: drag.tabId } : null)
+      follow(drag)
+      show(drag, next)
     }
-    const onUp = () => {
+    const onUp = (e: PointerEvent) => {
       const d = drag
       const z = zone
       drag = null
       zone = null
+      if (d?.active && d.links && d.mode === 'link') {
+        // The page takes the row's link where it was released (TB-09).
+        void d.links.drop(e.clientX, e.clientY)
+        setDrop(null)
+        return
+      }
+      d?.links?.end()
       if (!d?.active || !z) {
         setDrop(null)
         return

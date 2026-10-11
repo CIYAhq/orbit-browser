@@ -26,6 +26,7 @@ import type { SpaceCommands } from './commands/spaces'
 import type { SplitCommands } from './commands/split'
 import type { TabCommands } from './commands/tabs'
 import type { TweakCommands } from './commands/tweaks'
+import type { WindowMaterial } from './theme'
 
 export interface OrbitCommands
   extends CoreCommands,
@@ -91,6 +92,8 @@ export type RendererView =
   | 'import'
   /** Downloads lane: an internal page, `orbit://<page>/` in a tab (DT-13). */
   | 'internal'
+  /** Tabs lane: toasts over the page card while the sidebar is hidden (SB-13, SP-02). */
+  | 'toasts'
   /** Pages lane: a page's dialog over its page (alert, confirm, prompt, leave-page, sign-in; NV-24). */
   | 'dialog'
   /** Pages lane: what a page's area shows when its page couldn't load or crashed (NV-13, NV-14). */
@@ -105,6 +108,8 @@ export interface OrbitBridge {
   windowId: string
   view: RendererView
   platform: string
+  /** The shell's: the window's see-through material behind the neutral theme, if it has one (SB-24). */
+  material?: WindowMaterial
   invoke<K extends CommandName>(name: K, args: CommandArgs<K>): Promise<CommandResult<K>>
   send<K extends EventName>(name: K, payload: OrbitEvents[K]): void
   getState(): Promise<{ state: import('./state').OrbitState; seq: number }>

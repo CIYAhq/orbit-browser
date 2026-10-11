@@ -1,11 +1,18 @@
 import { type CSSProperties, useCallback, useLayoutEffect, useMemo, useSyncExternalStore } from 'react'
 import { isPrivateSpace, PRIVATE_PALETTE } from '../../shared/private'
 import type { SpaceTheme } from '../../shared/state'
-import { mixPalettes, type Palette, paletteFor, resolveDark } from '../../shared/theme'
+import { frameStops, mixPalettes, type Palette, paletteFor, resolveDark } from '../../shared/theme'
 import { reducedMotion } from './motion/reduced'
 import { getOrbitState, useOrbit } from './store'
 
 const darkQuery = window.matchMedia('(prefers-color-scheme: dark)')
+
+/**
+ * The window's shell lets the system material (macOS vibrancy, Windows Mica) through the neutral
+ * theme (SB-24, SP-15). Other views stay solid: the floating sidebar card lies over a page, not the
+ * desktop, and Electron gives a view no material of its own.
+ */
+const SEE_THROUGH = window.orbit?.view === 'shell' && !!window.orbit.material && window.orbit.material !== 'none'
 
 /** Reduced motion: the OS setting or Orbit's own (FL-28; see ./motion/reduced). */
 export const prefersReducedMotion = reducedMotion
@@ -145,6 +152,8 @@ export class ThemeDriver {
     this.written.clear()
     if (!el) return
     el.style.setProperty('--grain-image', grainImage())
+    // Only the background layer paints the theme, so the material shows where it is see-through.
+    if (SEE_THROUGH) el.dataset.material = ''
     if (this.restShown) this.writeRest(this.restShown)
   }
 
@@ -257,9 +266,10 @@ export class ThemeDriver {
       bg.style.setProperty(name, value)
       this.bgWritten.set(name, value)
     }
-    set('--bg-top', p.frameTop)
-    set('--bg-mid', p.frameMid)
-    set('--bg-bottom', p.frameBottom)
+    const [top, mid, bottom] = frameStops(p, SEE_THROUGH)
+    set('--bg-top', top)
+    set('--bg-mid', mid)
+    set('--bg-bottom', bottom)
     const grain = (p.grain * 0.6).toFixed(3)
     if (this.bgWritten.get('grain') !== grain) {
       if (this.grain) this.grain.style.opacity = grain

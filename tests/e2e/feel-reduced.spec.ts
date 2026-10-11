@@ -5,7 +5,7 @@
  */
 import { expect, type Page, test } from '@playwright/test'
 import { motionOf, note, type Recording, record, rotation, series } from './frames'
-import { action, FRAME_SLACK, launchOrbit, type Orbit, run, state, viewPage } from './helpers'
+import { action, FRAME_SLACK, launchOrbit, type Orbit, run, state, tabPage, viewPage } from './helpers'
 import { openSettings } from './settings-support'
 import { settled } from './tabs-support'
 
@@ -347,4 +347,65 @@ test('[FL-28][FL-15] reduced motion turned on while the sidebar shows: pressing 
   note('FL-28', '"+" pressed (on after it showed): scale', plus, '1 (no nudge)', '×')
   expect(tile, 'a pressed Favorite keeps its size').toBeCloseTo(1, 3)
   expect(plus, 'the pressed "+" keeps its size').toBeCloseTo(1, 3)
+})
+
+test('[FL-28][FL-26][TB-05] reduced motion turned on after the overlay is up: the recent-tab list shows at full strength in its first frame', async () => {
+  const { app } = orbit
+  const overlay = await viewPage(app, 'overlay')
+  for (const name of ['a', 'b', 'c']) await run(app, 'tabs.create', { url: `about:blank#${name}` })
+  await run(app, 'tabs.focusPage', {})
+  const focused = () => app.evaluate(({ webContents }) => webContents.getFocusedWebContents()?.getURL() ?? '')
+  await expect.poll(focused).toBe('about:blank#c')
+  await action(app, 'app.toggleReduceMotion')
+  await expect(overlay.locator('html')).toHaveClass(reduced)
+  type Mod = 'control'
+  const keys = (...events: [type: 'keyDown' | 'keyUp', keyCode: string, modifiers: Mod[]][]) =>
+    app.evaluate(({ webContents }, list) => {
+      for (const [type, keyCode, modifiers] of list)
+        webContents.getFocusedWebContents()?.sendInputEvent({ type, keyCode, modifiers })
+    }, events)
+  const rec = await record(overlay, { list: '[data-testid="tab-switcher"]' }, { maxMs: 5000, hidden: true })
+  // Held ⌃, two quick Tabs: the list at once.
+  await keys(
+    ['keyDown', 'Control', ['control']],
+    ['keyDown', 'Tab', ['control']],
+    ['keyUp', 'Tab', ['control']],
+    ['keyDown', 'Tab', ['control']],
+    ['keyUp', 'Tab', ['control']],
+  )
+  await expect(overlay.getByTestId('tab-switcher')).toBeVisible()
+  await overlay.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
+  const r = await rec.stop()
+  const first = r.frames.find((f) => f.els.list)
+  note(
+    'FL-28',
+    'recent-tab list (on after the overlay was up): opacity in its first frame',
+    first?.els.list?.opacity,
+    '1',
+    '',
+  )
+  expect(first?.els.list?.opacity, 'the list shows at once, at full strength').toBeGreaterThanOrEqual(0.999)
+  await keys(['keyDown', 'Escape', ['control']], ['keyUp', 'Escape', ['control']], ['keyUp', 'Control', []])
+  await expect.poll(async () => Object.values((await state(app)).windows)[0]?.overlay.kind).toBe('none')
+})
+
+test('[FL-28][TB-15] reduced motion turned on while a Favorite plays sound: its notes stand still', async () => {
+  const { app, shell } = orbit
+  const tab = (await run(app, 'tabs.create', { url: 'about:blank#tune', activate: true })) as string
+  await run(app, 'tabs.favorite', { tabId: tab })
+  await (await tabPage(app, 'about:blank#tune')).evaluate(() => {
+    const audio = new AudioContext()
+    const tone = audio.createOscillator()
+    const gain = audio.createGain()
+    gain.gain.value = 0.05
+    tone.connect(gain).connect(audio.destination)
+    tone.start()
+  })
+  const notes = shell.locator(`[data-fav-id="${tab}"] .favorite__note`)
+  await expect(notes).toHaveCount(2)
+  const looks = () =>
+    notes.evaluateAll((els) => els.map((el) => `${getComputedStyle(el).animationName} ${getComputedStyle(el).opacity}`))
+  expect((await looks()).map((l) => l.split(' ')[0])).toEqual(['favorite-note', 'favorite-note'])
+  await reduce('switch', shell)
+  await expect.poll(looks).toEqual(['none 1', 'none 1'])
 })

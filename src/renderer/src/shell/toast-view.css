@@ -1,0 +1,32 @@
+/* Toasts while the sidebar is hidden (SB-13): a small transparent view over the bottom centre of the
+   page card. The view is the stack plus a 24 px margin, for the shadow and the rise a toast comes in
+   with (TOAST_VIEW in src/main/tabs/toasts.ts). */
+html[data-view="toasts"] body {
+  background: transparent;
+  overflow: hidden;
+}
+
+.toast-view {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.toast-view__stack {
+  position: absolute;
+  left: 24px;
+  bottom: 24px;
+  /* Its own size, whatever the view's is now, so it can be measured. */
+  width: max-content;
+  max-width: 420px;
+}
+
+.toast-view .toasts {
+  position: static;
+  align-items: center;
+}
+
+/* Over the page every toast takes the pointer: hovering one keeps it (FL-22). */
+.toast-view .toast {
+  pointer-events: auto;
+}

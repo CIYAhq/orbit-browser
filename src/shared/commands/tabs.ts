@@ -1,3 +1,5 @@
+import type { RowMenuAt } from '../row-menu'
+import type { Box } from '../split'
 import type { ContainerRef, FolderId, ItemId, ProfileId, SpaceId, TabId, WindowId } from '../state'
 
 /** Owned by the sidebar/tabs lane. */
@@ -13,7 +15,10 @@ export interface TabCommands {
   'tabs.reopenClosed': { args: { tabId?: TabId }; result: TabId | null }
   /** The remembered icon (a small data URL) for a page's origin: archive, history, lists (MF-2). */
   'tabs.favicon': { args: { url: string }; result: string | null }
-  /** Recently closed tabs, newest first (for command bar results, TB-07). */
+  /**
+   * Recently closed tabs, newest first (for command bar results, TB-07): those the calling window
+   * may reopen (`mayReopenIn`); called with no window, those a normal window may.
+   */
   'tabs.recentlyClosed': {
     args: Record<string, never>
     result: {
@@ -47,6 +52,17 @@ export interface TabCommands {
   'tabs.splitWith': { args: { tabId: TabId; target: ItemId; side: 'left' | 'right' }; result: string | null }
   /** Drag a tab out of the window: a new window shows it (TB-09). `x`/`y` are screen coordinates. */
   'tabs.toNewWindow': { args: { tabId: TabId; x?: number; y?: number }; result: WindowId | null }
+  /**
+   * A tab's row dragged over the page (TB-09): where the pages in `panes` take its link (text fields
+   * and editable areas in sight), in window coordinates, asked as they are drawn now.
+   */
+  'tabs.linkTargets': { args: { tabId: TabId; panes: { tabId: TabId; rect: Box }[] }; result: Box[] }
+  /**
+   * The row's link at a window point over one of those places: `over` tells the page the row is
+   * there, `leave` that it moved off, `drop` gives it the link, `end` forgets the drag (the row left
+   * the page, or was let go elsewhere). False when nothing took it.
+   */
+  'tabs.dropLink': { args: { x: number; y: number; phase: 'over' | 'leave' | 'drop' | 'end' }; result: boolean }
   /** Pin into the tab's Space, or into `spaceId` ("Pin to [Space]") (PN-02). */
   'tabs.pin': { args: { tabId: TabId; spaceId?: SpaceId }; result: void }
   'tabs.unpin': { args: { tabId: TabId }; result: void }
@@ -72,16 +88,30 @@ export interface TabCommands {
   'tabs.clearToday': { args: { spaceId?: SpaceId }; result: void }
   /** Collapse or expand a Space's pinned section (PN-09). */
   'tabs.setPinnedCollapsed': { args: { spaceId?: SpaceId; collapsed: boolean }; result: void }
-  /** Right-click menu for a tab or folder; `selection` is the multi-selection (TB-13, TB-14). */
-  'tabs.contextMenu': { args: { id: ItemId; selection?: TabId[] }; result: void }
+  /**
+   * Right-click menu for a tab or folder; `selection` is the multi-selection (TB-13, TB-14). It opens
+   * in the overlay at `at` (the sender's coordinates), else at the pointer.
+   */
+  'tabs.contextMenu': { args: { id: ItemId; selection?: TabId[]; at?: RowMenuAt }; result: void }
+  /** The overlay's row menu: run item `id` ("4.1.0") of menu `menu`, if it is still open (TB-14). */
+  'rowMenu.choose': { args: { menu: number; id: string }; result: boolean }
+  /** The toast view has loaded and listens: it is sent the toasts that waited for it (SB-13). */
+  'toasts.ready': { args: Record<string, never>; result: void }
+  /** The toast view's stack is this big now (0 × 0: no toasts), so main fits the view to it (SB-13). */
+  'toasts.size': { args: { width: number; height: number }; result: void }
   /** The sidebar's multi-selection in this window, so ⌘W and ⌘⇧C act on all of it (TB-13). */
   'tabs.setSelection': { args: { tabIds: TabId[] }; result: void }
-  /** Control was released: the recent-tab switch in progress settles on the current tab (TB-05). */
-  'tabs.endRecentSwitch': { args: Record<string, never>; result: void }
+  /**
+   * Ends the recent-tab switch in progress (TB-05): on the highlighted tab (Control was let go), on
+   * `tabId` (its row in the list was clicked) or, with `cancel`, with no switch (Esc).
+   */
+  'tabs.endRecentSwitch': { args: { tabId?: TabId; cancel?: boolean }; result: void }
   /** Give keyboard focus to the window's sidebar (drag cancel with Escape, SB-22). */
   'tabs.focusSidebar': { args: Record<string, never>; result: void }
   /** Return keyboard focus to the selected tab's page (SB-22). */
   'tabs.focusPage': { args: Record<string, never>; result: void }
+  /** The battery as the window's page reads it: below 20 % on battery power, the battery saver (TB-16). */
+  'tabs.battery': { args: { level: number; charging: boolean }; result: void }
   'folders.create': {
     args: { container?: ContainerRef; index?: number; name?: string; items?: ItemId[] }
     result: FolderId
