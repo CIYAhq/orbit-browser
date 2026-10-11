@@ -223,6 +223,11 @@ export class WindowManager {
   /** Tabs whose page closed its own web contents (window.close()): not reopened until selected again. */
   private selfClosed = new Set<TabId>()
   private floatingOwners: ((tabId: TabId) => WindowId | undefined)[] = []
+  /**
+   * Views that stay above the page tools wherever either goes: a page's own dialog or print dialog
+   * over its page, in a tab or a Peek (pages lane, NV-24, NV-07; keepAboveTools()).
+   */
+  private aboveTools = new WeakSet<object>()
   /** Main window that most recently had focus (fallback when no window has focus). */
   private lastFocused: WindowId | undefined
   /** The last main window, closed while the app keeps running (macOS) or is about to quit: its state is kept. */
@@ -736,9 +741,14 @@ export class WindowManager {
     const parent = rec.win.contentView
     const children = parent.children
     const at = children.indexOf(view)
-    const above = opts.top
-      ? []
-      : [rec.overlay, rec.floating, rec.cover].map((v) => (v ? children.indexOf(v) : -1)).filter((i) => i >= 0)
+    const band = [rec.overlay, rec.floating, rec.cover].map((v) => (v ? children.indexOf(v) : -1)).filter((i) => i >= 0)
+    const above = opts.top ? [] : [...band]
+    // A page's own dialog over its page stays above them (keepAboveTools()): with `top`, one over a
+    // Peek's page, above the overlay.
+    const floor = opts.top && band.length > 0 ? Math.max(...band) : -1
+    children.forEach((child, i) => {
+      if (i > floor && this.aboveTools.has(child)) above.push(i)
+    })
     const ceiling = above.length > 0 ? Math.min(...above) : -1
     if (ceiling < 0) {
       if (at !== children.length - 1) parent.addChildView(view)
@@ -856,6 +866,15 @@ export class WindowManager {
   }
 
   /**
+   * Keeps `view` above the window's page tools (the find bar, the zoom indicator) wherever either
+   * goes: a page's own dialog or print dialog over its page (pages lane, NV-24, NV-07), as a
+   * createUiView() view or a view of its own over a Peek's page.
+   */
+  keepAboveTools(view: WebContentsView): void {
+    this.aboveTools.add(view)
+  }
+
+  /**
    * A small transparent Orbit UI view for another module (the loading indicator, SB-28; the link
    * pill, SB-27; page dialogs, NV-24): out of the window until showUiView(), then above the window's
    * pages (under the overlay and the floating sidebar) until hideUiView(); closed with the window.
@@ -948,6 +967,10 @@ export class WindowManager {
     for (const entry of this.attached.values()) {
       if (entry.windowId === rec.id) topPage = Math.max(topPage, children.indexOf(entry.view))
     }
+    // A view kept above the page tools (keepAboveTools()) goes above them too, where they are under
+    // the ceiling (over a Peek's page they are above it, and so is a dialog over that page).
+    const tools = rec.tools && this.aboveTools.has(view) ? children.indexOf(rec.tools) : -1
+    if (tools < ceiling) topPage = Math.max(topPage, tools)
     if (at > topPage && at < ceiling) return
     if (ceiling >= children.length) parent.addChildView(view)
     else parent.addChildView(view, at >= 0 && at < ceiling ? ceiling - 1 : ceiling)

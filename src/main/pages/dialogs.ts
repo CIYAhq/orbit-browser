@@ -76,6 +76,8 @@ export function registerDialogs(ctx: MainContext): PageDialogs$ {
     // time one to catch keys meant for the find bar or a sidebar field.
     mayTakeKeyboard: (page, focused) =>
       pageHasKeyboard(page, focused) || queues.get(page.id)?.list[0]?.hadKeyboard === true,
+    // Above the find bar, in a tab or a Peek, where the find bar keeps the keyboard (D72).
+    aboveTools: true,
   })
 
   const matches = (dialog: Dialog, which: DialogsWhich) =>

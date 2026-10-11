@@ -85,6 +85,12 @@ export function createCovers<C extends CoverContent>(
     mayTakeKeyboard?: (page: WebContents, focused: WebContents | null) => boolean
     /** A key pressed in the view (`view`) while it shows over `page`. */
     onKey?: (page: WebContents, view: WebContents, event: Electron.Event, input: Electron.Input) => void
+    /**
+     * The view stays above the window's page tools (the find bar), as a page's own dialog does: in
+     * a tab and over a Peek's page alike (`WindowManager.keepAboveTools`). An error or crash screen
+     * isn't kept so: the find bar can show over it.
+     */
+    aboveTools?: boolean
   },
 ): PageCovers<C> {
   const { store, tabs, windows } = ctx
@@ -210,6 +216,7 @@ export function createCovers<C extends CoverContent>(
     }
     const view = windows.createUiView(windowId, opts.view)
     if (!view) return undefined
+    if (opts.aboveTools) windows.keepAboveTools(view)
     pool.add(view)
     watchView(view)
     windows.get(windowId)?.once('closed', () => {
@@ -225,6 +232,7 @@ export function createCovers<C extends CoverContent>(
     const view = new WebContentsView({ webPreferences: uiWebPreferences(windowId, opts.view) })
     view.setBackgroundColor('#00000000')
     view.setVisible(false)
+    if (opts.aboveTools) windows.keepAboveTools(view)
     const contents = view.webContents
     windows.registerUi(contents, windowId)
     windows.attachShortcuts(contents)

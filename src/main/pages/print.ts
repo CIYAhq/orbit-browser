@@ -154,6 +154,8 @@ export function registerPrint(ctx: MainContext, deps: { deliver: DeliverPrint; p
 
   const covers = createCovers<PrintContent>(ctx, {
     view: 'print',
+    // Above the find bar, as a page's dialog is.
+    aboveTools: true,
     content: (page) => {
       const s = sessions.get(page.id)
       return s ? contentOf(s) : undefined

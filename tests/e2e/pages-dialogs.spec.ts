@@ -1,6 +1,15 @@
 import { expect, test } from '@playwright/test'
 import { action, isMac, launchOrbit, type Orbit, state } from './helpers'
-import { clickInPage, closeWindow, cmdIn, pressInPage, toolsPage, windowState } from './nav-support'
+import {
+  clickInPage,
+  closeWindow,
+  cmdIn,
+  pressInPage,
+  toolsInfo,
+  toolsPage,
+  waitLoaded,
+  windowState,
+} from './nav-support'
 import {
   AUTH_PASSWORD,
   AUTH_USER,
@@ -204,6 +213,64 @@ test('[NV-24][KS-19][NV-05] a dialog the page times leaves the keyboard in the f
   await expect.poll(async () => (await waitDialog(app, (d) => d.id === shown.id)).focused).toBe(true)
   expect(await typeWhereKeyboardIs(['Escape'])).toEqual([expect.stringContaining('view=dialog')])
   await answered(asking, 'false')
+})
+
+/** The views of the window that has the page tools, bottom to top: 'dialog', 'tools', or a page's address. */
+function stacking(app: Orbit['app']): Promise<string[]> {
+  return app.evaluate(({ BrowserWindow }) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      const views = w.contentView.children.map((v) => {
+        const contents = (v as Electron.WebContentsView).webContents
+        if (!contents || contents.isDestroyed()) return ''
+        const url = contents.getURL()
+        return /[?&]view=(dialog|tools)(&|$)/.exec(url)?.[1] ?? url
+      })
+      if (views.includes('tools')) return views
+    }
+    return []
+  })
+}
+
+test('[NV-24][PK-11][KS-19] a dialog in a Peek shows above the find bar there, which keeps its keys; the dialog takes them when the bar closes (D72)', async () => {
+  const { app } = orbit
+  const under = await newTab(app, fx.url('/page/Under'))
+  await waitTab(app, under, '/page/Under')
+  const url = fx.url('/ask?kind=confirm&msg=In%20a%20Peek')
+  const peekTab = await cmd<string>(app, 'peek.open', { url })
+  await waitLoaded(app, peekTab, url)
+  await expect.poll(focusedUrl).toBe(url)
+  // The find bar opens over the Peek's card, with the keyboard (PK-11)...
+  await pressInPage(app, url, 'F', [MOD_KEY])
+  const input = (await toolsPage(app)).getByTestId('find-input')
+  await expect(input).toBeFocused()
+  await expect.poll(focusedUrl).toContain('view=tools')
+  // ...as the page in the Peek asks.
+  await inPage(app, url, 'setTimeout(ask, 0); 0')
+  const shown = await waitDialog(app, (d) => d.tabId === peekTab && d.onScreen)
+  expect(shown).toMatchObject({ host: 'floating', focused: false })
+  const dialogAboveTools = async () => {
+    const views = await stacking(app)
+    return views.indexOf('dialog') > views.indexOf('tools') && views.indexOf('tools') > views.indexOf(url)
+  }
+  await expect.poll(dialogAboveTools).toBe(true)
+  // What the user types goes on into the find bar, and the dialog stays above it, also when the bar
+  // is placed again (an emptied field lays it out anew).
+  const typed = await typeWhereKeyboardIs(['A', 's', 'k', 'Enter'])
+  expect(typed.every((at) => at.includes('view=tools'))).toBe(true)
+  await expect(input).toHaveValue('Ask')
+  await expect.poll(async () => (await toolsInfo(app)).find.query).toBe('Ask')
+  const erased = await typeWhereKeyboardIs(['Backspace', 'Backspace', 'Backspace'])
+  expect(erased.every((at) => at.includes('view=tools'))).toBe(true)
+  await expect.poll(async () => (await toolsInfo(app)).find.query).toBe('')
+  expect(await dialogAboveTools()).toBe(true)
+  expect(await waitDialog(app, (d) => d.id === shown.id)).toMatchObject({ onScreen: true, focused: false })
+  // Esc closes the bar and gives the Peek's page the keyboard: the dialog takes it, and Esc there
+  // cancels. The Peek stays open.
+  expect(await typeWhereKeyboardIs(['Escape'])).toEqual([expect.stringContaining('view=tools')])
+  await expect.poll(async () => (await waitDialog(app, (d) => d.id === shown.id)).focused).toBe(true)
+  expect(await typeWhereKeyboardIs(['Escape'])).toEqual([expect.stringContaining('view=dialog')])
+  await answered(peekTab, 'false')
+  expect((await windowState(app)).overlay.kind).toBe('peek')
 })
 
 test('[NV-24] a dialog from an empty tab or pop-up that its opener scripts names the opener’s site', async () => {
