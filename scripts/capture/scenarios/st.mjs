@@ -221,7 +221,7 @@ export default async function (t) {
   await click(page.getByTestId('peek-shift-click'), offset, 14)
   await t.sleep(1300)
 
-  // ST-17: About: the version and engine; Check Now finds a newer version (UP-10).
+  // ST-17: About: the version and engine; Check Now finds a newer version (UP-03, UP-10).
   mark('about')
   await click(page.getByTestId('settings-tab-about'), offset, 18)
   await page.getByTestId('about-version').waitFor({ timeout: 8000 })
