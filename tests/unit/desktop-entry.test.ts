@@ -1,4 +1,13 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -160,6 +169,8 @@ describe('Linux launcher actions (MW-14)', () => {
     const user = '/home/ada/.local/share/applications/Orbit.desktop'
     const theirs = '[Desktop Entry]\nType=Application\nName=Orbit\nExec=/somewhere/else\n'
     expect(desktopPlan({ ...SETUP, exists: (p) => p === user, read: () => theirs })).toEqual({ skip: 'not ours' })
+    // One it can't read may be someone else's too.
+    expect(desktopPlan({ ...SETUP, exists: (p) => p === user, read: () => undefined })).toEqual({ skip: 'not ours' })
     const first = desktopPlan(SETUP)
     const ours = 'text' in first ? first.text : ''
     expect(desktopPlan({ ...SETUP, exists: (p) => p === user, read: () => ours })).toEqual({ skip: 'current' })
@@ -200,6 +211,30 @@ describe('Linux launcher actions (MW-14)', () => {
       await mkdir(join(dir, 'system', 'applications'), { recursive: true })
       writeFileSync(join(dir, 'system', 'applications', 'Orbit.desktop'), '[Desktop Entry]\n')
       expect(await writeDesktopEntry(setup)).toEqual({ skip: 'installed' })
+    })
+
+    it("[MW-14] leaves alone an entry it can't read: a link to nothing, a folder, a file it may not read", async () => {
+      dir = mkdtempSync(join(tmpdir(), 'orbit-desktop-'))
+      const env = { XDG_DATA_HOME: join(dir, 'home'), XDG_DATA_DIRS: join(dir, 'system') }
+      const setup = { env, home: dir, appName: 'Orbit', execPath: '/opt/Orbit/orbit-browser' }
+      const path = join(dir, 'home', 'applications', 'Orbit.desktop')
+      await mkdir(join(dir, 'home', 'applications'), { recursive: true })
+      // Writing through the link would make a file where it points.
+      const target = join(dir, 'elsewhere.desktop')
+      symlinkSync(target, path)
+      expect(await writeDesktopEntry(setup)).toEqual({ skip: 'not ours' })
+      expect(existsSync(target)).toBe(false)
+      rmSync(path)
+      mkdirSync(path)
+      expect(await writeDesktopEntry(setup)).toEqual({ skip: 'not ours' })
+      rmSync(path, { recursive: true })
+      // Root reads any file: the plan's own test covers that case there.
+      if (process.getuid?.() === 0) return
+      const mine = '[Desktop Entry]\nName=Mine\n'
+      writeFileSync(path, mine, { mode: 0o200 })
+      expect(await writeDesktopEntry(setup)).toEqual({ skip: 'not ours' })
+      chmodSync(path, 0o600)
+      expect(readFileSync(path, 'utf8')).toBe(mine)
     })
   })
 })

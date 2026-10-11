@@ -9,7 +9,7 @@
  * pointing at where it runs from, and keeps it current. It never touches an entry it didn't write,
  * and an entry a package installed wins. Kept apart from Electron so it is unit-tested.
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { lstatSync, readFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { NEW_MINI_SWITCH, TOGGLE_MINIS_SWITCH } from './switches'
@@ -81,7 +81,7 @@ export interface DesktopSetup {
   /** The running program (process.execPath). */
   execPath: string
   icon?: string
-  /** Whether a file exists. */
+  /** Whether something is at a path (a link counts, even one to nothing). */
   exists: (path: string) => boolean
   /** A file's text, if it can be read. */
   read: (path: string) => string | undefined
@@ -117,9 +117,12 @@ export function desktopPlan(setup: DesktopSetup): DesktopPlan {
     // Electron's X11 window class is the app's name (on Wayland the entry's own name ties them).
     wmClass: setup.appName,
   })
-  const current = setup.exists(path) ? setup.read(path) : undefined
-  if (current !== undefined && !current.split('\n').includes(WRITTEN_MARK)) return { skip: 'not ours' }
-  if (current === entry) return { skip: 'current' }
+  if (setup.exists(path)) {
+    // What it can't read (a link to nothing, a folder, a file it may not read) may be someone else's.
+    const current = setup.read(path)
+    if (current === undefined || !current.split('\n').includes(WRITTEN_MARK)) return { skip: 'not ours' }
+    if (current === entry) return { skip: 'current' }
+  }
   return { write: path, text: entry }
 }
 
@@ -127,7 +130,14 @@ export function desktopPlan(setup: DesktopSetup): DesktopPlan {
 export async function writeDesktopEntry(setup: Omit<DesktopSetup, 'exists' | 'read'>): Promise<DesktopPlan> {
   const plan = desktopPlan({
     ...setup,
-    exists: existsSync,
+    exists: (path) => {
+      try {
+        lstatSync(path)
+        return true
+      } catch {
+        return false
+      }
+    },
     read: (path) => {
       try {
         return readFileSync(path, 'utf8')
