@@ -384,9 +384,9 @@ test('[CB-22][FL-16][FL-17] keys typed right after ⌘T are kept and results fol
     () => (window as unknown as { __orbitCommandBar: { latencies: number[] } }).__orbitCommandBar.latencies,
   )
   // Results follow the keystrokes: the upper median of the last 10. The worst keystroke and the open's
-  // budget are judged by the budget tests: CB-22 below, measured in up to three rounds (D46), and FL-17
-  // in feel-commandbar, one round with every keystroke timed frame by frame. One sample or a maximum
-  // here would judge the load on the machine more than the bar.
+  // budget are judged by the budget tests, each measured in up to three rounds (D46): CB-22 below, and
+  // FL-17 in feel-commandbar, with every keystroke timed frame by frame. One sample or a maximum here
+  // would judge the load on the machine more than the bar.
   const last = latencies.slice(-10).sort((a, b) => a - b)
   expect(last.length).toBeGreaterThan(0)
   expect(last[last.length >> 1]).toBeLessThan(50 * FRAME_SLACK)
