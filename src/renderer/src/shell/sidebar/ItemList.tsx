@@ -49,6 +49,35 @@ const ROW_SPRING = SNAPPY
 export const CHEVRON = { duration: 0.16, ease: EASE.snappy }
 export const REVEAL = { height: SNAPPY, opacity: tween('quick') }
 export const CONCEAL = { height: SNAPPY_EXIT, opacity: tween('quick', { exit: true }) }
+
+/**
+ * A folder's children or the pinned section, opening and closing (FL-12): the box grows with the
+ * snappy spring while its rows fade in one after another (`.is-revealing`), and shrinks a little
+ * quicker as it fades. Only a box the user opens staggers (`stagger`, decided as it mounts), not one
+ * drawn open with the sidebar; with reduced motion the box only fades.
+ */
+export function RevealBox({
+  className,
+  stagger,
+  children,
+}: {
+  className: string
+  stagger: boolean
+  children: React.ReactNode
+}) {
+  const [revealing, setRevealing] = useState(() => stagger && !reducedMotion())
+  return (
+    <motion.div
+      className={`${className}${revealing ? ' is-revealing' : ''}`}
+      initial={reducedMotion() ? false : { height: 0, opacity: revealing ? 1 : 0 }}
+      animate={{ height: 'auto', opacity: 1, transition: REVEAL }}
+      exit={{ height: 0, opacity: 0, transition: CONCEAL }}
+      onAnimationComplete={() => setRevealing(false)}
+    >
+      {children}
+    </motion.div>
+  )
+}
 /** The gap between rows in a list (`.item-list`'s `gap`). */
 const LIST_GAP = 1
 /** A tab row's height (`--row-h`). */
@@ -707,6 +736,11 @@ const FolderRow = memo(function FolderRow({
   const renaming = useRename((s) => s.id === folderId)
   const hidden = useDrag((s) => !!s.hidden[folderId])
   const collapsedBefore = useRef<boolean | null>(null)
+  // Drawn before: children shown from now on were opened by the user (FL-12).
+  const shown = useRef(false)
+  useEffect(() => {
+    shown.current = true
+  }, [])
   if (!folder) return null
   const childAncestors = ancestors ? `${ancestors},${folderId}` : folderId
   // A deleted folder animating out draws no children (they're gone or moved on).
@@ -792,20 +826,14 @@ const FolderRow = memo(function FolderRow({
       </RowSlot>
       <AnimatePresence initial={false}>
         {open && (
-          <motion.div
-            key="children"
-            className="folder__children"
-            initial={reducedMotion() ? false : { height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1, transition: REVEAL }}
-            exit={{ height: 0, opacity: 0, transition: CONCEAL }}
-          >
+          <RevealBox key="children" className="folder__children" stagger={shown.current}>
             <ItemList
               containerKey={`folder:${folderId}`}
               items={folder.children}
               depth={depth + 1}
               ancestors={childAncestors}
             />
-          </motion.div>
+          </RevealBox>
         )}
       </AnimatePresence>
       {!open && peek && (

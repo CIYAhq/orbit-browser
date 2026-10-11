@@ -25,7 +25,7 @@ import { setDragContext } from './drag'
 import { Favorites } from './Favorites'
 import { FolderSearch } from './FolderSearch'
 import { IconPicker } from './IconPicker'
-import { CHEVRON, CONCEAL, ItemList, REVEAL, TabRow, useRowShift } from './ItemList'
+import { CHEVRON, ItemList, RevealBox, TabRow, useRowShift } from './ItemList'
 import { RowWindow, RowWindowContext } from './row-window'
 import { clearSelection, startRename, useDrag, useIconPicker, useKeyboardFocus, useSelection } from './ui-state'
 
@@ -214,26 +214,25 @@ const PinnedSection = memo(function PinnedSection({ space }: { space: Space }) {
     const loc = locate(s, a)
     return loc ? `${a}|${containerKey(loc.container)}|${loc.index}` : null
   })
+  // Drawn before: the section shown from now on was opened by the user (FL-12).
+  const shown = useRef(false)
+  useEffect(() => {
+    shown.current = true
+  }, [])
   const [peekId, peekContainer, peekIndex] = peekKey ? peekKey.split('|') : []
   const peek = peekId && peekContainer ? { id: peekId, key: peekContainer, index: Number(peekIndex) } : null
   return (
     <>
       <AnimatePresence initial={false}>
         {!collapsed && (
-          <motion.div
-            key="pinned"
-            className="pinned-section"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1, transition: REVEAL }}
-            exit={{ height: 0, opacity: 0, transition: CONCEAL }}
-          >
+          <RevealBox key="pinned" className="pinned-section" stagger={shown.current}>
             <ItemList
               key={`pinned:${space.id}`}
               containerKey={`pinned:${space.id}`}
               items={space.pinned}
               testId="pinned-list"
             />
-          </motion.div>
+          </RevealBox>
         )}
       </AnimatePresence>
       {peek && (

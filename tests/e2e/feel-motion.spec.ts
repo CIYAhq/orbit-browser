@@ -5,7 +5,18 @@
  * docs/FEEL.md has them against their targets.
  */
 import { expect, test } from '@playwright/test'
-import { frameAfterWall, interruption, jumpRatio, mainInputs, note, type Recording, record, series } from './frames'
+import {
+  frameAfterWall,
+  interruption,
+  jumpRatio,
+  mainInputs,
+  motionOf,
+  note,
+  type Recording,
+  record,
+  series,
+  settledFrom,
+} from './frames'
 import {
   type Fixtures,
   FRAME_SLACK,
@@ -38,6 +49,8 @@ test.afterEach(async () => {
 })
 
 const MOD_KEY = isMac ? 'meta' : 'control'
+/** One refresh interval at 60 Hz. */
+const FRAME = 1000 / 60
 /** No jump: the first frames after the interruption step at most twice as far as the frames before, plus `slack`. */
 const carriesOn = (s: { before: number; after: number }, slack: number) => s.after <= 2 * s.before + slack
 
@@ -209,4 +222,81 @@ test('[FL-01] collapsing a folder while it opens closes it from where it is', as
   expect(peak).toBeGreaterThan(0)
   expect(carriesOn(turn, 2)).toBe(true)
   expect(h.at(-1)?.v ?? 0).toBe(0)
+})
+
+/** A transform's rotation in degrees (`none` is 0). */
+function rotation(transform: string | undefined): number {
+  const m = /matrix\(([^)]+)\)/.exec(transform ?? '')
+  if (!m) return 0
+  const [a, b] = (m[1] as string).split(',').map(Number) as [number, number]
+  return (Math.atan2(b, a) * 180) / Math.PI
+}
+
+test('[FL-12] opening a folder of 6: the chevron turns in about 160 ms, the content below makes room within 250 ms as the children fade in one after another; closing is quicker', async () => {
+  const { app, shell } = orbit
+  const tabs: string[] = []
+  for (let k = 0; k < 6; k++)
+    tabs.push((await run(app, 'tabs.create', { url: `about:blank#g${k}`, activate: false })) as string)
+  const space = Object.values((await state(app)).windows)[0]?.spaceId as string
+  await run(app, 'folders.create', { container: { kind: 'pinned', spaceId: space }, name: 'Box', items: tabs })
+  const folderRow = shell.getByTestId('folder-row')
+  await expect(folderRow).toBeVisible()
+  if ((await folderRow.getAttribute('aria-expanded')) === 'true') {
+    await folderRow.click()
+    await expect(folderRow).toHaveAttribute('aria-expanded', 'false')
+  }
+  await settled(shell)
+  const box = await folderRow.boundingBox()
+  if (!box) throw new Error('no folder row')
+  await shell.mouse.move(box.x + 40, box.y + box.height / 2)
+  await shell.waitForTimeout(300)
+  const targets = {
+    chevron: { selector: '[data-testid="folder-row"] .folder-row__chevron-wrap', style: ['transform'] },
+    divider: '[data-testid="today-divider"]',
+    kids: { selector: '.folder__children [data-testid="tab-row"]', key: 'data-tab-id' },
+  }
+  const open = await record(shell, targets)
+  await shell.mouse.down()
+  await shell.mouse.up()
+  await expect(folderRow).toHaveAttribute('aria-expanded', 'true')
+  const o = await open.until(700)
+  const click = o.inputs.find((i) => i.type === 'pointerup')
+  if (!click) throw new Error('the click never reached the shell')
+  const turn = motionOf(o.frames.map((f) => ({ t: f.t, v: rotation(f.els.chevron?.style?.transform) })))
+  const below = series(o, 'divider', (b) => b.y)
+  const end = below.at(-1)?.v ?? 0
+  const room = settledFrom(o, (f) => Math.abs((f.els.divider?.y ?? Number.NaN) - end) <= 0.5)
+  const made = room ? room.t - click.t : Number.POSITIVE_INFINITY
+  const flow = motionOf(below)
+  // When each child first shows (opacity above 5 %), in list order.
+  const shows = tabs.map((id) => o.frames.find((f) => (f.lists.kids?.[id]?.opacity ?? 0) > 0.05)?.t ?? Number.NaN)
+  const spread = Math.max(...shows) - Math.min(...shows)
+  note('FL-12', 'chevron turn, first to last moving frame', (turn.end ?? 0) - (turn.start ?? 0), '150–180 ms')
+  note('FL-12', 'click → content below in place (within 0.5 px)', made, '≤ 250 ms')
+  note('FL-12', 'content below: largest step share', flow.biggestStep * 100, '< 60 % (moves smoothly)', '%')
+  note('FL-12', 'children: first shown → last shown', spread, '5 × 10–15 ms (a stagger)')
+  expect(turn.travel, 'the chevron turns a quarter').toBeCloseTo(90, 0)
+  expect(made, 'the content below makes room').toBeLessThanOrEqual(250 * FRAME_SLACK)
+  if (FRAME_SLACK === 1) expect(flow.biggestStep, 'the content below moves smoothly').toBeLessThan(0.6)
+  expect(spread, 'the children fade in one after another').toBeGreaterThanOrEqual(FRAME - 1)
+
+  await settled(shell)
+  await shell.waitForTimeout(200)
+  const close = await record(shell, { ...targets, children: '.folder__children' })
+  await shell.mouse.down()
+  await shell.mouse.up()
+  await expect(folderRow).toHaveAttribute('aria-expanded', 'false')
+  const c = await close.until(700)
+  const again = c.inputs.find((i) => i.type === 'pointerup')
+  if (!again) throw new Error('the second click never reached the shell')
+  const shut = c.frames.find((f) => f.i >= again.frame && (f.els.children?.height ?? 0) <= 0.5)
+  const closing = motionOf(series(c, 'divider', (b) => b.y))
+  note(
+    'FL-12',
+    'closing: the content below moves for',
+    (closing.end ?? 0) - (closing.start ?? 0),
+    '150–180 ms (quicker)',
+  )
+  note('FL-12', 'click → closed', shut ? shut.t - again.t : undefined, '≤ 250 ms')
+  expect(shut ? shut.t - again.t : Number.POSITIVE_INFINITY).toBeLessThanOrEqual(250 * FRAME_SLACK)
 })

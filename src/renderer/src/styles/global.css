@@ -1146,6 +1146,21 @@ html[data-view="strip"] body {
   overflow-clip-margin: 3px;
 }
 
+/*
+ * A folder or the pinned section the user opens (FL-12): while the box grows, its rows fade in one
+ * after another, 12 ms apart (10–15 ms); from the thirteenth on they come together.
+ */
+.is-revealing > .item-list > [data-slot] {
+  animation: reveal-row var(--motion-quick) var(--ease-quick) backwards;
+  animation-delay: calc(min(sibling-index() - 1, 12) * 12ms);
+}
+
+@keyframes reveal-row {
+  from {
+    opacity: 0;
+  }
+}
+
 .today-block {
   position: relative;
   flex: none;
