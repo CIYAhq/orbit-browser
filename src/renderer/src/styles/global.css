@@ -919,14 +919,14 @@ html[data-view="strip"] body {
   z-index: 2;
 }
 
-/* Toasts */
+/* Toasts: at most three stack, 8 px apart; they move with motion (Toasts.tsx, FL-22). */
 .toasts {
   position: fixed;
   left: 12px;
   bottom: 52px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   pointer-events: none;
   z-index: 10;
 }
@@ -938,14 +938,6 @@ html[data-view="strip"] body {
   color: #fff;
   background: rgba(24, 24, 28, 0.88);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
-  animation: toast-in 220ms var(--ease-spring);
-}
-
-@keyframes toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px) scale(0.98);
-  }
 }
 
 /* A toast with a button (AR-05 "Go to Space") takes clicks. */
