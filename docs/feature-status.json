@@ -132,7 +132,7 @@
   "CB-17": {"built": "yes", "note": "hover × and ⌘⌥⌫ / Shift+Delete delete history and past-search rows"},
   "CB-18": {"built": "yes", "note": "recent tabs, frequent sites, paste row; starter actions/sites in a fresh profile (not pre-selected: Enter on the untouched field only runs Paste and go or ⌘L's current page); current page in ⌘L mode"},
   "CB-19": {"built": "yes", "note": "results use the window's current Space/profile and re-run on Space switch; new tabs go to the current Space"},
-  "CB-20": {"built": "partial", "note": "a left click over the sidebar closes the bar and is forwarded (one-click tab select); right/middle clicks only close; hover-reveal sidebar interplay untested"},
+  "CB-20": {"built": "yes", "note": "a left click over the docked or the hover-revealed sidebar closes the bar and reaches the sidebar where it is drawn (one click selects a tab); right and middle clicks only close it; ⌘T with the revealed sidebar out opens the bar over it and the sidebar stays until the bar closes; the window's edge doesn't bring the sidebar in while the bar is open (SB-12), so its appearance never dismisses the bar"},
   "CB-21": {"built": "yes", "note": "Esc, ⌘T/⌘L again, click outside, window blur; text discarded; focus returns to the page, also when the window comes back after a background close"},
   "CB-22": {"built": "yes", "note": "spring scale-fade entrance, quicker exit, reduced-motion fade; type-ahead and Enter buffered; IME-safe; per-keystroke latency measured"},
   "CB-23": {"built": "partial", "note": "private (non-persistent) profiles: no history/archive rows, and their tabs, folders and Spaces never show in normal windows; ⌘L on an empty Space acts like ⌘T; split-pane and Mini Window variants not done"},

@@ -12,6 +12,7 @@ import {
   state,
   viewPage,
 } from './helpers'
+import { floatingInfo, floatingPage, windowState } from './nav-support'
 import { blockNetwork, clickInTab, findPage, overlayOf, startSites } from './peek-helpers'
 
 /** Views lane follow-ups: the command bar, split view, Peek, Mini Windows and media. */
@@ -317,6 +318,60 @@ test('[SV-23][PK-02] a link to another site in either pane of a Favorite split o
   } finally {
     await sites.close()
   }
+})
+
+// ---- The command bar over the hover-revealed sidebar (CB-20) ----
+
+/** Hides the sidebar, then brings its floating card in from the window's left edge. */
+async function revealFloating(): Promise<Page> {
+  const { app, shell } = orbit
+  await run(app, 'window.setSidebar', { visible: false })
+  await expect(shell.getByTestId('sidebar')).toBeHidden()
+  // Into the edge from the page side: a pointer resting there doesn't count.
+  await shell.mouse.move(40, 300)
+  await shell.mouse.move(2, 300)
+  await expect.poll(async () => (await windowState(app)).sidebar.peeking).toBe(true)
+  const floating = await floatingPage(app)
+  await expect(floating.getByTestId('floating-sidebar')).toHaveAttribute('data-out', 'true')
+  return floating
+}
+
+test('[CB-20][SB-12] ⌘T over the revealed sidebar: both stay; a click on a tab row there selects it in one click and closes the bar', async () => {
+  const { app, shell } = orbit
+  const first = await newTab('First')
+  const second = await newTab('Second')
+  await expect.poll(() => activeTabId(app)).toBe(second)
+  const floating = await revealFloating()
+
+  // ⌘T from the keyboard: the bar opens over the card, and the card stays out under it, also once
+  // the pointer has moved on over the bar's backdrop.
+  await shell.keyboard.press(`${MOD}+T`)
+  const overlay = await viewPage(app, 'overlay')
+  await expect(input(overlay)).toBeFocused()
+  await overlay.mouse.move(700, 300)
+  await overlay.mouse.move(120, 400)
+  await expect.poll(async () => (await floatingInfo(app)).hold?.overlay).toBe(true)
+  expect((await windowState(app)).sidebar.peeking).toBe(true)
+  expect((await windowState(app)).overlay.kind).toBe('commandbar')
+  // A right-click over the card only closes the bar (review M5); the card is still there.
+  const row = floating.locator(`[data-testid="tab-row"][data-tab-id="${first}"]`)
+  const box = await row.boundingBox()
+  if (!box) throw new Error('no row')
+  const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+  await overlay.mouse.click(at.x, at.y, { button: 'right' })
+  await expect.poll(async () => (await windowState(app)).overlay.kind).toBe('none')
+  expect(await activeTabId(app)).toBe(second)
+
+  // Again, then a click on First's row in the card: one click selects it and closes the bar. (Whether
+  // the card then stays is the real pointer's to say, which a test can't place: SB-12's tests.)
+  await expect.poll(async () => (await windowState(app)).sidebar.peeking).toBe(true)
+  await shell.keyboard.press(`${MOD}+T`)
+  await expect(input(await viewPage(app, 'overlay'))).toBeFocused()
+  await expect.poll(async () => (await windowState(app)).overlay.kind).toBe('commandbar')
+  await (await viewPage(app, 'overlay')).mouse.click(at.x, at.y)
+  await expect.poll(() => activeTabId(app)).toBe(first)
+  expect((await windowState(app)).overlay.kind).toBe('none')
+  expect(Object.keys((await state(app)).tabs)).toEqual(expect.arrayContaining([first, second]))
 })
 
 // ---- The action catalogue (CB-13) ----

@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 242 built (81 partial) · 330 tested · 0 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 243 built (80 partial) · 330 tested · 0 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 144 | 168 |
-| P1 | 219 | 83 | 145 |
+| P1 | 219 | 84 | 145 |
 | P2 | 79 | 15 | 17 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -184,7 +184,7 @@ Spec: `spec/commandbar.md`
 | CB-17 | Remove a suggestion | P1 | ✅ | ✅ e2e+unit | – | hover × and ⌘⌥⌫ / Shift+Delete delete history and past-search rows |
 | CB-18 | Empty state (bar opened with nothing typed) | P0 | ✅ | ✅ e2e+unit | – | recent tabs, frequent sites, paste row; starter actions/sites in a fresh profile (not pre-selected: Enter on the untouched field only runs Paste and go or ⌘L's current page); current page in ⌘L mode |
 | CB-19 | Space and profile awareness | P0 | ✅ | ✅ e2e+unit | – | results use the window's current Space/profile and re-run on Space switch; new tabs go to the current Space |
-| CB-20 | Sidebar stays interactive while the bar is open | P1 | 🟡 partial | ✅ e2e | – | a left click over the sidebar closes the bar and is forwarded (one-click tab select); right/middle clicks only close; hover-reveal sidebar interplay untested |
+| CB-20 | Sidebar stays interactive while the bar is open | P1 | ✅ | ✅ e2e | – | a left click over the docked or the hover-revealed sidebar closes the bar and reaches the sidebar where it is drawn (one click selects a tab); right and middle clicks only close it; ⌘T with the revealed sidebar out opens the bar over it and the sidebar stays until the bar closes; the window's edge doesn't bring the sidebar in while the bar is open (SB-12), so its appearance never dismisses the bar |
 | CB-21 | Closing the bar and what happens to typed text | P0 | ✅ | ✅ e2e | – | Esc, ⌘T/⌘L again, click outside, window blur; text discarded; focus returns to the page, also when the window comes back after a background close |
 | CB-22 | Feel: open/close animation, latency and live updates | P0 | ✅ | ✅ e2e+unit | – | spring scale-fade entrance, quicker exit, reduced-motion fade; type-ahead and Enter buffered; IME-safe; per-keystroke latency measured |
 | CB-23 | The bar in other contexts (split pane, private window, Mini Window) | P1 | 🟡 partial | ✅ e2e | – | private (non-persistent) profiles: no history/archive rows, and their tabs, folders and Spaces never show in normal windows; ⌘L on an empty Space acts like ⌘T; split-pane and Mini Window variants not done |
