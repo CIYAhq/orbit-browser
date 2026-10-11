@@ -432,7 +432,7 @@ export const ACTIONS: ActionDef[] = [
     other: ['Ctrl+J'],
     keywords: ['open downloads', 'downloaded files', 'library'],
   },
-  // Every page visit of the profile, in the Library (AR-10).
+  // Every page visit of the profile, as a page in a tab (AR-10, orbit://history/).
   {
     id: 'app.history',
     title: 'View History',

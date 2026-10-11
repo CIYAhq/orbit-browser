@@ -6,6 +6,7 @@ import type { MainContext } from '../context'
 import type { TabOps } from '../tabs/ops'
 import { type PageDialogInfo, type PageDialogs$, registerDialogs } from './dialogs'
 import { type FullScreenInfo, registerFullScreen } from './fullscreen'
+import { registerHistoryPage } from './history'
 import { type LeaveInfo, registerLeave } from './leave'
 import { findSystemApp, findTestApp, launchInApp, registerOtherApps } from './other-apps'
 import { deliverPrint, type PrintInfo, type PrintRecord, registerPrint, systemPrinters, testPrinters } from './print'
@@ -42,7 +43,7 @@ export interface PagesTestHooks {
  * stopped responding. Links that open other apps (NV-19): asked about over the page. Window full
  * screen (NV-20): the sidebar hidden, and Esc in the page. Print (NV-07): Orbit's print dialog over
  * the page. View source (DT-04): the page's source in a new tab. Two-finger swipe (NV-02): back and
- * forward over the page, with its arrow.
+ * forward over the page, with its arrow. History (AR-10): the profile's visits as a page in a tab.
  */
 export function registerPages(ctx: MainContext, ops: TabOps): void {
   const dialogs = registerDialogs(ctx)
@@ -88,6 +89,7 @@ export function registerPages(ctx: MainContext, ops: TabOps): void {
 
   registerViewSource(ctx)
   const swipe = registerSwipe(ctx)
+  registerHistoryPage(ctx)
 
   if (ctx.e2e) {
     const hooks: PagesTestHooks = {

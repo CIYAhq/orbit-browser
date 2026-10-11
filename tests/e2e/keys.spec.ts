@@ -1435,11 +1435,15 @@ test('[KS-20][KS-10][OB-12] in a Mini Window keys act on its page: ⌘L edits it
   expect(await typeAnywhere(['z'])).toEqual([fx.url(path)])
   const inMini = await tabPage(app, path)
   await expect.poll(() => inMini.evaluate(() => (window as unknown as { __keys: string[] }).__keys)).toContain('z')
-  // ⌘Y / Ctrl+H shows History in the browser window behind.
+  // ⌘Y / Ctrl+H shows History in a tab of the browser window behind (AR-10).
   await pressInPage(app, path, isMac ? 'Y' : 'H', PRIMARY_MOD)
-  await expect.poll(() => cmdIn(app, main.id, 'library.status')).toMatchObject({ open: true, section: 'history' })
-  await cmdIn(app, main.id, 'library.close')
-  await expect.poll(() => cmdIn(app, main.id, 'library.status')).toMatchObject({ open: false })
+  await expect
+    .poll(async () => {
+      const now = await state(app)
+      const w = now.windows[main.id]
+      return w ? now.tabs[w.activeTab[w.spaceId] ?? '']?.url : undefined
+    })
+    .toBe('orbit://history/')
   // Help → Keyboard Shortcuts asked with the Mini Window in front opens over the browser window.
   await actionIn(mini.id, 'help.shortcuts')
   await expect
