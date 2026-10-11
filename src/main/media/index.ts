@@ -2,7 +2,6 @@ import { app, Menu, type MenuItemConstructorOptions } from 'electron'
 import type { TabId } from '../../shared/state'
 import type { MainContext } from '../context'
 import { activeTabOf } from '../windows'
-import { MEDIA_WORLD } from './agent'
 import { MediaManager } from './manager'
 
 /**
@@ -82,30 +81,22 @@ export function registerMedia(ctx: MainContext): MediaManager {
     ctx.toast(windowId, on ? 'Automatic Picture in Picture is on' : 'Automatic Picture in Picture is off')
   })
 
-  // The page's right-click menu on a video offers Picture in Picture (MD-02).
+  // The page's right-click menu on a video offers Picture in Picture (MD-02), in a frame too.
   ctx.hooks.pageContextMenu ??= []
   ctx.hooks.pageContextMenu.push((tabId, contents, params): MenuItemConstructorOptions[] => {
     if (params.mediaType !== 'video' || !params.mediaFlags?.canShowPictureInPicture) return []
     const showing = params.mediaFlags.isShowingPictureInPicture
     const zoom = contents.getZoomFactor() || 1
+    // The video under the pointer, not the page's main one.
     const x = Math.round(params.x / zoom)
     const y = Math.round(params.y / zoom)
-    // The video under the pointer, not the page's main one.
-    const code = showing
-      ? 'document.exitPictureInPicture().then(() => true, () => false)'
-      : `(() => { const el = document.elementFromPoint(${x}, ${y}); const v = el && (el.tagName === 'VIDEO' ? el : el.closest('video')); return v ? v.requestPictureInPicture().then(() => true, () => false) : false })()`
+    const frame = params.frame
     return [
       {
         label: 'Picture in Picture',
         type: 'checkbox',
         checked: showing,
-        click: () => {
-          void contents
-            .executeJavaScriptInIsolatedWorld(MEDIA_WORLD, [{ code }], true)
-            .catch(() => false)
-            // The page script follows picture-in-picture from now on (tray, return to the tab).
-            .then(() => media.watchTab(tabId as TabId))
-        },
+        click: () => void media.pipAt(tabId as TabId, frame, x, y, !showing),
       },
       { type: 'separator' },
     ]

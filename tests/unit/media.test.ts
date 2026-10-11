@@ -4,6 +4,7 @@ import {
   type AgentSnapshot,
   applySitePip,
   autoPipAllowed,
+  combineSnapshots,
   currentPosition,
   emptyMedia,
   endOfDay,
@@ -14,6 +15,7 @@ import {
   mediaSubtitle,
   mediaTitle,
   normalizeMediaSettings,
+  parseSnapshot,
   sameMedia,
   settleTray,
   shouldAutoPip,
@@ -43,6 +45,9 @@ const snap = (over: Partial<AgentSnapshot> = {}): AgentSnapshot => ({
   micMuted: false,
   camera: false,
   cameraOff: false,
+  score: 0,
+  pipArea: 0,
+  resumable: false,
   ...over,
 })
 
@@ -319,5 +324,66 @@ describe('media settings read back from disk (MD-06, MD-08)', () => {
     expect(broken.pipOffSites).toEqual([])
     expect(broken.pipSnoozed).toEqual({})
     expect(broken.pipPlacement).toEqual({ corner: 'bottom-right', size: 320 })
+  })
+})
+
+describe('media in frames: reports from several documents of a tab (MD-01, MD-09)', () => {
+  it('[MD-09] the tab plays when any of its documents plays; the best-scoring one is its main media', () => {
+    const page = snap({ playing: false, active: false, controllable: false, seekable: false })
+    const frame = snap({ video: true, score: 13, title: 'Clip', pipCandidate: true, pipArea: 64_000 })
+    const both = combineSnapshots([page, frame])
+    expect(both?.playing).toBe(true)
+    expect(both?.controllable).toBe(true)
+    expect(both?.video).toBe(true)
+    expect(both?.seekable).toBe(true)
+    expect(both?.title).toBe('Clip')
+    expect(both?.pipCandidate).toBe(true)
+    expect(both?.pipArea).toBe(64_000)
+    expect(both?.pipEnd).toBeNull()
+    expect(combineSnapshots([])).toBeUndefined()
+  })
+
+  it("[MD-01] the player's video is the main media, and its shape is the tab's", () => {
+    const page = snap({ score: 14, title: 'Page song' })
+    const frame = snap({ video: true, player: true, pip: true, aspect: 16 / 9, score: 100 })
+    const both = combineSnapshots([page, frame])
+    expect(both?.player).toBe(true)
+    expect(both?.pip).toBe(true)
+    expect(both?.aspect).toBeCloseTo(16 / 9)
+    expect(both?.video).toBe(true)
+    // No track name where the video is: the page's own is used.
+    expect(both?.title).toBe('Page song')
+  })
+
+  it('[MD-14] a call in a frame: microphone muted only when every document with one muted it', () => {
+    const a = snap({ mic: true, micMuted: true })
+    const b = snap({ mic: true, micMuted: false, camera: true, cameraOff: true })
+    expect(combineSnapshots([a, b])).toMatchObject({ mic: true, micMuted: false, camera: true, cameraOff: true })
+    expect(combineSnapshots([a])).toMatchObject({ mic: true, micMuted: true, camera: false, cameraOff: false })
+  })
+
+  it("[MD-01] a frame's report is checked: wrong types count as nothing, numbers are bounded, text cut short", () => {
+    expect(parseSnapshot(null)).toBeNull()
+    expect(parseSnapshot('playing')).toBeNull()
+    expect(parseSnapshot({ playing: true })).toBeNull()
+    const r = parseSnapshot({
+      v: 3,
+      playing: 'yes',
+      active: true,
+      score: 1e9,
+      pipArea: -5,
+      aspect: Number.NaN,
+      title: 'x'.repeat(500),
+      artist: 42,
+      time: { position: 'a', duration: 30, rate: 0, paused: true, live: 1, at: 5 },
+      pipEnd: { n: 2, reason: 'hacked' },
+      extra: { lots: 'of data' },
+    })
+    expect(r).toMatchObject({ v: 3, playing: false, active: true, score: 100, pipArea: 0, aspect: 0, artist: '' })
+    expect(r?.title).toHaveLength(200)
+    expect(r?.time).toEqual({ position: 0, duration: 30, rate: 1, paused: true, live: false, at: 5 })
+    expect(r?.pipEnd).toBeNull()
+    expect(r && 'extra' in r).toBe(false)
+    expect(parseSnapshot(snap({ pipEnd: { n: 4, reason: 'ended' } }))?.pipEnd).toEqual({ n: 4, reason: 'ended' })
   })
 })

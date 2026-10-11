@@ -215,11 +215,15 @@ async function startMediaFixtures(): Promise<Fixtures> {
       return html(
         `<style>#wrap{width:480px;height:270px}#wrap video{width:100%!important;height:100%!important}</style><div id="wrap">${LONG_VIDEO(60)}</div>`,
       )
-    // Media playing inside a frame: an embedded player (?src= a fixture path).
+    // Media playing inside a frame: an embedded player (?src= a fixture path). With ?cross, the
+    // frame comes from another site (127.0.0.1 in a page from localhost: a frame of its own process).
     if (parts[0] === 'media' && parts[1] === 'frame') {
       const src = u.searchParams.get('src') ?? ''
       if (!src.startsWith('/media/')) return html('<p>No frame.</p>')
-      return html(`<iframe id="f" src="${encodeURI(src)}" width="540" height="360" allow="autoplay"></iframe>`)
+      const origin = u.searchParams.has('cross') ? `http://127.0.0.1:${req.socket.localPort}` : ''
+      return html(
+        `<iframe id="f" src="${origin}${encodeURI(src)}" width="560" height="420" allow="autoplay; picture-in-picture"></iframe>`,
+      )
     }
     if (parts[0] === 'page') return html('<p>A quiet page.</p>')
     res.writeHead(404, { 'content-type': 'text/plain' })
@@ -280,14 +284,18 @@ async function openPlaying(
   return { id, page: p }
 }
 
-/** Opens a page whose media plays inside a frame (an embedded player) and waits until it plays. */
+/**
+ * Opens a page whose media plays inside a frame (an embedded player) and waits until it plays.
+ * `cross`: the frame comes from another site.
+ */
 async function openFramePlaying(
   app: ElectronApplication,
   title: string,
   src: string,
+  cross = false,
 ): Promise<{ id: string; page: Page; frame: Frame }> {
   const path = `/media/frame/${title}`
-  const id = await newTab(app, fx.url(`${path}?src=${encodeURIComponent(src)}`))
+  const id = await newTab(app, fx.url(`${path}?src=${encodeURIComponent(src)}${cross ? '&cross' : ''}`))
   await waitTab(app, id, path)
   const p = await tabPage(app, path)
   let frame: Frame | undefined
@@ -311,10 +319,10 @@ async function leave(app: ElectronApplication): Promise<string> {
 }
 
 /** The engine's own picture-in-picture window shows a video of the page. */
-const enginePip = (p: Page) => p.evaluate(() => !!document.pictureInPictureElement)
+const enginePip = (p: Page | Frame) => p.evaluate(() => !!document.pictureInPictureElement)
 /** The id of the page's video that floats in Orbit's player ('' when none). */
-const floated = (p: Page) => p.evaluate(() => document.querySelector('video[data-orbit-pip]')?.id ?? '')
-const paused = (p: Page, selector: string) =>
+const floated = (p: Page | Frame) => p.evaluate(() => document.querySelector('video[data-orbit-pip]')?.id ?? '')
+const paused = (p: Page | Frame, selector: string) =>
   p.evaluate((s) => (document.querySelector(s) as HTMLMediaElement | null)?.paused ?? null, selector)
 const currentTime = (p: Page, selector = '#v') =>
   p.evaluate((s) => (document.querySelector(s) as HTMLMediaElement).currentTime, selector)
@@ -468,7 +476,7 @@ async function dragPlayer(
 type Frames = { w: number; h: number; lifted: boolean }[]
 
 /** From now on, records each frame the page draws: its size, and whether its video floats. */
-async function recordFrames(p: Page): Promise<void> {
+async function recordFrames(p: Page | Frame): Promise<void> {
   await p.evaluate(() => {
     const w = window as unknown as { __frames: Frames }
     w.__frames = []
@@ -491,7 +499,7 @@ async function recordFrames(p: Page): Promise<void> {
  * Once the page has drawn a few frames at its size in its window again: the frames recorded, and
  * those drawn at that size with the video still floating (a blank frame where the video was, MD-01).
  */
-async function framesBack(p: Page): Promise<{ frames: Frames; blank: Frames }> {
+async function framesBack(p: Page | Frame): Promise<{ frames: Frames; blank: Frames }> {
   const size = await p.evaluate(() => ({ w: innerWidth, h: innerHeight }))
   const read = () => p.evaluate(() => (window as unknown as { __frames: Frames }).__frames)
   await expect
@@ -1593,27 +1601,190 @@ test('[MD-02] right-clicking a video offers Picture in Picture, which floats it 
   expect(await paused(v.page, '#v')).toBe(false)
 })
 
-// ---- Media in frames (embedded players): not seen yet, so these wait for frame support ----
+// ---- Media in frames (embedded players, MD-01, MD-09) ----
 
-test.fixme('[MD-01] a video playing in a frame (an embedded player) floats when its tab is left', async () => {
+/**
+ * What the player shows: how colourful the middle of its picture is (the spread of the red, green
+ * and blue of the borrowed view's pixels there, 0-255). The test videos are bright colours; a page
+ * is near white.
+ */
+function playerColour(app: ElectronApplication, tabId: string): Promise<number> {
+  return app.evaluate(async (_e, id) => {
+    const g = globalThis as unknown as {
+      __orbitMedia: MediaTestHooks
+      __orbit: { ctx: { tabs: { get: (id: string) => Electron.WebContentsView | undefined } } }
+    }
+    const bounds = g.__orbitMedia.manager.player.info().bounds
+    const view = g.__orbit.ctx.tabs.get(id)
+    if (!bounds || !view) return -1
+    const w = Math.round(bounds.width / 2)
+    const h = Math.round(bounds.height / 2)
+    const img = await view.webContents.capturePage({ x: Math.round(w / 2), y: Math.round(h / 2), width: w, height: h })
+    const px = img.toBitmap()
+    const size = img.getSize()
+    let spread = 0
+    let n = 0
+    for (let y = 0; y < size.height; y += 8) {
+      for (let x = 0; x < size.width; x += 8) {
+        const i = (y * size.width + x) * 4
+        const c = [px[i] ?? 0, px[i + 1] ?? 0, px[i + 2] ?? 0]
+        spread += Math.max(...c) - Math.min(...c)
+        n++
+      }
+    }
+    return n > 0 ? spread / n : -1
+  }, tabId)
+}
+
+/** The frame element that holds the frame's page up in the player ('' when none). */
+const liftedFrame = (p: Page) => p.evaluate(() => document.querySelector('[data-orbit-pip]')?.id ?? '')
+
+test('[MD-01][MD-03] a video playing in a frame (an embedded player) floats when its tab is left, and goes back into its frame', async () => {
   orbit = await launchOrbit()
   const { app } = orbit
   const v = await openFramePlaying(app, 'Embedded%20Film', '/media/long-video/Film')
+  await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
   await leave(app)
-  await expect.poll(async () => (await media(app, v.id))?.pip).toBe(true)
-  expect(await v.frame.evaluate(() => (document.getElementById('v') as HTMLVideoElement).paused)).toBe(false)
+  const info = await expectPlayer(app, v.id)
+  expect(info.bounds).toEqual(cornerBox(info.workArea as Box, 'bottom-right', 320, 180))
+  // The video floats out of its frame, and the frame out of the page, so the player shows the video.
+  expect(await floated(v.frame)).toBe('v')
+  expect(await liftedFrame(v.page)).toBe('f')
+  await expect.poll(() => playerColour(app, v.id)).toBeGreaterThan(80)
+  expect(await paused(v.frame, '#v')).toBe(false)
+  const m = await media(app, v.id)
+  expect(m?.pip).toBe(true)
+  expect(m?.player).toBe(true)
+  await expect(controller(orbit, v.id)).toHaveCount(0)
+
+  // The player's controls act on the video in the frame.
+  await cmd(app, 'media.control', { tabId: v.id, action: 'pause' })
+  await expect.poll(() => paused(v.frame, '#v')).toBe(true)
+  await cmd(app, 'media.control', { tabId: v.id, action: 'play' })
+  await expect.poll(() => paused(v.frame, '#v')).toBe(false)
+
+  // Back on the tab, the video plays in its frame again, with no frame drawn at the frame's own
+  // size with the video still floating (MD-01: no blank frame).
+  await recordFrames(v.frame)
+  await cmd(app, 'tabs.activate', { tabId: v.id })
+  await expectNoPlayer(app)
+  await expect.poll(() => floated(v.frame)).toBe('')
+  await expect.poll(() => liftedFrame(v.page)).toBe('')
+  const { frames, blank } = await framesBack(v.frame)
+  expect(frames.some((f) => f.lifted)).toBe(true)
+  expect(blank).toEqual([])
+  expect(await paused(v.frame, '#v')).toBe(false)
+  await expect.poll(async () => (await media(app, v.id))?.pip).toBe(false)
 })
 
-test.fixme('[MD-09] the controller of audio playing in a frame has play/pause, and × pauses it', async () => {
+test('[MD-01][MD-16] a video in a frame from another site floats out of its place in the page; returning puts it back with no blank frame', async () => {
   orbit = await launchOrbit()
   const { app } = orbit
-  const a = await openFramePlaying(app, 'Embedded%20Song', '/media/audio/Song?session')
+  const v = await openFramePlaying(app, 'Embedded%20Film', '/media/long-video/Film', true)
+  expect(new URL(v.frame.url()).hostname).toBe('127.0.0.1')
+  await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
+  // Where the video is on screen: the frame's place in the page plus the video's place in the frame.
+  const frameAt = await v.page.evaluate(() => {
+    const f = document.getElementById('f') as HTMLIFrameElement
+    const r = f.getBoundingClientRect()
+    return { x: r.x + f.clientLeft, y: r.y + f.clientTop }
+  })
+  const videoAt = await v.frame.evaluate(() => {
+    const r = (document.getElementById('v') as HTMLVideoElement).getBoundingClientRect()
+    return { x: r.x, y: r.y }
+  })
+  const pane = await stableView(app, orbit.shell, v.id)
+  const content = (await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0]?.getContentBounds(),
+  )) as Box
+
+  await leave(app)
+  const info = await expectPlayer(app, v.id)
+  expect(await floated(v.frame)).toBe('v')
+  expect(await liftedFrame(v.page)).toBe('f')
+  await expect.poll(() => playerColour(app, v.id)).toBeGreaterThan(80)
+  const from = (info.lastEnter as { from: Box }).from
+  expect(from.width).toBe(480)
+  expect(from.height).toBe(270)
+  expect(Math.abs(from.x - (content.x + pane.x + frameAt.x + videoAt.x))).toBeLessThanOrEqual(2)
+  expect(Math.abs(from.y - (content.y + pane.y + frameAt.y + videoAt.y))).toBeLessThanOrEqual(2)
+
+  // Back on the tab: the video is in its frame again and no frame was drawn at the frame's own
+  // size with the video still floating (MD-01: no blank frame).
+  await recordFrames(v.frame)
+  await cmd(app, 'tabs.activate', { tabId: v.id })
+  await expect.poll(() => floated(v.frame)).toBe('')
+  await expectNoPlayer(app)
+  const { frames, blank } = await framesBack(v.frame)
+  expect(frames.some((f) => f.lifted)).toBe(true)
+  expect(blank).toEqual([])
+  expect(await liftedFrame(v.page)).toBe('')
+  expect(await paused(v.frame, '#v')).toBe(false)
+})
+
+test('[MD-07] removing the frame of a video in the player closes the player', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const v = await openFramePlaying(app, 'Embedded%20Film', '/media/long-video/Film', true)
+  await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
+  await leave(app)
+  await expectPlayer(app, v.id)
+  await v.page.evaluate(() => document.getElementById('f')?.remove())
+  await expectNoPlayer(app)
+  await expect.poll(async () => (await media(app, v.id))?.playing ?? false).toBe(false)
+})
+
+test('[MD-09] the controller of audio playing in a frame from another site has its track, play/pause, and × pauses it', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const a = await openFramePlaying(app, 'Embedded%20Song', '/media/audio/Song?session', true)
   await leave(app)
   const ctl = controller(orbit, a.id)
   await expect(ctl).toBeVisible()
-  await expect(ctl.getByTestId('media-play')).toBeVisible()
+  await expect(ctl.getByTestId('media-title')).toHaveText('Track One')
+  await ctl.getByTestId('media-play').click()
+  await expect.poll(() => paused(a.frame, '#a')).toBe(true)
+  await expect(ctl).toHaveAttribute('data-playing', 'false')
+  await ctl.getByTestId('media-play').click()
+  await expect.poll(() => paused(a.frame, '#a')).toBe(false)
+  await expect(ctl).toHaveAttribute('data-playing', 'true')
   await ctl.hover()
   await ctl.getByTestId('media-close').click()
-  await expect.poll(() => a.frame.evaluate(() => (document.getElementById('a') as HTMLAudioElement).paused)).toBe(true)
+  await expect.poll(() => paused(a.frame, '#a')).toBe(true)
   await expect(ctl).toHaveCount(0)
+})
+
+test('[MD-02] right-clicking a video in a frame from another site offers Picture in Picture for that video', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const v = await openFramePlaying(app, 'Embedded%20Film', '/media/long-video/Film', true)
+  await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
+  const menu = async () => {
+    const m = await pageMenu(app)
+    return m ? m.labels.map((label) => `${label}${m.checked[label] ? ' ✓' : ''}`) : []
+  }
+  const frameAt = await v.page.evaluate(() => {
+    const f = document.getElementById('f') as HTMLIFrameElement
+    const r = f.getBoundingClientRect()
+    return { x: r.x + f.clientLeft, y: r.y + f.clientTop }
+  })
+  const center = await v.frame.evaluate(() => {
+    const r = (document.getElementById('v') as HTMLVideoElement).getBoundingClientRect()
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+  })
+  const at = { x: frameAt.x + center.x, y: frameAt.y + center.y }
+
+  await v.page.mouse.click(at.x, at.y, { button: 'right' })
+  await expect.poll(menu).toContain('Picture in Picture')
+  expect(await choosePageMenu(app, 'Picture in Picture')).toBe(true)
+  await expect.poll(() => enginePip(v.frame)).toBe(true)
+  expect(await activeId(app)).toBe(v.id)
+  await expect.poll(async () => (await media(app, v.id))?.pip).toBe(true)
+  expect(await paused(v.frame, '#v')).toBe(false)
+
+  await v.page.mouse.click(at.x, at.y, { button: 'right' })
+  await expect.poll(menu).toContain('Picture in Picture ✓')
+  expect(await choosePageMenu(app, 'Picture in Picture')).toBe(true)
+  await expect.poll(() => enginePip(v.frame)).toBe(false)
+  await expect.poll(async () => (await media(app, v.id))?.pip).toBe(false)
 })
