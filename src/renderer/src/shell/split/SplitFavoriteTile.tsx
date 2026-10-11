@@ -1,12 +1,15 @@
 import { motion } from 'motion/react'
 import { memo, type Ref, useState } from 'react'
 import { invoke } from '../../api'
-import { POP, SNAPPY } from '../../motion'
+import { AT_ONCE, POP, REDUCED_FADE, SNAPPY, useReducedMotion } from '../../motion'
 import { getOrbitState, useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
 import { pressItem } from '../sidebar/drag'
 import { clearSelection, useDrag } from '../sidebar/ui-state'
 import { focusedPaneOf, lastFocusedPane, paneOrderKey } from './selectors'
+
+/** With reduced motion a tile only fades, where it rests and at its size (FL-28, as Favorites' tiles). */
+const TILE_FADE = { opacity: 0, scale: 1 }
 
 /**
  * A Favorite that is a split view (SV-23): one tile with the panes' favicons side by side,
@@ -37,17 +40,23 @@ export const SplitFavoriteTile = memo(function SplitFavoriteTile({
   const hidden = useDrag((s) => !!s.hidden[splitId])
   // Tiles that arrive by drag appear at once under the ghost; others pop in (FL-20).
   const [instant] = useState(() => hidden)
+  // Reduced motion as it is now, not as the tile mounted (FL-28).
+  const reduced = useReducedMotion()
   if (!order) return null
   const panes = order.split(',')
   return (
     <motion.button
       ref={ref}
-      layout
+      layout={!reduced}
       transition={SNAPPY}
-      initial={instant ? false : { scale: 0.85, opacity: 0 }}
-      animate={{ scale: 1, opacity: hidden ? 0 : 1, transition: hidden ? { duration: 0 } : POP }}
-      exit={{ scale: 0.85, opacity: 0, transition: { duration: 0.15 } }}
-      whileTap={{ scale: 0.94 }}
+      initial={instant ? false : reduced ? TILE_FADE : { scale: 0.85, opacity: 0 }}
+      animate={{ scale: 1, opacity: hidden ? 0 : 1, transition: hidden ? AT_ONCE : reduced ? REDUCED_FADE : POP }}
+      exit={
+        reduced
+          ? { ...TILE_FADE, transition: REDUCED_FADE }
+          : { scale: 0.85, opacity: 0, transition: { duration: 0.15 } }
+      }
+      whileTap={reduced ? undefined : { scale: 0.94 }}
       type="button"
       className={`favorite split-favorite${active ? ' is-active' : ''}`}
       data-testid="favorite-tile"

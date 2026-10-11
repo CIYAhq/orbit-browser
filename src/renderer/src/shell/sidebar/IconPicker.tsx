@@ -2,7 +2,7 @@ import { AnimatePresence, motion, useIsPresent } from 'motion/react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { isFolderId } from '../../../../shared/ids'
 import { invoke } from '../../api'
-import { POPOVER } from '../../motion'
+import { POPOVER, useReducedMotion } from '../../motion'
 import { useIconPicker } from './ui-state'
 
 /** A compact emoji set with search words (TB-12, FD-07). Any emoji can also be typed or pasted. */
@@ -66,6 +66,8 @@ export function IconPicker() {
 
 function IconPickerPanel({ id }: { id: string }) {
   const present = useIsPresent()
+  // With reduced motion it only fades, also when the setting changes while it is open (FL-28).
+  const reduced = useReducedMotion()
   const [query, setQuery] = useState('')
   const [top, setTop] = useState(0)
   const ref = useRef<HTMLDivElement>(null)
@@ -110,9 +112,9 @@ function IconPickerPanel({ id }: { id: string }) {
       data-testid="icon-picker"
       role="dialog"
       aria-label="Choose icon"
-      initial={{ opacity: 0, scale: 0.97 }}
+      initial={{ opacity: 0, scale: reduced ? 1 : 0.97 }}
       animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.97, transition: POPOVER.out, pointerEvents: 'none' }}
+      exit={{ opacity: 0, scale: reduced ? 1 : 0.97, transition: POPOVER.out, pointerEvents: 'none' }}
       transition={POPOVER.in}
     >
       <input

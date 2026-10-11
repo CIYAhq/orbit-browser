@@ -4,7 +4,7 @@ import type { Tab } from '../../../../shared/state'
 import { tabTitle } from '../../../../shared/tabs'
 import { tabsInItem } from '../../../../shared/tree'
 import { invoke } from '../../api'
-import { POPOVER } from '../../motion'
+import { POPOVER, useReducedMotion } from '../../motion'
 import { useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
 import { useFolderSearch } from './ui-state'
@@ -25,6 +25,8 @@ export function FolderSearch() {
 
 function FolderSearchPanel({ id }: { id: string }) {
   const present = useIsPresent()
+  // With reduced motion it only fades, also when the setting changes while it is open (FL-28).
+  const reduced = useReducedMotion()
   const folderName = useOrbit((s) => (id ? s.folders[id]?.name : undefined))
   const tabIds = useOrbit((s) => (id ? tabsInItem(s, id).join(',') : ''))
   // Only watch the tabs while open (a stable empty map otherwise).
@@ -86,9 +88,9 @@ function FolderSearchPanel({ id }: { id: string }) {
       data-testid="folder-search"
       role="dialog"
       aria-label={`Search ${folderName ?? 'folder'}`}
-      initial={{ opacity: 0, scale: 0.97 }}
+      initial={{ opacity: 0, scale: reduced ? 1 : 0.97 }}
       animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.97, transition: POPOVER.out, pointerEvents: 'none' }}
+      exit={{ opacity: 0, scale: reduced ? 1 : 0.97, transition: POPOVER.out, pointerEvents: 'none' }}
       transition={POPOVER.in}
     >
       <input

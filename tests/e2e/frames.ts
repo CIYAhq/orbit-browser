@@ -376,6 +376,14 @@ export function motionOf(points: { t: number; v: number }[], eps = 0.5) {
   }
 }
 
+/** A transform's rotation in degrees (`none` is 0). */
+export function rotation(transform: string | undefined): number {
+  const m = /matrix\(([^)]+)\)/.exec(transform ?? '')
+  if (!m) return 0
+  const [a, b] = (m[1] as string).split(',').map(Number) as [number, number]
+  return (Math.atan2(b, a) * 180) / Math.PI
+}
+
 /** How soon a frame showed the response to an input: the first frame at or after it that passes `test`. */
 export function responseTo(
   rec: Recording,

@@ -17,7 +17,18 @@ import type { ItemId, OrbitState, TabId } from '../../../../shared/state'
 import { isAwayFromPinned, rowTitle } from '../../../../shared/tabs'
 import { splitOfTab, tabsInItem, visibleTabOrder } from '../../../../shared/tree'
 import { invoke, isMac } from '../../api'
-import { EASE, REDUCED, reducedMotion, SNAPPY, SNAPPY_EXIT, STANDARD, tween, waapi } from '../../motion'
+import {
+  AT_ONCE,
+  EASE,
+  REDUCED,
+  reducedMotion,
+  SNAPPY,
+  SNAPPY_EXIT,
+  STANDARD,
+  tween,
+  useReducedMotion,
+  waapi,
+} from '../../motion'
 import { activeTabId } from '../../selectors'
 import { getOrbitState, useMirror, useOrbit } from '../../store'
 import { Favicon } from '../../ui/Favicon'
@@ -54,7 +65,9 @@ export const CONCEAL = { height: SNAPPY_EXIT, opacity: tween('quick', { exit: tr
  * A folder's children or the pinned section, opening and closing (FL-12): the box grows with the
  * snappy spring while its rows fade in one after another (`.is-revealing`), and shrinks a little
  * quicker as it fades. Only a box the user opens staggers (`stagger`, decided as it mounts), not one
- * drawn open with the sidebar; with reduced motion the box only fades.
+ * drawn open with the sidebar. With reduced motion (FL-28) the box opens and closes at once, also
+ * one opened before the setting turned on: it asks `useReducedMotion()`, as motion reads
+ * OrbitMotionConfig only as an element mounts.
  */
 export function RevealBox({
   className,
@@ -65,13 +78,14 @@ export function RevealBox({
   stagger: boolean
   children: React.ReactNode
 }) {
-  const [revealing, setRevealing] = useState(() => stagger && !reducedMotion())
+  const reduced = useReducedMotion()
+  const [revealing, setRevealing] = useState(() => stagger && !reduced)
   return (
     <motion.div
       className={`${className}${revealing ? ' is-revealing' : ''}`}
-      initial={reducedMotion() ? false : { height: 0, opacity: revealing ? 1 : 0 }}
+      initial={reduced ? false : { height: 0, opacity: revealing ? 1 : 0 }}
       animate={{ height: 'auto', opacity: 1, transition: REVEAL }}
-      exit={{ height: 0, opacity: 0, transition: CONCEAL }}
+      exit={{ height: 0, opacity: 0, transition: reduced ? AT_ONCE : CONCEAL }}
       onAnimationComplete={() => setRevealing(false)}
     >
       {children}
@@ -771,6 +785,8 @@ const FolderRow = memo(function FolderRow({
   useEffect(() => {
     shown.current = true
   }, [])
+  // The chevron turns at once with reduced motion, also after the folder was drawn (FL-28).
+  const reduced = useReducedMotion()
   if (!folder) return null
   const childAncestors = ancestors ? `${ancestors},${folderId}` : folderId
   // A deleted folder animating out draws no children (they're gone or moved on).
@@ -822,7 +838,7 @@ const FolderRow = memo(function FolderRow({
             className="folder-row__chevron-wrap"
             initial={false}
             animate={{ rotate: open ? 90 : 0 }}
-            transition={CHEVRON}
+            transition={reduced ? AT_ONCE : CHEVRON}
           >
             <ChevronRight size={13} />
           </motion.span>

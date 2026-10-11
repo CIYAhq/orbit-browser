@@ -16,6 +16,7 @@ import {
   note,
   type Recording,
   record,
+  rotation,
   series,
   settledFrom,
   steps,
@@ -271,14 +272,6 @@ test('[FL-01] collapsing a folder while it opens closes it from where it is', as
   expect(carriesOn(turn, 2)).toBe(true)
   expect(h.at(-1)?.v ?? 0).toBe(0)
 })
-
-/** A transform's rotation in degrees (`none` is 0). */
-function rotation(transform: string | undefined): number {
-  const m = /matrix\(([^)]+)\)/.exec(transform ?? '')
-  if (!m) return 0
-  const [a, b] = (m[1] as string).split(',').map(Number) as [number, number]
-  return (Math.atan2(b, a) * 180) / Math.PI
-}
 
 test('[FL-12] opening a folder of 6: the chevron turns in about 160 ms, the content below makes room within 250 ms as the children fade in one after another; closing is quicker', async () => {
   const { app, shell } = orbit

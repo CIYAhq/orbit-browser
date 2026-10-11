@@ -127,3 +127,13 @@ export const REDUCED = {
 
 /** Reduced motion's settle for a released drag or swipe, as a motion tween. */
 export const REDUCED_SETTLE = { duration: REDUCED.settleMs / 1000, ease: REDUCED.settleEase }
+
+/** Reduced motion's cross-fade, as a motion tween. */
+export const REDUCED_FADE = { duration: REDUCED.fadeMs / 1000, ease: EASE.quick }
+
+/**
+ * No animation: the value lands in the next frame. With reduced motion a long-lived element moves,
+ * turns and resizes this way; it asks `useReducedMotion()` for that, because motion reads
+ * OrbitMotionConfig only as an element mounts (FL-28).
+ */
+export const AT_ONCE = { duration: 0 } as const

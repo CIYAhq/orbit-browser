@@ -19,7 +19,7 @@ import { engineForSpace, parseInput } from '../../../../shared/url'
 import { invoke, isMac, runAction } from '../../api'
 import { importDroppedFile, importPastedLinks, revealInSidebar } from '../../import/sidebar'
 import { useShortcutLabel } from '../../keys/live'
-import { EASE, OrbitMotionConfig, reducedMotion } from '../../motion'
+import { AT_ONCE, EASE, OrbitMotionConfig, reducedMotion, useReducedMotion } from '../../motion'
 import { activeTabId } from '../../selectors'
 import { getOrbitState, useOrbit } from '../../store'
 import { DragGhost } from './DragGhost'
@@ -178,6 +178,8 @@ function SpaceHeader({ space, children }: { space: Space; children: ReactNode })
     return !!a && sectionOf(s, a) === 'pinned'
   })
   const collapsed = !!space.pinnedCollapsed
+  // The caret turns at once with reduced motion, also after the header was drawn (FL-28).
+  const reduced = useReducedMotion()
   return (
     <div
       className={`space-header${collapsed ? ' is-collapsed' : ''}${collapsed && activePinned ? ' has-hidden-active' : ''}`}
@@ -197,7 +199,7 @@ function SpaceHeader({ space, children }: { space: Space; children: ReactNode })
           className="space-header__caret-glyph"
           initial={false}
           animate={{ rotate: collapsed ? -90 : 0 }}
-          transition={CHEVRON}
+          transition={reduced ? AT_ONCE : CHEVRON}
         >
           <ChevronDown size={13} />
         </motion.span>
@@ -260,6 +262,8 @@ function TodayBlock({ space, clear }: { space: Space; clear: boolean }) {
   const hasToday = clear && space.today.length > 0
   // The button's tooltip follows a remapped shortcut (KS-18).
   const clearShortcut = useShortcutLabel('tabs.clearToday')
+  // With reduced motion the "+" doesn't nudge (FL-28: decorative motion is off).
+  const reduced = useReducedMotion()
   return (
     <motion.div
       className="today-block"
@@ -292,7 +296,11 @@ function TodayBlock({ space, clear }: { space: Space; clear: boolean }) {
         onClick={() => runAction('tab.new')}
       >
         {/* FL-15: the "+" scales to about 0.92 and back in about 150 ms (its own timing). */}
-        <motion.span className="new-tab-button__plus" whileTap={{ scale: 0.92 }} transition={{ duration: 0.15 }}>
+        <motion.span
+          className="new-tab-button__plus"
+          whileTap={reduced ? undefined : { scale: 0.92 }}
+          transition={{ duration: 0.15 }}
+        >
           <Plus size={16} strokeWidth={2} />
         </motion.span>
         <span>New Tab</span>

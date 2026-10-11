@@ -9,6 +9,13 @@ import { describe, expect, it } from 'vitest'
  * - motion's components (`motion.*`, `m.*`, `AnimatePresence`, `LayoutGroup`) reduce their motion
  *   only under `OrbitMotionConfig`. A component that renders them sits under it wherever it is
  *   rendered, or reads reduced motion itself (`useReducedMotion()`, `reducedMotion()`).
+ * - The config isn't enough for an element that stays on screen while the setting changes (fix
+ *   check N1): motion reads it once, as an element mounts. So a motion element with a layout
+ *   animation, an entrance, an exit or a gesture (`layout`, `layoutId`, `initial` other than
+ *   `{false}`, `exit`, `while…`), or whose `animate` moves, turns or resizes it (a transform, a size
+ *   or a position), sits in a component that calls `useReducedMotion()`, which re-renders as the
+ *   setting changes, and chooses its reduced motion from it. The one exception is an element whose
+ *   `variants` ask `reducedMotion()` as they run (the rows' exit).
  * - motion's `animate()` follows no config: a file that calls it reads reduced motion.
  * - Stylesheets key their reduced rules off the root's `reduce-motion` class (motion/reduced.ts),
  *   never off the `prefers-reduced-motion` media query alone, which misses Orbit's switch.
@@ -225,6 +232,63 @@ function unguarded(g: Graph): string[] {
   return out.sort()
 }
 
+/** motion's positional keys: what reduced motion moves, turns or resizes at once. */
+const POSITIONAL =
+  /\b(?:x|y|z|scale[XYZ]?|rotate[XYZ]?|skew[XY]?|translate[XYZ]|width|height|top|left|right|bottom)\s*:/
+/** The hook that re-renders as reduced motion turns on or off. */
+const FOLLOWS = /\buseReducedMotion\(/
+
+/** An attribute's value in an opening tag: the text inside `{…}` or quotes, `true` when bare, else undefined. */
+function attr(tag: string, name: string): string | undefined {
+  const m = new RegExp(`\\s${name}(=|(?=[\\s/>]))`).exec(tag)
+  if (!m) return undefined
+  if (m[1] !== '=') return 'true'
+  const from = m.index + m[0].length
+  const quote = tag[from]
+  if (quote === '"' || quote === "'") return tag.slice(from + 1, tag.indexOf(quote, from + 1))
+  let depth = 0
+  for (let i = from; i < tag.length; i++) {
+    if (tag[i] === '{') depth++
+    else if (tag[i] === '}' && --depth === 0) return tag.slice(from + 1, i)
+  }
+  return tag.slice(from + 1)
+}
+
+/**
+ * Components whose motion elements keep the reduced motion they mounted with: an element with a
+ * layout animation, an entrance, an exit or a gesture, or an `animate` that moves, turns or resizes,
+ * in a component that doesn't call `useReducedMotion()`. Names that the element's attributes use and
+ * the file declares at top level (`animate={SHOWN}`, `variants={rowVariants}`) are read too.
+ */
+function followsLate(): string[] {
+  const out = new Set<string>()
+  for (const file of code) {
+    const units = unitsOf(file, text.get(file) as string)
+    const named = (value: string) =>
+      units.filter((o) => o.name && new RegExp(`\\b${o.name}\\b`).test(value)).map((o) => o.text)
+    for (const u of units) {
+      for (const m of u.text.matchAll(/<(?:motion|m)\.[a-z]\w*/g)) {
+        const tag = u.text.slice(m.index, openTag(u.text, m.index).end)
+        const layout = attr(tag, 'layout')
+        const initial = attr(tag, 'initial')
+        const animate = attr(tag, 'animate')
+        const changes =
+          (layout !== undefined && layout !== 'false') ||
+          attr(tag, 'layoutId') !== undefined ||
+          attr(tag, 'exit') !== undefined ||
+          /\swhile[A-Z]\w*=/.test(tag) ||
+          (initial !== undefined && initial !== 'false') ||
+          (animate !== undefined && [animate, ...named(animate)].some((t) => POSITIONAL.test(t)))
+        if (!changes || FOLLOWS.test(u.text)) continue
+        const variants = attr(tag, 'variants')
+        if (variants && named(variants).some((t) => READS_REDUCED.test(t))) continue
+        out.add(`${rel(file)}: ${u.name || '(top level)'}`)
+      }
+    }
+  }
+  return [...out].sort()
+}
+
 describe('[FL-28] reduced motion reaches every animation (feel review follow-up 6)', () => {
   const g = graph()
 
@@ -239,6 +303,18 @@ describe('[FL-28] reduced motion reaches every animation (feel review follow-up 
 
   it("every component that renders motion's components sits under OrbitMotionConfig or reads reduced motion", () => {
     expect(unguarded(g)).toEqual([])
+  })
+
+  it('every motion element that stays on screen follows reduced motion as it turns on or off, not only as it mounts (fix check N1)', () => {
+    expect(followsLate()).toEqual([])
+    // The hook is Orbit's (motion/reduced.ts: the OS setting or Orbit's switch), never motion's own,
+    // which follows the OS alone.
+    const theirs = code.filter((f) =>
+      /^import\s*\{[^}]*\buseReducedMotion\b[^}]*\}\s*from\s*'(?:motion|framer-motion)(?:\/react)?'/m.test(
+        text.get(f) as string,
+      ),
+    )
+    expect(theirs.map(rel)).toEqual([])
   })
 
   it("every file that calls motion's animate() reads reduced motion", () => {
@@ -284,5 +360,37 @@ describe('the guard catches what it should', () => {
       text.set(toasts, own)
     }
     expect(unguarded(graph())).not.toContain('shell/Toasts.tsx: Toasts')
+  })
+
+  it('a Favorites tile or a folder that only sits under the config is caught; rows whose variants ask as they run are not', () => {
+    // The tiles and the folder's chevron as the fix check found them (N1): under the config, reading
+    // nothing as the setting changes.
+    const favorites = join(RENDERER, 'src/shell/sidebar/Favorites.tsx')
+    const list = join(RENDERER, 'src/shell/sidebar/ItemList.tsx')
+    const tiles = text.get(favorites) as string
+    const rows = text.get(list) as string
+    expect(tiles).toContain('useReducedMotion()')
+    expect(rows).toContain('useReducedMotion()')
+    expect(rows).toContain('variants={rowVariants}')
+    try {
+      text.set(favorites, tiles.replaceAll('useReducedMotion()', 'false'))
+      text.set(list, rows.replaceAll('useReducedMotion()', 'false'))
+      const late = followsLate()
+      for (const name of [
+        'Favorites.tsx: Favorites',
+        'Favorites.tsx: FavoriteTile',
+        'ItemList.tsx: RevealBox',
+        'ItemList.tsx: FolderRow',
+      ])
+        expect(late).toContain(`shell/sidebar/${name}`)
+      expect(late).not.toContain('shell/sidebar/ItemList.tsx: RowSlot')
+      // Rows whose exit read reduced motion only as they mounted would be caught too.
+      text.set(list, rows.replace(/if \(reducedMotion\(\)\) \{/, 'if (false) {'))
+      expect(followsLate()).toContain('shell/sidebar/ItemList.tsx: RowSlot')
+    } finally {
+      text.set(favorites, tiles)
+      text.set(list, rows)
+    }
+    expect(followsLate()).toEqual([])
   })
 })
