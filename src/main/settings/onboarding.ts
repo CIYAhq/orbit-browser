@@ -3,8 +3,10 @@ import { ACTIONS_BY_ID } from '../../shared/actions'
 import { DEFAULT_PROFILE_ID, MAX_FAVORITES } from '../../shared/defaults'
 import { chosenApps, isOnboardingStep, type OnboardingInfo } from '../../shared/onboarding'
 import type { ColorMode, Settings, WindowId } from '../../shared/state'
+import { type KeyRemap, keyRemaps } from '../../shared/system-keys'
 import { NEUTRAL_THEME, normalizeSpaceTheme, paletteFor } from '../../shared/theme'
 import type { MainContext } from '../context'
+import { systemClashes } from '../keys/system'
 import { loadRenderer, uiWebPreferences } from '../windows'
 import { guardOwnWindow } from './ui-window'
 
@@ -14,6 +16,10 @@ export const ONBOARDING_WINDOW_ID = 'w-onboarding'
 const SIZE = { width: 920, height: 660 }
 const MIN_SIZE = { width: 720, height: 560 }
 const isMac = process.platform === 'darwin'
+/** The first-run key check (KS-03) is Linux's: macOS and Windows keep no keys Orbit binds by default. */
+const checksKeys = process.platform === 'linux'
+/** How long onboarding waits for the desktop to say which keys it keeps before going on without. */
+const KEY_CHECK_WAIT = 1500
 
 let current: Onboarding | undefined
 
@@ -83,7 +89,8 @@ class Onboarding {
     else this.open()
   }
 
-  info(): OnboardingInfo {
+  async info(): Promise<OnboardingInfo> {
+    const keys = await this.keyRemaps()
     const { settings, spaceOrder } = this.ctx.store.state
     return {
       step: isOnboardingStep(settings.onboardingStep) ? settings.onboardingStep : 'welcome',
@@ -91,7 +98,27 @@ class Onboarding {
       importer: this.ctx.commands.has('import.open'),
       returning: this.browserWindows().length > 0,
       favorites: chosenApps(settings.onboardingFavorites).map((app) => app.id),
+      keys,
     }
+  }
+
+  /**
+   * KS-03, on Linux: the keys Orbit's actions are bound to that the desktop keeps, with a free key
+   * for each. The same check as Settings → Shortcuts' marks; asked as the window opens, so it is
+   * usually answered by the time the page asks. A desktop that doesn't answer in time gets no step.
+   */
+  private async keyRemaps(): Promise<KeyRemap[]> {
+    if (!checksKeys) return []
+    let timer: NodeJS.Timeout | undefined
+    const late = new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), KEY_CHECK_WAIT)
+    })
+    const clashes = await Promise.race([systemClashes(), late])
+    clearTimeout(timer)
+    if (!clashes) return []
+    return keyRemaps(clashes, this.ctx.store.state.settings.shortcuts ?? {}, process.platform, (id) =>
+      this.ctx.actions.has(id),
+    )
   }
 
   /** The theme step's live change (OB-04). The first one keeps what it replaces, for Skip (D44). */
@@ -198,6 +225,8 @@ class Onboarding {
   }
 
   private open(): void {
+    // The desktop's keys are looked up while the page loads (KS-03).
+    if (checksKeys) void systemClashes()
     // Recorded at once, so a quit on the welcome step resumes there rather than counting as done
     // (an install with no step and onboarded false is from before onboarding: see index.ts).
     if (this.ctx.store.state.settings.onboardingStep === undefined) {

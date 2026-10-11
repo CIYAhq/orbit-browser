@@ -6,7 +6,7 @@ import { NEUTRAL_THEME } from '../../../shared/theme'
 import { invoke, isMac } from '../api'
 import { useOrbit } from '../store'
 import { cachedPalette, paletteVars, prefersReducedMotion, useDark } from '../theme'
-import { BrowserStep, DoneStep, FavoritesStep, ImportStep, ThemeStep, WelcomeStep } from './steps'
+import { BrowserStep, DoneStep, FavoritesStep, ImportStep, KeysStep, ThemeStep, WelcomeStep } from './steps'
 import './onboarding.css'
 
 /** Each step's name in the progress dots, for screen readers. */
@@ -16,7 +16,22 @@ const STEP_NAMES: Record<OnboardingStep, string> = {
   theme: 'Colours',
   favorites: 'Favorites',
   browser: 'Default browser',
+  keys: 'Shortcuts',
   done: 'Done',
+}
+
+/** The steps this run shows: the keys step only when the desktop keeps some of Orbit's keys (KS-03). */
+function stepsFor(info: OnboardingInfo): OnboardingStep[] {
+  return ONBOARDING_STEPS.filter((s) => s !== 'keys' || info.keys.length > 0)
+}
+
+/** Where to start: the step a quit left off at, or the next one shown when that one isn't (OB-14). */
+function startAt(step: OnboardingStep, steps: readonly OnboardingStep[]): number {
+  const order = ONBOARDING_STEPS.indexOf(step)
+  return Math.max(
+    0,
+    steps.findIndex((s) => ONBOARDING_STEPS.indexOf(s) >= order),
+  )
 }
 
 /**
@@ -59,7 +74,8 @@ function useThemeFade(dark: boolean): void {
 }
 
 function Flow({ info }: { info: OnboardingInfo }) {
-  const [index, setIndex] = useState(() => Math.max(0, ONBOARDING_STEPS.indexOf(info.step)))
+  const steps = useMemo(() => stepsFor(info), [info])
+  const [index, setIndex] = useState(() => startAt(info.step, steps))
   const [forward, setForward] = useState(true)
   // Picks are kept in the state file as they're made, so a quit resumes with them (OB-14).
   const [favorites, setFavorites] = useState<string[]>(info.favorites)
@@ -79,8 +95,8 @@ function Flow({ info }: { info: OnboardingInfo }) {
     },
     [importJob],
   )
-  const step = ONBOARDING_STEPS[index] as OnboardingStep
-  const last = ONBOARDING_STEPS.length - 1
+  const step = steps[index] as OnboardingStep
+  const last = steps.length - 1
   const stepRef = useRef<HTMLElement>(null)
 
   // Asked again when the window comes back to the front: the OS's own prompt or settings may have
@@ -98,9 +114,9 @@ function Flow({ info }: { info: OnboardingInfo }) {
       if (next === index) return
       setForward(next > index)
       setIndex(next)
-      void invoke('onboarding.setStep', { step: ONBOARDING_STEPS[next] as OnboardingStep })
+      void invoke('onboarding.setStep', { step: steps[next] as OnboardingStep })
     },
-    [index, last],
+    [index, last, steps],
   )
   const end = useCallback(
     (chosen: string[]) => {
@@ -151,14 +167,14 @@ function Flow({ info }: { info: OnboardingInfo }) {
     <>
       <header className="ob__top">
         <ol className="ob-progress" aria-label="Setup steps">
-          {ONBOARDING_STEPS.map((s, i) => (
+          {steps.map((s, i) => (
             <li
               key={s}
               className={`ob-progress__dot${i === index ? ' is-current' : i < index ? ' is-done' : ''}`}
               aria-current={i === index ? 'step' : undefined}
             >
               <span className="ob-sr">
-                Step {i + 1} of {ONBOARDING_STEPS.length}: {STEP_NAMES[s]}
+                Step {i + 1} of {steps.length}: {STEP_NAMES[s]}
               </span>
             </li>
           ))}
@@ -199,6 +215,7 @@ function Flow({ info }: { info: OnboardingInfo }) {
               onNext={next}
             />
           )}
+          {step === 'keys' && <KeysStep remaps={info.keys} onNext={next} />}
           {step === 'done' && (
             <DoneStep
               spaceId={info.spaceId}
@@ -207,6 +224,7 @@ function Flow({ info }: { info: OnboardingInfo }) {
               declined={declined}
               importer={info.importer}
               importJob={importJob}
+              keys={info.keys}
               returning={info.returning}
               finishing={finishing}
               onStart={finish}

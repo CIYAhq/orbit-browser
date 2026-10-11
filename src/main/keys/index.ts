@@ -1,6 +1,6 @@
 import { webContents } from 'electron'
 import { ACTIONS } from '../../shared/actions'
-import type { BindResult, ShortcutPriority } from '../../shared/commands/keys'
+import type { BindResult, ShortcutPriority, SystemClash } from '../../shared/commands/keys'
 import { onKeymapChange, setCustomBindings } from '../../shared/keymap'
 import type { MainContext } from '../context'
 import { installMenu, watchWindowsForMenu } from '../menu'
@@ -12,7 +12,7 @@ import { pageFocus } from './page-focus'
 import { keyRouter } from './router'
 import { registerShortcutSheet } from './sheet'
 import { registerSpecialWindows } from './special-windows'
-import { setSystemClashesForTest, systemClashes } from './system'
+import { setSystemClashesForTest, systemClashes, systemKeysForTest } from './system'
 import { registerTabKeys } from './tab-keys'
 import { registerWindowKeys } from './window-keys'
 
@@ -96,8 +96,10 @@ export function registerKeys(ctx: MainContext): void {
   // Tests say which keys the system keeps instead of asking it, and read the keys a menu showed,
   // where Orbit knows the keyboard is in a page, and what became of Esc on loading pages.
   if (ctx.e2e) {
+    // Tests never ask the desktop (KS-03): it keeps the keys the test names, none unless it does.
+    setSystemClashesForTest(systemKeysForTest(process.env.ORBIT_SYSTEM_KEYS))
     ;(globalThis as unknown as { __orbitKeys: unknown }).__orbitKeys = {
-      setSystemClashes: setSystemClashesForTest,
+      setSystemClashes: (list: SystemClash[] | undefined) => setSystemClashesForTest(list ?? []),
       lastMenuHints,
       focusIn: (urlPart: string) => {
         const contents = webContents

@@ -1,13 +1,17 @@
 import { ArrowRight, Check, Monitor, Moon, Sun } from 'lucide-react'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { ACTIONS_BY_ID, formatAccelerator, shortcutsFor } from '../../../shared/actions'
 import { type DefaultBrowserStatus, ENGINE_ORDER } from '../../../shared/commands/settings'
 import { DEFAULT_PROFILE_ID, MAX_FAVORITES } from '../../../shared/defaults'
+import { canonicalAccelerator } from '../../../shared/keymap'
 import { STARTER_APPS } from '../../../shared/onboarding'
 import type { ColorMode, SpaceTheme } from '../../../shared/state'
+import type { KeyRemap } from '../../../shared/system-keys'
 import { NEUTRAL_THEME } from '../../../shared/theme'
 import { engineFor, SEARCH_ENGINES } from '../../../shared/url'
 import { invoke } from '../api'
 import { ImportSuggestions, ImportSummary, OnboardingImport } from '../import/Onboarding'
+import { useKeymap } from '../keys/live'
 import { swatchBackground, ThemeEditor } from '../shell/spaces/ThemeEditor'
 import '../shell/spaces/spaces.css'
 import { useOrbit } from '../store'
@@ -391,6 +395,151 @@ export function BrowserStep({
   )
 }
 
+// ---- KS-03: keys the desktop keeps (Linux) ----
+
+const keysLabel = (accel: string) => formatAccelerator(accel, window.orbit.platform)
+
+/** The action's bindings now, as `canonicalAccelerator` writes them. */
+function bindingsOf(actionId: string): string[] {
+  const action = ACTIONS_BY_ID[actionId]
+  if (!action) return []
+  return shortcutsFor(action, window.orbit.platform)
+    .map((k) => canonicalAccelerator(k))
+    .filter((k): k is string => k !== undefined)
+}
+
+/** Whether the action still has the key the desktop keeps: the user may have changed it since. */
+export function stillKept(remap: KeyRemap): boolean {
+  return bindingsOf(remap.actionId).includes(remap.accel)
+}
+
+const remapId = (remap: KeyRemap) => `${remap.actionId} ${remap.accel}`
+
+/**
+ * KS-03's first-run check, on Linux: the keys Orbit's actions are bound to that the desktop keeps,
+ * each with another key to use. Nothing changes until the user says yes: they can take the keys
+ * suggested (all, or the ones left ticked), choose their own in Settings → Shortcuts, or keep them.
+ */
+export function KeysStep({ remaps, onNext }: { remaps: KeyRemap[]; onNext: () => void }) {
+  useKeymap()
+  const [left, setLeft] = useState<ReadonlySet<string>>(() => new Set())
+  const [busy, setBusy] = useState(false)
+  const open = remaps.filter(stillKept)
+  const chosen = open.filter((r) => r.suggestion && !left.has(remapId(r)))
+  const toggle = (id: string) =>
+    setLeft((was) => {
+      const next = new Set(was)
+      if (!next.delete(id)) next.add(id)
+      return next
+    })
+  const use = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      for (const r of chosen) {
+        await invoke('keys.bind', { actionId: r.actionId, accel: r.suggestion as string, replace: r.accel })
+      }
+    } finally {
+      setBusy(false)
+    }
+    onNext()
+  }
+  const first = open[0] ?? remaps[0]
+  const choose = () =>
+    void invoke('settings.open', { section: 'shortcuts', ...(first ? { item: `shortcut-${first.actionId}` } : {}) })
+  return (
+    <div className="ob-narrow ob-keys">
+      <Title id="keys">Some shortcuts are taken</Title>
+      <p className="ob-lead">
+        Your desktop uses these keys itself, so they never reach Orbit. Orbit can use other keys for them instead.
+      </p>
+      <ul className="ob-keys__list" data-testid="onboarding-keys">
+        {remaps.map((r) => {
+          const id = remapId(r)
+          const kept = stillKept(r)
+          const now = bindingsOf(r.actionId)[0]
+          const others = r.others.filter((k) => bindingsOf(r.actionId).includes(k))
+          const why = `Your desktop uses ${keysLabel(r.accel)} for ${r.owner}.${
+            others.length > 0 ? ` ${others.map(keysLabel).join(' and ')} still works.` : ''
+          }`
+          return (
+            <li key={id} className="ob-keys__row" data-testid="onboarding-key" data-action={r.actionId}>
+              {!kept ? (
+                <div className="ob-keys__pick">
+                  <Check size={15} className="ob-keys__done" aria-hidden="true" />
+                  <span className="ob-keys__what">
+                    <span className="ob-keys__name">{r.title}</span>
+                    <span className="ob-keys__why" data-testid="onboarding-key-now">
+                      {now ? `Now ${keysLabel(now)}` : 'No shortcut now'}
+                    </span>
+                  </span>
+                </div>
+              ) : r.suggestion ? (
+                <label className="ob-keys__pick">
+                  <input
+                    type="checkbox"
+                    checked={!left.has(id)}
+                    onChange={() => toggle(id)}
+                    data-testid="onboarding-key-pick"
+                  />
+                  <span className="ob-keys__what">
+                    <span className="ob-keys__name">{r.title}</span>
+                    <span className="ob-keys__why">{why}</span>
+                  </span>
+                  <span className="ob-keys__change" data-testid="onboarding-key-change">
+                    <kbd>{keysLabel(r.accel)}</kbd>
+                    <ArrowRight size={12} aria-label="to" />
+                    <kbd>{keysLabel(r.suggestion)}</kbd>
+                  </span>
+                </label>
+              ) : (
+                <div className="ob-keys__pick">
+                  <span className="ob-keys__what">
+                    <span className="ob-keys__name">{r.title}</span>
+                    <span className="ob-keys__why">{why} Choose another key in Settings.</span>
+                  </span>
+                  <span className="ob-keys__change">
+                    <kbd>{keysLabel(r.accel)}</kbd>
+                  </span>
+                </div>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      <Actions>
+        {chosen.length > 0 ? (
+          <>
+            <Button onClick={onNext} testId="onboarding-keys-keep">
+              Keep them as they are
+            </Button>
+            <Button primary onClick={() => void use()} disabled={busy} testId="onboarding-keys-use">
+              {chosen.length === 1 ? 'Use the new key' : `Use the ${chosen.length} new keys`}
+            </Button>
+          </>
+        ) : (
+          <Button primary onClick={onNext} testId="onboarding-next">
+            Continue
+          </Button>
+        )}
+      </Actions>
+      <p className="ob-note ob-keys__more">
+        <button type="button" className="ob-link" onClick={choose} data-testid="onboarding-keys-settings">
+          Choose other keys in Settings → Shortcuts
+        </button>
+        , or turn the desktop’s own shortcut off in its keyboard settings.
+      </p>
+    </div>
+  )
+}
+
+/** What the keys step changed, for the Done screen: how many of the actions got keys that reach Orbit. */
+function keysSummary(remaps: KeyRemap[]): string {
+  const changed = remaps.filter((r) => !stillKept(r)).length
+  if (changed === 0) return 'Unchanged: Settings → Shortcuts marks the ones your desktop keeps'
+  return changed === 1 ? '1 changed to suit your desktop' : `${changed} changed to suit your desktop`
+}
+
 // ---- OB-09, OB-08 ----
 
 function modeLabel(mode: ColorMode): string {
@@ -436,6 +585,7 @@ export function DoneStep({
   declined,
   importer,
   importJob,
+  keys,
   returning,
   finishing,
   onStart,
@@ -446,6 +596,8 @@ export function DoneStep({
   declined: boolean
   importer: boolean
   importJob: string | undefined
+  /** The keys step's list (KS-03), empty when it didn't show. */
+  keys: KeyRemap[]
   returning: boolean
   finishing: boolean
   onStart: () => void
@@ -453,6 +605,7 @@ export function DoneStep({
   const theme = useOrbit((s) => (spaceId ? s.spaces[spaceId]?.theme : undefined)) ?? NEUTRAL_THEME
   const appearance = useOrbit((s) => s.settings.appearance)
   const dark = useDark()
+  useKeymap()
   return (
     <div className="ob-narrow">
       <Title id="done">You’re all set</Title>
@@ -482,6 +635,12 @@ export function DoneStep({
           <dt>Import</dt>
           <dd>{importer ? <ImportSummary jobId={importJob} /> : 'Not yet available'}</dd>
         </div>
+        {keys.length > 0 && (
+          <div>
+            <dt>Shortcuts</dt>
+            <dd data-testid="onboarding-summary-keys">{keysSummary(keys)}</dd>
+          </div>
+        )}
         <div>
           <dt>
             <label htmlFor="ob-search">Search with</label>

@@ -4,9 +4,13 @@
  */
 
 import { MAX_FAVORITES } from './defaults'
+import type { KeyRemap } from './system-keys'
 
-/** The steps, in order. Import shows a placeholder until the import lane provides `import.open`. */
-export const ONBOARDING_STEPS = ['welcome', 'import', 'theme', 'favorites', 'browser', 'done'] as const
+/**
+ * The steps, in order. Import shows a placeholder until the import lane provides `import.open`.
+ * Keys shows only on Linux, when the desktop keeps keys Orbit's actions are bound to (KS-03).
+ */
+export const ONBOARDING_STEPS = ['welcome', 'import', 'theme', 'favorites', 'browser', 'keys', 'done'] as const
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number]
 
 export function isOnboardingStep(value: unknown): value is OnboardingStep {
@@ -64,4 +68,6 @@ export interface OnboardingInfo {
   returning: boolean
   /** The Favorites picked so far (STARTER_APPS ids), when resuming after a quit (OB-14). */
   favorites: string[]
+  /** Linux: the keys the desktop keeps that Orbit's actions are bound to, with others to use (KS-03). */
+  keys: KeyRemap[]
 }

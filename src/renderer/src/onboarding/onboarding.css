@@ -121,7 +121,9 @@
 .ob-button:focus-visible,
 .ob-app:focus-visible,
 .ob-modes__option:focus-visible,
-.ob-select:focus-visible {
+.ob-select:focus-visible,
+.ob-link:focus-visible,
+.ob-keys__pick input:focus-visible {
   outline: 2px solid color-mix(in oklab, var(--accent) 70%, transparent);
   outline-offset: 2px;
 }
@@ -617,6 +619,105 @@
   color: var(--text);
   font: inherit;
   font-weight: 550;
+}
+
+/* ---- Keys the desktop keeps (KS-03, Linux) ---- */
+
+.ob-keys__list {
+  /* A long list scrolls on its own, so the step's buttons stay in view in the smallest window. */
+  max-height: max(160px, calc(100vh - 360px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--text) 28%, transparent) transparent;
+  max-width: 560px;
+  margin: 4px auto 0;
+  padding: 2px 14px;
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--active) 72%, transparent);
+  box-shadow: inset 0 0 0 1px var(--divider);
+  list-style: none;
+  text-align: left;
+}
+
+.ob-keys__row + .ob-keys__row {
+  border-top: 1px solid var(--divider);
+}
+
+.ob-keys__pick {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 46px;
+  padding: 8px 0;
+}
+
+.ob-keys__pick input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.ob-keys__done {
+  flex: none;
+  color: var(--accent);
+}
+
+.ob-keys__what {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+
+.ob-keys__name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ob-keys__why {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ob-keys__change {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+}
+
+.ob-keys kbd {
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--active);
+  box-shadow: inset 0 0 0 1px var(--divider);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ob-keys .ob-actions {
+  margin-top: 18px;
+}
+
+.ob-keys__more {
+  margin: 14px 0 0;
+}
+
+.ob-link {
+  padding: 0;
+  border-radius: 3px;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* ---- Narrow windows, motion and light/dark changes ---- */
