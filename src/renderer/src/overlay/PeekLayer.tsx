@@ -217,11 +217,23 @@ class PeekAnimator {
       chrome: 1,
       page: true,
     }
-    const settled = this.settler()
+    // Main takes the layer away once what is left of the card and the dim is under 0.1 %, which no
+    // one can see (the curve's last tenth): the page behind takes clicks again sooner (FL-19: within
+    // 200 ms of Escape).
+    const done = this.settler()
+    let told = false
+    const settled = () => {
+      if (told) return
+      told = true
+      done()
+    }
     if (reducedMotion()) {
       this.tween(
         FADE_MS,
-        (t) => this.draw({ rect: start.rect, radius: start.radius, dim: start.dim * (1 - t), chrome: 0, page: false }),
+        (t) => {
+          this.draw({ rect: start.rect, radius: start.radius, dim: start.dim * (1 - t), chrome: 0, page: false })
+          if (t >= 0.999) settled()
+        },
         settled,
       )
       return
@@ -232,14 +244,16 @@ class PeekAnimator {
     if (dragged) to.y += Math.min(this.area().height, Math.max(40, (Math.max(0, velocity) * PEEK_CLOSE_MS) / 3000))
     this.tween(
       PEEK_CLOSE_MS,
-      (e) =>
+      (e) => {
         this.draw({
           rect: lerpBox(start.rect, to, e),
           radius: start.radius,
           dim: start.dim * (1 - e),
           chrome: start.chrome * (1 - e),
           page: e < 0.45,
-        }),
+        })
+        if (e >= 0.999) settled()
+      },
       settled,
     )
   }
@@ -353,7 +367,10 @@ class PeekAnimator {
     d.wheelTimer = window.setTimeout(() => this.drag === d && this.endDrag(t), WHEEL_END_MS)
   }
 
-  /** Runs a unit spring (0 → 1) frame by frame; `done` fires once it rests. */
+  /**
+   * Runs a unit spring (0 → 1) frame by frame; `done` fires once it rests. Its clock starts now, so
+   * the first frame after the change already moves (FL-29), as a new phase must.
+   */
   private spring(
     cfg: Spring,
     step: (p: number, elapsed: number) => void,
@@ -362,16 +379,16 @@ class PeekAnimator {
   ): void {
     let x = 0
     let v = initialVelocity
-    let last = 0
-    let first = 0
+    const first = performance.now()
+    let last = first
     const tick = (now: number) => {
-      if (!first) first = last = now
+      // A frame's time can be a little before the call that started the spring.
       const next = advanceSpring(cfg, x, v, (now - last) / 1000)
       x = next.x
       v = next.v
-      last = now
+      last = Math.max(last, now)
       const resting = springResting(x, v)
-      step(resting ? 1 : x, now - first)
+      step(resting ? 1 : x, Math.max(0, now - first))
       if (resting) {
         this.raf = 0
         done?.()
@@ -380,12 +397,11 @@ class PeekAnimator {
     this.raf = requestAnimationFrame(tick)
   }
 
-  /** A timed ease-out (exits are quicker than entrances, FL-01). */
+  /** A timed ease-out (exits are quicker than entrances, FL-01). Its clock starts now, as the spring's does. */
   private tween(ms: number, step: (e: number) => void, done?: () => void): void {
-    let first = 0
+    const first = performance.now()
     const tick = (now: number) => {
-      if (!first) first = now
-      const t = Math.min(1, (now - first) / ms)
+      const t = Math.min(1, Math.max(0, now - first) / ms)
       step(1 - (1 - t) ** 3)
       if (t >= 1) {
         this.raf = 0
