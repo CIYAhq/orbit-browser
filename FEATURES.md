@@ -4,7 +4,7 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 276 built (77 partial) · 356 tested · 97 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 276 built (77 partial) · 356 tested · 104 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
@@ -416,7 +416,7 @@ Spec: `spec/appearance.md`
 | AP-02 | Theme colours carry through the whole interface | P1 | – | ✅ e2e | – |  |
 | AP-03 | Restore the default (neutral) theme | P1 | – | ✅ unit | – |  |
 | AP-04 | Dark mode quality | P1 | – | ✅ unit | – |  |
-| AP-05 | Private-window appearance | P1 | ✅ | ✅ e2e | – | private windows are near-black whatever the theme (frame, sidebar, window background) with hover and selection tuned for black; Private label with icon in the sidebar, not over the page; no Space switcher or Favorites |
+| AP-05 | Private-window appearance | P1 | ✅ | ✅ e2e | ✅ | private windows are near-black whatever the theme (frame, sidebar, window background) with hover and selection tuned for black; Private label with icon in the sidebar, not over the page; no Space switcher or Favorites |
 | AP-06 | Inactive-window dimming | P1 | – | – | – |  |
 | AP-07 | Optional top toolbar (look and placement) | P1 | – | – | – |  |
 | AP-08 | Page-colour-aware chrome | P2 | – | – | – |  |
@@ -535,15 +535,15 @@ Spec: `spec/settings.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| ST-01 | Settings window | P0 | ✅ | ✅ e2e+unit | – | own window (⌘, / Ctrl+,): opens or focuses one; remembers section and size; takes the opener Space's colours; sections come from a registry (src/renderer/src/settings/registry.ts); search filters rows |
-| ST-02 | Settings reachable and searchable from the command bar | P1 | ✅ | ✅ e2e | – | sections and common settings are command-bar actions (settings.*) that open Settings at the row; the keys lane adds Shortcuts |
+| ST-01 | Settings window | P0 | ✅ | ✅ e2e+unit | ✅ | own window (⌘, / Ctrl+,): opens or focuses one; remembers section and size; takes the opener Space's colours; sections come from a registry (src/renderer/src/settings/registry.ts); search filters rows |
+| ST-02 | Settings reachable and searchable from the command bar | P1 | ✅ | ✅ e2e | ✅ | sections and common settings are command-bar actions (settings.*) that open Settings at the row; the keys lane adds Shortcuts |
 | ST-03 | General section | P1 | 🟡 partial | ✅ e2e | – | default browser row, app-menu item and command-bar action (only an installed build can register; e2e uses a stub); Mini Window archive timing; Import… opens the import flow (IM-01); Updates group: automatic checks switch, Check Now and the update feed address. Not built: UP-04's install-while-idle, hover-preview toggles (OT-26, P2), Open PDFs (P2) |
-| ST-04 | Profiles section (list, rename, delete) | P1 | ✅ | ✅ e2e | – | list with Default first, rename any profile, New Profile…, delete with confirmation (off while a Space uses it, and says why) |
-| ST-05 | Per-profile: auto-archive timing | P1 | ✅ | ✅ e2e+unit | – | 12 hours (default), 24 hours, 7 days, 30 days per profile; no Never; other profiles follow Default until set |
-| ST-06 | Per-profile: default search engine and custom engines | P0 | ✅ | ✅ e2e+unit | – | per-profile default engine (8 built-ins), custom engines with keyword and %s URL, Make default from the row menu; no extension override in Electron, so that row does not exist |
+| ST-04 | Profiles section (list, rename, delete) | P1 | ✅ | ✅ e2e | ✅ | list with Default first, rename any profile, New Profile…, delete with confirmation (off while a Space uses it, and says why) |
+| ST-05 | Per-profile: auto-archive timing | P1 | ✅ | ✅ e2e+unit | ✅ | 12 hours (default), 24 hours, 7 days, 30 days per profile; no Never; other profiles follow Default until set |
+| ST-06 | Per-profile: default search engine and custom engines | P0 | ✅ | ✅ e2e+unit | ✅ | per-profile default engine (8 built-ins), custom engines with keyword and %s URL, Make default from the row menu; no extension override in Electron, so that row does not exist |
 | ST-07 | Per-profile: download location, new-document app, data shortcuts | P1 | – | – | – |  |
 | ST-08 | Shortcuts section (remapping) | P1 | 🟡 partial | ✅ e2e+unit | – | Settings → Shortcuts: every action Orbit has (the action table, as main registers it) in groups with a search by name, search words or keys; click a key, press the new one (a modifier first except F1–F12; system and reserved keys refused, with the reason, and on macOS ⌃ with a lone letter, which moves the caret in text fields, D60); + adds another (up to 5), ⌫ while listening removes one, Esc cancels; a key another action has asks: Swap (when replacing) or Remove from the other; right-click: Reset to Default, Remove Shortcut, Prefer Websites / Prefer Orbit (KS-02); Reset All asks first; Go to Tab: Include Favorites in ordering and ⌘9 last or ninth item; actions with no keys (Duplicate Tab…) show Record Shortcut; keys the system keeps are marked (KS-03); Settings search finds rows; stored per device; Exit Full Screen (Esc in full screen, NV-20) has its row with no keys of its own, preferring websites by default, and its priority sets Esc's |
-| ST-09 | Links section | P1 | ✅ | ✅ e2e+unit | – | links from other apps open in a Mini Window (default), the most recent Space or one Space; routing rules (address contains / is exactly → a Space; first match wins; add, edit, reorder, remove); Peek options |
+| ST-09 | Links section | P1 | ✅ | ✅ e2e+unit | ✅ | links from other apps open in a Mini Window (default), the most recent Space or one Space; routing rules (address contains / is exactly → a Space; first match wins; add, edit, reorder, remove); Peek options |
 | ST-10 | Advanced section | P1 | 🟡 partial | ✅ e2e+unit | – | tab sleep timer (TB-16), picture in picture, graphics acceleration; no site customizations, full-URL toggle, sounds or haptics, or edge-drag settings because those features don't exist yet |
 | ST-11 | Appearance section | P1 | 🟡 partial | ✅ e2e | – | Theme mode: Light / Dark / Match system (AP-01). Not built: window material (AP-10, Windows), app icon (AP-09), page defaults (P2) |
 | ST-12 | Privacy & security, and clearing browsing data | P1 | 🟡 partial | ✅ e2e+unit | – | privacy promise (Orbit sends nothing); Clear browsing data per profile (⌘⇧⌫ / Ctrl+Shift+Delete): history by time range; cookies and site data, and the cache, always from all time (Electron has no range), so they start ticked only for All time; Secure DNS (Automatic, Off, Cloudflare, Google, Quad9); graphics acceleration lives in Advanced. No HTTPS-first or Safe Browsing (not in Electron), no per-site clearing here |

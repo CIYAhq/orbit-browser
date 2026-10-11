@@ -63,8 +63,25 @@ const log = (...m) => console.error(`[capture ${new Date().toISOString().slice(1
 async function startFixtures() {
   const accents = ['#e5484d', '#3e63dd', '#30a46c', '#f76b15', '#8e4ec6', '#12a594', '#d6409f', '#ffb224']
   const esc = (t) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+  // What /feed.json offers: set by a scenario with fx.offer({ version, summary, security }).
+  let offer = null
   const server = createServer((req, res) => {
     const at = new URL(req.url ?? '/', 'http://127.0.0.1')
+    // /feed.json: an update feed (UP-01). Before a scenario offers a version, its release is 0.0.0, older
+    // than any build. The release's page is one of these pages.
+    if (at.pathname === '/feed.json') {
+      const { version = '0.0.0', summary, security = false } = offer ?? {}
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(
+        JSON.stringify({
+          version,
+          url: `http://${req.headers.host}/${encodeURIComponent(`Orbit ${version}`)}`,
+          summary,
+          security,
+        }),
+      )
+      return
+    }
     const raw = at.pathname.split('/').pop() || 'Home'
     let name = raw
     try {
@@ -107,7 +124,13 @@ main{padding:40px;max-width:1100px}h1{font-size:40px;margin:8px 0 6px;letter-spa
     )
     server.listen(port, '127.0.0.1', ok)
   })
-  return { url: (name) => `http://127.0.0.1:${port}/${encodeURIComponent(name)}`, close: () => server.close() }
+  return {
+    url: (name) => `http://127.0.0.1:${port}/${encodeURIComponent(name)}`,
+    offer: (release) => {
+      offer = release
+    },
+    close: () => server.close(),
+  }
 }
 
 function startRecorder(file) {
