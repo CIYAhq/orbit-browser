@@ -356,16 +356,8 @@ function useShellUndo() {
       e.preventDefault()
       void invoke(undo.redo ? 'tabs.redo' : 'tabs.undo', {})
     }
-    // Releasing Control settles a recent-tab switch (TB-05) when the sidebar has focus.
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'Control') void invoke('tabs.endRecentSwitch', {})
-    }
     window.addEventListener('keydown', onKey)
-    window.addEventListener('keyup', onKeyUp)
-    return () => {
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('keyup', onKeyUp)
-    }
+    return () => window.removeEventListener('keydown', onKey)
   }, [])
 }
 

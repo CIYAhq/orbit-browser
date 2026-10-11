@@ -364,24 +364,36 @@ test('[TB-02] a link dropped on the sidebar and a pasted URL open as new Today t
 })
 
 test('[TB-05] Ctrl+Tab goes to the previous tab; holding Ctrl and tapping Tab walks back through recent tabs', async () => {
-  const { app, shell } = orbit
+  const { app } = orbit
   const a = await newTab(app, fx.url('/page/A'))
   await waitTab(app, a, '/page/A')
   const b = await newTab(app, fx.url('/page/B'))
   await waitTab(app, b, '/page/B')
   const c = await newTab(app, fx.url('/page/C'))
   await waitTab(app, c, '/page/C')
+  await cmd(app, 'tabs.focusPage', {})
+  await expect
+    .poll(() => app.evaluate(({ webContents }) => webContents.getFocusedWebContents()?.getURL()))
+    .toBe(fx.url('/page/C'))
+  // Each key goes to whatever has the keyboard, as a keyboard's do: from the first Tab on, that is
+  // the switcher's overlay (finish-tabs lane, TB-05).
+  const keys = (...events: [type: 'keyDown' | 'keyUp', keyCode: string, control: boolean][]) =>
+    app.evaluate(({ webContents }, list) => {
+      for (const [type, keyCode, control] of list)
+        webContents.getFocusedWebContents()?.sendInputEvent({ type, keyCode, modifiers: control ? ['control'] : [] })
+    }, events)
+  const tabKey: [type: 'keyDown' | 'keyUp', keyCode: string, control: boolean][] = [
+    ['keyDown', 'Tab', true],
+    ['keyUp', 'Tab', true],
+  ]
   // Quick tap and release: back to B.
-  await shell.keyboard.press('Control+Tab')
+  await keys(['keyDown', 'Control', true], ...tabKey, ['keyUp', 'Control', false])
   await expect.poll(() => activeId(app)).toBe(b)
   // Hold Control, Tab twice, release: A (C was used before A now that B is current).
-  await shell.keyboard.down('Control')
-  await shell.keyboard.press('Tab')
-  await shell.keyboard.press('Tab')
-  await shell.keyboard.up('Control')
+  await keys(['keyDown', 'Control', true], ...tabKey, ...tabKey, ['keyUp', 'Control', false])
   await expect.poll(() => activeId(app)).toBe(a)
   // Then a single tap returns to B, the tab used just before.
-  await shell.keyboard.press('Control+Tab')
+  await keys(['keyDown', 'Control', true], ...tabKey, ['keyUp', 'Control', false])
   await expect.poll(() => activeId(app)).toBe(b)
 })
 

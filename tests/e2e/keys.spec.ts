@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { expect, type Page, test } from '@playwright/test'
+import { switcherOf } from '../../src/shared/tab-switcher'
 import { action, isMac, launchOrbit, MOD, type Orbit, run, state, tabPage, viewPage } from './helpers'
 import {
   cmd,
@@ -724,6 +725,12 @@ async function activeTab(): Promise<string | undefined> {
   return win?.activeTab[win.spaceId] ?? undefined
 }
 
+/** The tab the recent-tab switcher of the first window highlights, once its list shows (TB-05). */
+async function highlighted(): Promise<string | undefined> {
+  const list = switcherOf(Object.values((await state(orbit.app)).windows)[0]?.overlay)
+  return list?.tabs[list.index]
+}
+
 test('[KS-05][PN-02][TB-07] from a page: ⌘D pins a Today tab and ⌘D again puts it back on top of Today; ⌘⇧T after ⌘W restores a closed tab in its place', async () => {
   const { app } = orbit
   const spaceId = await activeSpace(app)
@@ -817,22 +824,25 @@ test('[KS-06][TB-05] holding ⌃: Tab and ⇧Tab step through recent tabs, W clo
     ['keyDown', 'Tab', mods],
     ['keyUp', 'Tab', mods],
   ]
+  // Held, the list shows with A highlighted; the page stays D's until Control is let go.
   await keyEvents([['keyDown', 'Control', ctrl], ...tab(ctrl)])
-  await expect.poll(activeTab).toBe(a)
+  await expect.poll(highlighted).toBe(a)
   await keyEvents(tab(ctrl))
-  await expect.poll(activeTab).toBe(c)
+  await expect.poll(highlighted).toBe(c)
   await keyEvents([['keyDown', 'Shift', ['control', 'shift']], ...tab(['control', 'shift']), ['keyUp', 'Shift', ctrl]])
-  await expect.poll(activeTab).toBe(a)
+  await expect.poll(highlighted).toBe(a)
   // W closes A; C, next in the switcher, is highlighted in its place.
   await keyEvents([
     ['keyDown', 'W', ctrl],
     ['keyUp', 'W', ctrl],
   ])
   await expect.poll(async () => (await state(app)).tabs[a]).toBeUndefined()
-  await expect.poll(activeTab).toBe(c)
+  await expect.poll(highlighted).toBe(c)
   await keyEvents(tab(ctrl))
-  await expect.poll(activeTab).toBe(b)
+  await expect.poll(highlighted).toBe(b)
+  expect(await activeTab()).toBe(d)
   await keyEvents([['keyUp', 'Control', []]])
+  await expect.poll(activeTab).toBe(b)
   // Settled on B: a quick ⌃Tab goes back to D, the tab used before it.
   await keyEvents([['keyDown', 'Control', ctrl], ...tab(ctrl), ['keyUp', 'Control', []]])
   await expect.poll(activeTab).toBe(d)
@@ -865,9 +875,10 @@ test('[KS-06][TB-05] ⌃` steps back in the recent-tab switcher on every platfor
     ['keyDown', 'Tab', ctrl],
     ['keyUp', 'Tab', ctrl],
   ])
-  await expect.poll(activeTab).toBe(a)
+  await expect.poll(highlighted).toBe(a)
   await keyEvents(tick)
-  await expect.poll(activeTab).toBe(b)
+  await expect.poll(highlighted).toBe(b)
+  expect(await activeTab()).toBe(c)
   await keyEvents([['keyUp', 'Control', []]])
   await expect.poll(focusedUrl).toBe(fx.url('/page/TickB'))
   expect(await activeTab()).toBe(b)

@@ -157,10 +157,17 @@ export class TabRuntime {
   onUndoShortcut?: (tabId: TabId, redo: boolean) => void
   /** A page closed itself (window.close()); treated like closing the tab (TB-06). */
   onPageClosed?: (tabId: TabId) => void
-  /** Control was released in a page (ends recent-tab switching, TB-05). */
+  /** Control was released, wherever the keyboard is (ends recent-tab switching, TB-05). */
   onControlUp?: () => void
-  /** Recent-tab switching in a window (TB-05): whether it is going on, and closing its highlighted tab (W, KS-06). */
-  recentSwitch?: { active: (windowId: WindowId) => boolean; closeHighlighted: (windowId: WindowId) => void }
+  /**
+   * Recent-tab switching in a window (TB-05): whether it is going on, closing its highlighted tab
+   * (W, KS-06), and ending it with no switch (Esc; true when there was one to end).
+   */
+  recentSwitch?: {
+    active: (windowId: WindowId) => boolean
+    closeHighlighted: (windowId: WindowId) => void
+    cancel: (windowId: WindowId | undefined) => boolean
+  }
   /** A page tried to open a tab or pop-up without a user gesture. */
   onPopupBlocked?: (tabId: TabId, url: string, referrer: Referrer) => void
   /**
@@ -288,7 +295,6 @@ export class TabRuntime {
       this.trackPinnedTitle(tabId, title)
     })
     contents.on('before-input-event', (event, input) => {
-      if (input.type === 'keyUp' && input.key === 'Control') this.onControlUp?.()
       // Sidebar undo and redo, ⌘Z and ⌘⇧Z as the keymap has them (KS-05): a key that edits text is
       // the page's own undo in a text field, and undoes the last sidebar change elsewhere (KS-16).
       if (input.type !== 'keyDown' || !this.onUndoShortcut) return

@@ -19,7 +19,6 @@ import {
   profileOfContainer,
   rootContainerOf,
   sectionOf,
-  sidebarTabOrder,
   splitOfTab,
   tabsInItem,
 } from '../../shared/tree'
@@ -36,6 +35,7 @@ import { folderMenu, type MenuOps, tabMenu } from './menus'
 import { makeTab, numberedTarget, steppedTarget, todayInsertIndex } from './model'
 import { TabOps, type TabPage } from './ops'
 import { type RowMenuInfo, registerRowMenus } from './row-menu'
+import { registerTabSwitcher } from './switcher'
 import { registerThemeUndo } from './theme-undo'
 import { registerToastView, type ToastViewInfo } from './toasts'
 
@@ -670,82 +670,8 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   actions.register('tab.next', step(1))
   actions.register('tab.previous', step(-1))
 
-  // Recent-tab switching (TB-05): while Control is held, each Tab steps back through the five
-  // most recently used tabs of this Space; a quick tap-and-release goes to the previous tab.
-  // Releasing Control settles there; tabs passed on the way keep their place in the recency order.
-  let recent: {
-    windowId: WindowId
-    order: TabId[]
-    times: Map<TabId, number>
-    index: number
-    timer?: NodeJS.Timeout
-  } | null = null
-  const endRecent = () => {
-    const r = recent
-    if (!r) return
-    recent = null
-    if (r.timer) clearTimeout(r.timer)
-    const landed = r.order[r.index]
-    const start = r.order[0]
-    // Restore recency of the tabs merely passed through (after the idle-clock updates have run).
-    setTimeout(() => {
-      store.update((d) => {
-        for (const [id, at] of r.times) {
-          if (id === landed || id === start) continue
-          const t = d.tabs[id]
-          if (t) t.lastActiveAt = at
-        }
-      })
-    }, 0)
-  }
-  const stepRecent = (delta: number) => (c: CallContext) => {
-    const windowId = windowOf(c)
-    if (!windowId) return
-    if (!recent || recent.windowId !== windowId) {
-      const state = store.state
-      const win = state.windows[windowId]
-      if (!win) return
-      const ids = [...new Set(sidebarTabOrder(state, win.spaceId))]
-        .map((id) => state.tabs[id])
-        .filter((t): t is NonNullable<typeof t> => !!t)
-        .sort((a, b) => b.lastActiveAt - a.lastActiveAt)
-        .slice(0, 5)
-      const active = ops.activeTab(windowId)
-      const order = active ? [active, ...ids.map((t) => t.id).filter((id) => id !== active)] : ids.map((t) => t.id)
-      recent = { windowId, order: order.slice(0, 5), times: new Map(ids.map((t) => [t.id, t.lastActiveAt])), index: 0 }
-    }
-    const r = recent
-    if (r.order.length < 2) return
-    r.index = (r.index + delta + r.order.length) % r.order.length
-    const target = r.order[r.index]
-    if (target) ops.activate(windowId, target)
-    // If the Control release is never seen (focus moved), settle after a pause.
-    if (r.timer) clearTimeout(r.timer)
-    r.timer = setTimeout(endRecent, 1500)
-  }
-  actions.register('tab.recent', stepRecent(1))
-  actions.register('tab.recentBack', stepRecent(-1))
-  tabs.onControlUp = endRecent
-  // W, with Control still held, closes the highlighted tab; the next one in the switcher takes its
-  // place and switching goes on (TB-05, keys lane KS-06).
-  tabs.recentSwitch = {
-    active: (windowId) => recent?.windowId === windowId,
-    closeHighlighted: (windowId) => {
-      const r = recent
-      if (!r || r.windowId !== windowId) return
-      const closing = r.order[r.index]
-      if (!closing) return
-      r.order.splice(r.index, 1)
-      r.times.delete(closing)
-      if (r.index >= r.order.length) r.index = 0
-      ops.closeTabs([closing], 'closed')
-      const next = r.order[r.index]
-      if (next && store.state.tabs[next]) ops.activate(windowId, next)
-      if (r.timer) clearTimeout(r.timer)
-      r.timer = setTimeout(endRecent, 1500)
-    },
-  }
-  commands.register('tabs.endRecentSwitch', () => endRecent())
+  // The recent-tab switcher, ⌃Tab (TB-05).
+  registerTabSwitcher(ctx, ops)
   for (let n = 1; n <= 9; n++) {
     actions.register(`tab.goto.${n}`, (c) => {
       const windowId = windowOf(c)

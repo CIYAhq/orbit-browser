@@ -15,6 +15,7 @@ import type {
   WindowId,
   WindowState,
 } from '../shared/state'
+import { switcherOf } from '../shared/tab-switcher'
 import { paletteFor } from '../shared/theme'
 import { splitLeaves, splitOfTab } from '../shared/tree'
 import type { MainContext } from './context'
@@ -1120,10 +1121,20 @@ export class WindowManager {
         event.preventDefault()
         return
       }
+      // Letting go of Control, wherever the keyboard is, ends a switch to a recent tab (TB-05).
+      if (input.type === 'keyUp' && input.key === 'Control') this.ctx.tabs.onControlUp?.()
       if (input.type !== 'keyDown') return
+      // Esc ends a switch to a recent tab with no switch (TB-05), here, in step with Control's release.
+      if (
+        input.key === 'Escape' &&
+        this.ctx.tabs.recentSwitch?.cancel(this.windowIdFor(contents) ?? this.focusedWindowId())
+      ) {
+        if (!this.isOverlay(contents)) event.preventDefault()
+        return
+      }
       // W while switching to a recent tab closes the highlighted tab (keys lane, KS-06).
       if (keyRouter.switcherKey(input, () => this.windowIdFor(contents) ?? this.focusedWindowId())) {
-        event.preventDefault()
+        if (!this.isOverlay(contents)) event.preventDefault()
         return
       }
       // Where the key was pressed may decide the action (keys lane: ⌘O opens a file outside a Peek, KS-12).
@@ -1141,7 +1152,11 @@ export class WindowManager {
       if (keyRouter.leaveToPage(contents, input, action, () => this.windowIdFor(contents) ?? this.focusedWindowId())) {
         return
       }
-      event.preventDefault()
+      // ⌃Tab and ⌃⇧Tab stay with the overlay, which has the keyboard from the switcher's first Tab
+      // on (TB-05): once Orbit takes a key from a view, the engine holds back every key-up there
+      // until another key goes down, the release of Control that ends the switch included. The
+      // overlay's page leaves them alone (shortcuts.ts, TabSwitcher).
+      if (!(RECENT_SWITCH.has(action.id) && this.isOverlay(contents))) event.preventDefault()
       const windowId = this.windowIdFor(contents) ?? this.focusedWindowId()
       // Close Tab in a window that isn't an Orbit window (a page's popup) closes that window.
       if (!windowId && action.id === 'tab.close') {
@@ -1150,6 +1165,12 @@ export class WindowManager {
       }
       void this.ctx.actions.run(action.id, { windowId, repeat: input.isAutoRepeat })
     })
+  }
+
+  /** Whether `contents` is a window's overlay (command bar, menus, the recent-tab switcher). */
+  private isOverlay(contents: WebContents): boolean {
+    for (const rec of this.records.values()) if (rec.overlay?.webContents === contents) return true
+    return false
   }
 
   /**
@@ -1292,9 +1313,11 @@ export class WindowManager {
       }
       if (now.overlay !== before?.overlay) {
         // A Peek has played its own close by now (or was dismissed outright): its layer goes at
-        // once so the page takes clicks again (FL-19). Other overlays linger to animate out.
-        if (now.overlay.kind === 'none') this.hideOverlay(rec, before?.overlay.kind === 'peek')
-        else if (!rec.overlayShown || overlayKey(now.overlay) !== overlayKey(before?.overlay)) this.showOverlay(rec)
+        // once so the page takes clicks again (FL-19). So does the recent-tab switcher, in the frame
+        // its tab shows (FL-26). Other overlays linger to animate out.
+        if (now.overlay.kind === 'none') {
+          this.hideOverlay(rec, before?.overlay.kind === 'peek' || !!switcherOf(before?.overlay))
+        } else if (!rec.overlayShown || overlayKey(now.overlay) !== overlayKey(before?.overlay)) this.showOverlay(rec)
         // The same overlay changed (e.g. a Peek's phase or area): keep its place and focus.
         else this.fitOverlay(rec)
       }
@@ -1666,6 +1689,9 @@ export function windowBackground(state: OrbitState, spaceId: SpaceId | undefined
   // The theme source follows settings.appearance, so this is the global light/dark choice.
   return paletteFor(space.theme, nativeTheme.shouldUseDarkColors).windowBackground
 }
+
+/** The recent-tab switcher's actions (TB-05): the overlay keeps their keys (`attachShortcuts`). */
+const RECENT_SWITCH = new Set(['tab.recent', 'tab.recentBack'])
 
 /** Identifies one opening of an overlay (its kind and nonce): updates to it keep the same key. */
 function overlayKey(overlay: OverlayState | undefined): string {

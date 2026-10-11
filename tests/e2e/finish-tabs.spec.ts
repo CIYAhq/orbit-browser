@@ -5,8 +5,11 @@
 import { expect, type Page, test } from '@playwright/test'
 import type { SearchResult } from '../../src/shared/commands/commandbar'
 import { DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
+import { switcherOf } from '../../src/shared/tab-switcher'
+import { bestOf, frameAfterWall, mainInputs, ms, note, record, viewShown } from './frames'
 import {
   type Fixtures,
+  FRAME_SLACK,
   isMac,
   launchOrbit,
   type Orbit,
@@ -1188,4 +1191,408 @@ test('[TB-17][TB-22][TB-07] a blank window open at quit comes back with its tabs
   const urls = Object.values((await state(orbit.app)).tabs).map((t) => t.url)
   expect(urls).not.toContain(fx.url('/page/Far'))
   expect(urls).not.toContain(fx.url('/page/Away'))
+})
+
+// ---------- TB-05: the recent-tab switcher (⌃Tab) ----------
+
+type KeyEvent = [type: 'keyDown' | 'keyUp', keyCode: string, modifiers: Mod[]]
+
+/** Key events, each sent to whatever has the keyboard at that moment, as the keyboard does. */
+function keyEvents(...events: KeyEvent[]): Promise<void> {
+  return orbit.app.evaluate(({ webContents }, list) => {
+    for (const [type, keyCode, modifiers] of list) {
+      webContents.getFocusedWebContents()?.sendInputEvent({ type, keyCode, modifiers })
+    }
+  }, events)
+}
+
+const CTRL: Mod[] = ['control']
+const CTRL_DOWN: KeyEvent = ['keyDown', 'Control', CTRL]
+const CTRL_UP: KeyEvent = ['keyUp', 'Control', []]
+const TAB: KeyEvent[] = [
+  ['keyDown', 'Tab', CTRL],
+  ['keyUp', 'Tab', CTRL],
+]
+
+/** The first window's switcher: the tabs it lists, the highlighted one and whether its list is drawn. */
+async function switcher(): Promise<{ tabs: string[]; highlighted: string | undefined; shown: boolean } | null> {
+  const list = switcherOf(Object.values((await state(orbit.app)).windows)[0]?.overlay)
+  return list ? { tabs: list.tabs, highlighted: list.tabs[list.index], shown: list.shown } : null
+}
+
+/** Opens a page for each name, each shown in turn, and gives the last one's page the keyboard. */
+async function usedInTurn(names: string[]): Promise<string[]> {
+  const ids: string[] = []
+  for (const name of names) {
+    const id = await newTab(orbit.app, fx.url(`/page/${name}`))
+    await waitTab(orbit.app, id, `/page/${name}`)
+    ids.push(id)
+  }
+  await cmd(orbit.app, 'tabs.focusPage', {})
+  await expect.poll(focusedUrl).toBe(fx.url(`/page/${names.at(-1)}`))
+  return ids
+}
+
+/** Shows the tabs in turn, so the last is the one shown and the order of use is theirs. */
+async function useInTurn(ids: string[], last: string): Promise<void> {
+  for (const id of ids) await cmd(orbit.app, 'tabs.activate', { tabId: id })
+  await cmd(orbit.app, 'tabs.focusPage', {})
+  await expect.poll(focusedUrl).toBe(fx.url(`/page/${last}`))
+}
+
+/** The switcher's list and its tabs in the overlay. */
+const switcherList = (overlay: Page) => overlay.getByTestId('tab-switcher')
+const switcherItem = (overlay: Page, tabId: string) =>
+  overlay.locator(`[data-testid="tab-switcher-item"][data-tab-id="${tabId}"]`)
+
+/** Watches the overlay page for the switcher's list ever being drawn; returns a reader. */
+async function listEverShown(overlay: Page): Promise<() => Promise<boolean>> {
+  await overlay.evaluate(() => {
+    const w = window as unknown as { __switcherSeen?: boolean; __switcherWatch?: MutationObserver }
+    w.__switcherSeen = !!document.querySelector('[data-testid="tab-switcher"]')
+    w.__switcherWatch?.disconnect()
+    w.__switcherWatch = new MutationObserver(() => {
+      if (document.querySelector('[data-testid="tab-switcher"]')) w.__switcherSeen = true
+    })
+    w.__switcherWatch.observe(document.body, { subtree: true, childList: true })
+  })
+  return () => overlay.evaluate(() => !!(window as unknown as { __switcherSeen?: boolean }).__switcherSeen)
+}
+
+test('[TB-05][SP-16] held, ⌃Tab lists the five most recent tabs in the middle of the window, the second highlighted, in the Space’s colours over a page that is not dimmed; a quick tap goes straight back and shows nothing', async () => {
+  const { app } = orbit
+  const names = ['SwitchA', 'SwitchB', 'SwitchC', 'SwitchD', 'SwitchE', 'SwitchF']
+  const [a, b, c, d, e, f] = (await usedInTurn(names)) as [string, string, string, string, string, string]
+  const overlay = await viewPage(app, 'overlay')
+  // A quick tap and release: the tab used before, at once, and no list.
+  const seen = await listEverShown(overlay)
+  await keyEvents(CTRL_DOWN, ...TAB, CTRL_UP)
+  await expect.poll(() => activeId(app)).toBe(e)
+  await expect.poll(focusedUrl).toBe(fx.url('/page/SwitchE'))
+  await overlay.waitForTimeout(400)
+  expect(await seen(), 'a quick tap shows no list').toBe(false)
+  expect(await overlayKind()).toBe('none')
+
+  // Held in a coloured Space: after a moment the list shows, most recent first, the second highlighted.
+  await run(app, 'spaces.update', { spaceId: (await space(app)).id, theme: RED })
+  await keyEvents(CTRL_DOWN, ...TAB)
+  await expect(switcherList(overlay)).toBeVisible()
+  expect(await switcher()).toEqual({ tabs: [e, f, d, c, b], highlighted: f, shown: true })
+  const items = overlay.getByTestId('tab-switcher-item')
+  await expect(items).toHaveCount(5)
+  expect(await items.evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.tabId))).toEqual([e, f, d, c, b])
+  await expect(items.nth(1)).toHaveAttribute('aria-selected', 'true')
+  await expect(overlay.locator('[data-testid="tab-switcher-item"][aria-selected="true"]')).toHaveCount(1)
+  await expect(switcherItem(overlay, d)).toContainText('SwitchD')
+  expect(await switcherItem(overlay, a).count(), 'only five').toBe(0)
+  // In the middle of the window, in the Space’s colours, and nothing dims the page.
+  const look = await overlay.evaluate(() => {
+    const list = document.querySelector('[data-testid="tab-switcher"]') as HTMLElement
+    const root = document.querySelector('[data-testid="overlay"]') as HTMLElement
+    const probe = document.createElement('div')
+    probe.style.background = 'var(--surface)'
+    root.appendChild(probe)
+    const surface = getComputedStyle(probe).backgroundColor
+    probe.remove()
+    const r = list.getBoundingClientRect()
+    // Everything under the window's corners is see-through.
+    const corners = [
+      [2, 2],
+      [innerWidth - 3, innerHeight - 3],
+    ].flatMap(([x, y]) => document.elementsFromPoint(x as number, y as number))
+    return {
+      dx: r.x + r.width / 2 - innerWidth / 2,
+      dy: r.y + r.height / 2 - innerHeight / 2,
+      list: getComputedStyle(list).backgroundColor,
+      surface,
+      under: corners.map((el) => getComputedStyle(el).backgroundColor),
+    }
+  })
+  expect(Math.abs(look.dx)).toBeLessThanOrEqual(1)
+  expect(Math.abs(look.dy)).toBeLessThanOrEqual(1)
+  expect(look.list).toBe(look.surface)
+  // Red-family, as the Space is: more red than blue.
+  const [red = 0, , blue = 0] = (look.list.match(/\d+/g) ?? []).map(Number)
+  expect(red).toBeGreaterThan(blue)
+  expect(look.under.every((bg) => bg === 'rgba(0, 0, 0, 0)')).toBe(true)
+  // The page stays as it was until Control is let go; then the highlighted tab's page has the keyboard.
+  expect(await activeId(app)).toBe(e)
+  await keyEvents(CTRL_UP)
+  await expect.poll(() => activeId(app)).toBe(f)
+  await expect.poll(overlayKind).toBe('none')
+  await expect.poll(focusedUrl).toBe(fx.url('/page/SwitchF'))
+})
+
+test('[TB-05][KS-19][KS-16] the list has the keyboard while it shows: Esc, a click beside it or another action ends it with no switch; a click on a tab switches to it; the page has the keyboard back after', async () => {
+  const { app } = orbit
+  const [a, b, c] = (await usedInTurn(['EscA', 'EscB', 'EscC'])) as [string, string, string]
+  const overlay = await viewPage(app, 'overlay')
+  // Esc.
+  await keyEvents(CTRL_DOWN, ...TAB)
+  await expect(switcherList(overlay)).toBeVisible()
+  await expect.poll(focusedUrl).toContain('view=overlay')
+  await keyEvents(['keyDown', 'Escape', CTRL], ['keyUp', 'Escape', CTRL])
+  await expect.poll(overlayKind).toBe('none')
+  await expect.poll(focusedUrl).toBe(fx.url('/page/EscC'))
+  await keyEvents(CTRL_UP)
+  await overlay.waitForTimeout(200)
+  expect(await activeId(app)).toBe(c)
+  // A click beside the list.
+  await keyEvents(CTRL_DOWN, ...TAB)
+  await expect(switcherList(overlay)).toBeVisible()
+  const box = await switcherList(overlay).boundingBox()
+  if (!box) throw new Error('no list')
+  await overlay.mouse.click(box.x + box.width / 2, Math.max(4, box.y - 40))
+  await expect.poll(overlayKind).toBe('none')
+  await keyEvents(CTRL_UP)
+  await overlay.waitForTimeout(200)
+  expect(await activeId(app)).toBe(c)
+  await expect.poll(focusedUrl).toBe(fx.url('/page/EscC'))
+  // Another action: it runs, and the switch ends where it was.
+  await keyEvents(CTRL_DOWN, ...TAB)
+  await expect(switcherList(overlay)).toBeVisible()
+  await act(app, 'sidebar.toggle')
+  await expect.poll(overlayKind).toBe('none')
+  await expect.poll(async () => Object.values((await state(app)).windows)[0]?.sidebar.visible).toBe(false)
+  await keyEvents(CTRL_UP)
+  await overlay.waitForTimeout(200)
+  expect(await activeId(app)).toBe(c)
+  await act(app, 'sidebar.toggle')
+  // A click on a tab of the list (with Control still held): that tab, at once.
+  await cmd(app, 'tabs.focusPage', {})
+  await expect.poll(focusedUrl).toBe(fx.url('/page/EscC'))
+  await keyEvents(CTRL_DOWN, ...TAB, ...TAB)
+  await expect.poll(async () => (await switcher())?.highlighted).toBe(a)
+  await switcherItem(overlay, b).click()
+  await expect.poll(() => activeId(app)).toBe(b)
+  await expect.poll(overlayKind).toBe('none')
+  await expect.poll(focusedUrl).toBe(fx.url('/page/EscB'))
+  await keyEvents(CTRL_UP)
+  await overlay.waitForTimeout(200)
+  expect(await activeId(app)).toBe(b)
+})
+
+test('[TB-05][MD-11] the list shows which tabs use the camera or microphone and which play sound, as their rows do', async () => {
+  await orbit.app.close()
+  orbit = await launchOrbit({ args: ['--use-fake-device-for-media-stream'] })
+  const { app } = orbit
+  const [call, loud, hush, plain] = (await usedInTurn(['Call', 'Loud', 'Hush', 'Plain'])) as [
+    string,
+    string,
+    string,
+    string,
+  ]
+  // A call: camera and microphone, allowed for the site, in a self view (what Orbit's page script sees).
+  await cmd(app, 'site.setPermission', { tabId: call, kind: 'camera', allowed: true })
+  await cmd(app, 'site.setPermission', { tabId: call, kind: 'microphone', allowed: true })
+  const callPage = await tabPage(app, '/page/Call')
+  expect(
+    await callPage.evaluate(() =>
+      navigator.mediaDevices.getUserMedia({ audio: true, video: true }).then(
+        (stream) => {
+          const self = document.createElement('video')
+          self.muted = true
+          self.playsInline = true
+          self.width = 160
+          self.height = 90
+          self.srcObject = stream
+          document.body.append(self)
+          return self.play().then(() => 'ok')
+        },
+        (err: Error) => err.name,
+      ),
+    ),
+  ).toBe('ok')
+  await expect.poll(async () => (await state(app)).tabs[call]?.media).toMatchObject({ camera: true, mic: true })
+  // Sound: a tone in one page, and another muted.
+  for (const urlPart of ['/page/Loud', '/page/Hush']) {
+    await (await tabPage(app, urlPart)).evaluate(() => {
+      const audio = new AudioContext()
+      const tone = audio.createOscillator()
+      const gain = audio.createGain()
+      gain.gain.value = 0.05
+      tone.connect(gain).connect(audio.destination)
+      tone.start()
+      ;(window as unknown as { __audio: AudioContext }).__audio = audio
+    })
+  }
+  await cmd(app, 'tabs.setMuted', { tabId: hush, muted: true })
+  await expect.poll(async () => (await state(app)).tabs[loud]?.audible).toBe(true)
+  await expect.poll(async () => (await state(app)).tabs[hush]?.muted).toBe(true)
+  await cmd(app, 'tabs.focusPage', {})
+  await expect.poll(focusedUrl).toBe(fx.url('/page/Plain'))
+
+  const overlay = await viewPage(app, 'overlay')
+  await keyEvents(CTRL_DOWN, ...TAB)
+  await expect(switcherList(overlay)).toBeVisible()
+  await expect(switcherItem(overlay, call).getByTestId('tab-capture')).toBeVisible()
+  await expect(switcherItem(overlay, call).getByTestId('tab-capture')).toHaveAttribute(
+    'aria-label',
+    'Using camera and microphone',
+  )
+  await expect(switcherItem(overlay, loud).getByTestId('tab-switcher-audio')).toHaveAttribute(
+    'aria-label',
+    'Playing sound',
+  )
+  await expect(switcherItem(overlay, hush).getByTestId('tab-switcher-audio')).toHaveAttribute('aria-label', 'Muted')
+  for (const quiet of [plain, call]) {
+    await expect(switcherItem(overlay, quiet).getByTestId('tab-switcher-audio')).toHaveCount(0)
+  }
+  for (const still of [plain, loud, hush]) {
+    await expect(switcherItem(overlay, still).getByTestId('tab-capture')).toHaveCount(0)
+  }
+  await keyEvents(['keyDown', 'Escape', CTRL], ['keyUp', 'Escape', CTRL], CTRL_UP)
+  await expect.poll(overlayKind).toBe('none')
+})
+
+/** Records, in main, when the overlay's layer is hidden (on the wall clock); returns a reader. */
+async function overlayHidden(): Promise<() => Promise<number[]>> {
+  await orbit.app.evaluate(({ BrowserWindow }) => {
+    type View = Electron.View & {
+      webContents?: Electron.WebContents
+      setVisible: (on: boolean) => void
+      getVisible: () => boolean
+      __hidden?: number[]
+    }
+    const views = BrowserWindow.getAllWindows().flatMap((w) => w.contentView.children as View[])
+    const view = views.find((v) => v.webContents?.getURL().includes('view=overlay'))
+    if (!view) throw new Error('no overlay view')
+    if (view.__hidden) {
+      view.__hidden.length = 0
+      return
+    }
+    const hidden: number[] = []
+    view.__hidden = hidden
+    const setVisible = view.setVisible.bind(view)
+    view.setVisible = (on: boolean) => {
+      const was = view.getVisible()
+      setVisible(on)
+      if (!on && was) hidden.push(performance.timeOrigin + performance.now())
+    }
+  })
+  return () =>
+    orbit.app.evaluate(({ BrowserWindow }) => {
+      type View = Electron.View & { webContents?: Electron.WebContents; __hidden?: number[] }
+      const views = BrowserWindow.getAllWindows().flatMap((w) => w.contentView.children as View[])
+      return [...(views.find((v) => v.webContents?.getURL().includes('view=overlay'))?.__hidden ?? [])]
+    })
+}
+
+test('[FL-26][TB-05] the list appears in a frame at the second Tab, or after a hold of about 150 ms, fading in without a slide; each Tab moves the highlight in a frame; letting go hides it and shows the page in the same frame', async () => {
+  const { app } = orbit
+  const FRAME = 1000 / 60
+  const ids = await usedInTurn(['FeelA', 'FeelB', 'FeelC', 'FeelD'])
+  const [a, b] = ids as [string, string, string, string]
+  const overlay = await viewPage(app, 'overlay')
+  const keys = await mainInputs(app)
+  const hidden = await overlayHidden()
+  const drawn = () =>
+    overlay.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
+  const lit =
+    (tabId: string) => (f: { lists: Record<string, Record<string, { attrs?: Record<string, string | null> }>> }) =>
+      f.lists.items?.[tabId]?.attrs?.['aria-selected'] === 'true'
+  // One round: two quick Tabs show the list, a third moves the highlight to A, letting go shows A;
+  // then a single held Tab shows the list after the hold, and Esc ends it. Times are judged on the
+  // best of up to three rounds (D46); what holds every time holds in every round.
+  const round = async () => {
+    await useInTurn(ids, 'FeelD')
+    await keys()
+    await hidden()
+    const shownA = await viewShown(app, a)
+    const rec = await record(
+      overlay,
+      {
+        list: '[data-testid="tab-switcher"]',
+        items: { selector: '[data-testid="tab-switcher-item"]', key: 'data-tab-id', attrs: ['aria-selected'] },
+      },
+      { maxMs: 10_000, hidden: true },
+    )
+    await keyEvents(CTRL_DOWN, ...TAB, ...TAB)
+    await expect(switcherList(overlay)).toBeVisible()
+    await expect(switcherItem(overlay, b)).toHaveAttribute('aria-selected', 'true')
+    await drawn()
+    await keyEvents(...TAB)
+    await expect(switcherItem(overlay, a)).toHaveAttribute('aria-selected', 'true')
+    await drawn()
+    await overlay.waitForTimeout(150)
+    await keyEvents(CTRL_UP)
+    await expect.poll(() => activeId(app)).toBe(a)
+    await expect.poll(focusedUrl).toBe(fx.url('/page/FeelA'))
+    // Held: one Tab, then the list after the hold.
+    await keyEvents(CTRL_DOWN, ...TAB)
+    await expect(switcherList(overlay)).toBeVisible()
+    await drawn()
+    await keyEvents(['keyDown', 'Escape', CTRL], ['keyUp', 'Escape', CTRL], CTRL_UP)
+    await expect.poll(overlayKind).toBe('none')
+    const r = await rec.stop()
+    const seen = await keys()
+    const tabs = seen.filter((k) => k.type === 'keyDown' && k.key === 'Tab')
+    const release = seen.find((k) => k.type === 'keyUp' && k.key === 'Control')
+    const [, second, third, held] = tabs
+    if (tabs.length !== 4 || !second || !third || !held || !release)
+      throw new Error(`keys main saw: ${seen.map((k) => `${k.type} ${k.key}`).join(', ')}`)
+    const drawnList = (from: number) => r.frames.find((f) => f.i >= from && (f.els.list?.opacity ?? 0) > 0)
+    // Appears: the first frame with the list after the second Tab, counted from the first frame drawn after it.
+    const after2 = frameAfterWall(r, second.wall)
+    const first = drawnList(after2)
+    const fromThird = frameAfterWall(r, third.wall)
+    const moved = r.frames.find((f) => f.i >= fromThird && lit(a)(f))
+    // Fades in (opacity only) and never slides: one box in every frame it is drawn in, until let go.
+    const releaseFrame = frameAfterWall(r, release.wall)
+    const showing = r.frames.filter((f) => f.i >= (first?.i ?? 0) && f.i < releaseFrame && f.els.list)
+    const full = showing.find((f) => (f.els.list?.opacity ?? 0) >= 0.999)
+    const xs = showing.map((f) => f.els.list?.x ?? 0)
+    const ys = showing.map((f) => f.els.list?.y ?? 0)
+    // Let go: the layer is hidden and A's page shown in one go (main does both in the same task).
+    const shown = (await shownA()).find((w) => w >= release.wall)
+    const before = (await shownA()).filter((w) => w < release.wall)
+    const hide = (await hidden()).find((w) => w >= release.wall)
+    const heldList = drawnList(frameAfterWall(r, held.wall))
+    return {
+      appear: first ? first.i - after2 + 1 : Number.POSITIVE_INFINITY,
+      appearMs: first ? r.wall0 + first.run - second.wall : undefined,
+      highlight: moved ? moved.i - fromThird + 1 : Number.POSITIVE_INFINITY,
+      fade: first && full ? full.t - first.t : Number.POSITIVE_INFINITY,
+      slide: Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)),
+      apart: shown !== undefined && hide !== undefined ? hide - shown : Number.POSITIVE_INFINITY,
+      pageBefore: before.length,
+      hold: heldList ? r.wall0 + heldList.run - held.wall : Number.POSITIVE_INFINITY,
+    }
+  }
+  const budget = FRAME_SLACK > 1 ? 3 : 2
+  // The list's first frame shows it before its fade's clock starts, so frame to frame the fade
+  // reads one frame longer than it is (as feel-reduced.spec.ts allows).
+  const fadeBudget = (100 + FRAME) * FRAME_SLACK
+  const { best, all } = await bestOf(
+    round,
+    (m) =>
+      m.appear <= budget &&
+      m.highlight <= budget &&
+      m.fade <= fadeBudget &&
+      m.apart <= FRAME / 2 &&
+      m.hold <= (150 + 3 * FRAME) * FRAME_SLACK,
+  )
+  console.log(
+    `[feel] FL-26 rounds: ${all.map((m) => `list ${m.appear} frames, highlight ${m.highlight}, fade ${ms(m.fade)}, hide and page ${ms(m.apart)} apart, hold ${ms(m.hold)}`).join('; ')}`,
+  )
+  note('FL-26', 'second Tab → list in a frame', best.appearMs, '1 frame (16.7 ms)')
+  note('FL-26', 'frames from the second Tab to the list', best.appear, '1', 'frames')
+  note('FL-26', 'frames from a Tab to the highlight moving', best.highlight, '1 (at once)', 'frames')
+  note('FL-26', 'fade in, first frame to full', best.fade, '≤ 100 ms (90 ms set)')
+  note('FL-26', 'list moved while it showed', best.slide, '0 (no slide)', 'px')
+  note('FL-26', 'letting go: layer hidden after the page shown', best.apart, '0 (same frame)')
+  note('FL-26', 'held Tab → list in a frame', best.hold, '≈ 150 ms')
+  for (const m of all) {
+    expect(m.slide, 'the list never slides').toBeLessThanOrEqual(0.5)
+    expect(m.pageBefore, 'no page changes before Control is let go').toBe(0)
+    expect(m.apart, 'the layer goes after the page shows, never before').toBeGreaterThanOrEqual(0)
+    expect(m.hold, 'a held Tab shows the list only after the hold').toBeGreaterThanOrEqual(150 - FRAME)
+  }
+  expect(best.appear, 'frames from the second Tab to the list').toBeLessThanOrEqual(budget)
+  expect(best.highlight, 'frames from a Tab to the highlight').toBeLessThanOrEqual(budget)
+  expect(best.fade).toBeLessThanOrEqual(fadeBudget)
+  expect(best.apart, 'the layer hidden in the frame the page shows').toBeLessThanOrEqual(FRAME / 2)
+  expect(best.hold).toBeLessThanOrEqual((150 + 3 * FRAME) * FRAME_SLACK)
+  expect(await activeId(app)).toBe(a)
+  expect(await switcher()).toBeNull()
 })

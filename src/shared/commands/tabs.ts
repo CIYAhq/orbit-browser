@@ -98,8 +98,11 @@ export interface TabCommands {
   'toasts.size': { args: { width: number; height: number }; result: void }
   /** The sidebar's multi-selection in this window, so ⌘W and ⌘⇧C act on all of it (TB-13). */
   'tabs.setSelection': { args: { tabIds: TabId[] }; result: void }
-  /** Control was released: the recent-tab switch in progress settles on the current tab (TB-05). */
-  'tabs.endRecentSwitch': { args: Record<string, never>; result: void }
+  /**
+   * Ends the recent-tab switch in progress (TB-05): on the highlighted tab (Control was let go), on
+   * `tabId` (its row in the list was clicked) or, with `cancel`, with no switch (Esc).
+   */
+  'tabs.endRecentSwitch': { args: { tabId?: TabId; cancel?: boolean }; result: void }
   /** Give keyboard focus to the window's sidebar (drag cancel with Escape, SB-22). */
   'tabs.focusSidebar': { args: Record<string, never>; result: void }
   /** Return keyboard focus to the selected tab's page (SB-22). */
