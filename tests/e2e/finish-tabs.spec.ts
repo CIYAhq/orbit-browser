@@ -284,11 +284,17 @@ test('[TB-14][KS-19][KS-16] a row menu opened while the sidebar has the keyboard
     await expect(menu(overlay)).toBeVisible()
     await expect.poll(focusedUrl).toContain('view=overlay')
   }
+  // Where the keyboard is a moment after each way of closing the menu: all three are judged together.
+  const went: Record<string, string> = {}
   const backInSidebar = async (how: string) => {
     await expect.poll(overlayKind, how).toBe('none')
-    await expect.poll(focusedUrl, how).toContain('view=shell')
+    const at = async () => {
+      const url = (await focusedUrl()) ?? 'nothing'
+      return url.includes('view=shell') ? 'the sidebar' : url.includes('view=overlay') ? 'the overlay' : url
+    }
+    for (let i = 0; i < 20 && (await at()) !== 'the sidebar'; i++) await pause(100)
     await pause(300)
-    expect(await focusedUrl(), `${how}, a moment later`).toContain('view=shell')
+    went[how] = await at()
   }
   // Enter on an item.
   await fromSidebar()
@@ -309,6 +315,11 @@ test('[TB-14][KS-19][KS-16] a row menu opened while the sidebar has the keyboard
   await fromSidebar()
   await keys(['W', [isMac ? 'meta' : 'control']])
   await backInSidebar(`${PRIMARY}+W`)
+  expect(went).toEqual({
+    'Enter on Mute Tab': 'the sidebar',
+    'a click on Unmute Tab': 'the sidebar',
+    [`${PRIMARY}+W`]: 'the sidebar',
+  })
   expect(await tabCount()).toBe(count)
 })
 
