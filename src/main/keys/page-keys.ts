@@ -5,9 +5,11 @@ export const KEYS_WORLD = 1020
 
 /**
  * Whether an element is a text field: one that types or edits text (page script source, shared by
- * the watcher here and the focus mirror in page-focus.ts).
+ * the watcher here and the focus mirror in page-focus.ts). A web component's field counts: the
+ * element focused inside open shadow roots, not their host (keys fix check K1).
  */
 export const EDITABLE = `(el) => {
+  while (el && el.shadowRoot && el.shadowRoot.activeElement) el = el.shadowRoot.activeElement
   if (!el || el === document.body || el === document.documentElement) return false
   if (el.isContentEditable) return true
   const tag = el.tagName

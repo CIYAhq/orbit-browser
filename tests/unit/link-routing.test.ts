@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  altClickOpens,
   decideLink,
   framesMayOpen,
   isInternalPageUrl,
@@ -164,6 +165,25 @@ describe('local files a page may have Orbit open (D49)', () => {
     for (const from of [undefined, '', 'about:blank', 'data:text/html,<a>x</a>', `view-source:${file}`]) {
       expect(pageMayOpen(from, file)).toBe(false)
     }
+  })
+  it('⌥-click: the link at the press opens as the page may open it; a frame’s link as a web page’s, even in a local page (round 2 fix check F2)', () => {
+    const local = 'file:///tmp/orbit/index.html'
+    const web = 'https://example.com/'
+    const link = 'https://example.org/b'
+    expect(altClickOpens(web, { href: link }, undefined)).toEqual({ url: link, split: false })
+    expect(altClickOpens(local, { href: file }, undefined)).toEqual({ url: file, split: false })
+    expect(altClickOpens(web, { href: file }, file)).toBeNull()
+    // A press on a frame: the link the page last hovered, once the engine's download names it.
+    expect(altClickOpens(web, { frame: true }, link)).toEqual({ url: link, split: true })
+    expect(altClickOpens(local, { frame: true }, link)).toEqual({ url: link, split: true })
+    // No frame opens a local file, whatever the page is.
+    expect(altClickOpens(local, { frame: true }, file)).toBeNull()
+    expect(altClickOpens(web, { frame: true }, file)).toBeNull()
+    // Nothing hovered, nothing found, or no page to open: nothing opens.
+    expect(altClickOpens(web, { frame: true }, undefined)).toBeNull()
+    expect(altClickOpens(web, null, link)).toBeNull()
+    expect(altClickOpens(web, { href: 'javascript:void 0' }, link)).toBeNull()
+    expect(altClickOpens(web, { frame: true }, 'data:text/html,x')).toBeNull()
   })
   it('a page that asks from a frame Orbit can’t name: a local file only when every frame is local (F1)', () => {
     const framed = (...origins: string[]) => ({ mainFrame: { framesInSubtree: origins.map((origin) => ({ origin })) } })

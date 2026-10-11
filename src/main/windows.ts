@@ -1507,11 +1507,24 @@ export class WindowManager {
     rec.promptShown = false
     rec.promptReady = false
     rec.promptSaid = undefined
+    const contents = view.webContents
     // Into the window once its page has loaded, if it is still wanted then (fix check A, F1).
-    view.webContents.once('did-finish-load', () => {
+    contents.on('did-finish-load', () => {
       if (rec.prompt !== view || rec.win.isDestroyed()) return
       rec.promptReady = true
       if (rec.promptShown) this.placePrompt(rec, view)
+    })
+    // A crash takes its page away until it has loaded again, as for the page tools (chrome fix check 4,
+    // N4): it leaves the window until then, still wanted, and the keyboard goes back to the page if it
+    // had it. Its new page asks what to show when it loads.
+    contents.on('render-process-gone', () => {
+      if (rec.prompt !== view || rec.win.isDestroyed()) return
+      rec.promptReady = false
+      rec.promptSaid = undefined
+      if (!rec.win.contentView.children.includes(view)) return
+      const focused = webContents.getFocusedWebContents()
+      this.removeChild(rec, view)
+      if ((!focused || focused === contents) && !rec.overlayShown && rec.win.isFocused()) this.focusActiveTab(rec.id)
     })
     return view
   }

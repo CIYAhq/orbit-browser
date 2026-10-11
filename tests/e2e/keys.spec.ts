@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { expect, type Page, test } from '@playwright/test'
+import { FOCUS_IS_EDITABLE } from '../../src/main/nav/focus'
 import { action, isMac, launchOrbit, MOD, type Orbit, run, state, tabPage, viewPage } from './helpers'
 import {
   cmd,
@@ -434,6 +435,50 @@ test('[KS-16][NV-01] in a page text field, ⌘[ / Alt+← goes back only when th
   await b.focus('#box')
   await pressInPage(app, '/page/FieldB', key, [...mods])
   await expect.poll(async () => (await state(app)).tabs[id]?.url).toBe(fx.url('/page/FieldA'))
+})
+
+test('[KS-16][NV-01] a web component’s text field counts as one: ⌘[ / Alt+← there goes back only when the page leaves the key alone, and ⌘← / ⌘→ stay its own (keys fix check K1)', async () => {
+  const { app } = orbit
+  const [key, mods] = isMac ? (['[', ['meta']] as const) : (['Left', ['alt']] as const)
+  const id = await openTab(app, fx.url('/page/ShadowA'))
+  await visit(app, id, fx.url('/page/ShadowB'))
+  await visit(app, id, fx.url('/page/ShadowC'))
+  const c = await tabPage(app, '/page/ShadowC')
+  // A field inside a web component (an open shadow root), whose editor outdents with the key.
+  await c.evaluate(() => {
+    customElements.define(
+      'x-editor',
+      class extends HTMLElement {
+        constructor() {
+          super()
+          const field = document.createElement('input')
+          field.id = 'inner'
+          this.attachShadow({ mode: 'open' }).append(field)
+        }
+      },
+    )
+    const editor = document.createElement('x-editor')
+    document.body.append(editor)
+    addEventListener('keydown', (e) => {
+      const inField = editor.shadowRoot?.activeElement?.id === 'inner'
+      if (inField && (e.code === 'BracketLeft' || e.code === 'ArrowLeft')) e.preventDefault()
+    })
+  })
+  await c.locator('#inner').focus()
+  await focusKnown('/page/ShadowC', 'main', 'field')
+  // What ⌘← / ⌘→ ask before they go back or forward (macOS): a text field, so they don't.
+  expect(await c.evaluate(FOCUS_IS_EDITABLE)).toBe(true)
+  await pressInPage(app, '/page/ShadowC', key, [...mods])
+  await expect
+    .poll(() => c.evaluate(() => (window as unknown as { __keys: string[] }).__keys))
+    .toContain(isMac ? '[' : 'ArrowLeft')
+  // Outside the field the key is Orbit's: one page back. Had the first press gone back too, this
+  // would land on A.
+  await c.locator('#inner').blur()
+  await focusKnown('/page/ShadowC', 'main', 'page')
+  expect(await c.evaluate(FOCUS_IS_EDITABLE)).toBe(false)
+  await pressInPage(app, '/page/ShadowC', key, [...mods])
+  await expect.poll(async () => (await state(app)).tabs[id]?.url).toBe(fx.url('/page/ShadowB'))
 })
 
 test('[KS-02][KS-16] while a page is on its way, Orbit takes its keys at once: ⌘S / Ctrl+S toggles the sidebar, and ⌘[ / Alt+← in a text field goes back', async () => {

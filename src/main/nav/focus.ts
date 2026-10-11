@@ -3,9 +3,13 @@ import type { WebContents } from 'electron'
 /** Isolated world for the chrome lane's small page scripts: pages can't see or tamper with them. */
 export const NAV_WORLD = 1002
 
-/** Is keyboard focus in something that edits text (or in a frame Orbit can't see into)? */
-const FOCUS_IS_EDITABLE = `(() => {
-  const el = document.activeElement
+/**
+ * Is keyboard focus in something that edits text (or in a frame Orbit can't see into)? Inside open
+ * shadow roots: a web component's field counts (keys fix check K1). Page script source.
+ */
+export const FOCUS_IS_EDITABLE = `(() => {
+  let el = document.activeElement
+  while (el && el.shadowRoot && el.shadowRoot.activeElement) el = el.shadowRoot.activeElement
   if (!el || el === document.body || el === document.documentElement) return false
   if (el.isContentEditable) return true
   const tag = el.tagName

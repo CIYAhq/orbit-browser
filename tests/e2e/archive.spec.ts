@@ -15,6 +15,7 @@ import {
   state,
   tabPage,
 } from './helpers'
+import { focusedUrl } from './nav-support'
 import { overlayOf, pressInTab, viewInfo } from './peek-helpers'
 import { activeId, newTab, space, waitTab } from './tabs-support'
 
@@ -133,12 +134,24 @@ test('[AR-02][SB-09] the Library button opens the Library over the page, above t
   await expect(button).toHaveAttribute('aria-pressed', 'false')
   expect((await state(app)).tabs[t]).toBeDefined()
   await expect.poll(async () => (await info(orbit)).visible).toBe(false)
-  const page = await tabPage(app, '/page/Under')
-  await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true)
-  // Esc closes it too…
+  // Where the keys are, as main sees it (the page's own document.hasFocus() stays true while
+  // another view of the window has them).
+  const under = fx.url('/page/Under')
+  await expect.poll(() => focusedUrl(app)).toBe(under)
+  // Esc closes it too, from the Archive and from History, and the page has the keys again (keys
+  // review F11)…
   await openLibrary(orbit)
+  expect(await focusedUrl(app)).toContain('view=library')
   await lib.keyboard.press('Escape')
   await expect.poll(async () => (await info(orbit)).open).toBe(false)
+  await expect.poll(() => focusedUrl(app)).toBe(under)
+  await run(app, 'library.open', { section: 'history' })
+  await expect(lib.getByTestId('library')).toHaveAttribute('data-open', 'true')
+  await expect(lib.getByTestId('library-section')).toHaveAttribute('data-section-id', 'history')
+  await expect.poll(() => focusedUrl(app)).toContain('view=library')
+  await lib.keyboard.press('Escape')
+  await expect.poll(async () => (await info(orbit)).open).toBe(false)
+  await expect.poll(() => focusedUrl(app)).toBe(under)
   // …and the button, pressed again.
   await openLibrary(orbit)
   await button.click()
