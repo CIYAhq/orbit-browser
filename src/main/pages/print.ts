@@ -121,6 +121,11 @@ interface Session {
   generation: number
   busy: boolean
   error?: string
+  /**
+   * The page's own `window.print()` opened it (D76): its close and navigations wait for it, and it
+   * alone hears when it closes (`PAGE_CHANNEL.printClosed`).
+   */
+  byPage: boolean
   off: () => void
 }
 
@@ -184,7 +189,8 @@ export function registerPrint(ctx: MainContext, deps: { deliver: DeliverPrint; p
     // The view goes, and the page gets the keyboard back (KS-16).
     covers.update(page)
     // A close or a navigation the page started after its `print()` goes on now (the page preload).
-    if (!page.isDestroyed()) page.send(PAGE_CHANNEL.printClosed)
+    // Only the page whose `print()` opened the dialog waits for it (D76).
+    if (s.byPage && !page.isDestroyed()) page.send(PAGE_CHANNEL.printClosed)
   }
 
   const preview = async (s: Session) => {
@@ -244,6 +250,7 @@ export function registerPrint(ctx: MainContext, deps: { deliver: DeliverPrint; p
       preview: { state: 'loading' },
       generation: 0,
       busy: false,
+      byPage: false,
       off: () => {
         if (page.isDestroyed()) return
         page.off('did-start-navigation', onNavigate)
@@ -332,15 +339,21 @@ export function registerPrint(ctx: MainContext, deps: { deliver: DeliverPrint; p
   })
 
   // The page's own `window.print()` (the page preload): only a page's main frame has it (D40). The
-  // reply says whether the page has a print dialog open now: its close and navigations wait for it.
-  // The reply goes out as soon as returnValue is set, so it is set once.
+  // reply says whether the dialog the page's own `print()` opened is open now: its close and
+  // navigations wait for it. A `print()` while a dialog that ⌘P or a menu opened shows returns at
+  // once and holds nothing, as Chromium's does (D76). The reply goes out at once, waiting on
+  // nothing, as soon as returnValue is set, so it is set once.
   ipcMain.on(PAGE_CHANNEL.print, (event: IpcMainEvent) => {
     let opened = false
     try {
       const frame = event.senderFrame
       if (frame && !frame.parent && !event.sender.isDestroyed()) {
-        open(event.sender)
-        opened = sessions.has(event.sender.id)
+        const page = event.sender
+        const had = sessions.has(page.id)
+        open(page)
+        const s = sessions.get(page.id)
+        if (s && !had) s.byPage = true
+        opened = s?.byPage === true
       }
     } catch (err) {
       console.error('[pages] print', err)

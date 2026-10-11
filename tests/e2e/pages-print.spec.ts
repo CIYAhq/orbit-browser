@@ -312,3 +312,25 @@ test('[NV-07] a page that prints and goes to another page at once shows the prin
   expect(await printDialogs(app)).toEqual([])
   expect(await tabHistory(app, fx.url('/page/Printed'))).toEqual({ urls: [url, fx.url('/page/Printed')], index: 1 })
 })
+
+test('[NV-07] the page’s print() while a dialog ⌘P opened shows returns at once and holds nothing: the page goes on to another page at once, and the dialog goes with it (D76)', async () => {
+  const { app } = orbit
+  const { tabId, page } = await printTab(app)
+  await pressInPage(app, '/print', 'P', [MOD_KEY])
+  const dialog = await waitPrint(app, (d) => d.tabId === tabId && d.onScreen)
+  // The page prints and goes on: as in Chromium, its print() doesn't wait for a dialog it didn't open.
+  await page.evaluate(() => {
+    window.print()
+    ;(window as unknown as { __print: { returned: boolean } }).__print.returned = true
+    setTimeout(() => {
+      location.href = '/page/Printed'
+    }, 0)
+  })
+  await waitTab(app, tabId, '/page/Printed')
+  await expect.poll(async () => (await printDialogs(app)).some((d) => d.dialog === dialog.dialog)).toBe(false)
+  expect(await tabHistory(app, fx.url('/page/Printed'))).toEqual({
+    urls: [fx.url('/print'), fx.url('/page/Printed')],
+    index: 1,
+  })
+  expect(await printedJobs(app)).toEqual([])
+})
