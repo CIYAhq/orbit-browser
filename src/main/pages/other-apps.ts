@@ -16,6 +16,7 @@ import type { ProfileId, TabId } from '../../shared/state'
 import { sectionOf } from '../../shared/tree'
 import type { MainContext } from '../context'
 import { setAppLinkHandler } from '../nav/permissions'
+import { isActivation } from '../tabs/runtime'
 import { activeTabOf } from '../windows'
 import type { PageDialogs$ } from './dialogs'
 
@@ -166,7 +167,8 @@ function neverShowedPage(page: WebContents): boolean {
  * followed the link. Orbit asks over that page, in a page dialog: the app with its icon, the site,
  * and "Always allow" for a web site; Cancel is the default. Open launches the app through
  * `launch`, the one place Orbit starts another app. A site always allowed for a kind of link opens
- * it without asking. A page asks one question at a time: a link it follows meanwhile is dropped.
+ * it without asking, once per user gesture in the page, as in Chromium: a page can't open the app
+ * again and again unasked. A page asks one question at a time: a link it follows meanwhile is dropped.
  *
  * A tab, Peek, Mini Window or pop-up opened only for such a link (`target=_blank`, `window.open`,
  * or a redirect there) never shows a page: it closes itself once its navigation ends, and the tab
@@ -194,6 +196,8 @@ export function registerOtherApps(
   const asking = new Set<number>()
   /** Where each watched page's main frame is going, or went last: the address after any redirect. */
   const going = new Map<number, string>()
+  /** Pages (by contents id) with a user gesture that no link to another app has used yet. */
+  const gestured = new Set<number>()
 
   const launchOnly = (page: WebContents) =>
     !page.isDestroyed() && !asking.has(page.id) && !!appScheme(going.get(page.id)) && neverShowedPage(page)
@@ -250,9 +254,13 @@ export function registerOtherApps(
     page.on('did-stop-loading', () => {
       if (launchOnly(page)) setImmediate(() => closeLaunchOnly(page))
     })
+    page.on('input-event', (_event, input) => {
+      if (isActivation(input)) gestured.add(id)
+    })
     page.once('destroyed', () => {
       going.delete(id)
       asking.delete(id)
+      gestured.delete(id)
     })
   }
   ctx.hooks.tabCreated.push((_tabId, contents) => {
@@ -301,8 +309,11 @@ export function registerOtherApps(
     if (!scheme || page.isDestroyed() || !dialogs.hostable(page)) return
     // The site asking is the frame that followed the link (the page's own, or one in it).
     const origin = permissionOrigin(details.requestingUrl)
+    // Each link to another app uses up the page's last user gesture (Chromium's rule).
+    const fresh = gestured.delete(page.id)
     if (origin && /^https?:\/\//i.test(origin) && choices.has(profileId, origin, scheme)) {
-      launch(page, url)
+      // Always allowed: it opens without asking, but only for a gesture no link used yet (NV-19).
+      if (fresh) launch(page, url)
       return
     }
     if (asking.has(page.id)) return

@@ -136,6 +136,33 @@ test('[NV-19] Open launches the app; “Always allow” opens that site’s link
   expect(await noDialogs(orbit.app)).toBe(true)
 })
 
+test('[NV-19] an always-allowed site opens the app once per user gesture: a timer that follows its link again and again opens it once', async () => {
+  const { app } = orbit
+  const { page } = await openApps(app)
+  await page.locator('#mail').click()
+  const asked = await waitDialog(app, (d) => d.kind === 'app' && d.focused)
+  const view = await dialogPage(app, asked.id)
+  await view.getByTestId('page-dialog-check').check()
+  await view.getByTestId('page-dialog-ok').click()
+  await expect.poll(() => launchedLinks(app)).toEqual([MAIL])
+  // One click in the page, then a timer that follows the link 20 times (review REPRO B).
+  await page.locator('#area').click()
+  await page.evaluate((mail) => {
+    const w = window as unknown as { __tries: number }
+    w.__tries = 0
+    const timer = setInterval(() => {
+      location.href = mail
+      if (++w.__tries === 20) clearInterval(timer)
+    }, 20)
+  }, MAIL)
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __tries: number }).__tries)).toBe(20)
+  // The timer's first link used the click and opened the app; the other 19 opened nothing. A new
+  // click opens it again.
+  await page.locator('#mail').click()
+  await expect.poll(() => launchedLinks(app)).toEqual([MAIL, MAIL, MAIL])
+  expect(await noDialogs(app)).toBe(true)
+})
+
 test('[NV-19] a tab or pop-up opened only to launch an app closes itself: the question shows over the page it came from', async () => {
   const { app } = orbit
   const { tabId, page } = await openApps(app)
