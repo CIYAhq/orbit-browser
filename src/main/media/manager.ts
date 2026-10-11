@@ -60,9 +60,12 @@ interface Agent {
   pipEndSeen: number
   /**
    * Orbit opened the engine's picture-in-picture in this document (the controller, the page menu):
-   * the next ending reported is that one's, and may bring the tab's window forward (D71).
+   * the next ending reported is that one's, and may bring the tab's window forward (D71). It lasts
+   * only as long as that picture-in-picture (D74).
    */
   orbitPip?: boolean
+  /** An unmarked "Back to tab" from this frame's document has selected its tab: it gets no more (D74). */
+  selected?: boolean
   /** A long-poll is running for this document. */
   looping: boolean
   /** Settles once the document is gone: a call into a frame that went away never answers. */
@@ -590,6 +593,7 @@ export class MediaManager {
     // Orbit's controls. The user asked for it, so the automatic-PiP choices don't apply. The
     // tab's state knows first (the page's report of it may still be on its way).
     if ((snap.pip || tab.media.pip) && !snap.player && !tab.media.player) {
+      this.unmark(tabId)
       void this.player.open(tabId, { auto: true, keep: true })
       return
     }
@@ -601,6 +605,7 @@ export class MediaManager {
 
   /** A tab came back on screen: its picture-in-picture ends and the video plays in the page (MD-01, MD-07). */
   private returned(tabId: TabId, state: OrbitState): void {
+    this.unmark(tabId)
     if (this.player.tabId === tabId) {
       this.player.close('returned')
       return
@@ -635,24 +640,40 @@ export class MediaManager {
     if (!windowId) return
     // A frame's script runs in the frame's own world, so its report may be the page's own words
     // (D67): unless Orbit opened that picture-in-picture, it only selects the tab where that
-    // brings no window forward and switches no Space (D71).
-    if (agent.frame && !ours) this.selectInFocused(tabId, windowId)
-    else this.focusTab(tabId, windowId)
+    // brings no window forward and switches no Space (D71), once for the frame's document (D74).
+    if (agent.frame && !ours) {
+      if (!agent.selected && this.selectInFocused(tabId, windowId)) agent.selected = true
+    } else this.focusTab(tabId, windowId)
   }
 
   /** Selects a tab only in a window that already has focus, and only in the Space it shows (D71). */
-  private selectInFocused(tabId: TabId, windowId: WindowId): void {
+  private selectInFocused(tabId: TabId, windowId: WindowId): boolean {
     const win = this.ctx.windows.get(windowId)
-    if (!win || win.isDestroyed() || !win.isFocused()) return
+    if (!win || win.isDestroyed() || !win.isFocused()) return false
     const state = this.ctx.store.state
     const tab = state.tabs[tabId]
     const spaceId = state.windows[windowId]?.spaceId
-    if (!tab || !spaceId) return
+    if (!tab || !spaceId) return false
     // Favorites show in every Space of their profile (activateInDraft keeps the Space for them).
     const shown =
       tab.spaceId === spaceId ||
       (sectionOf(state, tabId) === 'favorite' && state.spaces[spaceId]?.profileId === tab.profileId)
     if (shown) void this.ctx.commands.run('tabs.activate', { tabId }, { windowId })
+    return shown
+  }
+
+  /** Orbit closed the tab's picture-in-picture, or handed it to its player: no mark outlives it (D74). */
+  private unmark(tabId: TabId): void {
+    const t = this.tabs.get(tabId)
+    if (t) for (const a of this.agentsOf(t)) a.orbitPip = false
+  }
+
+  /**
+   * Orbit opened the engine's picture-in-picture in `agent` (none: in a tab's page through the
+   * page menu). The engine shows one at a time, so every other document's mark goes (D74).
+   */
+  private markOnly(agent: Agent | undefined): void {
+    for (const t of this.tabs.values()) for (const a of this.agentsOf(t)) a.orbitPip = a === agent
   }
 
   /** The documents to try for picture-in-picture, most likely first (reports may lag: all of them, last). */
@@ -671,6 +692,7 @@ export class MediaManager {
    * selected tab uses the engine's window, as its page stays on screen.
    */
   async setPip(tabId: TabId, on: boolean, from?: { windowId: WindowId; rect: Rect }): Promise<boolean> {
+    if (!on) this.unmark(tabId)
     if (!on && this.player.tabId === tabId) {
       this.player.close('close')
       return true
@@ -682,7 +704,7 @@ export class MediaManager {
     const t = this.tabs.get(tabId)
     for (const agent of t ? this.pipOrder(t, false) : []) {
       if ((await this.exec<boolean>(agent, 'pip', [true, false], true)) !== true) continue
-      agent.orbitPip = true
+      this.markOnly(agent)
       this.markPip(tabId, true)
       return true
     }
@@ -700,11 +722,13 @@ export class MediaManager {
     try {
       if (frame?.parent && alive(frame)) sub = frame
     } catch {}
+    if (!on) this.unmark(tabId)
     if (!sub) {
       const code = on
         ? `(() => { const el = document.elementFromPoint(${x}, ${y}); const v = el && (el.tagName === 'VIDEO' ? el : el.closest('video')); return v ? v.requestPictureInPicture().then(() => true, () => false) : false })()`
         : 'document.exitPictureInPicture().then(() => true, () => false)'
-      await contents.executeJavaScriptInIsolatedWorld(MEDIA_WORLD, [{ code }], true).catch(() => false)
+      const ok = await contents.executeJavaScriptInIsolatedWorld(MEDIA_WORLD, [{ code }], true).catch(() => false)
+      if (on && ok === true) this.markOnly(undefined)
     } else {
       await this.ensureAgent(tabId)
       const t = this.tabs.get(tabId)
@@ -719,7 +743,7 @@ export class MediaManager {
           py -= box?.y ?? 0
         }
         // Orbit's own menu opened it: its "Back to tab" may bring the window forward, once (D71).
-        if ((await this.exec(agent, 'pipAt', [on, px, py], true)) === true && on) agent.orbitPip = true
+        if ((await this.exec(agent, 'pipAt', [on, px, py], true)) === true && on) this.markOnly(agent)
       }
     }
     // The page scripts follow picture-in-picture from now on (tray, return to the tab).

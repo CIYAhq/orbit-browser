@@ -335,6 +335,9 @@ const agentScript = (handle: string, define: string) => `(() => {
         if (done) return
         done = true
         v.removeEventListener('pause', onPause)
+        // Still showing here: the page moved its picture-in-picture to another of its videos.
+        // Nothing ended, and nothing comes forward (D74).
+        if (document.pictureInPictureElement) return
         endPip('back')
       }, 300)
       v.addEventListener('pause', onPause, { once: true })

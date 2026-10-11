@@ -170,6 +170,21 @@ const FORGE = `
 })()
 </script>`
 
+/**
+ * A page that makes Orbit's script believe its own exit from picture-in-picture failed, then exits
+ * anyway: the engine's leave then looks like its Back to tab (D74). Goes before the page's media.
+ */
+const HOLD = `
+<script>
+(() => {
+  const exit = Document.prototype.exitPictureInPicture
+  Document.prototype.exitPictureInPicture = function () {
+    setTimeout(() => exit.call(document), 0)
+    return Promise.reject(new DOMException('held', 'InvalidStateError'))
+  }
+})()
+</script>`
+
 /** With `art`, the Media Session names artwork (two sizes, as music sites give). */
 const AUDIO = (session: boolean, art = false) => `
 <audio id="a" src="/media/tone.wav?s=30&f=440" loop></audio>
@@ -280,7 +295,11 @@ async function startMediaFixtures(): Promise<Fixtures> {
     if (parts[0] === 'media' && parts[1] === 'video') return html(STREAM_VIDEO)
     if (parts[0] === 'media' && parts[1] === 'file-video') return html(FILE_VIDEO(u.searchParams.has('once')))
     if (parts[0] === 'media' && parts[1] === 'long-video')
-      return html((u.searchParams.has('forge') ? FORGE : '') + LONG_VIDEO(Number(u.searchParams.get('s') ?? 60)))
+      return html(
+        (u.searchParams.has('forge') ? FORGE : '') +
+          (u.searchParams.has('hold') ? HOLD : '') +
+          LONG_VIDEO(Number(u.searchParams.get('s') ?? 60)),
+      )
     if (parts[0] === 'media' && parts[1] === 'call') return html(CALL(u.searchParams.has('participant')))
     if (parts[0] === 'media' && parts[1] === 'share') return html(SHARE)
     // A page whose own !important rule (with an id) sizes its video to fill its box.
@@ -2226,9 +2245,15 @@ test("[MD-02][MD-07] a frame that calls Orbit's script with a forged Back to tab
   await forge()
   expect(await activeId(app)).toBe(v.id)
   expect(await raises(app)).toBe(before)
+  // Once for the frame's document: back on the other tab, another one moves nothing (D74).
+  await cmd(app, 'tabs.activate', { tabId: quiet })
+  await forge()
+  expect(await activeId(app)).toBe(quiet)
+  expect(await raises(app)).toBe(before)
 
   // Orbit's own picture-in-picture (the Picture in Picture action): its Back to tab brings the
   // window forward, once.
+  await cmd(app, 'tabs.activate', { tabId: v.id })
   await act(app, 'media.togglePip')
   await expect.poll(() => enginePip(v.frame)).toBe(true)
   const opened = await raises(app)
@@ -2240,6 +2265,125 @@ test("[MD-02][MD-07] a frame that calls Orbit's script with a forged Back to tab
   // A forged one after it gets no more.
   await forge()
   expect(await raises(app)).toBe(opened + 1)
+})
+
+/** The id of the page's video in the engine's picture-in-picture window ('' when none). */
+const pipId = (p: Page | Frame) => p.evaluate(() => document.pictureInPictureElement?.id ?? '')
+
+test('[MD-02][MD-07] a page that moves its picture-in-picture to another of its videos brings no window forward; ending it itself does, once (D74)', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const v = await openPlaying(app, '/media/long-video/Mover')
+  await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
+  // The page's second video: a drawn stream, muted.
+  await v.page.evaluate(async () => {
+    const c = document.createElement('canvas')
+    c.width = 320
+    c.height = 180
+    const g = c.getContext('2d') as CanvasRenderingContext2D
+    let n = 0
+    setInterval(() => {
+      g.fillStyle = `hsl(${(n++ * 9) % 360},60%,45%)`
+      g.fillRect(0, 0, 320, 180)
+    }, 40)
+    const w = document.createElement('video')
+    w.id = 'w'
+    w.muted = true
+    w.width = 320
+    w.height = 180
+    w.srcObject = c.captureStream(25)
+    document.body.append(w)
+    await w.play()
+  })
+  await expect
+    .poll(() => v.page.evaluate(() => (document.getElementById('w') as HTMLVideoElement).videoWidth))
+    .toBeGreaterThan(0)
+  // Orbit's Picture in Picture: the engine's window shows the page's main video.
+  await act(app, 'media.togglePip')
+  await expect.poll(() => pipId(v.page)).toBe('v')
+  await countRaises(app)
+  let round = 0
+  /** The page moves its picture-in-picture; past the script's wait, a speed change main must have seen. */
+  const move = async (to: 'v' | 'w') => {
+    const rate = 1 + ++round / 8
+    await v.page.evaluate(
+      async ([id, r]) => {
+        await (document.getElementById(id) as HTMLVideoElement).requestPictureInPicture()
+        setTimeout(() => {
+          ;(document.getElementById('v') as HTMLVideoElement).playbackRate = r
+        }, 500)
+      },
+      [to, rate] as const,
+    )
+    await expect.poll(() => pipId(v.page)).toBe(to)
+    await expect.poll(async () => (await media(app, v.id))?.rate).toBe(rate)
+  }
+  for (const to of ['w', 'v', 'w', 'v'] as const) {
+    await move(to)
+    expect(await raises(app), `moved to ${to}`).toBe(0)
+  }
+  expect(await paused(v.page, '#v')).toBe(false)
+  // D74's known limit: the page ends its own picture-in-picture, as the engine's Back to tab does,
+  // and the window comes forward once.
+  await v.page.evaluate(() => document.exitPictureInPicture())
+  await expect.poll(() => pipId(v.page)).toBe('')
+  await expect.poll(() => raises(app)).toBe(1)
+})
+
+test("[MD-02][MD-07] Orbit's mark on its own picture-in-picture lasts only as long as it: closed by Orbit, handed to Orbit's player or replaced by another, a frame's leave brings nothing forward (D74)", async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  await act(app, 'media.toggleAutoPip')
+  const x = await openFramePlaying(app, 'Holder', '/media/long-video/Film?hold', true)
+  await expect.poll(async () => (await media(app, x.id))?.video).toBe(true)
+  await countRaises(app)
+  await haveFocus(app, false)
+  let round = 0
+  /** Past the page script's wait, a speed change in the frame main must have seen. */
+  const settle = async () => {
+    const rate = 1 + ++round / 8
+    await x.frame.evaluate((r) => {
+      setTimeout(() => {
+        ;(document.getElementById('v') as HTMLVideoElement).playbackRate = r
+      }, 500)
+    }, rate)
+    await expect.poll(async () => (await media(app, x.id))?.rate).toBe(rate)
+  }
+
+  // Orbit opens and closes it (the Picture in Picture action twice): the frame's leave that
+  // follows looks like Back to tab, and gets nothing.
+  await act(app, 'media.togglePip')
+  await expect.poll(() => enginePip(x.frame)).toBe(true)
+  await act(app, 'media.togglePip')
+  await expect.poll(() => enginePip(x.frame)).toBe(false)
+  await settle()
+  expect(await raises(app)).toBe(0)
+
+  // Orbit opens it, then the user leaves the tab: Orbit's player takes the video over.
+  await act(app, 'media.togglePip')
+  await expect.poll(() => enginePip(x.frame)).toBe(true)
+  const quiet = await leave(app)
+  await expectPlayer(app, x.id)
+  await expect.poll(() => enginePip(x.frame)).toBe(false)
+  await settle()
+  expect(await activeId(app)).toBe(quiet)
+  expect(await raises(app)).toBe(0)
+  expect((await player(app)).tabId).toBe(x.id)
+
+  // Beside another video in a split, Orbit opens it in the frame, then in the other pane: the
+  // engine shows one at a time, so the frame's ends.
+  const y = await openPlaying(app, '/media/long-video/Beside')
+  expect(await cmd<string | null>(app, 'split.create', { tabIds: [x.id, y.id], focus: x.id })).toBeTruthy()
+  await expectNoPlayer(app)
+  await act(app, 'media.togglePip')
+  await expect.poll(() => enginePip(x.frame)).toBe(true)
+  await cmd(app, 'tabs.activate', { tabId: y.id })
+  await act(app, 'media.togglePip')
+  await expect.poll(() => enginePip(y.page)).toBe(true)
+  await expect.poll(() => enginePip(x.frame)).toBe(false)
+  await settle()
+  expect(await activeId(app)).toBe(y.id)
+  expect(await raises(app)).toBe(0)
 })
 
 // ---- The switches in other panels (MD-08: site controls NV-16, Settings › Advanced ST-10) ----
