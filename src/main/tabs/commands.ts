@@ -27,6 +27,7 @@ import type { MainContext } from '../context'
 import { KEEP_KEYBOARD } from '../keys/focus'
 import { TAB_MENU_KEYS, withKeyHints } from '../keys/menu-hints'
 import type { CallContext } from '../registry'
+import { registerSpaceOrderUndo } from '../spaces/order-undo'
 import { tabSplitMenuItems } from '../split/menu'
 import { registerBlankWindows } from './blank'
 import { registerLinkDrop } from './link-drop'
@@ -238,6 +239,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
   const rowMenus = registerRowMenus(ctx)
   const toastView = registerToastView(ctx)
   registerThemeUndo(ctx, ops.undo)
+  registerSpaceOrderUndo(ctx, ops.undo)
   registerLinkDrop(ctx)
   registerBlankWindows(ctx, ops)
   /** What a row menu is about, for screen readers: the tab, the folder or the selection. */

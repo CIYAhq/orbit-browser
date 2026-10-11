@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 278 built (67 partial) · 350 tested · 0 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 281 built (64 partial) · 351 tested · 0 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 159 | 173 |
-| P1 | 219 | 103 | 157 |
+| P1 | 219 | 106 | 158 |
 | P2 | 79 | 16 | 20 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -67,7 +67,7 @@ Spec: `spec/tabs.md`
 | TB-10 | Duplicate a tab | P1 | ✅ | ✅ e2e+unit | – | menu/action Duplicate (selected, below the original) and Alt-drag copy, both with history; Cmd-click Reload is the top bar's |
 | TB-11 | Move a tab to another Space | P0 | ✅ | ✅ e2e | – | Move to > Space > Pinned/Today/folder (menu + tabs.moveToSpace); command-bar entry is the commandbar lane's |
 | TB-12 | Rename a tab and set a custom icon | P1 | ✅ | ✅ e2e | – | double-click/menu rename, empty reverts; emoji icon picker |
-| TB-13 | Multi-select tabs | P1 | 🟡 partial | ✅ e2e | – | Cmd-click, Shift-click ranges, Escape/plain click clears; Cmd+W, Copy URL, menu pin/unpin/move/new folder and group drag act on the selection; open-as-split is the split lane's |
+| TB-13 | Multi-select tabs | P1 | ✅ | ✅ e2e | – | ⌘-click toggles a row and ⇧-click selects a range, with a shared highlight; Escape or a plain click clears; ⌘W closes them all, ⌘⇧C copies all their URLs, and the menu pins or unpins them, moves them to a Space, puts them in a new pinned folder or opens two to four as a split (more than four is refused); share is a later phase |
 | TB-14 | Tab context menu | P0 | ✅ | ✅ e2e+unit | – | Orbit's own menu in the overlay, in the Space's colours (SP-16), for tab, pinned, Favorite, folder, multi-selection and split rows (a split pane's menu over the page stays the system's): every item the spec lists (Share is a later phase there); arrows (round the ends), Home/End, type-ahead letters, → / ← and hover for submenus, Enter or Space chooses, Esc closes a level then the menu, a click outside closes it; each item shows its key from the live keymap (KS-18); it takes the keys first and a key bound to an Orbit action only closes it (KS-19), then the keyboard goes back where it was (KS-16); opened by the keyboard it sits under the row's slot, and its row stays drawn however far the list scrolls (FL-21). While a Peek is open the row menu is the system's: the Peek has the overlay then, and the sidebar must not close it (PK-13) |
 | TB-15 | Audio, mute, microphone/camera and screen-share indicators | P1 | 🟡 partial | ✅ e2e+unit | – | audio icon toggles mute; camera/microphone indicator and a distinct screen-share indicator (media lane, MD-11); no Favorites notes (P2) |
 | TB-16 | Tab sleeping and background resource limits | P1 | 🟡 partial | ✅ e2e+unit | – | sleep timer (settings.sleepAfterMs), Favorites warm 4x; selected, audible, playing (muted too), PiP and camera/mic tabs never sleep |
@@ -112,7 +112,7 @@ Spec: `spec/tabs.md`
 | FD-06 | Nested folders | P1 | ✅ | ✅ e2e | – | nesting by drag or New Folder from children; 14px indent per level |
 | FD-07 | Folder icon | P1 | 🟡 partial | ✅ e2e | – | emoji icon via Change Icon; open/closed glyphs; not full-colour |
 | FD-08 | Folder hover preview and search | P1 | ✅ | ✅ e2e | – | magnifier on folder hover opens a search popover (custom names, first match selected, Enter opens and peeks) |
-| FD-09 | Folder context menu | P1 | 🟡 partial | ✅ e2e | – | Rename, Change Icon, Duplicate, Copy All Links, Paste URL, Move to, Delete; no Open [Folder] command |
+| FD-09 | Folder context menu | P1 | ✅ | ✅ e2e+unit | – | Rename, Change Icon, Duplicate, Copy All Links, Paste URL as New Tab, Move to ▸ Space and Delete; the command bar finds a folder by its name or by "Open" and its name, and opens it expanded (CB-13); Share is a later phase |
 | FD-10 | Delete a folder | P1 | ✅ | ✅ e2e+unit | – | confirm when non-empty, contents to Archive, Cmd+Z restores all |
 | FD-11 | Auto-updating folders | P2 | – | – | – |  |
 
@@ -132,7 +132,7 @@ Spec: `spec/spaces.md`
 | SP-08 | Switch Spaces with a trackpad swipe | P0 | ✅ | ✅ e2e+unit | – | wheel deltaX and touch/pen drags; 1:1 tracking, projected-velocity commit, motion springs, rubber-band, over-swipe opens the new-Space flow; momentum detected heuristically |
 | SP-09 | Switch Spaces with the keyboard, mouse buttons and command bar | P0 | ✅ | ✅ e2e+unit | – | Ctrl/Alt+1-9 and Cmd/Ctrl+Alt+arrows (rate-limited, nudge at the ends), mouse back/forward over the sidebar |
 | SP-10 | What switching Space does | P0 | ✅ | ✅ e2e+unit | – | per-window Space, remembered tab per Space, page swap at commit, scroll position per Space |
-| SP-11 | Reorder Spaces | P1 | 🟡 partial | ✅ e2e+unit | – | drag targets in the switcher to reorder; Cmd+Z for a reorder not yet |
+| SP-11 | Reorder Spaces | P1 | 🟡 partial | ✅ e2e+unit | – | drag targets in the switcher to reorder, and the Space shown stays; ⌘Z puts the Spaces back in their order and ⌘⇧Z reorders them again (TB-18); reordering in the Library's Spaces overview waits for SP-13 |
 | SP-12 | Delete a Space | P0 | ✅ | ✅ e2e+unit | – | confirmation dialog, tabs archived with the Space name, Undo toast and Cmd+Z, last Space protected |
 | SP-13 | Spaces overview in the Library | P1 | – | – | – |  |
 | SP-14 | Open the theme picker | P0 | ✅ | ✅ e2e+unit | – | theme picker beside the sidebar (Space menu, right-click on the sidebar, Edit Theme action, new-Space flow, first run); edits apply live; Esc, Enter or a click outside keeps the result; Cmd+Z after it closes reverts what that opening changed (theme, and light/dark if changed there), Cmd+Shift+Z re-applies, from the sidebar or a page; no trackpad haptics (Electron has no haptics API) |
@@ -156,7 +156,7 @@ Spec: `spec/spaces.md`
 | PR-06 | Favorites per profile | P0 | ✅ | ✅ e2e+unit | – | Favorites per profile; still during same-profile swipes, cross-fade between profiles |
 | PR-07 | Profile indicator | P1 | ✅ | ✅ e2e | – | hover badge on the title row, 'Space · Profile' tooltip, check mark in the Profile submenu |
 | PR-08 | Delete a profile | P1 | 🟡 partial | ✅ e2e+unit | – | profiles.delete refuses Default and profiles in use, erases the profile's Favorites and clears its stored data; the partition folder stays on disk and the Settings button is the settings lane's |
-| PR-09 | Rename a profile | P1 | 🟡 partial | – | – | profiles.rename command; the Settings UI is the settings lane's |
+| PR-09 | Rename a profile | P1 | ✅ | ✅ e2e | – | Settings → Profiles → select a profile and rename it inline, Default too when it is the only one; the new name shows at once in Settings, the Space menu, the profile badge (PR-07) and the switcher's tooltip |
 | PR-10 | Profiles and other features | P1 | – | – | – |  |
 
 ## Command bar (prefix CB)

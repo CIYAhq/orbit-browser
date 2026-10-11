@@ -515,8 +515,10 @@ export function rank(input: RankInput): SearchResponse {
       })
     }
 
+    // "Open Recipes" opens the folder Recipes, as its name alone does (FD-09).
+    const folderTerms = ts.length > 1 && ts[0] === 'open' ? ts.slice(1) : ts
     for (const f of input.folders ?? []) {
-      const m = matchName(ts, f.nameLower)
+      const m = matchName(folderTerms, f.nameLower)
       if (m.score === 0) continue
       const other = f.spaceId && f.spaceId !== input.currentSpaceId ? input.spaceNames[f.spaceId] : undefined
       folders.add({

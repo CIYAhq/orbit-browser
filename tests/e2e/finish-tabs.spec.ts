@@ -1596,3 +1596,130 @@ test('[FL-26][TB-05] the list appears in a frame at the second Tab, or after a h
   expect(await activeId(app)).toBe(a)
   expect(await switcher()).toBeNull()
 })
+
+// ---------- TB-13: what a selection's menu does ----------
+
+/** The Space the first window shows. */
+async function shownSpace(): Promise<string | undefined> {
+  const id = (await windowIds())[0] as string
+  return (await state(orbit.app)).windows[id]?.spaceId
+}
+
+test('[TB-13] a selection’s menu acts on every selected tab: pin, unpin, move to a Space, a new folder, and a split of up to four', async () => {
+  const { app } = orbit
+  const here = (await shownSpace()) as string
+  const shown = async () => (await state(app)).spaces[here]
+  const work = await cmd<string>(app, 'spaces.create', { name: 'Work', activate: false })
+  const ids: string[] = []
+  for (const n of [1, 2, 3, 4, 5]) ids.push(await newTab(app, fx.url(`/page/Sel${n}`), { activate: false }))
+  const [a, b, c, d, e] = ids as [string, string, string, string, string]
+  const choose = async (selection: string[], on: string, path: string) => {
+    await cmd(app, 'tabs.setSelection', { tabIds: selection })
+    await cmd(app, 'tabs.contextMenu', { id: on, selection })
+    const labels = await menuFor(app, on)
+    expect(labels, path).toContain(path)
+    return tabsHook<boolean>(app, 'chooseRowMenu', path)
+  }
+  const sorted = (list: string[] | undefined) => [...(list ?? [])].sort()
+  // Pin three, then unpin two of them.
+  expect(await choose([a, b, c], b, 'Pin 3 Tabs')).toBe(true)
+  await expect.poll(async () => sorted((await shown())?.pinned)).toEqual(sorted([a, b, c]))
+  expect(await choose([a, b], a, 'Unpin 2 Tabs')).toBe(true)
+  await expect.poll(async () => sorted((await shown())?.pinned)).toEqual([c])
+  expect(sorted((await shown())?.today)).toEqual(sorted([a, b, d, e]))
+  // Move two to another Space's Today; this Space stays in view.
+  expect(await choose([d, e], d, 'Move to > Work > Today')).toBe(true)
+  await expect.poll(async () => sorted((await state(app)).spaces[work]?.today)).toEqual(sorted([d, e]))
+  expect(await shownSpace()).toBe(here)
+  // A new folder with two.
+  expect(await choose([a, b], b, 'New Folder with Tabs')).toBe(true)
+  await expect
+    .poll(async () => Object.values((await state(app)).folders).map((f) => sorted(f.children)))
+    .toContainEqual(sorted([a, b]))
+  // The new folder is pinned: it joins the pinned section.
+  const folder = Object.values((await state(app)).folders).find(
+    (f) => sorted(f.children).join() === sorted([a, b]).join(),
+  )
+  expect((await shown())?.pinned).toContain(folder?.id)
+  expect((await shown())?.today).not.toContain(a)
+  // Five can't share a split (four at most); two can.
+  await cmd(app, 'tabs.activate', { tabId: c })
+  const others = [await newTab(app, fx.url('/page/Sel6'), { activate: false })]
+  others.push(await newTab(app, fx.url('/page/Sel7'), { activate: false }))
+  others.push(await newTab(app, fx.url('/page/Sel8'), { activate: false }))
+  others.push(await newTab(app, fx.url('/page/Sel9'), { activate: false }))
+  const five = [c, ...others]
+  await cmd(app, 'tabs.setSelection', { tabIds: five })
+  await cmd(app, 'tabs.contextMenu', { id: c, selection: five })
+  expect((await menuFor(app, c)).some((l) => l.startsWith('Open in Split View ('))).toBe(true)
+  await closeOverlay(app)
+  const [o1, o2] = others as [string, string]
+  expect(await choose([o1, o2], o1, 'Open in Split View')).toBe(true)
+  const panes = async () =>
+    Object.values((await state(app)).splits).map((s) => sorted(JSON.stringify(s.layout).match(/t-[a-z0-9]+/g) ?? []))
+  await expect.poll(panes).toContainEqual(sorted([o1, o2]))
+})
+
+// ---------- PR-09: renaming a profile ----------
+
+test('[PR-09] a profile renamed in Settings has its new name at once in the Space menu, the badge, the switcher’s tooltip and Settings; Default can be renamed when it is the only one', async () => {
+  const { app, shell } = orbit
+  const page = await openSettings(app, { section: 'profiles' })
+  const list = page.getByTestId('profile-list').getByRole('option')
+  const name = page.getByTestId('profile-name')
+  // Default, the only profile.
+  await expect(list).toHaveCount(1)
+  await name.fill('Personal')
+  await name.press('Enter')
+  await expect.poll(async () => (await state(app)).profiles[DEFAULT_PROFILE_ID]?.name).toBe('Personal')
+  await expect(list.first()).toContainText('Personal')
+  // Another profile, used by the Space on screen.
+  const spaceId = await cmd<string>(app, 'spaces.create', { name: 'Client' })
+  const work = await cmd<string>(app, 'profiles.create', { name: 'Work', assignSpaceId: spaceId })
+  await page.getByTestId(`profile-${work}`).click()
+  await expect(name).toHaveValue('Work')
+  await name.fill('Studio')
+  await name.press('Enter')
+  await expect.poll(async () => (await state(app)).profiles[work]?.name).toBe('Studio')
+  await expect(list.nth(1)).toContainText('Studio')
+  await settled(shell)
+  await shell.getByTestId('space-title-row').hover()
+  await expect(shell.getByTestId('profile-badge')).toHaveText('S')
+  await expect(shell.locator(`[data-testid="space-dot"][data-space-id="${spaceId}"]`)).toHaveAttribute(
+    'title',
+    /Client · Studio/,
+  )
+  await shell.getByTestId('space-menu-button').click()
+  const overlay = await viewPage(app, 'overlay')
+  await overlay.getByTestId('menu-profile').click()
+  await expect(overlay.getByTestId(`menu-profile-${work}`)).toContainText('Studio')
+  await expect(overlay.getByTestId(`menu-profile-${DEFAULT_PROFILE_ID}`)).toContainText('Personal')
+  await overlay.keyboard.press('Escape')
+})
+
+// ---------- SP-11: ⌘Z after a Space reorder ----------
+
+test('[SP-11][TB-18] ⌘Z after the Spaces are reordered puts them back and ⌘⇧Z again; the Space on screen stays', async () => {
+  const { app, shell } = orbit
+  const a = await shownSpace()
+  const b = await cmd<string>(app, 'spaces.create', { name: 'Beta', activate: false })
+  const c = await cmd<string>(app, 'spaces.create', { name: 'Gamma', activate: false })
+  const order = async () => (await state(app)).spaceOrder
+  const targets = () =>
+    shell.getByTestId('space-dot').evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.spaceId))
+  const before = await order()
+  expect([...before].sort()).toEqual([a, b, c].sort())
+  await cmd(app, 'spaces.reorder', { spaceId: c, index: 0 })
+  const after = await order()
+  expect(after[0]).toBe(c)
+  await expect.poll(targets).toEqual(after)
+  const mod = isMac ? 'Meta' : 'Control'
+  await shell.keyboard.press(`${mod}+Z`)
+  await expect.poll(order).toEqual(before)
+  await expect.poll(targets).toEqual(before)
+  expect(await shownSpace()).toBe(a)
+  await shell.keyboard.press(`${mod}+Shift+Z`)
+  await expect.poll(order).toEqual(after)
+  await expect.poll(targets).toEqual(after)
+  expect(await shownSpace()).toBe(a)
+})

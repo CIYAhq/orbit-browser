@@ -736,4 +736,13 @@ describe('folders', () => {
     )
     expect(r.results[0]).toMatchObject({ kind: 'folder', folderId: 'f-1', label: 'Folder', subtitle: 'Work' })
   })
+
+  it('[FD-09] "Open [Folder]": the folder’s name after "open" finds it too', () => {
+    const folders = [{ id: 'f-1', name: 'Recipes', nameLower: 'recipes', spaceId: 's-b' }]
+    expect(rank(input('open recip', { folders })).results.find((x) => x.kind === 'folder')).toMatchObject({
+      folderId: 'f-1',
+    })
+    // "open" alone is not a folder's name.
+    expect(rank(input('open', { folders })).results.some((x) => x.kind === 'folder')).toBe(false)
+  })
 })
