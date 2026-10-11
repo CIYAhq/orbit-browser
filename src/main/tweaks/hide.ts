@@ -417,7 +417,8 @@ export function registerTweakHide(ctx: MainContext, editor: TweakEditor, pages: 
     const ended = new Promise<null>((resolve) => {
       wake = () => resolve(null)
     })
-    // Another document in the tab ends the mode: the picker went with the old one.
+    // Another document in the tab ends the mode: the picker went with the old one. So does one that
+    // comes, while the mode starts, from a navigation that began before it (D89).
     const onNavigate = (details: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>) => {
       if (details.isMainFrame && !details.isSameDocument) end(windowId)
     }
@@ -427,6 +428,7 @@ export function registerTweakHide(ctx: MainContext, editor: TweakEditor, pages: 
       onLoaded = resolve
     })
     contents.on('did-start-navigation', onNavigate)
+    contents.on('did-navigate', onGone)
     contents.on('render-process-gone', onGone)
     contents.once('destroyed', onGone)
     const s: Session = {
@@ -439,6 +441,7 @@ export function registerTweakHide(ctx: MainContext, editor: TweakEditor, pages: 
       ended: false,
       release: () => {
         contents.off('did-start-navigation', onNavigate)
+        contents.off('did-navigate', onGone)
         contents.off('render-process-gone', onGone)
         contents.off('destroyed', onGone)
         contents.off('did-stop-loading', onLoaded)
@@ -454,6 +457,10 @@ export function registerTweakHide(ctx: MainContext, editor: TweakEditor, pages: 
       editor.setHide(windowId, { on: false, starting: true, pick: null })
       await Promise.race([loaded, ended])
       if (s.ended) return false
+      if (!pages.tweakable(s.tabId)) {
+        end(windowId)
+        return false
+      }
     }
     s.sent = true
     try {

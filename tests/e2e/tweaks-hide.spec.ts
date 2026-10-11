@@ -409,4 +409,17 @@ test('[BO-10] on a page still loading, a click on the lightning button shows the
   await expect(button).toHaveAttribute('aria-pressed', 'false')
   await waitTab(app, tabId, '/held/Starting-next')
   expect(await pickerInfo(app, tabId)).toBeNull()
+
+  // So does one that comes, while it starts, from a navigation that began before the click.
+  fx.slowHome(1500)
+  await mark(page)
+  await cmd(app, 'tabs.navigate', { tabId, url: fx.url('/') })
+  await button.click()
+  await expect(area).toHaveAttribute('data-state', 'starting')
+  await newDocument(page)
+  await expect(area).toHaveCount(0)
+  await expect(button).toHaveAttribute('aria-pressed', 'false')
+  await waitTab(app, tabId, fx.url('/'))
+  expect(await pickerInfo(app, tabId)).toBeNull()
+  fx.slowHome(0)
 })
