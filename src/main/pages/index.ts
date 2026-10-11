@@ -8,7 +8,7 @@ import { type PageDialogInfo, type PageDialogs$, registerDialogs } from './dialo
 import { type FullScreenInfo, registerFullScreen } from './fullscreen'
 import { registerHistoryPage } from './history'
 import { type LeaveInfo, registerLeave } from './leave'
-import { findSystemApp, findTestApp, launchInApp, registerOtherApps } from './other-apps'
+import { type AppLinkOutcome, findSystemApp, findTestApp, launchInApp, registerOtherApps } from './other-apps'
 import { deliverPrint, type PrintInfo, type PrintRecord, registerPrint, systemPrinters, testPrinters } from './print'
 import { registerSavePage } from './save-page'
 import { LOAD_TIMEOUT_MS, type PageScreenInfo, registerScreens } from './screens'
@@ -25,6 +25,8 @@ export interface PagesTestHooks {
   screens: () => PageScreenInfo[]
   /** Links Orbit opened in another app, oldest first (NV-19): test runs never start one. */
   launched: string[]
+  /** Links to other apps that pages followed, oldest first, and what came of each (NV-19). */
+  appLinks: { url: string; outcome: AppLinkOutcome }[]
   /** A window's full screen (NV-20). */
   fullScreen: (windowId: WindowId) => FullScreenInfo
   /** Every page's print dialog (NV-07). */
@@ -55,6 +57,7 @@ export function registerPages(ctx: MainContext, ops: TabOps): void {
   const screens = registerScreens(ctx, ops, dialogs, fullScreen, testTimeout > 0 ? testTimeout : LOAD_TIMEOUT_MS)
   // Test runs record each launch instead, and take the OS's apps from ORBIT_E2E_APPS.
   const launched: string[] = []
+  const appLinks: PagesTestHooks['appLinks'] = []
   registerOtherApps(
     ctx,
     dialogs,
@@ -64,6 +67,9 @@ export function registerPages(ctx: MainContext, ops: TabOps): void {
             launched.push(url)
           },
           findApp: findTestApp(process.env.ORBIT_E2E_APPS),
+          note: (url, outcome) => {
+            appLinks.push({ url, outcome })
+          },
         }
       : { launch: launchInApp, findApp: findSystemApp },
   )
@@ -101,6 +107,7 @@ export function registerPages(ctx: MainContext, ops: TabOps): void {
       },
       screens: () => screens.info(),
       launched,
+      appLinks,
       fullScreen: (windowId) => fullScreen.info(windowId),
       print: () => print.info(),
       printed,

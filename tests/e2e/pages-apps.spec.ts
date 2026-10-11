@@ -3,6 +3,7 @@ import { activeTabId, launchOrbit, type Orbit, state, tabPage } from './helpers'
 import {
   APP_ICON,
   APPS_ENV,
+  appLinks,
   dialogPage,
   launchedLinks,
   type PagesFixtures,
@@ -198,4 +199,44 @@ test('[NV-19] a tab or pop-up opened only to launch an app closes itself: the qu
   const { archive } = await state(app)
   expect(archive.filter((a) => /^(mailto|zoommtg):|\/to-app/.test(a.url))).toEqual([])
   expect(await launchedLinks(app)).toEqual(['zoommtg://join?confno=123'])
+})
+
+test('[NV-19] after Cancel, the page asks again only with a new user gesture: a link it follows without one asks nothing, and a click asks again', async () => {
+  const { app } = orbit
+  const { tabId, page } = await openApps(app)
+  const CALL = 'tel:+15550100'
+  await page.locator('#mail').click()
+  const asked = await waitDialog(app, (d) => d.tabId === tabId && d.kind === 'app' && d.focused)
+  await (await dialogPage(app, asked.id)).getByTestId('page-dialog-cancel').click()
+  await expect.poll(() => noDialogs(app)).toBe(true)
+  // With no new gesture (a timer, say), the page follows a link to another app: nothing asks, as in
+  // Chromium. The page can't keep asking once the user said no.
+  await page.evaluate((call) => {
+    location.href = call
+  }, CALL)
+  await expect
+    .poll(() => appLinks(app))
+    .toEqual([
+      { url: MAIL, outcome: 'asked' },
+      { url: CALL, outcome: 'dropped' },
+    ])
+  expect(await noDialogs(app)).toBe(true)
+  // A click is a new gesture: its link asks.
+  await page.locator('#call').click()
+  const again = await waitDialog(app, (d) => d.kind === 'app' && d.id > asked.id && d.focused)
+  expect(again.title).toBe('Open this link in another app?')
+  // Esc is Cancel too: once more, a link without a gesture asks nothing.
+  await (await dialogPage(app, again.id)).keyboard.press('Escape')
+  await expect.poll(() => noDialogs(app)).toBe(true)
+  await page.evaluate((mail) => {
+    location.href = mail
+  }, MAIL)
+  await expect
+    .poll(async () => (await appLinks(app)).slice(2))
+    .toEqual([
+      { url: CALL, outcome: 'asked' },
+      { url: MAIL, outcome: 'dropped' },
+    ])
+  expect(await noDialogs(app)).toBe(true)
+  expect(await launchedLinks(app)).toEqual([])
 })

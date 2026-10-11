@@ -32,6 +32,12 @@ export type LaunchApp = (url: string) => Promise<void>
  */
 export type FindApp = (url: string) => Promise<OtherApp | null | undefined>
 
+/**
+ * What came of a page's link to another app (NV-19): Orbit asked, opened it without asking (always
+ * allowed), or dropped it (a question was up already, or the page had no new user gesture for it).
+ */
+export type AppLinkOutcome = 'asked' | 'opened' | 'dropped'
+
 /** The real launch: the OS opens the link in its app. */
 export const launchInApp: LaunchApp = (url) => shell.openExternal(launchableUrl(url))
 
@@ -169,6 +175,8 @@ function neverShowedPage(page: WebContents): boolean {
  * `launch`, the one place Orbit starts another app. A site always allowed for a kind of link opens
  * it without asking, once per user gesture in the page, as in Chromium: a page can't open the app
  * again and again unasked. A page asks one question at a time: a link it follows meanwhile is dropped.
+ * Once the user answers Cancel, the page asks again only after a new user gesture in it, as in
+ * Chromium: a page can't keep asking once the user said no.
  *
  * A tab, Peek, Mini Window or pop-up opened only for such a link (`target=_blank`, `window.open`,
  * or a redirect there) never shows a page: it closes itself once its navigation ends, and the tab
@@ -179,7 +187,12 @@ function neverShowedPage(page: WebContents): boolean {
 export function registerOtherApps(
   ctx: MainContext,
   dialogs: PageDialogs$,
-  deps: { launch: LaunchApp; findApp: FindApp },
+  deps: {
+    launch: LaunchApp
+    findApp: FindApp
+    /** Test runs: hears what came of each link (NV-19). */
+    note?: (url: string, outcome: AppLinkOutcome) => void
+  },
 ): void {
   const { store, tabs, windows, commands } = ctx
   const choices = new AlwaysAllowed(join(ctx.paths.userData, 'orbit-app-links.json'), (id) =>
@@ -198,6 +211,8 @@ export function registerOtherApps(
   const going = new Map<number, string>()
   /** Pages (by contents id) with a user gesture that no link to another app has used yet. */
   const gestured = new Set<number>()
+  /** Pages (by contents id) whose last question the user answered Cancel: they ask again only with a new gesture. */
+  const refused = new Set<number>()
 
   const launchOnly = (page: WebContents) =>
     !page.isDestroyed() && !asking.has(page.id) && !!appScheme(going.get(page.id)) && neverShowedPage(page)
@@ -257,10 +272,15 @@ export function registerOtherApps(
     page.on('input-event', (_event, input) => {
       if (isActivation(input)) gestured.add(id)
     })
+    // A click in a frame from another site (in a process of its own) comes only as a mouse event.
+    page.on('before-mouse-event', (_event, mouse) => {
+      if (mouse.type === 'mouseDown') gestured.add(id)
+    })
     page.once('destroyed', () => {
       going.delete(id)
       asking.delete(id)
       gestured.delete(id)
+      refused.delete(id)
     })
   }
   ctx.hooks.tabCreated.push((_tabId, contents) => {
@@ -296,6 +316,8 @@ export function registerOtherApps(
     } finally {
       asking.delete(id)
     }
+    // Cancel (or Esc): the page's next link asks only with a new gesture (Chromium's rule).
+    if (answer && !answer.ok) refused.add(id)
     if (answer?.ok) {
       if (answer.checked === true && origin && /^https?:\/\//i.test(origin)) choices.add(profileId, origin, scheme)
       launch(page, url)
@@ -314,10 +336,17 @@ export function registerOtherApps(
     if (origin && /^https?:\/\//i.test(origin) && choices.has(profileId, origin, scheme)) {
       // Always allowed: it opens without asking, but only for a gesture no link used yet (NV-19).
       if (fresh) launch(page, url)
+      deps.note?.(url, fresh ? 'opened' : 'dropped')
       return
     }
-    if (asking.has(page.id)) return
+    // One question at a time; and after a Cancel, none until the user does something in the page.
+    if (asking.has(page.id) || (refused.has(page.id) && !fresh)) {
+      deps.note?.(url, 'dropped')
+      return
+    }
+    refused.delete(page.id)
     asking.add(page.id)
+    deps.note?.(url, 'asked')
     void ask(profileId, page, url, scheme, origin).catch((err: unknown) => console.error('[pages] link to an app', err))
   })
 }

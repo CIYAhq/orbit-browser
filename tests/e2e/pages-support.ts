@@ -474,6 +474,7 @@ type PagesGlobal = {
     leave: (tabId: string) => LeaveInfo | null
     screens: () => PageScreenInfo[]
     launched: string[]
+    appLinks: { url: string; outcome: string }[]
     fullScreen: (windowId: string) => FullScreenInfo
     print: () => PrintInfo[]
     printed: PrintRecord[]
@@ -494,6 +495,11 @@ export const APPS_ENV = { ORBIT_E2E_APPS: JSON.stringify({ mailto: { name: 'Mail
 /** Links Orbit opened in another app, oldest first: test runs record each and start none (NV-19). */
 export function launchedLinks(app: ElectronApplication): Promise<string[]> {
   return app.evaluate(() => [...(globalThis as unknown as PagesGlobal).__orbitPages.launched])
+}
+
+/** Links to other apps that pages followed, oldest first, and what came of each (NV-19). */
+export function appLinks(app: ElectronApplication): Promise<{ url: string; outcome: string }[]> {
+  return app.evaluate(() => [...(globalThis as unknown as PagesGlobal).__orbitPages.appLinks])
 }
 
 /**
