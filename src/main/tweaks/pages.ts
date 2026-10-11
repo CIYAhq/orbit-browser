@@ -11,6 +11,7 @@ import {
   tweakSheets,
 } from '../../shared/tweaks'
 import type { MainContext } from '../context'
+import { insertSheet, type PlacedSheet, removeSheet } from './page-sheets'
 
 /** The isolated world main's own scripts for Tweaks run in (never the page's world). */
 export const TWEAK_WORLD = 1040
@@ -29,13 +30,19 @@ interface PageRecord {
   doc: number
   /** The preload's first-paint sheets are in the page, not yet replaced by main's own. */
   preloaded: boolean
-  /** Main's sheets in the page, by part (`SheetPart.key`). */
-  inserted: Map<string, { key: string; css: string }>
+  /** Main's sheets in the page, by part (`SheetPart.key`), each with the renderer that gave its key. */
+  inserted: Map<string, PlacedSheet & { css: string }>
   /** The JavaScript of this document's Tweaks has run (once per load, BO-18). */
   scripted: boolean
   /** A change is being applied; `again` asks for another pass once it is done. */
   busy: boolean
   again: boolean
+  /**
+   * Settles once this document's passes stop waiting on its renderer (`leave()`): a new document
+   * asked, or the renderer went. An answer that never comes then holds up nothing.
+   */
+  gone: Promise<void>
+  leave: () => void
   /** Sheet options for this page only: a hidden element shown while its restore marker is hovered. */
   showHidden?: string
 }
@@ -72,7 +79,9 @@ export interface TweakPages {
  * - while the page is open, each change to its Tweaks replaces only the sheets that changed:
  *   the new one goes in before the old one comes out, so nothing flashes. A change waits only on
  *   `insertCSS`, never on a script in the page or an isolated world, so it shows while the page is
- *   still loading.
+ *   still loading; and only while its document is there: a renderer that never answers (it crashed,
+ *   or another site's page took its place while it was busy) holds up nothing for the next document
+ *   (page-sheets.ts).
  */
 export function registerTweakPages(ctx: MainContext): TweakPages {
   const { store, sessions, tabs } = ctx
@@ -96,26 +105,16 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
   const partsFor = (state: OrbitState, record: PageRecord): SheetPart[] =>
     tweakSheets(enabledTweaksFor(state.tweaks, state.settings, record.host), sheetOptions(record))
 
-  const remove = (contents: WebContents, key: string) => {
-    if (!contents.isDestroyed()) contents.removeInsertedCSS(key).catch(() => {})
-  }
-
-  const insert = async (record: PageRecord, doc: number, part: SheetPart): Promise<void> => {
-    const { contents } = record
-    let key: string
-    try {
-      key = await contents.insertCSS(part.css, { cssOrigin: 'author' })
-    } catch {
-      return
-    }
-    // A later document came meanwhile: the sheet may have landed in it.
-    if (record.doc !== doc) {
-      remove(contents, key)
-      return
-    }
+  /**
+   * Puts one part's sheet in a document. A key that comes back once a later document came, or
+   * the renderer went, comes out again, but only from the renderer that gave it (page-sheets.ts).
+   */
+  const insert = async (record: PageRecord, doc: number, gone: Promise<void>, part: SheetPart): Promise<void> => {
+    const sheet = await insertSheet(record.contents, part.css, gone, () => record.doc === doc && current(record))
+    if (!sheet) return
     const old = record.inserted.get(part.key)
-    record.inserted.set(part.key, { key, css: part.css })
-    if (old) remove(contents, old.key)
+    record.inserted.set(part.key, { ...sheet, css: part.css })
+    if (old) removeSheet(record.contents, old)
   }
 
   /**
@@ -133,15 +132,18 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
   /** Brings a page's sheets in line with its Tweaks now. */
   const syncOnce = async (record: PageRecord): Promise<void> => {
     if (!current(record)) return
-    const doc = record.doc
+    const { doc, gone } = record
     const want = partsFor(store.state, record)
     const keys = new Set(want.map((p) => p.key))
-    await Promise.all(want.filter((p) => record.inserted.get(p.key)?.css !== p.css).map((p) => insert(record, doc, p)))
-    if (record.doc !== doc || record.contents.isDestroyed()) return
+    await Promise.all(
+      want.filter((p) => record.inserted.get(p.key)?.css !== p.css).map((p) => insert(record, doc, gone, p)),
+    )
+    // Its document went meanwhile (a new one asked, or the renderer went): the pass ends here.
+    if (record.doc !== doc || !current(record)) return
     for (const [part, have] of record.inserted) {
       if (keys.has(part)) continue
       record.inserted.delete(part)
-      remove(record.contents, have.key)
+      removeSheet(record.contents, have)
     }
     // Main's own sheets are all in: the preload's go.
     if (record.preloaded && want.every((p) => record.inserted.get(p.key)?.css === p.css)) {
@@ -188,6 +190,15 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
     }
   }
 
+  /** A document's end, for its passes to stop waiting on (`PageRecord.gone`), and its trigger. */
+  const parting = (): Pick<PageRecord, 'gone' | 'leave'> => {
+    let leave = () => {}
+    const gone = new Promise<void>((resolve) => {
+      leave = resolve
+    })
+    return { gone, leave }
+  }
+
   const track = (contents: WebContents): PageRecord => {
     const record: PageRecord = {
       contents,
@@ -199,6 +210,7 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
       scripted: false,
       busy: false,
       again: false,
+      ...parting(),
     }
     records.set(contents.id, record)
     const id = contents.id
@@ -218,8 +230,12 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
     })
     contents.on('render-process-gone', () => {
       record.host = null
+      record.leave()
     })
-    contents.once('destroyed', () => records.delete(id))
+    contents.once('destroyed', () => {
+      records.delete(id)
+      record.leave()
+    })
     return record
   }
 
@@ -250,6 +266,9 @@ export function registerTweakPages(ctx: MainContext): TweakPages {
     let record = records.get(contents.id)
     if (!host && !record) return null
     record ??= track(contents)
+    // A pass for the document before this one stops waiting on its renderer, which may never answer.
+    record.leave()
+    Object.assign(record, parting())
     record.doc++
     record.url = url
     record.host = host

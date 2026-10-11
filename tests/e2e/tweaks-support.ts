@@ -442,3 +442,76 @@ export async function newDocument(page: Page): Promise<void> {
     .poll(async () => !(await marked(page)) && !!(await firstFrame(page).catch(() => undefined)), { timeout: 15_000 })
     .toBe(true)
 }
+
+type TabsGlobal = { __orbit: { ctx: { tabs: { contents: (id: string) => Electron.WebContents | undefined } } } }
+
+/**
+ * Runs a script in a tab's page, in the page's own world, from main: it doesn't wait for the page's
+ * load, and reaches a page Playwright no longer follows (one reloaded after a crash). Null while the
+ * tab has no live page.
+ */
+export function inTab<T>(app: ElectronApplication, tabId: string, code: string): Promise<T | null> {
+  return app.evaluate(
+    async (_e, [id, js]) => {
+      const contents = (globalThis as unknown as TabsGlobal).__orbit.ctx.tabs.contents(id)
+      if (!contents || contents.isDestroyed() || contents.isCrashed()) return null
+      return (await contents.mainFrame.executeJavaScript(js)) as unknown
+    },
+    [tabId, code] as const,
+  ) as Promise<T | null>
+}
+
+/** Whether a tab's page answers a script within `ms` (a busy page answers nothing). */
+export function answers(app: ElectronApplication, tabId: string, ms: number): Promise<boolean> {
+  return app.evaluate(
+    (_e, [id, wait]) => {
+      const contents = (globalThis as unknown as TabsGlobal).__orbit.ctx.tabs.contents(id)
+      if (!contents) return false
+      return Promise.race([
+        contents.executeJavaScript('true').catch(() => false),
+        new Promise<boolean>((r) => setTimeout(() => r(false), wait)),
+      ])
+    },
+    [tabId, ms] as const,
+  )
+}
+
+/** From now on a tab's page notes, in each frame it paints, when and its body's background (`window.__frames`). */
+export async function logFrames(app: ElectronApplication, tabId: string): Promise<void> {
+  await inTab(
+    app,
+    tabId,
+    `(() => {
+  const log = []
+  window.__frames = log
+  const tick = () => {
+    log.push([performance.timeOrigin + performance.now(), getComputedStyle(document.body).backgroundColor])
+    requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
+  return true
+})()`,
+  )
+}
+
+/**
+ * Makes a change, and counts the frames a tab's page (`logFrames`) painted from then to the first
+ * whose background is `bg` (the change shown). Waits for that frame up to 4 s; fails without it.
+ */
+export async function framesTo(
+  app: ElectronApplication,
+  tabId: string,
+  change: () => Promise<unknown>,
+  bg: string,
+): Promise<number> {
+  const t0 = await inTab<number>(app, tabId, 'performance.timeOrigin + performance.now()')
+  await change()
+  const shown = async () =>
+    (await inTab<number>(
+      app,
+      tabId,
+      `window.__frames.filter(([at]) => at >= ${t0}).findIndex(([, b]) => b === ${JSON.stringify(bg)})`,
+    )) ?? -1
+  await expect.poll(shown, { timeout: 4000, message: `a frame with background ${bg}` }).toBeGreaterThanOrEqual(0)
+  return shown()
+}

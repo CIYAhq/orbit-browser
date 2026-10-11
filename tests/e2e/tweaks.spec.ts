@@ -5,14 +5,19 @@ import { type ElectronApplication, expect, type Page, test } from '@playwright/t
 import { TWEAK_EDITOR } from '../../src/shared/commands/tweaks'
 import { isMac, launchOrbit, MOD, type Orbit, run, state, tabPage, tabView, viewPage } from './helpers'
 import { clickInPage, focusedUrl, pressInPage } from './nav-support'
+import { crashTab, startInTab, tabCrashed } from './pages-support'
 import { remoteRequests } from './settings-support'
 import { act, activeId, cmd, newTab, tabsHook, waitTab } from './tabs-support'
 import {
+  answers,
   bgOf,
   edited,
   editorInfo,
   editorPage,
   firstFrame,
+  framesTo,
+  inTab,
+  logFrames,
   mark,
   marked,
   near,
@@ -544,6 +549,81 @@ test('[BO-02][BO-14][BO-16] while the page is still loading, a Tweak turned off 
     expect(r.frames, report).toBeLessThanOrEqual(12)
   }
   console.log(`[BO-14] changes while loading: ${report}`)
+})
+
+/** Keeps a tab's page busy for `ms`, a script that never yields: its renderer answers nothing meanwhile. */
+async function keepBusy(app: ElectronApplication, tabId: string, ms: number): Promise<void> {
+  await startInTab(app, tabId, `{ const end = Date.now() + ${ms}; while (Date.now() < end) {} }`)
+  await expect.poll(() => answers(app, tabId, 300)).toBe(false)
+}
+
+test('[BO-02][BO-14][BO-16] a change a busy page never took holds up nothing once its renderer crashed and the tab reloaded: the next edit shows within a few frames', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const { tabId, page } = await openPage(app, '/page/Crashing')
+  const id = (await run(app, 'tweaks.create', { tabId })) as string
+  await run(app, 'tweaks.update', { id, patch: { css: 'body { background: #202020 }' } })
+  await run(app, 'tweaks.closeEditor', {})
+  await expect.poll(() => bgOf(page)).toBe('rgb(32, 32, 32)')
+  await expect.poll(async () => (await pageTweaks(app, tabId))?.preloaded).toBe(false)
+
+  // An edit while the page is busy: its sheet waits on a renderer that then crashes, unanswered.
+  await keepBusy(app, tabId, 10_000)
+  await run(app, 'tweaks.update', { id, patch: { css: 'body { background: #303030 }' } })
+  expect(await answers(app, tabId, 300)).toBe(false)
+  await crashTab(app, tabId)
+  await expect.poll(() => tabCrashed(app, tabId)).toBe(true)
+  await cmd(app, 'tabs.reload', { tabId })
+  await waitTab(app, tabId, '/page/Crashing')
+  expect(await tabCrashed(app, tabId)).toBe(false)
+  // The new document has the edit from its first paint, and takes the next one at once.
+  await expect.poll(() => inTab(app, tabId, 'getComputedStyle(document.body).backgroundColor')).toBe('rgb(48, 48, 48)')
+  await logFrames(app, tabId)
+  const frames = await framesTo(
+    app,
+    tabId,
+    () => run(app, 'tweaks.update', { id, patch: { css: 'body { background: #404040 }' } }),
+    'rgb(64, 64, 64)',
+  )
+  expect(frames).toBeLessThanOrEqual(12)
+  // Main's own sheets took over from the first paint's.
+  await expect.poll(async () => (await pageTweaks(app, tabId))?.preloaded).toBe(false)
+  console.log(`[BO-14] the next edit after a crash showed in frame ${frames}`)
+})
+
+test('[BO-02][BO-14][BO-16] a change a busy page never took holds up nothing once another site’s page took its place: a change to that site’s Tweak shows within a few frames', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  // Two sites with a Tweak each: 127.0.0.1 is another site than localhost, so another renderer.
+  const there = await openPage(app, '/page/There', '127.0.0.1')
+  const other = (await run(app, 'tweaks.create', { tabId: there.tabId })) as string
+  await run(app, 'tweaks.update', { id: other, patch: { css: 'body { background: #202020 }' } })
+  await run(app, 'tweaks.closeEditor', {})
+  const { tabId, page } = await openPage(app, '/page/Here')
+  const id = (await run(app, 'tweaks.create', { tabId })) as string
+  await run(app, 'tweaks.update', { id, patch: { css: 'body { background: #303030 }' } })
+  await run(app, 'tweaks.closeEditor', {})
+  await expect.poll(() => bgOf(page)).toBe('rgb(48, 48, 48)')
+  await expect.poll(async () => (await pageTweaks(app, tabId))?.preloaded).toBe(false)
+
+  // An edit while the page is busy, long enough to outlast this test: its sheet waits on that
+  // renderer, and the tab goes to the other site meanwhile.
+  await keepBusy(app, tabId, 20_000)
+  await run(app, 'tweaks.update', { id, patch: { css: 'body { background: #404040 }' } })
+  expect(await answers(app, tabId, 300)).toBe(false)
+  await cmd(app, 'tabs.navigate', { tabId, url: fx.url('/page/There-too', '127.0.0.1') })
+  await waitTab(app, tabId, '/page/There-too')
+  await expect.poll(() => inTab(app, tabId, 'getComputedStyle(document.body).backgroundColor')).toBe('rgb(32, 32, 32)')
+  await logFrames(app, tabId)
+  const frames = await framesTo(
+    app,
+    tabId,
+    () => run(app, 'tweaks.update', { id: other, patch: { css: 'body { background: #505050 }' } }),
+    'rgb(80, 80, 80)',
+  )
+  expect(frames).toBeLessThanOrEqual(12)
+  await expect.poll(async () => (await pageTweaks(app, tabId))?.preloaded).toBe(false)
+  console.log(`[BO-14] a change on the other site's page showed in frame ${frames}`)
 })
 
 test('[BO-18][BO-01] a Tweak survives reloads, other pages of its site, back and forward, a closed tab reopened, a sleeping tab woken and a restart', async () => {
