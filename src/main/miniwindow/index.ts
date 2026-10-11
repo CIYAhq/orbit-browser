@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   app,
   BrowserWindow,
@@ -26,6 +28,7 @@ import { runPageAction } from '../peek/page-actions'
 import type { CallContext } from '../registry'
 import { activateInDraft, detachFromSplit, reselectAway, todayInsertIndex } from '../tabs/model'
 import { activeTabOf, loadRenderer, rendererEntry, uiWebPreferences } from '../windows'
+import { writeDesktopEntry } from './desktop-entry'
 import { miniSwitchIn, NEW_MINI_SWITCH, systemWideShortcut, TOGGLE_MINIS_SWITCH } from './switches'
 
 /**
@@ -96,6 +99,8 @@ const canFade = isMac || process.platform === 'win32'
 const GROW_FROM = 0.92
 /** How long main waits for the UI to take its starting size before showing the window anyway. */
 const GROW_READY_WAIT_MS = 100
+/** When a Linux folder build checks its desktop entry (MW-14), after launch. */
+const DESKTOP_ENTRY_DELAY_MS = 3000
 
 interface MiniApi {
   open(url?: string): WindowId | undefined
@@ -1070,6 +1075,20 @@ export function registerMiniWindow(ctx: MainContext): void {
       task(NEW_MINI_SWITCH, 'New Mini Window', 'Open a blank Mini Window for a quick lookup'),
       task(TOGGLE_MINIS_SWITCH, 'Show/Hide All Mini Windows', 'Show or hide every open Mini Window'),
     ])
+  }
+  // Linux launchers: the same two entries as launcher actions, in the desktop entry a folder build
+  // writes for itself (MW-14). A moment after launch, off the start-up path.
+  if (process.platform === 'linux' && app.isPackaged && !ctx.e2e) {
+    setTimeout(() => {
+      const icon = join(process.resourcesPath, 'icon.png')
+      writeDesktopEntry({
+        env: process.env,
+        home: app.getPath('home'),
+        appName: app.name,
+        execPath: process.execPath,
+        icon: existsSync(icon) ? icon : undefined,
+      }).catch((err) => console.error('[mini] could not write the desktop entry', err))
+    }, DESKTOP_ENTRY_DELAY_MS)
   }
   const onSwitch = (argv: readonly string[]) => {
     const which = miniSwitchIn(argv)

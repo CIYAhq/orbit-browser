@@ -296,7 +296,7 @@ Spec: `spec/mini-window.md`
 | MW-11 | Turning the Mini Window off | P1 | ✅ | ✅ e2e | – | settings.miniWindowForExternalLinks off: tabs in the most recent or chosen Space (externalLinksSpace) |
 | MW-12 | What works inside a Mini Window | P2 | 🟡 partial | – | – | fullscreen video fills the window, copy URL, devtools, downloads via the session; no captures |
 | MW-13 | Menu-bar / tray button | P2 | – | – | – |  |
-| MW-14 | Platforms | P1 | 🟡 partial | ✅ e2e+unit | – | all platforms with Ctrl+Alt+N / Ctrl+O / Ctrl+Alt+O; Windows jump list: New Mini Window, Show/Hide All; no Linux tray (MW-13) or launcher actions |
+| MW-14 | Platforms | P1 | 🟡 partial | ✅ e2e+unit | – | all platforms with Ctrl+Alt+N / Ctrl+O / Ctrl+Alt+O; New Mini Window and Show/Hide All in the Windows jump list and as Linux launcher actions (a packaged folder build writes its own desktop entry at start-up under Electron's desktop name, keeps it pointing at where Orbit runs from, and never touches an entry a package installed or the user wrote; checked on a packaged build: both actions reach the running Orbit); no tray button yet (MW-13) |
 | MW-15 | Feel | P1 | ✅ | ✅ e2e | – | warm spare window takes keys at once, page loads before the window shows; opens with MW-04's 200 ms grow and fade; Open in… shrinks to 92% and fades (140 ms, macOS/Windows) as the row enters Today |
 
 ## Picture-in-picture, sidebar media player and call controls (prefix MD)
