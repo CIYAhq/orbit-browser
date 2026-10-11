@@ -14,6 +14,7 @@ import { expect } from '@playwright/test'
 import type { PageDialogInfo } from '../../src/main/pages/dialogs'
 import type { FullScreenInfo } from '../../src/main/pages/fullscreen'
 import type { LeaveInfo } from '../../src/main/pages/leave'
+import type { PrintInfo, PrintRecord } from '../../src/main/pages/print'
 import type { PageScreenInfo } from '../../src/main/pages/screens'
 import { listenInRange, tabPage } from './helpers'
 
@@ -55,6 +56,9 @@ const html = (title: string, body: string, head = '') => `<!doctype html>
  * - `/to-app?to=…`: redirects to `to`.
  * - `/esc?prevent=1`: notes each Escape it gets in `window.__escapes` (`keydown`, `keydown (repeat)`,
  *   `keyup`), and with `prevent=1` uses it (`preventDefault`), as a web app closing its own menu does.
+ * - `/print`: a few pages long, with a field (`#field`), a button that calls `window.print()`
+ *   (`#print`), and `window.__print`: its `beforeprint` and `afterprint` events, whether `print()`
+ *   returned, and how many times the tab has loaded it (`loads`).
  *
  * Every page has an icon (PAGE_ICON). `port` listens on that port only (a server back on the port
  * it left).
@@ -196,6 +200,26 @@ for (const type of ['keydown', 'keyup']) {
     ${prevent ? 'e.preventDefault()' : ''}
   })
 }
+</script>`,
+        ),
+      )
+      return
+    }
+    if (u.pathname === '/print') {
+      const lines = Array.from({ length: 120 }, (_, i) => `<p>Line ${i + 1} of the page to print.</p>`).join('')
+      send(
+        html(
+          'Print',
+          `<h1>Print</h1><input id="field" value="typed"><button id="print">Print</button>${lines}
+<script>
+sessionStorage.loads = Number(sessionStorage.loads || 0) + 1
+window.__print = { before: 0, after: 0, returned: false, loads: Number(sessionStorage.loads) }
+addEventListener('beforeprint', () => window.__print.before++)
+addEventListener('afterprint', () => window.__print.after++)
+document.getElementById('print').addEventListener('click', () => {
+  window.print()
+  window.__print.returned = true
+})
 </script>`,
         ),
       )
@@ -349,6 +373,8 @@ type PagesGlobal = {
     screens: () => PageScreenInfo[]
     launched: string[]
     fullScreen: (windowId: string) => FullScreenInfo
+    print: () => PrintInfo[]
+    printed: PrintRecord[]
   }
 }
 
@@ -579,4 +605,49 @@ export function pageBounds(app: ElectronApplication, tabId: string): Promise<unk
 /** A window's full screen as Orbit keeps it (NV-20). */
 export function fullScreenInfo(app: ElectronApplication, windowId: string): Promise<FullScreenInfo> {
   return app.evaluate((_e, id) => (globalThis as unknown as PagesGlobal).__orbitPages.fullScreen(id), windowId)
+}
+
+/** The printers a test run's OS has (ORBIT_E2E_PRINTERS, for launchOrbit's `env`): one office printer (NV-07). */
+export const PRINTERS_ENV = { ORBIT_E2E_PRINTERS: JSON.stringify([{ id: 'Office', name: 'Office Printer' }]) }
+
+/** Every page's print dialog (NV-07). */
+export function printDialogs(app: ElectronApplication): Promise<PrintInfo[]> {
+  return app.evaluate(() => (globalThis as unknown as PagesGlobal).__orbitPages.print())
+}
+
+/** Print jobs, oldest first: test runs record each, and print or save none (NV-07). */
+export function printedJobs(app: ElectronApplication): Promise<PrintRecord[]> {
+  return app.evaluate(() => [...(globalThis as unknown as PagesGlobal).__orbitPages.printed])
+}
+
+/** Waits for a print dialog that matches (by default, one on screen with its preview), and returns it. */
+export async function waitPrint(
+  app: ElectronApplication,
+  match: (d: PrintInfo) => boolean = (d) => d.onScreen && d.preview === 'ready',
+): Promise<PrintInfo> {
+  let found: PrintInfo | undefined
+  await expect
+    .poll(async () => {
+      found = (await printDialogs(app)).find(match)
+      return !!found
+    })
+    .toBe(true)
+  return found as PrintInfo
+}
+
+/** The print view (a Playwright page) showing the print dialog with this id. */
+export async function printPage(app: ElectronApplication, id: number): Promise<Page> {
+  const deadline = Date.now() + 15_000
+  while (Date.now() < deadline) {
+    for (const page of app.windows()) {
+      if (!page.url().includes('view=print')) continue
+      const shows = await page
+        .locator(`[data-dialog-id="${id}"]`)
+        .count()
+        .catch(() => 0)
+      if (shows > 0) return page
+    }
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  throw new Error(`no print view shows dialog ${id}`)
 }

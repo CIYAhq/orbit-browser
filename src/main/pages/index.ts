@@ -1,5 +1,6 @@
 import { app } from 'electron'
 import { authDialog } from '../../shared/pages'
+import { countPdfPages } from '../../shared/print'
 import type { TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import type { TabOps } from '../tabs/ops'
@@ -7,6 +8,7 @@ import { type PageDialogInfo, type PageDialogs$, registerDialogs } from './dialo
 import { type FullScreenInfo, registerFullScreen } from './fullscreen'
 import { type LeaveInfo, registerLeave } from './leave'
 import { findSystemApp, findTestApp, launchInApp, registerOtherApps } from './other-apps'
+import { deliverPrint, type PrintInfo, type PrintRecord, registerPrint, systemPrinters, testPrinters } from './print'
 import { LOAD_TIMEOUT_MS, type PageScreenInfo, registerScreens } from './screens'
 
 /** Test-only handle (ORBIT_E2E=1): globalThis.__orbitPages. */
@@ -23,6 +25,10 @@ export interface PagesTestHooks {
   launched: string[]
   /** A window's full screen (NV-20). */
   fullScreen: (windowId: WindowId) => FullScreenInfo
+  /** Every page's print dialog (NV-07). */
+  print: () => PrintInfo[]
+  /** Print jobs, oldest first (NV-07): test runs never print or save one. */
+  printed: PrintRecord[]
 }
 
 /**
@@ -30,7 +36,8 @@ export interface PagesTestHooks {
  * prompt, the leave-page warning and HTTP sign-in, in Orbit's own dialog over that page. Error and
  * crash screens (NV-13, NV-14): what the page's area shows when its page couldn't load, crashed or
  * stopped responding. Links that open other apps (NV-19): asked about over the page. Window full
- * screen (NV-20): the sidebar hidden, and Esc in the page.
+ * screen (NV-20): the sidebar hidden, and Esc in the page. Print (NV-07): Orbit's print dialog over
+ * the page.
  */
 export function registerPages(ctx: MainContext, ops: TabOps): void {
   const dialogs = registerDialogs(ctx)
@@ -54,6 +61,25 @@ export function registerPages(ctx: MainContext, ops: TabOps): void {
         }
       : { launch: launchInApp, findApp: findSystemApp },
   )
+  // Test runs record each print job instead, and take the printers from ORBIT_E2E_PRINTERS.
+  const printed: PrintRecord[] = []
+  const print = registerPrint(
+    ctx,
+    ctx.e2e
+      ? {
+          deliver: async (page, job) => {
+            const url = page.isDestroyed() ? '' : page.getURL()
+            if (job.kind === 'printer') printed.push({ kind: 'printer', url, options: job.options })
+            else {
+              const pages = countPdfPages(job.data.toString('latin1'))
+              printed.push({ kind: 'pdf', url, name: job.name, bytes: job.data.length, pages })
+            }
+            return { ok: true }
+          },
+          printers: testPrinters(process.env.ORBIT_E2E_PRINTERS),
+        }
+      : { deliver: deliverPrint, printers: systemPrinters },
+  )
 
   if (ctx.e2e) {
     const hooks: PagesTestHooks = {
@@ -66,6 +92,8 @@ export function registerPages(ctx: MainContext, ops: TabOps): void {
       screens: () => screens.info(),
       launched,
       fullScreen: (windowId) => fullScreen.info(windowId),
+      print: () => print.info(),
+      printed,
     }
     ;(globalThis as unknown as { __orbitPages: PagesTestHooks }).__orbitPages = hooks
   }

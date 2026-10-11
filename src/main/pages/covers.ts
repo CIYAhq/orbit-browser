@@ -86,6 +86,8 @@ export function createCovers<C extends CoverContent>(
   const covers = new Map<number, Cover>()
   const pools = new Map<WindowId, Set<WebContentsView>>()
   const inUse = new Set<WebContentsView>()
+  /** Views whose page has loaded, and not crashed since: only these go on screen. */
+  const loaded = new WeakSet<WebContentsView>()
 
   const hostOf = (page: WebContents): Host | undefined => {
     const tabId = tabs.tabIdFor(page)
@@ -166,6 +168,7 @@ export function createCovers<C extends CoverContent>(
       })
     }
     contents?.on('did-finish-load', () => {
+      loaded.add(view)
       for (const c of covers.values()) {
         if (c.view !== view) continue
         c.ready = true
@@ -174,6 +177,7 @@ export function createCovers<C extends CoverContent>(
       }
     })
     contents?.on('render-process-gone', () => {
+      loaded.delete(view)
       for (const c of covers.values()) {
         if (c.view !== view) continue
         c.ready = false
@@ -231,9 +235,9 @@ export function createCovers<C extends CoverContent>(
     if (!view) return undefined
     c.view = view
     inUse.add(view)
-    // A pooled view that has loaded already is ready now.
-    const contents = viewContents(view)
-    if (contents && !contents.isLoading() && contents.getURL() !== '') c.ready = true
+    // A pooled view that has loaded already is ready now (`isLoading` can stay true for a frame of
+    // its last cover's, such as the print preview's).
+    c.ready = loaded.has(view)
     return view
   }
 
@@ -278,10 +282,14 @@ export function createCovers<C extends CoverContent>(
   const entryFor = (page: WebContents): Cover => {
     const existing = covers.get(page.id)
     if (existing) return existing
-    // The page has the keyboard while its cover shows: the cover takes it (KS-19).
+    // The page has the keyboard while its cover shows: the cover takes it (KS-19), just after the
+    // page's own focus change (one made during it is lost, as when its tab comes back).
     const onFocus = () => {
-      const c = covers.get(page.id)
-      if (c?.onScreen) viewContents(c.view)?.focus()
+      setImmediate(() => {
+        const c = covers.get(page.id)
+        if (!c?.onScreen || page.isDestroyed() || allContents.getFocusedWebContents() !== page) return
+        viewContents(c.view)?.focus()
+      })
     }
     const gone = () => {
       const c = covers.get(page.id)

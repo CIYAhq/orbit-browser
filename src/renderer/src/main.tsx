@@ -56,6 +56,21 @@ async function boot(): Promise<void> {
     )
     return
   }
+  // The print dialog over a page (pages lane, NV-07).
+  if (view === 'print') {
+    const app = import('./pages/PrintApp')
+    await initStore()
+    installShortcutFallback()
+    document.documentElement.dataset.view = view
+    document.documentElement.dataset.platform = window.orbit.platform
+    const { PrintApp } = await app
+    createRoot(document.getElementById('root') as HTMLElement).render(
+      <StrictMode>
+        <PrintApp />
+      </StrictMode>,
+    )
+    return
+  }
   // An internal page (DT-13): Orbit's UI in a normal tab. Keys go to it as to any page.
   if (view === 'internal') {
     const app = import('./internal/InternalApp')

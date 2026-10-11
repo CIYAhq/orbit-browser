@@ -18,8 +18,9 @@
  * In a web page's main frame, the page's `alert`, `confirm` and `prompt` ask main, which shows
  * Orbit's dialog over that page only (NV-24): Electron has no `prompt`, and shows the others as
  * app-wide boxes. A frame has no preload (D40), so a dialog a frame asks for itself is the engine's
- * own box (and a frame's `prompt` returns null). It also answers main about the leave-page warning
- * (`exposeLeave`).
+ * own box (and a frame's `prompt` returns null). Its `window.print()` opens Orbit's print dialog over
+ * the page (NV-07); a frame's is the engine's, the system's own dialog. It also answers main about
+ * the leave-page warning (`exposeLeave`).
  */
 import { contextBridge, ipcRenderer } from 'electron'
 import type { OrbitBridge, StatePatch } from '../shared/rpc'
@@ -46,7 +47,7 @@ const notificationClicked = () => {
  * the page's globals). Built-ins are taken up front, so a page that replaces them later can't reach
  * Orbit's functions through them.
  */
-function patchPage(stateOf: StateOf, clicked: () => void, ask: AskDialog) {
+function patchPage(stateOf: StateOf, clicked: () => void, ask: AskDialog, print: () => void) {
   // Calls go through the captured `apply`, never a function's own `.call`: a page that replaces
   // `Function.prototype.call` (or `Reflect.apply`) would otherwise receive Orbit's functions.
   const apply = Reflect.apply
@@ -182,9 +183,24 @@ function patchPage(stateOf: StateOf, clicked: () => void, ask: AskDialog) {
     // A Proxy keeps the engine's name, length and toString.
     define(window, name, { ...own, value: new Proxy(native, { apply: (_target, _self, args) => answer(args) }) })
   }
+
+  // window.print(): Orbit's print dialog over this page (NV-07), where the engine's would be the
+  // system's own dialog. It returns at once, and the page goes on while the dialog shows.
+  const nativePrint = window.print
+  const ownPrint = describe(window, 'print')
+  if (typeof nativePrint === 'function' && ownPrint?.configurable) {
+    const printNow = () => {
+      if (!going()) print()
+    }
+    define(window, 'print', { ...ownPrint, value: new Proxy(nativePrint, { apply: printNow }) })
+  }
 }
 
 type AskDialog = (kind: 'alert' | 'confirm' | 'prompt', message: string, value: string) => unknown
+
+const printDialog = () => {
+  ipcRenderer.send(PAGE_CHANNEL.print)
+}
 
 /** Set while Orbit probes the page's `beforeunload` (`exposeLeave`): the page's dialogs are ignored then. */
 let dismissing = false
@@ -399,7 +415,10 @@ if (location.protocol === 'orbit:') {
   }
 } else {
   try {
-    contextBridge.executeInMainWorld({ func: patchPage, args: [permissionState, notificationClicked, askDialog] })
+    contextBridge.executeInMainWorld({
+      func: patchPage,
+      args: [permissionState, notificationClicked, askDialog, printDialog],
+    })
   } catch {
     // A page without its own world to patch keeps the engine's answers.
   }

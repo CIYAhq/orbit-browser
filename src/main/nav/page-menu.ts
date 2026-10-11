@@ -5,6 +5,7 @@ import { type PageReferrer, referrerPolicyName } from '../../shared/nav'
 import { isPrivateTab } from '../../shared/private'
 import type { TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
+import { printPage } from '../pages/entry'
 import type { TabPage } from '../tabs/ops'
 import { NAV_WORLD } from './focus'
 
@@ -191,7 +192,8 @@ export function pageItems(ctx: MainContext, tabId: TabId, contents: WebContents)
         )
       },
     },
-    { label: 'Print…', click: () => contents.print() },
+    // Orbit's print dialog over the page (pages lane, NV-07).
+    { label: 'Print…', click: () => printPage(contents) },
     { type: 'separator' },
     {
       label: 'View Page Source',

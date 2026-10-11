@@ -212,6 +212,11 @@ export const PAGE_CHANNEL = {
    * (src/main/pages/dialogs.ts).
    */
   dialog: 'orbit-page:dialog',
+  /**
+   * send(): the page called `window.print()` (NV-07). Main shows Orbit's print dialog over that
+   * page, for a tab's or a pop-up's main frame only (src/main/pages/print.ts).
+   */
+  print: 'orbit-page:print',
 } as const
 
 /** A tab comes forward for its notifications' clicks at most this often (a flood can't stall the shell). */

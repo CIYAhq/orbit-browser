@@ -26,6 +26,7 @@ import { engineForWindow, parseInput } from '../../shared/url'
 import type { MainContext } from '../context'
 import { KEEP_KEYBOARD } from '../keys/focus'
 import { TAB_MENU_KEYS, withKeyHints } from '../keys/menu-hints'
+import { printPage } from '../pages/entry'
 import type { CallContext } from '../registry'
 import { tabSplitMenuItems } from '../split/menu'
 import { TabMaintenance } from './maintenance'
@@ -783,10 +784,8 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
       const contents = tabs.contents(tabId)
       if (contents) fn(contents)
     })
-  actions.register(
-    'page.print',
-    onContents((w) => w.print()),
-  )
+  // Orbit's print dialog over the page (pages lane, NV-07).
+  actions.register('page.print', onContents(printPage))
   actions.register(
     'page.viewSource',
     withActive((tabId, windowId) => {
