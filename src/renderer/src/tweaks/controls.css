@@ -79,7 +79,7 @@
     0 0 0 0.5px var(--tweak-line),
     0 6px 16px rgba(0, 0, 0, 0.16),
     0 1px 3px rgba(0, 0, 0, 0.1);
-  animation: tweak-menu-in 120ms var(--ease-out, ease-out);
+  animation: tweak-menu-in var(--motion-snappy) var(--ease-snappy);
   transform-origin: 0 0;
 }
 

@@ -40,7 +40,7 @@ html[data-view="tweak"] body {
   outline: none;
   user-select: none;
   overflow: hidden;
-  animation: tweak-panel-in 160ms var(--ease-out, ease-out);
+  animation: tweak-panel-in var(--motion-snappy) var(--ease-snappy);
   transform-origin: 100% 0;
 }
 
