@@ -106,6 +106,11 @@ interface WindowRecord {
    * the prompt and the small views above stay under it, with the page (setPageCover).
    */
   cover?: WebContentsView
+  /**
+   * Pages no longer wanted that stay shown, where they were, over a view held out of sight until
+   * its page has drawn (holdArrivals); they hide once it shows.
+   */
+  lingering: Set<TabId>
 }
 
 /** A tab view placed in a window. */
@@ -118,6 +123,8 @@ interface Attachment {
 
 /** How long the overlay view stays up after closing so its exit animation can play (FL-16). */
 const OVERLAY_EXIT_MS = 110
+/** The longest a view coming back into a window stays out of sight, waiting for its page to draw (holdArrivals). */
+const HOLD_MS = 250
 /** The page tools' renderer starts this long after the window shows (NV-05: ⌘F finds the bar ready). */
 const TOOLS_PREWARM_MS = 1500
 
@@ -223,6 +230,9 @@ export class WindowManager {
   /** Tabs whose page closed its own web contents (window.close()): not reopened until selected again. */
   private selfClosed = new Set<TabId>()
   private floatingOwners: ((tabId: TabId) => WindowId | undefined)[] = []
+  private arrivalHolds: ((tabId: TabId, view: WebContentsView) => Promise<unknown> | undefined)[] = []
+  /** Views held out of sight under their window's pages (holdArrivals). */
+  private held = new Map<TabId, { view: WebContentsView; windowId: WindowId; timer: ReturnType<typeof setTimeout> }>()
   /**
    * Views that stay above the page tools wherever either goes: a page's own dialog or print dialog
    * over its page, in a tab or a Peek (pages lane, NV-24, NV-07; keepAboveTools()).
@@ -291,6 +301,17 @@ export class WindowManager {
    */
   addFloatingOwner(owner: (tabId: TabId) => WindowId | undefined): void {
     this.floatingOwners.push(owner)
+  }
+
+  /**
+   * A feature that lends a tab's view to a window of its own (the floating player) can hold it out
+   * of sight when it comes back into a window: until the promise it returns settles, or HOLD_MS.
+   * A view whose size changed shows the last frame its page drew until the page draws at the new
+   * size, so meanwhile it sits at its place under the pages the window showed, which stay (MD-01:
+   * never a frame of the player's layout in the page area).
+   */
+  holdArrivals(hold: (tabId: TabId, view: WebContentsView) => Promise<unknown> | undefined): void {
+    this.arrivalHolds.push(hold)
   }
 
   private floatingWindowOf(tabId: TabId): WindowId | undefined {
@@ -423,6 +444,7 @@ export class WindowManager {
       promptShown: false,
       promptReady: false,
       uiViews: new Set(),
+      lingering: new Set(),
     }
     this.records.set(id, rec)
     // macOS: the traffic lights live in the sidebar's top row (SB-20).
@@ -507,6 +529,7 @@ export class WindowManager {
       viewContents(rec.prompt)?.close()
       for (const view of rec.uiViews) viewContents(view)?.close()
       rec.uiViews.clear()
+      for (const [tabId, hold] of [...this.held]) if (hold.windowId === id) this.dropHold(tabId)
       this.records.delete(id)
       for (const [tabId, entry] of [...this.attached]) {
         if (entry.windowId === id) {
@@ -674,12 +697,7 @@ export class WindowManager {
     // Native full screen has no frame: square corners (SB-19).
     const corner = this.ctx.store.state.windows[windowId]?.fullscreen ? 0 : radius
     const wanted = new Set(panes.map((p) => p.tabId))
-    for (const tabId of rec.visible) {
-      if (wanted.has(tabId)) continue
-      // Only hide what this window holds: the view may have moved to another window since.
-      const entry = this.attached.get(tabId)
-      if (entry?.windowId === rec.id) entry.view.setVisible(false)
-    }
+    for (const [tabId, hold] of [...this.held]) if (hold.windowId === rec.id && !wanted.has(tabId)) this.dropHold(tabId)
     const shownBefore = rec.visible
     for (const pane of panes) {
       // A page that closed itself stays closed until the tab is selected again (onState).
@@ -694,6 +712,18 @@ export class WindowManager {
       // A tab whose page crashed while in the background shows its crash screen when it is shown
       // again, until the user reloads it (NV-14: the pages lane's screen over the page).
     }
+    // While a view coming back is held out of sight (holdArrivals), the pages shown before stay over it.
+    const holding = [...this.held.values()].filter((h) => h.windowId === rec.id)
+    for (const tabId of new Set([...rec.visible, ...rec.lingering])) {
+      rec.lingering.delete(tabId)
+      if (wanted.has(tabId)) continue
+      // Only hide what this window holds: the view may have moved to another window since.
+      const entry = this.attached.get(tabId)
+      if (entry?.windowId !== rec.id) continue
+      if (holding.length > 0) rec.lingering.add(tabId)
+      else entry.view.setVisible(false)
+    }
+    for (const hold of holding) this.placeUnder(rec, hold.view)
     rec.visible = wanted
     if (panes.length === 1) rec.lastSingleRect = panes[0]?.rect
     if (rec.htmlFullscreen) this.layoutHtmlFullscreen(rec, wanted)
@@ -1097,6 +1127,7 @@ export class WindowManager {
 
   /** Removes a (sleeping, closing or replaced) tab view from whatever window holds it. Safe for destroyed views. */
   detachView(tabId: TabId, view: WebContentsView): void {
+    if (this.held.get(tabId)?.view === view) this.dropHold(tabId)
     const entry = this.attached.get(tabId)
     if (entry?.view === view) {
       this.attached.delete(tabId)
@@ -1173,6 +1204,7 @@ export class WindowManager {
     const current = this.attached.get(tabId)
     const children = rec.win.contentView.children
     if (current?.view === view && current.windowId === rec.id && children.includes(view)) return
+    const arriving = !children.includes(view)
     let loser: WindowRecord | undefined
     if (current && current.view !== view) {
       this.removeEverywhere(current.view)
@@ -1186,6 +1218,7 @@ export class WindowManager {
     this.placeOnTop(rec, view)
     this.attached.set(tabId, { view, windowId: rec.id, contentsId: view.webContents.id })
     this.selfClosed.delete(tabId)
+    if (arriving) this.holdIfAsked(rec, tabId, view)
     if (loser && !loser.win.isDestroyed()) {
       this.applyPanes(
         loser.id,
@@ -1250,6 +1283,48 @@ export class WindowManager {
     } catch (err) {
       console.error('[windows] could not remove a view:', err)
     }
+  }
+
+  /** A view just came into the window: held out of sight if a feature asks (holdArrivals). */
+  private holdIfAsked(rec: WindowRecord, tabId: TabId, view: WebContentsView): void {
+    for (const ask of this.arrivalHolds) {
+      const ready = ask(tabId, view)
+      if (!ready) continue
+      this.dropHold(tabId)
+      const shown = () => this.unhold(tabId, view)
+      this.held.set(tabId, { view, windowId: rec.id, timer: setTimeout(shown, HOLD_MS) })
+      ready.then(shown, shown)
+      return
+    }
+  }
+
+  /** The held view's page has drawn (or HOLD_MS passed): its window lays out again and shows it. */
+  private unhold(tabId: TabId, view: WebContentsView): void {
+    const hold = this.held.get(tabId)
+    if (hold?.view !== view) return
+    this.dropHold(tabId)
+    const rec = this.records.get(hold.windowId)
+    if (rec && !rec.win.isDestroyed()) this.applyPanes(rec.id, rec.panes, rec.radius)
+  }
+
+  private dropHold(tabId: TabId): void {
+    clearTimeout(this.held.get(tabId)?.timer)
+    this.held.delete(tabId)
+  }
+
+  /** Puts a held view under the window's other shown pages, if it isn't already. */
+  private placeUnder(rec: WindowRecord, view: WebContentsView): void {
+    const parent = rec.win.contentView
+    const children = parent.children
+    const at = children.indexOf(view)
+    let floor = -1
+    for (const entry of this.attached.values()) {
+      if (entry.windowId !== rec.id || entry.view === view || !entry.view.getVisible()) continue
+      const i = children.indexOf(entry.view)
+      if (i >= 0 && (floor < 0 || i < floor)) floor = i
+    }
+    if (at < 0 || floor < 0 || at < floor) return
+    parent.addChildView(view, floor)
   }
 
   /** Follows a tab's live web contents: fullscreen requests, and pages that close themselves. */

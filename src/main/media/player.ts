@@ -6,9 +6,11 @@
  * page's top layer at the player's size at the top-left of the page; the window shows just that
  * corner. Orbit's controls (renderer view "pip") sit in a transparent view on top.
  *
- * Returning to the tab needs nothing from here: the window manager attaches the tab's view to its
- * window again (taking it out of this one), and the page puts the video back on that very frame
- * (see agent.ts). The player then just hides. Closing the player (×) hides it and leaves the view
+ * Returning to the tab: the window manager attaches the tab's view to its window again (taking it
+ * out of this one), and the page puts the video back on that very frame (see agent.ts). Until the
+ * page has drawn that layout, the view stays out of sight under the pages its window showed
+ * (arriving(), WindowManager.holdArrivals): never a frame of the player's layout in the page area
+ * (MD-01). The player then just hides. Closing the player (×) hides it and leaves the view
  * detached, like any background tab, so the media plays on as audio (MD-07).
  */
 import {
@@ -218,6 +220,7 @@ export class PipPlayer {
 
     screen.on('display-removed', () => this.refit())
     screen.on('display-metrics-changed', () => this.refit())
+    ctx.windows.holdArrivals((tabId, view) => this.arriving(tabId, view))
   }
 
   /** The tab whose video is in the player. */
@@ -370,6 +373,17 @@ export class PipPlayer {
     this.watchDialogs()
     this.host.changed(tabId, true, opts.auto)
     return true
+  }
+
+  /**
+   * The video's view goes back into a window (its tab was selected again, or Back to tab): it stays
+   * out of sight there until its page has put the video back and drawn at its size (MD-01). Until
+   * then the view would show the last frame the page drew: black, with the video small at its top-left.
+   */
+  private arriving(tabId: TabId, view: WebContentsView): Promise<unknown> | undefined {
+    const s = this.session
+    if (s?.tabId !== tabId || s.view !== view) return undefined
+    return this.host.call(tabId, 'drawn')
   }
 
   private isShown(tabId: TabId): boolean {

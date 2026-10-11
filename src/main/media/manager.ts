@@ -792,6 +792,8 @@ export class MediaManager {
     const target = agents[agents.length - 1]
     if (!target) return undefined
     if (fn === 'lift' && chain && agents.length > 1) return (await this.liftChain(tabId, chain, args[0])) as T
+    // Back in its window: every document on the way has drawn with the video back in it (MD-01).
+    if (fn === 'drawn') return (await Promise.all(agents.map((a) => this.exec(a, 'drawn')))) as T
     if (fn === 'drop') {
       const done = await Promise.all(agents.map((a) => this.exec(a, 'drop')))
       return done[done.length - 1] as T
