@@ -1045,12 +1045,21 @@ test('[DT-13][NV-08][NV-09][NV-12] a web page has Orbit open no internal page: n
   const web = fx.url(`/page/Web?away=${encodeURIComponent(internal)}`)
   const id = await openTab(app, web)
   const tab = await tabPage(app, '/page/Web')
-  await tab.evaluate(() => {
-    document.body.insertAdjacentHTML(
-      'afterbegin',
-      '<img id="internal" src="orbit://pages/" alt="Pages" width="48" height="48">',
-    )
-  })
+  // The page can't load the picture (D53). Its box shrinks once the load fails, and the link below
+  // it moves up, so the clicks wait for that: they aim at the link once, where it was then.
+  const picture = await tab.evaluate(
+    () =>
+      new Promise<string>((resolve) => {
+        document.body.insertAdjacentHTML(
+          'afterbegin',
+          '<img id="internal" src="orbit://pages/" alt="Pages" width="48" height="48">',
+        )
+        const img = document.getElementById('internal') as HTMLImageElement
+        img.addEventListener('error', () => resolve('error'), { once: true })
+        img.addEventListener('load', () => resolve('load'), { once: true })
+      }),
+  )
+  expect(picture).toBe('error')
   const orbitTabs = async () =>
     Object.values((await state(app)).tabs)
       .filter((t) => t.url.toLowerCase().startsWith('orbit:'))
