@@ -73,6 +73,8 @@ interface WindowTools {
   hovered: boolean
   /** What the view was last told, so a layout pass doesn't repeat it. */
   sent?: string
+  /** The view is leaving the window: its page draws itself empty first, and says so with `away` (NV-06). */
+  leaving?: { away: number; drawn: () => void }
 }
 
 /** A key typed for the find bar before its field had the keyboard (F4). */
@@ -158,6 +160,7 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
   const tools = new Map<WindowId, WindowTools>()
   let focusNonce = 0
   let zoomNonce = 0
+  let awayNonce = 0
 
   const windowOf = (c: CallContext): WindowId | undefined => c.windowId ?? windows.focusedWindowId()
   const toolsOf = (windowId: WindowId): WindowTools => {
@@ -218,7 +221,7 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
     if (!(find.open || zoom) || !page || windows.inHtmlFullscreen(windowId)) {
       // Nothing is under the pointer once the view has gone.
       if (t) t.hovered = false
-      windows.hideTools(windowId)
+      leave(windowId)
       return 'hidden'
     }
     const contents = windows.toolsContents(windowId)
@@ -235,6 +238,27 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
     return windows.showTools(windowId, toolsBounds(page, find.open, !!zoom), { top: !!target?.peek })
       ? 'placed'
       : 'loading'
+  }
+
+  /**
+   * Takes a window's page tools out of the window. A view put back in the window shows the last
+   * frame it drew until it draws again, so the next find bar or zoom indicator would show the old
+   * one first (NV-06): their page draws itself empty first, and the view leaves once it says so.
+   */
+  const leave = (windowId: WindowId) => {
+    const contents = windows.toolsInfo(windowId).placed ? windows.toolsContents(windowId) : undefined
+    if (!contents) {
+      windows.hideTools(windowId)
+      return
+    }
+    const state = toolsOf(windowId)
+    const payload = { find: CLOSED, zoom: null, away: ++awayNonce }
+    state.sent = JSON.stringify(payload)
+    contents.send('orbit:pageTools', payload)
+    const drawn = new Promise<void>((resolve) => {
+      state.leaving = { away: payload.away, drawn: resolve }
+    })
+    windows.hideTools(windowId, drawn)
   }
 
   // ---------- Keys typed before the find bar can take them (round 2 fix check, F4) ----------
@@ -609,6 +633,14 @@ export function registerPageTools(ctx: MainContext, prefs: SitePrefs): { info: (
     t.hovered = over
     clearTimeout(t.zoomTimer)
     t.zoomTimer = !over && t.zoom ? setTimeout(() => hideZoom(windowId), ZOOM_INDICATOR_MS) : undefined
+  })
+  // The page tools have drawn themselves empty: their view can leave the window (NV-06).
+  commands.register('pageTools.drawn', ({ away }, c) => {
+    const windowId = windowOf(c)
+    const t = windowId ? tools.get(windowId) : undefined
+    if (t?.leaving?.away !== away) return
+    t.leaving.drawn()
+    t.leaving = undefined
   })
 
   // The tools follow the active page: tab switches, resizes, splits and full screen.

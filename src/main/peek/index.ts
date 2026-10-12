@@ -9,7 +9,7 @@ import type {
 import { WebContentsView } from 'electron'
 import { sidebarUndoFor } from '../../shared/actions'
 import { decideLink, type LinkHow, type LinkSettings, type LinkSource, routeFor } from '../../shared/link-routing'
-import { PEEK_RADIUS, peekCard, peekStart } from '../../shared/peek-geometry'
+import { PEEK_RADIUS, peekCard, splitTarget } from '../../shared/peek-geometry'
 import { isPrivateTab } from '../../shared/private'
 import type { Rect } from '../../shared/rpc'
 import { layoutLeaves, MAX_PANES, SPLIT_FULL_MESSAGE } from '../../shared/split'
@@ -26,7 +26,12 @@ import { archiveFloating, floatingTab, keepFloatingPagesOutOfTabClose } from './
 import { ClickTracker, heldModifiers, isMiniClick, PAGE_WORLD, type PageClick } from './input'
 import { runPageAction, setPeekPages } from './page-actions'
 
-/** A Peek card open in a window: a floating tab whose view sits above the overlay, in the card. */
+/**
+ * A Peek card open in a window: a floating tab whose view sits above the overlay, on the card once
+ * the card is at rest. While the card moves (opening, dragged, closing, expanding), the overlay
+ * animates a still of the page and the view waits out of sight, at the size it shows at next, so its
+ * page is laid out once and never every frame (PK-06, FL-01).
+ */
 interface Session {
   windowId: WindowId
   tabId: TabId
@@ -37,13 +42,16 @@ interface Session {
   phase: 'open' | 'closing' | 'expanding' | 'splitting'
   /** The page area the overlay covers (window coordinates). */
   area: Rect
-  /** Last card rect and radius applied to the view (window coordinates). */
-  rect?: Rect
-  radius: number
+  /** The page view is on the card (the card is at rest); otherwise it is out of sight. */
+  shown: boolean
+  /** Shows the page on its card if the overlay never says where it goes (its renderer still starting). */
+  revealTimer?: NodeJS.Timeout
   /** The page is in HTML fullscreen (a video): its view covers the window. */
   fullscreen: boolean
   /** Commits the running transition if the overlay never reports it finished. */
   settleTimer?: NodeJS.Timeout
+  /** Takes the next still of the page for the overlay's card. */
+  stillTimer?: NodeJS.Timeout
   /** The page's background colour, for the card the overlay fades out on close. */
   background?: string
 }
@@ -71,8 +79,27 @@ export function openLinkInPeek(tabId: TabId, url: string): void {
 const UNDO_WINDOW_MS = 10_000
 /** How long a transition may run before main commits it anyway (overlay gone, reduced motion…). */
 const SETTLE_MS = 600
+/**
+ * Stills of the page for the overlay's card (PK-06), taken only while the page shows on the card at
+ * rest (a capture can cost the overlay a frame, so never while the card moves): the first just after
+ * the page joins the card, then again a moment after anything changed it (a load, a scroll, a key).
+ */
+const STILL_FIRST_MS = 40
+const STILL_AFTER_MS = 200
+/** Input that may change what a page shows (pointer moves don't count). */
+const STILL_INPUTS = new Set(['mouseUp', 'mouseWheel', 'keyUp', 'gestureScrollEnd', 'gestureFlingStart', 'touchEnd'])
 
 let nonceCounter = 0
+
+/**
+ * The page of the Peek's view while it is alive. Once the page has gone (it closed itself, or its tab
+ * went to sleep), `view.webContents` reads undefined, even before 'destroyed' fires: it is checked
+ * before anything is called on it (D28).
+ */
+function pageOf(view: WebContentsView | undefined): WebContents | undefined {
+  const contents = view?.webContents as WebContents | undefined
+  return contents && !contents.isDestroyed() ? contents : undefined
+}
 
 export function registerPeek(ctx: MainContext): void {
   const { store, commands, actions, windows, tabs } = ctx
@@ -157,7 +184,7 @@ export function registerPeek(ctx: MainContext): void {
       nonce,
       phase: 'open',
       area,
-      radius: PEEK_RADIUS,
+      shown: false,
       fullscreen: false,
     }
     sessions.set(windowId, session)
@@ -184,43 +211,94 @@ export function registerPeek(ctx: MainContext): void {
     } catch (err) {
       console.error('[peek] could not create the page', err)
     }
-    if (!view) {
+    if (!pageOf(view)) {
       discard(session)
       return null
     }
-    place(session, view, origin)
+    place(session, view as WebContentsView)
     return tab.id
   }
 
-  /** Puts the Peek's page view above the overlay, at the start of the open animation. */
-  const place = (s: Session, view: WebContentsView, origin?: { x: number; y: number }) => {
+  /**
+   * Puts the Peek's page view above the overlay, out of sight at the card's size while the overlay
+   * grows the card: the page loads, lays out and draws there once, and shows when the card is at rest.
+   */
+  const place = (s: Session, view: WebContentsView) => {
     const win = windows.get(s.windowId)
-    if (!win || win.isDestroyed()) return
+    const page = pageOf(view)
+    if (!win || win.isDestroyed() || !page) return
     s.view = view
-    const card = peekCard(s.area)
-    const start = peekStart(card, s.area, origin)
-    s.rect = toWindow(s, start)
-    view.setBounds(roundRect(s.rect))
     view.setBorderRadius(PEEK_RADIUS)
-    view.setVisible(true)
+    placeView(s)
     win.contentView.addChildView(view)
-    view.webContents.focus()
-    // Whatever the overlay does, the card ends at its place.
-    s.settleTimer = setTimeout(() => {
-      if (sessions.get(s.windowId) !== s || s.phase !== 'open' || s.fullscreen) return
-      applyRect(s, toWindow(s, peekCard(s.area)), PEEK_RADIUS, true)
+    page.focus()
+    // Whatever the overlay does, the page ends on its card.
+    s.revealTimer = setTimeout(() => {
+      if (sessions.get(s.windowId) !== s || s.phase !== 'open' || s.shown) return
+      s.shown = true
+      placeView(s)
+      stillSoon(s, STILL_FIRST_MS)
     }, SETTLE_MS)
   }
 
-  const applyRect = (s: Session, rect: Rect, radius: number, visible: boolean) => {
+  /**
+   * Puts the page view where the session's phase wants it: on the card at rest, or out of sight.
+   * Out of sight, all of it but its corner pixel is outside the window, so its page still lays out
+   * and draws, at the size it shows at next (a view wholly outside, or hidden, is given no size and
+   * draws nothing). Closing, it hides: it is going. A view whose page has gone is left be: the Peek
+   * closes with its page.
+   */
+  const placeView = (s: Session) => {
     const view = s.view
-    if (!view || view.webContents.isDestroyed()) return
-    s.rect = rect
-    s.radius = radius
-    if (s.fullscreen) return
-    view.setBounds(roundRect(rect))
-    view.setBorderRadius(Math.round(radius))
-    if (view.getVisible() !== visible) view.setVisible(visible)
+    const win = windows.get(s.windowId)
+    if (!view || !pageOf(view) || !win || win.isDestroyed() || s.fullscreen) return
+    if (s.phase === 'closing') {
+      if (view.getVisible()) view.setVisible(false)
+      return
+    }
+    const card = roundRect(toWindow(s, peekCard(s.area)))
+    if (s.phase === 'open' && s.shown) {
+      view.setBounds(card)
+    } else {
+      const next =
+        s.phase === 'expanding' ? s.area : s.phase === 'splitting' ? roundRect(toWindow(s, splitTarget(s.area))) : card
+      const [width = 0, height = 0] = win.getContentSize()
+      view.setBounds({ x: width - 1, y: height - 1, width: next.width, height: next.height })
+    }
+    if (!view.getVisible()) view.setVisible(true)
+  }
+
+  /**
+   * The page crashed, or its main frame failed to load (the tab's error, until it loads again):
+   * Orbit's screen shows over its view, and a still would be of a page that has gone, or of a blank
+   * one. The overlay drops the one it has (dropStill), so a card that moves or fades shows its own
+   * colour (PK-06), and none is taken meanwhile.
+   */
+  const broken = (s: Session) => !!store.state.tabs[s.tabId]?.error
+
+  /** Takes a still of the page and gives it to the overlay, for the card to show while the view is out of sight. */
+  const takeStill = async (s: Session) => {
+    const contents = s.view?.webContents
+    if (!contents || contents.isDestroyed() || broken(s) || s.fullscreen || s.phase !== 'open' || !s.shown) return
+    try {
+      const image = await contents.capturePage()
+      if (sessions.get(s.windowId) !== s || s.phase !== 'open' || broken(s) || image.isEmpty()) return
+      const url = `data:image/jpeg;base64,${image.toJPEG(85).toString('base64')}`
+      windows.sendToOverlay(s.windowId, 'peek:still', { nonce: s.nonce, url })
+    } catch {
+      // The page went away: the card keeps the still it has, or its colour.
+    }
+  }
+
+  const stillSoon = (s: Session, ms: number) => {
+    clearTimeout(s.stillTimer)
+    s.stillTimer = setTimeout(() => void takeStill(s), ms)
+  }
+
+  /** The page shows an error now (broken()): the card drops its still and shows its own colour. */
+  const dropStill = (s: Session) => {
+    clearTimeout(s.stillTimer)
+    windows.sendToOverlay(s.windowId, 'peek:still', { nonce: s.nonce, url: '' })
   }
 
   // ---- Closing, expanding, splitting ----
@@ -261,8 +339,10 @@ export function registerPeek(ctx: MainContext): void {
       windows.focusActiveTab(windowId)
       return
     }
+    // The page goes at once; the card, showing its still, shrinks and fades out on its own (FL-19).
+    placeView(s)
     setOverlay(s, { phase: 'closing' })
-    // Keys go to the page underneath at once; the card fades out on its own.
+    // Keys go to the page underneath at once.
     windows.focusActiveTab(windowId)
     s.settleTimer = setTimeout(() => discard(s), SETTLE_MS)
     sampleBackground(s)
@@ -271,6 +351,8 @@ export function registerPeek(ctx: MainContext): void {
   /** Removes the Peek: its view, its tab and the overlay. */
   const discard = (s: Session) => {
     clearTimeout(s.settleTimer)
+    clearTimeout(s.revealTimer)
+    clearTimeout(s.stillTimer)
     if (sessions.get(s.windowId) === s) sessions.delete(s.windowId)
     const view = s.view
     const win = windows.get(s.windowId)
@@ -295,7 +377,10 @@ export function registerPeek(ctx: MainContext): void {
     if (s?.phase !== 'open') return
     s.phase = 'expanding'
     clearTimeout(s.settleTimer)
+    clearTimeout(s.revealTimer)
     ctx.perf.mark('peek:expand')
+    // Out of sight, the page lays out at the page area's size while the card grows to it.
+    placeView(s)
     setOverlay(s, { phase: 'expanding' })
     s.settleTimer = setTimeout(() => commitExpand(s), SETTLE_MS)
   }
@@ -303,6 +388,8 @@ export function registerPeek(ctx: MainContext): void {
   /** The Peek's page becomes an ordinary tab, live (no reload): top of Today, selected. */
   const commitExpand = (s: Session) => {
     clearTimeout(s.settleTimer)
+    clearTimeout(s.revealTimer)
+    clearTimeout(s.stillTimer)
     if (sessions.get(s.windowId) !== s) return
     sessions.delete(s.windowId)
     const state = store.state
@@ -362,12 +449,17 @@ export function registerPeek(ctx: MainContext): void {
     }
     s.phase = 'splitting'
     clearTimeout(s.settleTimer)
+    clearTimeout(s.revealTimer)
+    // Out of sight, the page lays out at its pane's size while the card slides there.
+    placeView(s)
     setOverlay(s, { phase: 'splitting' })
     s.settleTimer = setTimeout(() => commitSplit(s), SETTLE_MS)
   }
 
   const commitSplit = (s: Session) => {
     clearTimeout(s.settleTimer)
+    clearTimeout(s.revealTimer)
+    clearTimeout(s.stillTimer)
     if (sessions.get(s.windowId) !== s) return
     const state = store.state
     const source = state.tabs[s.sourceTabId]
@@ -497,11 +589,16 @@ export function registerPeek(ctx: MainContext): void {
     else if (s.phase === 'splitting') commitSplit(s)
   })
 
-  // The overlay animates the card; the page view follows it every frame.
-  ctx.events.on('peek.frame', ({ nonce, rect, radius, visible }, { windowId }) => {
+  // The overlay animates the card: the page shows on it once it is at rest, and waits out of sight
+  // while it moves (a drag, a swipe).
+  ctx.events.on('peek.page', ({ nonce, shown }, { windowId }) => {
     const s = sessions.get(windowId ?? '')
     if (!s || s.nonce !== nonce) return
-    applyRect(s, toWindow(s, rect), radius, visible)
+    clearTimeout(s.revealTimer)
+    if (s.phase !== 'open' || s.shown === shown) return
+    s.shown = shown
+    placeView(s)
+    if (shown) stillSoon(s, STILL_FIRST_MS)
   })
   // The page area moved or resized (sidebar toggled, window resized): the card follows.
   ctx.events.on('layout.panes', (_payload, { windowId }) => {
@@ -511,14 +608,15 @@ export function registerPeek(ctx: MainContext): void {
     if (!area || sameRect(area, s.area)) return
     s.area = area
     setOverlay(s, { area: { width: area.width, height: area.height } })
-    if (s.phase === 'open') applyRect(s, toWindow(s, peekCard(area)), PEEK_RADIUS, true)
+    placeView(s)
+    if (s.phase === 'open' && s.shown) stillSoon(s, STILL_AFTER_MS)
   })
 
   // Find in page acts on the open Peek's page, over the top-right corner of its card (PK-11).
   setPeekPages((windowId) => {
     const s = sessions.get(windowId)
     const area = windows.pageArea(windowId) ?? s?.area
-    if (s?.phase !== 'open' || s.fullscreen || !s.view || !area) return undefined
+    if (s?.phase !== 'open' || s.fullscreen || !pageOf(s.view) || !area) return undefined
     const card = peekCard(area)
     return { tabId: s.tabId, card: { ...card, x: area.x + card.x, y: area.y + card.y } }
   })
@@ -587,6 +685,8 @@ export function registerPeek(ctx: MainContext): void {
       if (s.phase === 'open' && activeTabOf(next, s.windowId) !== s.sourceTabId) {
         queueMicrotask(() => closePeek(s.windowId, { animate: false }))
       }
+      const error = next.tabs[s.tabId]?.error
+      if (error && error !== prev.tabs[s.tabId]?.error) dropStill(s)
     }
   })
 
@@ -778,10 +878,21 @@ export function registerPeek(ctx: MainContext): void {
 
   ctx.hooks.tabCreated.push((tabId, contents) => {
     clicks.watch(contents)
-    // A Peek page that closes itself (window.close()) takes its card with it.
+    // The overlay's still of a Peek's page is taken again once the page has drawn a change (PK-06).
+    const changed = () => {
+      const s = sessionOfTab(tabId)
+      if (s?.phase === 'open' && s.shown && s.view?.webContents === contents) stillSoon(s, STILL_AFTER_MS)
+    }
+    contents.on('did-stop-loading', changed)
+    contents.on('did-navigate-in-page', changed)
+    contents.on('input-event', (_e, input) => {
+      if (STILL_INPUTS.has(input.type)) changed()
+    })
+    // A Peek page that closes itself (window.close()), or goes some other way (its tab put to sleep),
+    // takes its card with it. By now its view may read no page at all: that counts as this one gone.
     contents.once('destroyed', () => {
       const s = sessionOfTab(tabId)
-      if (s && s.view?.webContents === contents && sessions.get(s.windowId) === s) discard(s)
+      if (s?.view && (s.view.webContents === contents || !pageOf(s.view)) && sessions.get(s.windowId) === s) discard(s)
     })
     contents.on('will-navigate', (event) => onWillNavigate(tabId, contents, event))
     contents.on('before-input-event', (event, input) => onKey(tabId, event, input))
@@ -789,7 +900,7 @@ export function registerPeek(ctx: MainContext): void {
     contents.on('enter-html-full-screen', () => {
       const s = sessionOfTab(tabId)
       const win = s && windows.get(s.windowId)
-      if (!s?.view || !win) return
+      if (!s?.view || !pageOf(s.view) || !win) return
       s.fullscreen = true
       const [width = 0, height = 0] = win.getContentSize()
       s.view.setBounds({ x: 0, y: 0, width, height })
@@ -799,7 +910,8 @@ export function registerPeek(ctx: MainContext): void {
       const s = sessionOfTab(tabId)
       if (!s?.view || !s.fullscreen) return
       s.fullscreen = false
-      if (s.rect) applyRect(s, s.rect, s.radius, true)
+      s.view.setBorderRadius(PEEK_RADIUS)
+      placeView(s)
     })
   })
 }

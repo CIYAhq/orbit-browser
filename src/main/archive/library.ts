@@ -5,8 +5,13 @@ import type { OrbitState, SpaceId, TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import { activeTabOf, loadRenderer, rendererEntry, uiWebPreferences } from '../windows'
 
-/** The Library fades out over this long before its view hides (FL-24). */
-const EXIT_MS = 180
+/**
+ * The Library fades out when it closes (FL-24), and its view hides once its page says it has drawn
+ * itself at opacity 0 (`library.drawn`): a view put back in the window shows the last frame it drew
+ * until it draws again, so one that left mid-fade would show that frame first at the next open. A
+ * page that hasn't said so after this long (its renderer stuck) has its view hidden anyway.
+ */
+const EXIT_FALLBACK_MS = 500
 const DEFAULT_RADIUS = 10
 /**
  * A main window's Library view is made this long after the window first lays out, once Orbit is
@@ -29,6 +34,8 @@ interface LibraryWindow {
   /** The command bar, a menu or a Peek is over the window: when it goes, the Library takes the keys back. */
   overlay?: boolean
   hideTimer?: ReturnType<typeof setTimeout>
+  /** Closing: the view hides once its page has drawn the fade's end for this close (`away`). */
+  leaving?: { away: number; done: () => void }
 }
 
 /**
@@ -61,6 +68,7 @@ export class LibraryHost {
   private frames = new Map<WindowId, Rect>()
   private radii = new Map<WindowId, number>()
   private nonce = 0
+  private awayNonce = 0
   /** Windows whose Library view is made (or waits to be made) once Orbit is idle. */
   private idleScheduled = new Set<WindowId>()
   /** Called when the Library opens, closes or changes section in a window. */
@@ -139,6 +147,7 @@ export class LibraryHost {
     const page = pageOf(view)
     if (!page) return false
     clearTimeout(w.hideTimer)
+    w.leaving = undefined
     const section = args.section || this.sections.last()
     if (section !== this.sections.last()) this.sections.remember(section)
     const entering = !w.open
@@ -173,17 +182,26 @@ export class LibraryHost {
     w.open = false
     const view = w.view
     const page = pageOf(view)
-    if (view && page) {
-      page.send('orbit:library:hide', {})
-      clearTimeout(w.hideTimer)
-      // The page's own views count as covered until the Library's view has hidden: a permission
-      // prompt it uncovers takes no click before its choices have waited again (NV-15).
-      w.hideTimer = setTimeout(() => {
+    clearTimeout(w.hideTimer)
+    w.leaving = undefined
+    if (view && page && !page.isCrashed()) {
+      // The view hides once its page has drawn itself faded out (EXIT_FALLBACK_MS). The page's own
+      // views count as covered until then: a permission prompt it uncovers takes no click before
+      // its choices have waited again (NV-15).
+      const away = ++this.awayNonce
+      const done = () => {
+        if (w.leaving?.away !== away) return
+        clearTimeout(w.hideTimer)
+        w.leaving = undefined
         if (w.open) return
         if (pageOf(view)) view.setVisible(false)
         this.ctx.windows.setPageCover(windowId, undefined)
-      }, EXIT_MS)
+      }
+      w.leaving = { away, done }
+      w.hideTimer = setTimeout(done, EXIT_FALLBACK_MS)
+      page.send('orbit:library:hide', { away })
     } else {
+      if (view && page) view.setVisible(false)
       this.ctx.windows.setPageCover(windowId, undefined)
     }
     const win = this.ctx.windows.get(windowId)
@@ -191,6 +209,12 @@ export class LibraryHost {
       this.ctx.windows.focusActiveTab(windowId)
     }
     this.onChange?.(windowId, false, w.show.section)
+  }
+
+  /** The Library's page has drawn itself faded out for the close `away`: its view leaves the window (FL-24). */
+  drawn(windowId: WindowId | undefined, away: number): void {
+    const w = windowId ? this.wins.get(windowId) : undefined
+    if (w?.leaving?.away === away) w.leaving.done()
   }
 
   /** The section shown changed inside the Library: it reopens there (AR-02). */

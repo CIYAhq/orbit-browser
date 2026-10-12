@@ -567,6 +567,7 @@ describe('the action catalogue (CB-13)', () => {
     // Sidebar and window
     ['Toggle Sidebar', 'sidebar.toggle'],
     ['New Window', 'window.new'],
+    ['New Blank Window', 'window.newBlank'],
     ['New Private Window', 'window.newPrivate'],
     ['New Mini Window', 'window.newMini'],
     ['Collapse Pinned', 'pinned.toggleCollapsed'],

@@ -234,6 +234,8 @@ export interface ArchiveCommands {
   'library.open': { args: LibraryOpenArgs; result: void }
   /** Closes the Library (Esc, ⌘W, the Library button again). */
   'library.close': { args: Record<string, never>; result: void }
+  /** The Library's page has drawn itself faded out after `library:hide` `away`: its view can leave (FL-24). */
+  'library.drawn': { args: { away: number }; result: void }
   /** The Library button: opens or closes it (SB-09). */
   'library.toggle': { args: Record<string, never>; result: void }
   /** Loads the calling window's Library view ahead of an open (the pointer is on the Library button). */

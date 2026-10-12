@@ -20,8 +20,13 @@ html[data-view="library"] body {
   overflow: hidden;
 }
 
+/*
+ * Closed, or made ahead of its first open, it draws nothing (AR-02): a view shown again starts from
+ * the last frame it drew, and one never shown draws its first frame before it hears what to show.
+ */
 .library[data-open="false"] {
   pointer-events: none;
+  opacity: 0;
 }
 
 .library[data-dark="true"] {

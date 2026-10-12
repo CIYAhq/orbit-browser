@@ -589,6 +589,9 @@ export class MediaManager {
     const snap = t && combineSnapshots(this.reports(t))
     const tab = state.tabs[tabId]
     if (!t || !snap || !tab?.media || t.contents.isDestroyed()) return
+    // A Peek's page leaves the screen as its Peek goes (closed, or replaced by another overlay), and
+    // the page goes with it: nothing of it floats.
+    if (tab.floating === 'peek') return
     // The engine's own window (opened on the tab) hands its video over to Orbit's player, with
     // Orbit's controls. The user asked for it, so the automatic-PiP choices don't apply. The
     // tab's state knows first (the page's report of it may still be on its way).
@@ -792,6 +795,8 @@ export class MediaManager {
     const target = agents[agents.length - 1]
     if (!target) return undefined
     if (fn === 'lift' && chain && agents.length > 1) return (await this.liftChain(tabId, chain, args[0])) as T
+    // Back in its window: every document on the way has drawn with the video back in it (MD-01).
+    if (fn === 'drawn') return (await Promise.all(agents.map((a) => this.exec(a, 'drawn')))) as T
     if (fn === 'drop') {
       const done = await Promise.all(agents.map((a) => this.exec(a, 'drop')))
       return done[done.length - 1] as T

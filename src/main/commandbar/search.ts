@@ -1,4 +1,5 @@
 import { clipboard, net } from 'electron'
+import { actionForInput } from '../../shared/actions'
 import { isBlankSpace } from '../../shared/blank'
 import type { SearchQueryArgs, SearchResult } from '../../shared/commands/commandbar'
 import type { CommandName } from '../../shared/rpc'
@@ -12,6 +13,12 @@ import { activeTabOf } from '../windows'
 import { normKey, pastSearchOf, type RankInput, rank } from './rank'
 import { SourceCache } from './sources'
 import { parseSuggestions } from './suggest'
+
+/** Closes a window's command bar (in a store update's draft). */
+const closeIn = (windowId: WindowId) => (d: OrbitState) => {
+  const win = d.windows[windowId]
+  if (win && win.overlay.kind === 'commandbar') win.overlay = { kind: 'none' }
+}
 
 /**
  * The command bar's main-process side: ranks open tabs, history, archived
@@ -28,10 +35,7 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
 
   const closeBar = (windowId: WindowId | undefined) => {
     if (!windowId) return
-    store.update((d) => {
-      const win = d.windows[windowId]
-      if (win && win.overlay.kind === 'commandbar') win.overlay = { kind: 'none' }
-    })
+    store.update(closeIn(windowId))
   }
 
   /** Profile of the window's current Space, and whether it is private (non-persistent session). */
@@ -194,6 +198,20 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
     contents.sendInputEvent({ type: 'mouseUp', ...at, button: 'left', clickCount: 1 })
   })
 
+  // CB-22: the keymap is built on its first use, which was the first key press after a launch (⌘T's):
+  // it is built now, while Orbit starts, and a new window's overlay, once it has warmed the bar
+  // (OverlayApp), has main look a ⌘T up again, so the first real one runs warm code. Then the
+  // overlay, shown at the window's size but out of the way while it warmed up, hides.
+  const lookUpNewTab = () => {
+    const mod = process.platform === 'darwin'
+    actionForInput({ key: 't', code: 'KeyT', meta: mod, control: !mod, alt: false, shift: false }, process.platform)
+  }
+  lookUpNewTab()
+  commands.register('search.warm', (_args, c) => {
+    for (let i = 0; i < 3; i++) lookUpNewTab()
+    if (c.windowId) windows.overlayWarm(c.windowId)
+  })
+
   commands.register('search.siteSearches', () =>
     (store.state.settings.siteSearch ?? []).map((s) => ({ id: s.id, name: s.name, keyword: s.keyword })),
   )
@@ -227,6 +245,12 @@ export function registerSearch(ctx: MainContext, history: HistoryService): void 
   commands.register('search.open', async ({ result, mode, disposition, topResult }, c) => {
     const windowId = windowOf(c)
     if (windowId && store.state.windows[windowId]?.kind === 'mini') return openInMini(windowId, result, topResult)
+    // An open tab chosen for a pane goes into it in the update that closes the bar (SV-02).
+    const tabId = result.kind === 'tab' && disposition !== 'new-tab' ? result.tabId : undefined
+    if (windowId && tabId && store.state.tabs[tabId] && barOpen(windowId)) {
+      const close = closeIn(windowId)
+      if ((ctx.hooks.barChoice ?? []).some((take) => take(windowId, tabId, close))) return
+    }
     closeBar(windowId)
     const state = store.state
     const current = windowId ? activeTabOf(state, windowId) : null

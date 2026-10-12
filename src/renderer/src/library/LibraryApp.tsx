@@ -27,6 +27,8 @@ export function LibraryApp() {
   const [sectionId, setSectionId] = useState<string | undefined>()
   const rootRef = useRef<HTMLDivElement>(null)
   const exit = useRef<Animation | undefined>(undefined)
+  /** The close main is waiting on (`library:hide`): it hides this view once the fade's end is drawn. */
+  const away = useRef<number | undefined>(undefined)
 
   useEffect(() => {
     let heard = false
@@ -42,8 +44,9 @@ export function LibraryApp() {
       heard = true
       apply(payload as LibraryShow)
     })
-    const offHide = window.orbit.on('library:hide', () => {
+    const offHide = window.orbit.on('library:hide', (payload) => {
       heard = true
+      away.current = (payload as { away?: number } | undefined)?.away
       setOpen(false)
     })
     // The first open can arrive before this page has loaded: ask what to show. A view made ahead of
@@ -85,11 +88,26 @@ export function LibraryApp() {
       requestAnimationFrame(() => perfMark('library:shown'))
     } else if (show.nonce > 0) {
       // (A Library made ahead of its first open was never shown: nothing to fade.)
-      exit.current = el.animate([{ opacity: 1 }, { opacity: 0, transform: 'scale(0.99)' }], {
+      const fade = el.animate([{ opacity: 1 }, { opacity: 0, transform: 'scale(0.99)' }], {
         duration: EXIT_MS,
         easing: 'ease-in',
         fill: 'forwards',
       })
+      exit.current = fade
+      // Main hides this view once its last frame, at opacity 0, is drawn: a view put back shows
+      // its last frame first (FL-24).
+      const closing = away.current
+      fade.finished.then(
+        () => {
+          if (exit.current !== fade || closing === undefined) return
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              if (exit.current === fade) void invoke('library.drawn', { away: closing })
+            }),
+          )
+        },
+        () => {},
+      )
     }
   }, [open, show?.nonce])
 
@@ -141,7 +159,8 @@ export function LibraryApp() {
         <ul className="library__nav-list">
           {LIBRARY_SECTIONS.map((s) => {
             const Icon = s.icon
-            const active = s.id === section?.id
+            // Only the open Library marks its section: an open on another one would fade it from the old (DL-10).
+            const active = open && s.id === section?.id
             return (
               <li key={s.id}>
                 <button

@@ -804,11 +804,12 @@ html.is-resizing * {
   transform-origin: 50% 50%;
 }
 
-/* Drop indicator (SV-04, AP-03): translucent, theme-coloured. */
+/* Drop indicator (SV-04, AP-03): translucent, theme-coloured. Its fade starts a frame along, so the
+   frame that draws it already shows it (FL-18). */
 .pane--drop {
   background: color-mix(in srgb, var(--accent) 18%, transparent);
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
-  animation: pane-fade-in 100ms ease-out;
+  animation: pane-fade-in 100ms ease-out var(--motion-lead);
 }
 
 @keyframes pane-fade-in {
@@ -1675,11 +1676,11 @@ html[data-view="overlay"] body {
 
 /* ---------- Command bar (CB-04, FL-16/17) ---------- */
 
-/* Hidden warm-up instance (rendered once at overlay start-up). */
+/* The warm-up's bars (CB-22): invisible, though their field can take focus, as a real bar's does. */
 .cmdbar-warm {
   position: fixed;
   inset: 0;
-  visibility: hidden;
+  opacity: 0;
   pointer-events: none;
 }
 

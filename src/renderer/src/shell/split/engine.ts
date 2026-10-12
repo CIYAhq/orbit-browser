@@ -15,6 +15,7 @@ import {
   type PaneSide,
   paneDropZone,
   removePane,
+  replacePane,
   type SplitAxis,
   sameLayout,
   setSizesAt,
@@ -22,8 +23,9 @@ import {
 } from '../../../../shared/split'
 import type { SplitLayout, TabId } from '../../../../shared/state'
 import { waapi } from '../../motion'
+import { reducedMotion } from '../../motion/reduced'
 import { getSeq } from '../../store'
-import { prefersReducedMotion, SNAPPY, SpringValue, STANDARD } from './spring'
+import { SNAPPY, SpringValue, STANDARD } from './spring'
 
 /** Key of the drop indicator's placeholder pane. */
 export const DROP_PANE = '__drop__'
@@ -139,6 +141,13 @@ export class PaneEngine {
   private reportRaf = 0
   /** True while running inside this frame's work (rAF tick, resize observer): reports go out at once. */
   private inFrame = false
+  /**
+   * A still of each pane's page, from main (SV-26): in the pane's card, under its page's view, so the
+   * card shows the page the moment the view goes, and a closing card fades with its page on it.
+   */
+  private stills = new Map<TabId, HTMLImageElement>()
+  /** The newest still of each pane, while it decodes. */
+  private decoding = new Map<TabId, HTMLImageElement>()
 
   attach(host: HTMLElement): void {
     this.host = host
@@ -173,7 +182,12 @@ export class PaneEngine {
     document.addEventListener('transitionrun', onRun)
     document.addEventListener('transitionend', onEnd)
     document.addEventListener('transitioncancel', onEnd)
+    const offStill = window.orbit.on('split:still', (payload) => {
+      const { tabId, url, width, height } = payload as { tabId: TabId; url: string; width: number; height: number }
+      this.setStill(tabId, url, width, height)
+    })
     this.cleanup.push(
+      offStill,
       () => observer.disconnect(),
       () => window.removeEventListener('resize', onResize),
       () => document.removeEventListener('transitionrun', onRun),
@@ -197,7 +211,49 @@ export class PaneEngine {
       this.paneEls.set(tabId, el)
       const anim = this.anims.get(tabId)
       if (anim) this.writePane(el, rectOf(anim))
+      const still = this.stills.get(tabId)
+      if (still && still.parentElement !== el) el.prepend(still)
     } else this.paneEls.delete(tabId)
+  }
+
+  /** A pane of the split on screen (a pane that has stills). */
+  private shows(tabId: TabId): boolean {
+    const layout = this.model.layout
+    return !!layout && layout.type !== 'leaf' && layoutLeaves(layout).includes(tabId)
+  }
+
+  /** A still of a pane's page (SV-26): it goes in the pane's card, under the page, once decoded. */
+  setStill(tabId: TabId, url: string, width: number, height: number): void {
+    if (!this.shows(tabId)) return
+    const img = document.createElement('img')
+    img.alt = ''
+    img.draggable = false
+    img.dataset.testid = 'pane-still'
+    // Where the page is in its view: the card's top left, at the size it was taken at.
+    img.style.cssText = `position:absolute;left:0;top:0;width:${width}px;height:${height}px;pointer-events:none;user-select:none`
+    img.src = url
+    this.decoding.set(tabId, img)
+    const settle = () => {
+      if (this.decoding.get(tabId) !== img) return
+      this.decoding.delete(tabId)
+      if (!this.shows(tabId)) return
+      this.stills.get(tabId)?.remove()
+      this.stills.set(tabId, img)
+      this.paneEls.get(tabId)?.prepend(img)
+    }
+    img.decode().then(settle, () => {
+      if (this.decoding.get(tabId) === img) this.decoding.delete(tabId)
+    })
+  }
+
+  /** Stills of panes that left the split, or of a split that left the frame, go. */
+  private dropStills(): void {
+    for (const [id, img] of this.stills) {
+      if (this.shows(id)) continue
+      img.remove()
+      this.stills.delete(id)
+    }
+    for (const id of this.decoding.keys()) if (!this.shows(id)) this.decoding.delete(id)
   }
 
   registerDivider(key: string, el: HTMLElement | null): void {
@@ -230,9 +286,28 @@ export class PaneEngine {
       if (!sameLayout(this.model.layout, model.layout)) this.preview = null
     } else if (this.preview && after.includes(this.preview.tabId)) this.preview = null
     else if (this.preview?.link && after.some((id) => !before.includes(id))) this.preview = null
+    if (related) this.handOver(this.model.layout, model.layout, before, after)
     this.model = model
     this.ready = true
-    this.relayout(related && !prefersReducedMotion())
+    this.relayout(related && !reducedMotion())
+    this.dropStills()
+  }
+
+  /**
+   * A pane whose tab was replaced where it is (an open tab chosen for an empty pane, SV-02; ⌘L on a
+   * pane, SV-15): the new tab takes over its card as it is, instead of growing in from a sliver
+   * while the old card fades.
+   */
+  private handOver(old: SplitLayout | null, next: SplitLayout | null, before: TabId[], after: TabId[]): void {
+    const gone = before.filter((id) => !after.includes(id))
+    const added = after.filter((id) => !before.includes(id))
+    const from = gone[0]
+    const to = added[0]
+    if (!old || !next || gone.length !== 1 || added.length !== 1 || !from || !to) return
+    const anim = this.anims.get(from)
+    if (!anim || this.anims.has(to) || !sameLayout(replacePane(old, from, to), next)) return
+    this.anims.delete(from)
+    this.anims.set(to, anim)
   }
 
   /** Drop indicator for a tab dragged over the frame (SV-04), or null to clear it. */
@@ -243,7 +318,7 @@ export class PaneEngine {
       preview?.side === this.preview?.side
     if (same) return
     this.preview = preview
-    this.relayout(!prefersReducedMotion(), SNAPPY)
+    this.relayout(!reducedMotion(), SNAPPY)
   }
 
   /** Current pane rectangles in window coordinates (target layout, not the animated one). */
@@ -394,8 +469,14 @@ export class PaneEngine {
     for (const [id, rect] of previous) {
       if (keep.has(id)) continue
       this.anims.delete(id)
-      // A pane closing within the same split fades and shrinks while its neighbours grow (SV-26).
-      if (animate && id !== DROP_PANE && targets.length > 0) this.ghost(rect)
+      // A pane closing within the same split fades and shrinks while its neighbours grow (SV-26),
+      // with its page on it. A pane only lifted out (being dragged, SV-20) keeps its still.
+      if (animate && id !== DROP_PANE && targets.length > 0) {
+        const still = this.stills.get(id)
+        const lifted = this.shows(id)
+        if (still && !lifted) this.stills.delete(id)
+        this.ghost(rect, still && lifted ? (still.cloneNode() as HTMLImageElement) : still)
+      }
     }
     for (const { tabId, rect } of targets) {
       let anim = this.anims.get(tabId)
@@ -430,12 +511,16 @@ export class PaneEngine {
     }
   }
 
-  /** A short-lived card where a closed pane was; the page view is already gone. */
-  private ghost(r: Box): void {
-    if (!this.host || r.width < 1 || r.height < 1) return
+  /** A short-lived card where a closed pane was, with its page's still; the page view is already gone. */
+  private ghost(r: Box, still?: HTMLImageElement): void {
+    if (!this.host || r.width < 1 || r.height < 1) {
+      still?.remove()
+      return
+    }
     const el = document.createElement('div')
     el.className = 'pane pane--ghost'
     el.dataset.testid = 'split-ghost'
+    if (still) el.append(still)
     this.writePane(el, r)
     this.host.prepend(el)
     const at = `translate(${r.x}px, ${r.y}px)`

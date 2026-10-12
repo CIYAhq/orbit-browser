@@ -619,6 +619,20 @@ const agentScript = (handle: string, define: string, frame: boolean) => `(() => 
     return true
   }
 
+  // Back in its window (MD-01): resolves once the page has drawn a frame with its video back in it.
+  // The main process shows the view only then: until the page draws at its new size, the view
+  // shows the last frame it drew, in the player's layout. (rAF, then a task: after that frame.)
+  function drawn() {
+    return new Promise((resolve) => {
+      let n = 0
+      const tick = () => {
+        if (lift && lift.shown && ++n < 60) requestAnimationFrame(tick)
+        else requestAnimationFrame(() => setTimeout(() => resolve(!lift || !lift.shown), 0))
+      }
+      requestAnimationFrame(tick)
+    })
+  }
+
   // A video removed from the page leaves the top layer at once: the player has to close (MD-07).
   function watchRemoval(v) {
     if (removal) removal.disconnect()
@@ -765,6 +779,7 @@ const agentScript = (handle: string, define: string, frame: boolean) => `(() => 
     size: sizeVideo,
     zoom: zoomVideo,
     drop,
+    drawn,
     lifted: () => !!lift,
     index,
     frameBox,
