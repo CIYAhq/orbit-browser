@@ -20,6 +20,7 @@ import { splitOfTab, tabsInItem, visibleTabOrder } from '../../../../shared/tree
 import { invoke, isMac } from '../../api'
 import {
   AT_ONCE,
+  cubicBezier,
   EASE,
   REDUCED,
   reducedMotion,
@@ -646,6 +647,45 @@ function fadeHover(el: HTMLElement, entering: boolean) {
   hoverFades.set(el, fade)
 }
 
+/** A tab made in the background glows if its row first appears within this long of it (ms). */
+const GLOW_WINDOW = 1500
+/**
+ * Tabs whose row has appeared in this window, while they are young enough to glow, by when each was
+ * made. A row mounts again when it moves to another section, its folder opens or it comes back near
+ * the visible band (FL-21): none of those is its first appearance.
+ */
+const appeared = new Map<TabId, number>()
+/** Each row's running glow. */
+const glows = new WeakMap<HTMLElement, Animation>()
+
+/**
+ * A tab made in the background glows as its row first appears, so the eye finds it (FL-06): the row
+ * tints with `--row-glow` and fades back over 420 ms, once. The Web Animations API plays it, so
+ * nothing plays it again: a CSS animation restarts whenever its row is put back in the document (a
+ * reorder moves rows) or its rule matches again (the row is deselected). A tab made selected never
+ * glows, and with reduced motion (FL-28) none does. Starts in the frame the row first shows.
+ */
+function glowOnce(el: HTMLElement, tabId: TabId, createdAt: number, active: boolean) {
+  const now = Date.now()
+  for (const [id, made] of appeared) if (now - made >= GLOW_WINDOW) appeared.delete(id)
+  if (now - createdAt >= GLOW_WINDOW || appeared.has(tabId)) return
+  appeared.set(tabId, createdAt)
+  if (active || reducedMotion()) return
+  // Up to the tint over the first 30 % and back, each with an ease-out, from and to what the row
+  // shows underneath (its hover, say): the keyframe at 0 carries no colour, only the rise's easing.
+  const out = cubicBezier(EASE.instant)
+  const glow = el.animate(
+    [
+      { offset: 0, easing: out },
+      { offset: 0.3, backgroundColor: 'var(--row-glow)', easing: out },
+    ],
+    { duration: 420, id: 'row-glow' },
+  )
+  const start = document.timeline.currentTime
+  if (typeof start === 'number') glow.startTime = start
+  glows.set(el, glow)
+}
+
 function openContextMenu(e: ReactMouseEvent, id: ItemId) {
   e.preventDefault()
   const sel = useSelection.getState().ids
@@ -737,13 +777,20 @@ export const TabRowBody = memo(function TabRowBody({
   const renaming = useRename((s) => (s.id === tabId ? s.mode : null))
   const menuOpen = useRowMenuOpen(tabId)
   const [iconHover, setIconHover] = useState(false)
-  // A tab that just opened in the background glows once so the eye finds it (FL-06).
-  const [fresh] = useState(() => !!tab && !active && Date.now() - tab.createdAt < 1500)
   const rowRef = useRef<HTMLDivElement>(null)
+  // A tab made in the background glows once, as its row first appears (FL-06): decided as it mounts.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once per row, with the tab as it mounts
+  useLayoutEffect(() => {
+    if (rowRef.current && tab) glowOnce(rowRef.current, tabId, tab.createdAt, active)
+  }, [])
   // Selected: the highlight shows in this frame, not after a hover fade still running over it (FL-05).
   useLayoutEffect(() => {
     if (active && rowRef.current) hoverFades.get(rowRef.current)?.cancel()
   }, [active])
+  // Nor after the glow: a row selected while it glows shows its highlight at once (FL-05).
+  useLayoutEffect(() => {
+    if ((active || selected) && rowRef.current) glows.get(rowRef.current)?.cancel()
+  }, [active, selected])
   if (!tab) return null
   const { prefix, title } = rowTitle(tab)
   const away = isAwayFromPinned(tab)
@@ -758,7 +805,7 @@ export const TabRowBody = memo(function TabRowBody({
       aria-posinset={index >= 0 ? index + 1 : undefined}
       aria-setsize={index >= 0 ? size : undefined}
       aria-label={prefix ? `${prefix} / ${title}` : title}
-      className={`tab-row${active ? ' is-active' : ''}${selected ? ' is-selected' : ''}${tab.asleep ? ' is-asleep' : ''}${tab.loading ? ' is-loading' : ''}${away ? ' is-away' : ''}${focused ? ' is-focused' : ''}${fresh ? ' is-new-background' : ''}${menuOpen ? ' is-menu-open' : ''}`}
+      className={`tab-row${active ? ' is-active' : ''}${selected ? ' is-selected' : ''}${tab.asleep ? ' is-asleep' : ''}${tab.loading ? ' is-loading' : ''}${away ? ' is-away' : ''}${focused ? ' is-focused' : ''}${menuOpen ? ' is-menu-open' : ''}`}
       style={{ paddingLeft: 8 + depth * INDENT }}
       data-testid="tab-row"
       data-tab-id={tabId}

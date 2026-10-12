@@ -1377,15 +1377,13 @@ html.is-dragging-tab * {
   overflow: visible;
 }
 
-/* A tab opened in the background glows briefly so the eye finds it (FL-06); selected, it shows at once. */
-.tab-row.is-new-background:not(.is-active) {
-  animation: row-glow 420ms ease-out;
-}
-
-@keyframes row-glow {
-  30% {
-    background: color-mix(in srgb, var(--accent) 22%, transparent);
-  }
+/*
+ * A tab opened in the background glows once, as its row first appears, so the eye finds it (FL-06):
+ * the tint it rises to. ItemList plays it with the Web Animations API, so a row deselected, dragged
+ * or moved doesn't play it again, as a CSS animation would.
+ */
+.tab-row {
+  --row-glow: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .drag-ghost--tile {

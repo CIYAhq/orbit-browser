@@ -37,7 +37,19 @@ export type Target =
       text?: boolean
       /** Attributes to keep, e.g. `['aria-selected', 'data-kind']`. */
       attrs?: string[]
+      /** Keep the element's own running animations (`getAnimations()`), each as an `Anim`. */
+      animations?: boolean
     }
+
+/**
+ * An animation running on an element in a frame: a CSS animation by its `animation-name`, a Web
+ * Animations API one by its `id`. `start` is its start time on the document timeline (null while it
+ * waits for its first frame): an animation that restarts, or plays again, has a new one.
+ */
+export interface Anim {
+  name: string
+  start: number | null
+}
 
 export interface Box {
   x: number
@@ -52,6 +64,7 @@ export interface Box {
   matched?: string[]
   text?: string
   attrs?: Record<string, string | null>
+  animations?: Anim[]
 }
 
 export interface Frame {
@@ -130,6 +143,7 @@ export async function record(
         matches?: string[]
         text?: boolean
         attrs?: string[]
+        animations?: boolean
       }
       type W = { __feelRec?: PageRecorder }
       const w = window as unknown as W
@@ -156,6 +170,15 @@ export async function record(
         if (spec.matches) out.matched = spec.matches.filter((m) => el.matches(m))
         if (spec.text) out.text = el instanceof HTMLInputElement ? el.value : (el.textContent ?? '')
         if (spec.attrs) out.attrs = Object.fromEntries(spec.attrs.map((a) => [a, el.getAttribute(a)]))
+        if (spec.animations) {
+          out.animations = el
+            .getAnimations()
+            .filter((a) => a.playState === 'running')
+            .map((a) => ({
+              name: a instanceof CSSAnimation ? a.animationName : a.id,
+              start: typeof a.startTime === 'number' ? a.startTime : null,
+            }))
+        }
         if (spec.style) {
           const cs = getComputedStyle(el)
           out.style = Object.fromEntries(spec.style.map((p) => [p, cs.getPropertyValue(p)]))
