@@ -158,13 +158,18 @@ const newTabTitled = async (t, title, known) => {
   return Object.keys(s.tabs).find((id) => s.tabs[id].title === title && !known.has(id))
 }
 
-export default async function (t) {
-  t0 = performance.now()
+// Made in setup, before the recording starts; the clip uses them.
+let sp
+let folder
+const ids = {}
+
+/**
+ * Three Favorites, two pinned tabs, a pinned folder of three and six Today tabs, each shown once so it has
+ * its title and icon (a tab never shown doesn't load).
+ */
+export async function setup(t) {
   const s0 = await t.state()
-  const sp = s0.spaces[s0.spaceOrder[0]]
-  // Three Favorites, two pinned tabs, a pinned folder of three and six Today tabs, each shown once so it
-  // has its title and icon (a tab never shown doesn't load), made before the clip has much to show.
-  const ids = {}
+  sp = s0.spaces[s0.spaceOrder[0]]
   const shown = async (id, name) => {
     await t.run('tabs.activate', { tabId: id })
     await waitFor(t, async () => {
@@ -190,7 +195,7 @@ export default async function (t) {
     ids[n] = await t.run('tabs.create', { url: t.fx.url(n), spaceId: sp.id, activate: false })
     await shown(ids[n], n)
   }
-  const folder = await t.run('folders.create', {
+  folder = await t.run('folders.create', {
     container: { kind: 'pinned', spaceId: sp.id },
     name: 'Projects',
     items: [ids.Alpha, ids.Beta, ids.Gamma],
@@ -199,6 +204,10 @@ export default async function (t) {
     ids[n] = await t.run('tabs.create', { url: t.fx.url(n), spaceId: sp.id, activate: false })
     await shown(ids[n], n)
   }
+}
+
+export default async function (t) {
+  t0 = performance.now()
   await settled(t)
   await glide(t, 700, 420, 4)
   await t.sleep(1500)

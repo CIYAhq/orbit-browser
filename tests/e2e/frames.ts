@@ -29,6 +29,10 @@ export type Target =
       key?: string
       /** Computed style properties to keep, e.g. `['transform', 'background-color']`. */
       style?: string[]
+      /** Read `style` from this pseudo-element of the element instead, e.g. `'::after'`. */
+      pseudo?: string
+      /** Keep whether the element is on top at its centre (Box.top). */
+      top?: boolean
       /** Keep the element's class attribute. */
       classes?: boolean
       /** Selectors to test the element against each frame, e.g. `[':hover', '.is-active']`. */
@@ -65,6 +69,11 @@ export interface Box {
   opacity: number
   classes?: string
   style?: Record<string, string>
+  /**
+   * With `top`: whether hit testing at the element's centre finds the element or one inside it, so
+   * that nothing is drawn above it there. Hit testing passes over what takes no pointer events.
+   */
+  top?: boolean
   /** The `matches` selectors the element matched in this frame. */
   matched?: string[]
   text?: string
@@ -144,6 +153,8 @@ export async function record(
         selector: string
         key?: string
         style?: string[]
+        pseudo?: string
+        top?: boolean
         classes?: boolean
         matches?: string[]
         text?: boolean
@@ -186,8 +197,12 @@ export async function record(
             }))
         }
         if (spec.style) {
-          const cs = getComputedStyle(el)
+          const cs = spec.pseudo ? getComputedStyle(el, spec.pseudo) : getComputedStyle(el)
           out.style = Object.fromEntries(spec.style.map((p) => [p, cs.getPropertyValue(p)]))
+        }
+        if (spec.top) {
+          const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+          out.top = !!at && el.contains(at)
         }
         return out
       }

@@ -1,8 +1,9 @@
 /**
  * Feel of the Peek (feel.md FL-19), measured frame by frame with the shared sampler (frames.ts). The
- * overlay view draws the card, its chrome and the dim; main moves the Peek's page view onto the card
- * every frame (PK-06), so the card's box in the overlay is where the page shows. Each test logs its
- * numbers (`[feel]` lines): docs/FEEL.md has them against their targets.
+ * overlay view draws the card, its chrome and the dim. While the card moves it shows a still of the
+ * page, and main keeps the Peek's page view out of sight, laid out at the size it shows at next; the
+ * view joins the card when the card is at rest (PK-06). So the card's box in the overlay is where the
+ * page shows. Each test logs its numbers (`[feel]` lines): docs/FEEL.md has them against their targets.
  */
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 import {
@@ -27,6 +28,10 @@ import {
   pressInTab,
   type Sites,
   startSites,
+  stillReady,
+  viewInfo,
+  viewMoves,
+  watchPeekView,
 } from './peek-helpers'
 
 let sites: Sites
@@ -54,6 +59,7 @@ const slack = FRAME_SLACK
 const PEEK = {
   card: { selector: '[data-testid="peek-card"]' },
   dim: { selector: '[data-testid="peek-backdrop"]', style: ['background-color'] },
+  still: { selector: '[data-testid="peek-still"]' },
 }
 
 /** A pinned tab on the first site, whose `#other` link opens a Peek (PK-02). */
@@ -150,7 +156,7 @@ async function layerGone(app: ElectronApplication, peekTab: string): Promise<() 
   return () => app.evaluate(() => (globalThis as unknown as { __feelLayerGone?: number }).__feelLayerGone ?? 0)
 }
 
-test('[FL-19] a Peek grows out of the clicked link into a card about 90 % of the page with the standard spring, and dims the page 10–20 %', async () => {
+test('[FL-19][PK-06] a Peek grows out of the clicked link into a card about 90 % of the page with the standard spring, and dims the page 10–20 %; its page is laid out once, at its size', async () => {
   const { source, page } = await pinnedSource()
   const overlay = await viewPage(orbit.app, 'overlay')
   const link = await page.locator('#other').boundingBox()
@@ -161,10 +167,12 @@ test('[FL-19] a Peek grows out of the clicked link into a card about 90 % of the
     async (round) => {
       if (round > 1) await expect.poll(async () => (await overlayOf(orbit.app)).kind).toBe('none')
       const rec = await record(overlay, PEEK, { hidden: true, maxMs: 3000 })
+      const views = await watchPeekView(orbit.app)
       const clickWall = await clickThroughMain(orbit.app, source, linkX, linkY)
       const peekTab = await opened()
       // The spring's last frames are in by now (it ends within half a second of the click).
       const r: Recording = await rec.until(1200)
+      const view = viewMoves(await views())
       const area = await overlay.evaluate(() => ({ width: innerWidth, height: innerHeight }))
       await closed(peekTab)
       const cards = r.frames.filter((f) => (f.els.card?.width ?? 0) > 0 && (f.els.card?.opacity ?? 0) > 0)
@@ -190,7 +198,9 @@ test('[FL-19] a Peek grows out of the clicked link into a card about 90 % of the
           Math.abs(end.y + end.height / 2 - area.height / 2),
         ),
         dim: Math.max(0, ...r.frames.map(dimOf)),
-        pace: pacing(cards),
+        // The open's own frames, from the first until the card is in place.
+        pace: pacing(cards.filter((f) => f.t <= (within(0.5)?.t ?? Number.POSITIVE_INFINITY))),
+        ...view,
       }
     },
     (m) => m.in2 <= (320 + 2 * FRAME) * slack,
@@ -207,7 +217,16 @@ test('[FL-19] a Peek grows out of the clicked link into a card about 90 % of the
   note('FL-19', 'open: page behind darkened by', m.dim * 100, '10–20 %', '%')
   note('FL-19', 'open: frame p99', m.pace.p99, '≤ 16.7 ms (FL-29)')
   note('FL-19', 'open: frame max', m.pace.max, '≤ 33.3 ms (FL-29)')
-  console.info(`[feel] FL-19 open rounds: ${all.map((x) => `${Math.round(x.in2)} ms`).join(', ')}`)
+  note('PK-06', "open: the page view's size changes", m.resizes, '≤ 1', '')
+  note('PK-06', 'open: samples with the page in sight mid-motion', m.shownElsewhere, '0', '')
+  console.info(
+    `[feel] FL-19 open rounds: ${all.map((x) => `${Math.round(x.in2)} ms, max frame ${Math.round(x.pace.max)} ms`).join('; ')}`,
+  )
+  // Laid out once: the page view takes its size once and never shows at another (FL-01, PK-06).
+  // Frame pacing is logged, not judged: under Xvfb's software compositing the overlay draws at
+  // 30–60 fps whatever it shows.
+  expect(m.resizes).toBeLessThanOrEqual(1)
+  expect(m.shownElsewhere).toBe(0)
   expect(m.firstShare, 'grows from the link, not from the card').toBeLessThan(0.34)
   // The card's centre at rest is about 550 px from the link: a first frame near the link grew from it.
   expect(m.fromLink).toBeLessThan(m.endWidth / 4)
@@ -222,7 +241,7 @@ test('[FL-19] a Peek grows out of the clicked link into a card about 90 % of the
   expect(m.dim).toBeLessThanOrEqual(0.2)
 })
 
-test('[FL-19] Escape shrinks the card to about 0.96 as it fades in 150–180 ms, and the page behind takes clicks again within 200 ms', async () => {
+test('[FL-19][PK-06] Escape shrinks the card to about 0.96 as its still of the page fades in 150–180 ms, the page view gone from the start; the page behind takes clicks again within 200 ms', async () => {
   const { source, page } = await pinnedSource()
   const overlay = await viewPage(orbit.app, 'overlay')
   const link = await page.locator('#other').boundingBox()
@@ -231,12 +250,15 @@ test('[FL-19] Escape shrinks the card to about 0.96 as it fades in 150–180 ms,
     async () => {
       await clickThroughMain(orbit.app, source, link.x + link.width / 2, link.y + link.height / 2)
       const peekTab = await opened()
+      await stillReady(overlay)
       const gone = await layerGone(orbit.app, peekTab)
       const keys = await mainInputs(orbit.app)
       const rec = await record(overlay, PEEK, { maxMs: 3000 })
+      const views = await watchPeekView(orbit.app)
       await closed(peekTab)
       await expect.poll(gone).toBeGreaterThan(0)
       const r: Recording = await rec.stop()
+      const samples = await views()
       const esc = (await keys()).find((k) => k.type === 'keyDown' && k.key === 'Escape')
       if (!esc) throw new Error('Escape never reached main')
       const at = frameAfterWall(r, esc.wall)
@@ -254,15 +276,29 @@ test('[FL-19] Escape shrinks the card to about 0.96 as it fades in 150–180 ms,
       })
       const sizes = after.filter((f) => f.els.card).map((f) => (f.els.card?.width ?? 0) / open.width)
       const undimmed = after.find((f) => dimOf(f) <= 0.001)
+      // The still: whole when the close starts, then fading to nothing. Its fade's last frame is
+      // found as the card's is.
+      const stillOf = (f: Frame | undefined) => f?.els.still?.opacity ?? 0
+      const before = r.frames[Math.max(0, at - 1)]
+      const fading = after.find((f) => stillOf(f) < stillOf(before) - 0.0005)
+      const faded = after.findLast((f, k) => Math.abs(stillOf(k > 0 ? after[k - 1] : before) - stillOf(f)) > 0.0005)
+      // The page view, from Escape on: never in sight again (main hides it as it starts the close).
+      const lastBefore = samples.findLast((v) => v.wall <= esc.wall)
+      const fromEsc = [...(lastBefore ? [lastBefore] : []), ...samples.filter((v) => v.wall > esc.wall)]
+      const hiddenAt = fromEsc.find((v) => !v.shown)
       return {
         starts: moving ? moving.i - at + 1 : Number.POSITIVE_INFINITY,
         fade: moving && out ? out.t - moving.t : Number.POSITIVE_INFINITY,
         smallest: Math.min(...sizes),
         undimmed: undimmed ? undimmed.wall - esc.wall : Number.POSITIVE_INFINITY,
         layer: (await gone()) - esc.wall,
+        stillAtStart: stillOf(before),
+        stillFade: fading && faded ? faded.t - fading.t : Number.POSITIVE_INFINITY,
+        viewHidden: hiddenAt ? hiddenAt.wall - esc.wall : Number.POSITIVE_INFINITY,
+        viewShownAgain: hiddenAt ? fromEsc.filter((v) => v.wall > hiddenAt.wall && v.shown).length : 0,
       }
     },
-    (m) => m.layer <= 200 * slack && m.fade <= (180 + 2 * FRAME) * slack,
+    (m) => m.layer <= 200 * slack && m.fade <= (180 + 2 * FRAME) * slack && m.stillFade <= (180 + 2 * FRAME) * slack,
   )
   const m = best
   note('FL-19', 'close: Escape → card starts closing', m.starts, '1–2 frames', 'frames')
@@ -270,7 +306,18 @@ test('[FL-19] Escape shrinks the card to about 0.96 as it fades in 150–180 ms,
   note('FL-19', 'close: smallest card scale', m.smallest, '≈ 0.96', '')
   note('FL-19', 'close: Escape → dim gone', m.undimmed, 'with the card', 'ms')
   note('FL-19', 'close: Escape → no layer over the page (main)', m.layer, '≤ 200 ms')
-  console.info(`[feel] FL-19 close rounds: ${all.map((x) => `layer ${Math.round(x.layer)} ms`).join(', ')}`)
+  note('PK-06', "close: the still's opacity when the close starts", m.stillAtStart, '1', '')
+  note('PK-06', 'close: the still fades out over', m.stillFade, '150–180 ms')
+  note('PK-06', 'close: Escape → page view out of sight (main)', m.viewHidden, 'at once')
+  console.info(
+    `[feel] FL-19 close rounds: ${all.map((x) => `layer ${Math.round(x.layer)} ms, still ${Math.round(x.stillFade)} ms`).join('; ')}`,
+  )
+  // The page view goes with Escape, and the card shows the page's still as it fades (PK-06).
+  expect(m.viewHidden).toBeLessThanOrEqual(FRAME * slack)
+  expect(m.viewShownAgain).toBe(0)
+  expect(m.stillAtStart).toBeGreaterThan(0.99)
+  expect(m.stillFade, 'a fade, not a cut').toBeGreaterThanOrEqual(100)
+  expect(m.stillFade).toBeLessThanOrEqual((180 + 2 * FRAME) * slack)
   expect(m.starts).toBeLessThanOrEqual(3 * slack)
   // The curve runs 160 ms; its last tenth moves the card by under 0.1 %, which the fade's last
   // frame leaves out.
@@ -281,7 +328,7 @@ test('[FL-19] Escape shrinks the card to about 0.96 as it fades in 150–180 ms,
   expect(m.layer).toBeLessThanOrEqual(200 * slack)
 })
 
-test('[FL-19] ⌘O grows the card until its edges meet the page card in about 220–260 ms, then it is a normal tab', async () => {
+test('[FL-19][PK-06] ⌘O grows the card until its edges meet the page card in about 220–260 ms, then it is a normal tab; its page is laid out at its new size once', async () => {
   const { source, page } = await pinnedSource()
   const overlay = await viewPage(orbit.app, 'overlay')
   const link = await page.locator('#other').boundingBox()
@@ -291,9 +338,19 @@ test('[FL-19] ⌘O grows the card until its edges meet the page card in about 22
   const area = await overlay.evaluate(() => ({ x: 0, y: 0, width: innerWidth, height: innerHeight }))
   const keys = await mainInputs(orbit.app)
   const rec = await record(overlay, PEEK, { maxMs: 3000 })
+  const views = await watchPeekView(orbit.app)
   await pressInTab(orbit.app, peekTab, 'Mod+O')
   await expect.poll(async () => (await overlayOf(orbit.app)).kind).toBe('none')
   const r: Recording = await rec.stop()
+  // The Peek is a tab now, its view shown over the page area: the watch followed it from ⌘O.
+  await expect
+    .poll(async () => {
+      const { bounds: b, area: a, visible, inWindow } = await viewInfo(orbit.app, peekTab)
+      if (!b || !a || !visible || !inWindow) return false
+      return [b.x - a.x, b.y - a.y, b.width - a.width, b.height - a.height].every((d) => Math.abs(d) <= 1)
+    })
+    .toBe(true)
+  const view = viewMoves(await views())
   const cmdO = (await keys()).find((k) => k.type === 'keyDown' && k.key.toLowerCase() === 'o')
   if (!cmdO) throw new Error('⌘O never reached main')
   const at = frameAfterWall(r, cmdO.wall)
@@ -304,6 +361,10 @@ test('[FL-19] ⌘O grows the card until its edges meet the page card in about 22
   const ms = (f: Frame | undefined) => (f && moving ? f.t - moving.t : Number.POSITIVE_INFINITY)
   note('FL-19', 'expand: first move → edges within 2 px of the page card', ms(met(2)), '220–260 ms')
   note('FL-19', 'expand: first move → edges meet (within 0.5 px)', ms(met(0.5)), '220–260 ms')
+  note('PK-06', "expand: the page view's size changes", view.resizes, '≤ 1', '')
+  // Laid out at the page area's size once, out of sight, while the card grows (PK-06).
+  expect(view.resizes).toBeLessThanOrEqual(1)
+  expect(view.shownElsewhere).toBe(0)
   // It is a normal, selected tab now (PK-07).
   const s = await state(orbit.app)
   const win = await mainWindow(orbit.app)

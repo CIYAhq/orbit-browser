@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { flushSync } from 'react-dom'
 import { carriesLink, droppedLink, LINK_DROP_ID, type LinkDragMessage } from '../../../../shared/link-drop'
 import type { DropTarget } from '../../../../shared/split'
 import { invoke } from '../../api'
@@ -41,7 +42,8 @@ export function useLinkDrop(engine: PaneEngine, setDrop: (preview: DropPreview |
     const show = (z: DropTarget | null) => {
       if (z?.target === zone?.target && z?.side === zone?.side) return
       zone = z
-      setDrop(z ? { tabId: LINK_DROP_ID, target: z.target, side: z.side, link: true } : null)
+      // Drawn in the next frame, as a dragged tab's zone is (FL-18).
+      flushSync(() => setDrop(z ? { tabId: LINK_DROP_ID, target: z.target, side: z.side, link: true } : null))
     }
     const over = (x: number, y: number) => {
       window.clearTimeout(gone)

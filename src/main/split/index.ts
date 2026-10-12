@@ -1,6 +1,7 @@
 import { clipboard, Menu, type MenuItemConstructorOptions, nativeTheme } from 'electron'
 import { FAVORITES_FULL_MESSAGE } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
+import { windowMayShow } from '../../shared/private'
 import {
   equalizeLayout,
   flipLayout,
@@ -51,6 +52,7 @@ import {
   swapIntoPaneInDraft,
   windowsShowing,
 } from './model'
+import { installPaneStills } from './stills'
 import { PaneStrip } from './strip'
 
 /**
@@ -82,6 +84,21 @@ interface PaneSession {
 /** How long an empty pane waits for the command bar's choice before it is removed. */
 const SETTLE_GRACE_MS = 120
 
+/** An open tab the command bar chose, with the change that closes the bar. */
+interface BarChoice {
+  tabId: TabId
+  close: (d: OrbitState) => void
+}
+
+/** Selecting `tabId` keeps the window in its Space (as `activateInDraft` decides), and the window may show it. */
+function selectsInPlace(state: OrbitState, windowId: WindowId, tabId: TabId): boolean {
+  const win = state.windows[windowId]
+  const tab = state.tabs[tabId]
+  if (!win || !tab || !windowMayShow(state, windowId, tabId) || hiddenByImport(state, tabId)) return false
+  if (tab.spaceId === win.spaceId) return true
+  return sectionOf(state, tabId) === 'favorite' && state.spaces[win.spaceId]?.profileId === tab.profileId
+}
+
 /** Split feature (main process). Owned by the split lane; see docs/ARCHITECTURE.md. */
 export function registerSplit(ctx: MainContext): void {
   const { store, commands, actions, windows } = ctx
@@ -89,6 +106,7 @@ export function registerSplit(ctx: MainContext): void {
   const sessions = new Map<WindowId, PaneSession>()
   const strip = new PaneStrip(ctx)
   installLinkDrop(ctx)
+  installPaneStills(ctx)
   // An empty pane whose command bar was open when Orbit quit has nothing to show.
   store.update((d) => {
     dropBlankPanes(d)
@@ -261,8 +279,12 @@ export function registerSplit(ctx: MainContext): void {
     else settle(session, { cancel: true })
   }
 
-  /** Ends a pane session once its command bar closed: keep, fill, swap in or remove the pane. */
-  const settle = (session: PaneSession, opts: { cancel?: boolean } = {}) => {
+  /**
+   * Ends a pane session once its command bar closed: keep, fill, swap in or remove the pane. With a
+   * `choice`, the bar is still open and has just chosen that open tab: the bar closes in the same
+   * store update that carries the choice out, so no frame shows the tab outside the split (SV-02).
+   */
+  const settle = (session: PaneSession, opts: { cancel?: boolean; choice?: BarChoice } = {}) => {
     const windowId = session.windowId
     if (sessions.get(windowId) !== session) return
     sessions.delete(windowId)
@@ -271,17 +293,23 @@ export function registerSplit(ctx: MainContext): void {
     const tab = state.tabs[session.tabId]
     const splitId = splitOfTab(state, session.tabId)
     if (!tab || !splitId) return
-    const chosen = opts.cancel ? null : (session.chosen ?? null)
+    const close = opts.choice?.close ?? (() => {})
+    const chosen = opts.cancel ? null : (opts.choice?.tabId ?? session.chosen ?? null)
     // A tab that existed when the bar closed was picked from its results; a tab the choice
     // created (e.g. "open in new tab") was not, and is left alone.
-    const picked = !!chosen && !!session.tabsAtClose?.[chosen]
+    const picked = !!chosen && (!!opts.choice || !!session.tabsAtClose?.[chosen])
     const chosenIsToday = picked && sectionOf(state, chosen) === 'today' && !splitOfTab(state, chosen)
 
     if (!session.blank) {
       // ⌘L on a pane, then an open Today tab was chosen: it takes the pane's place (SV-15).
       if (!chosen || !chosenIsToday) return
       updateMoving([chosen], (d) => {
-        if (!swapIntoPaneInDraft(d, session.tabId, chosen)) return
+        close(d)
+        if (!swapIntoPaneInDraft(d, session.tabId, chosen)) {
+          // The bar left the choice to this session: it is still made.
+          if (opts.choice) focusInDraft(d, windowId, chosen)
+          return
+        }
         restoreOtherSpaces(d, session, chosen)
         focusInDraft(d, windowId, chosen)
       })
@@ -291,6 +319,7 @@ export function registerSplit(ctx: MainContext): void {
     if (!opts.cancel && !isBlankPane(tab)) {
       // Filled with a URL or search: a pinned split remembers it as the pane's pinned URL.
       store.update((d) => {
+        close(d)
         const split = d.splits[splitId]
         if (split?.pending === session.tabId) delete split.pending
         adoptPlacement(d, [session.tabId], locate(d, splitId)?.container)
@@ -301,6 +330,7 @@ export function registerSplit(ctx: MainContext): void {
     if (chosen && chosenIsToday) {
       // An open tab was chosen: it moves into the new pane (SV-02).
       updateMoving([chosen], (d) => {
+        close(d)
         detachTab(d, chosen)
         const split = d.splits[splitId]
         if (!split) return
@@ -319,6 +349,7 @@ export function registerSplit(ctx: MainContext): void {
       const url = state.tabs[chosen]?.url
       if (url && !isBlankPane({ url })) {
         store.update((d) => {
+          close(d)
           const blank = d.tabs[session.tabId]
           const split = d.splits[splitId]
           if (split?.pending === session.tabId) delete split.pending
@@ -337,6 +368,7 @@ export function registerSplit(ctx: MainContext): void {
     // Nothing chosen (Escape, click outside) or a new tab was opened instead: the empty pane
     // goes away. Focus returns to the previous pane unless something else was selected since.
     store.update((d) => {
+      close(d)
       const stillOnBlank = activeTabOf(d, windowId) === session.tabId
       detachTab(d, session.tabId)
       delete d.tabs[session.tabId]
@@ -356,6 +388,23 @@ export function registerSplit(ctx: MainContext): void {
       }
     }
   }
+
+  // The bar chose an open tab while it fills a pane (SV-02, SV-03, SV-07) or changes one (SV-15): the
+  // session carries the choice out itself. A choice that takes the window to another Space, or that
+  // the window can't show, goes the usual way: the bar closes, selects it, and the session settles.
+  ctx.hooks.barChoice ??= []
+  ctx.hooks.barChoice.push((windowId, chosen, close) => {
+    const session = sessions.get(windowId)
+    const state = store.state
+    const overlay = state.windows[windowId]?.overlay
+    if (!session || session.settling || overlay?.kind !== 'commandbar' || overlay.nonce !== session.nonce) return false
+    const tab = state.tabs[session.tabId]
+    if (!tab || !splitOfTab(state, session.tabId) || !selectsInPlace(state, windowId, chosen)) return false
+    const today = sectionOf(state, chosen) === 'today' && !splitOfTab(state, chosen)
+    if (session.blank ? !isBlankPane(tab) : !today) return false
+    settle(session, { choice: { tabId: chosen, close } })
+    return true
+  })
 
   // Watch command bar sessions: open on a pane → track; closed → settle right after the choice ran.
   store.subscribe((next) => {

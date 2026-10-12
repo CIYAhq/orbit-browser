@@ -11,6 +11,8 @@ import './find.css'
 interface ToolsState {
   find: FindState
   zoom: ZoomIndicator | null
+  /** Main is taking the view out of the window: it draws nothing, then says so with this number (NV-06). */
+  away?: number
 }
 
 /** The last focus request the bar acted on: returning to a tab shows its bar without taking focus. */
@@ -41,8 +43,18 @@ export function PageToolsApp() {
       off()
     }
   }, [])
-  const find = state?.find
-  const zoom = state?.zoom
+  // A view put back in the window shows the last frame it drew until it draws again: before it
+  // leaves, it draws itself empty and says so once that frame is drawn (NV-06).
+  const away = state?.away
+  useEffect(() => {
+    if (!away) return
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => void invoke('pageTools.drawn', { away }))
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [away])
+  const find = away ? undefined : state?.find
+  const zoom = away ? undefined : state?.zoom
   return (
     <div
       className={`page-tools${palette?.dark ? ' page-tools--dark' : ''}`}
@@ -50,7 +62,8 @@ export function PageToolsApp() {
       data-testid="page-tools"
     >
       {find?.open && <FindBar key={find.tabId ?? ''} state={find} />}
-      {zoom && <ZoomPill key={zoom.nonce} zoom={zoom} />}
+      {/* While it shows, a new zoom changes its number in place. */}
+      {zoom && <ZoomPill zoom={zoom} />}
     </div>
   )
 }

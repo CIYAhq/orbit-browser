@@ -71,13 +71,15 @@ async function restingOn(t, spaceId) {
   })
 }
 
-export default async function (t) {
-  t0 = performance.now()
-  const s0 = await t.state()
-  const home = s0.spaceOrder[0]
+// Made in setup, before the recording starts; the clip uses them.
+let home
+let work
+const tabs = {}
+
+/** Personal and Work, each tab shown once so it has its title and icon (a tab never shown doesn't load). */
+export async function setup(t) {
+  home = (await t.state()).spaceOrder[0]
   await t.run('spaces.update', { spaceId: home, name: 'Personal' })
-  // Each tab is shown once, so it has its title and icon (a tab never shown doesn't load).
-  const tabs = {}
   const shown = async (id, name) => {
     await t.run('tabs.activate', { tabId: id })
     await waitFor(t, async () => {
@@ -85,7 +87,7 @@ export default async function (t) {
       return tab?.title === name && !tab.loading
     })
   }
-  const work = await t.run('spaces.create', { name: 'Work', activate: false })
+  work = await t.run('spaces.create', { name: 'Work', activate: false })
   for (const n of ['Wiki', 'Tracker']) {
     tabs[n] = await t.run('tabs.create', { url: t.fx.url(n), spaceId: work, activate: false })
     await shown(tabs[n], n)
@@ -94,6 +96,10 @@ export default async function (t) {
     tabs[n] = await t.run('tabs.create', { url: t.fx.url(n), spaceId: home, activate: false })
     await shown(tabs[n], n)
   }
+}
+
+export default async function (t) {
+  t0 = performance.now()
   await restingOn(t, home)
   await glide(t, 700, 420, 4)
   await t.sleep(1500)

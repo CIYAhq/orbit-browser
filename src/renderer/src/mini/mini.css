@@ -11,6 +11,17 @@ html[data-view="mini"] body {
   background: linear-gradient(180deg, var(--frame-top), var(--frame-bottom));
 }
 
+/* The ready window Orbit keeps hidden (MW-15) draws itself empty, in the window's own colour, until it
+   opens. A window shows first the frame it drew last, so one that opens a link never shows the blank
+   lookup bar, and a blank one never shows it at full size before it grows (MW-04). */
+.mini--ready::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--frame-top);
+}
+
 /* Above the card: the command bar's list drops from here over it (CB-23). */
 .mini__bar {
   position: relative;
@@ -285,6 +296,11 @@ html[data-view="mini"] body {
   position: absolute;
   inset: 0;
   background: rgba(10, 10, 14, 0.07);
+}
+
+/* The page's still as the window leaves after "Open in…" (MW-15): the page as it was, not dimmed. */
+.mini__cover--page::after {
+  content: none;
 }
 
 @media (prefers-color-scheme: dark) {

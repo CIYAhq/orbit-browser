@@ -101,12 +101,15 @@ const keyEvents = (t, events) =>
     }
   }, events)
 
-export default async function (t) {
-  t0 = performance.now()
+// Made in setup, before the recording starts; the clip uses them.
+const ids = {}
+
+/**
+ * Five Today tabs and two Favorites, each shown once so it has its title and icon (a tab never shown
+ * doesn't load).
+ */
+export async function setup(t) {
   const sp = await space(t)
-  // Five Today tabs and two Favorites, each shown once so it has its title and icon (a tab never shown
-  // doesn't load), made before the clip has much to show.
-  const ids = {}
   const shown = async (id, name) => {
     await t.run('tabs.activate', { tabId: id })
     await waitFor(t, async () => {
@@ -123,6 +126,10 @@ export default async function (t) {
     ids[n] = await t.run('tabs.create', { url: t.fx.url(n), spaceId: sp.id, activate: false })
     await shown(ids[n], n)
   }
+}
+
+export default async function (t) {
+  t0 = performance.now()
   await settled(t)
   await glide(t, 700, 420, 4)
   await t.sleep(1500)

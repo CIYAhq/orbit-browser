@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { flushSync } from 'react-dom'
 import { type DropTarget, leaf, type PaneBox } from '../../../../shared/split'
 import type { TabId } from '../../../../shared/state'
 import { splitOfTab } from '../../../../shared/tree'
@@ -50,7 +51,10 @@ export function useTabDrop(engine: PaneEngine, setDrop: (preview: DropPreview | 
       const next = d.mode === 'split' ? target : null
       if (sameZone(next, zone) && !!next?.full === !!zone?.full) return
       zone = next
-      setDrop(next && !next.full ? { ...next, tabId: d.tabId } : null)
+      const tabId = d.tabId
+      // Drawn in the frame after the move, not after a render of its own (FL-18: the zone shows
+      // within a frame or two and moves to a new half at once).
+      flushSync(() => setDrop(next && !next.full ? { ...next, tabId } : null))
     }
     // Over the page, once the page the drag began on is back (FL-05), its pages say where they take
     // the row's link, as they are drawn before any preview makes room.
@@ -185,7 +189,7 @@ export function usePaneDrag(engine: PaneEngine, setDrop: (preview: DropPreview |
         const next = engine.paneDropTargetFor(x, y, tabId)
         if (next?.target === zone?.target && next?.side === zone?.side) return
         zone = next
-        setDrop(next ? { tabId, target: next.target, side: next.side, move: true } : null)
+        flushSync(() => setDrop(next ? { tabId, target: next.target, side: next.side, move: true } : null))
         return
       }
       const z = zone
