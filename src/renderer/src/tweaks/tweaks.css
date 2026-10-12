@@ -1,0 +1,314 @@
+/*
+ * The Tweak editor panel's own view (view=tweak, BO-02): transparent, over the top-right corner of
+ * the page it edits, as big as the panel plus an 8 px margin for its shadow (TWEAK_EDITOR in
+ * shared/commands/tweaks.ts). The panel is in the Space's colours, like the site controls panel.
+ */
+html[data-view="tweak"] body {
+  background: transparent;
+  overflow: hidden;
+}
+
+.tweak-view {
+  position: fixed;
+  inset: 0;
+  padding: 8px;
+  display: flex;
+  /* Main keeps the view's right edge where it was as the panel widens or narrows (BO-11). */
+  justify-content: flex-end;
+  align-items: flex-start;
+  color: var(--text, #1c1c1f);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.tweak-panel {
+  --tweak-line: color-mix(in srgb, var(--text, #1c1c1f) 9%, transparent);
+  --tweak-fill: color-mix(in srgb, var(--text, #1c1c1f) 6%, transparent);
+  --tweak-fill-hover: color-mix(in srgb, var(--text, #1c1c1f) 11%, transparent);
+  --tweak-muted: var(--text-muted, rgba(28, 28, 31, 0.56));
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  max-height: calc(100vh - 16px);
+  border-radius: 14px;
+  background: var(--surface, #fff);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.16),
+    0 4px 7px rgba(0, 0, 0, 0.12),
+    0 1px 2px rgba(0, 0, 0, 0.08);
+  outline: none;
+  user-select: none;
+  overflow: hidden;
+  animation: tweak-panel-in var(--motion-snappy) var(--ease-snappy);
+  transform-origin: 100% 0;
+}
+
+.tweak-view.is-dark .tweak-panel {
+  box-shadow:
+    0 0 0 0.5px rgba(255, 255, 255, 0.14),
+    0 4px 7px rgba(0, 0, 0, 0.4),
+    0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+@keyframes tweak-panel-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(-4px);
+  }
+}
+
+.tweak-panel__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 6px 8px 10px;
+  border-bottom: 1px solid var(--tweak-line);
+  cursor: grab;
+  touch-action: none;
+}
+
+.tweak-panel__head:active {
+  cursor: grabbing;
+}
+
+.tweak-panel__badge {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent, #5865d8) 16%, transparent);
+  color: var(--accent, #5865d8);
+}
+
+.tweak-panel__title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tweak-panel__name {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tweak-panel__host {
+  overflow: hidden;
+  color: var(--tweak-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tweak-panel__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--tweak-muted);
+  cursor: default;
+}
+
+.tweak-panel__icon:hover {
+  background: var(--tweak-fill);
+  color: inherit;
+}
+
+.tweak-panel__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.tweak-panel__content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+}
+
+.tweak-panel__foot {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 0 8px 8px;
+}
+
+.tweak-panel__foot:empty {
+  padding: 0;
+}
+
+.tweak-panel button:focus-visible,
+.tweak-panel input:focus-visible {
+  outline: 2px solid var(--accent, #5865d8);
+  outline-offset: 1px;
+}
+
+/* ---------- Rows and buttons ---------- */
+
+.tweak-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 4px 0 6px;
+}
+
+.tweak-row__label {
+  flex: 1;
+  min-width: 0;
+  color: var(--tweak-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tweak-row__control {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tweak-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 14px;
+  border: none;
+  border-radius: 8px;
+  background: var(--tweak-fill);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.tweak-button:hover:not(:disabled) {
+  background: var(--tweak-fill-hover);
+}
+
+.tweak-button.is-primary {
+  background: var(--accent, #5865d8);
+  color: #fff;
+}
+
+.tweak-button.is-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent, #5865d8) 88%, #000);
+}
+
+.tweak-button.is-wide {
+  width: 100%;
+}
+
+.tweak-button:disabled {
+  opacity: 0.4;
+}
+
+/* − value + */
+.tweak-stepper {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--tweak-fill);
+}
+
+.tweak-stepper__button,
+.tweak-stepper__value {
+  display: grid;
+  place-items: center;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: default;
+}
+
+.tweak-stepper__button {
+  width: 28px;
+}
+
+.tweak-stepper__value {
+  min-width: 52px;
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.tweak-stepper__button:hover:not(:disabled),
+.tweak-stepper__value:hover {
+  background: var(--surface, #fff);
+}
+
+.tweak-stepper__button:disabled {
+  opacity: 0.35;
+}
+
+/* ---------- First-use intro (BO-01) ---------- */
+
+.tweak-intro {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 4px 2px;
+}
+
+.tweak-intro__art {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: conic-gradient(from 200deg, #ff7a7a, #ffd36e, #7be495, #6ec8ff, #b18cff, #ff7a7a);
+  color: #fff;
+}
+
+.tweak-intro__title {
+  margin: 4px 0 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.tweak-intro__text {
+  margin: 0;
+  color: var(--tweak-muted);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.tweak-intro__text strong {
+  color: var(--text, #1c1c1f);
+  font-weight: 650;
+}
+
+.tweak-intro .tweak-button {
+  margin-top: 6px;
+}
+
+.reduce-motion .tweak-panel {
+  animation: none;
+}
