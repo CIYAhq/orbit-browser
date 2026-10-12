@@ -112,8 +112,10 @@ test('[TB-12][PN-08] rename by double-click survives navigation and relaunch; em
   await row(shell, p).click({ button: 'right' })
   await menuFor(app, p)
   expect(await chooseRowMenu(app, 'Change Icon…')).toBe(true)
-  await expect(shell.getByTestId('icon-picker')).toBeVisible()
-  await shell.getByTestId('icon-choice').first().click()
+  const picker = shell.getByTestId('icon-picker')
+  await expect(picker).toBeVisible()
+  await picker.getByTestId('emoji-search').fill('star')
+  await picker.locator('[data-testid="emoji-option"][data-emoji="⭐"]').click()
   await expect(row(shell, p).locator('.tab-row__emoji')).toHaveText('⭐')
   await app.close()
   orbit = await launchOrbit({ userData })
@@ -597,8 +599,10 @@ test('[TB-09][TB-11] holding a dragged tab at the sidebar edge slides to the nex
   await shell.mouse.move(edgeX, start.y + 20, { steps: 8 })
   // Hold near the right edge: the window shows the next Space.
   await expect.poll(async () => Object.values((await state(app)).windows)[0]?.spaceId, { timeout: 4000 }).toBe(sB)
+  // The window's first visit to B selects B's last-used tab (SP-10), so its page shows beside its row.
+  await expect.poll(async () => Object.values((await state(app)).windows)[0]?.activeTab[sB]).toBe(inB)
   // Drop at the top of that Space's Today.
-  const target = await shell.locator(`[data-tab-id="${inB}"]`).boundingBox()
+  const target = await row(shell, inB).boundingBox()
   await shell.mouse.move(start.x, (target?.y ?? 0) + 4, { steps: 8 })
   await shell.mouse.up()
   await expect.poll(async () => (await state(app)).spaces[sB]?.today).toEqual([t, inB])

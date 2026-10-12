@@ -54,7 +54,9 @@ export const Favorites = memo(
         data-testid="favorites"
         style={tiles.length > 0 ? { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` } : undefined}
       >
-        <LayoutGroup id={`favorites-${profileId}`}>
+        {/* Between Spaces of two profiles the whole grid swaps: no tile leaves, arrives or moves, and
+            the Space switcher's cross-fade alone carries it (PR-06, SP-10). */}
+        <LayoutGroup key={profileId} id={`favorites-${profileId}`}>
           <AnimatePresence initial={false} mode="popLayout">
             {tiles.map((id) =>
               id ? (

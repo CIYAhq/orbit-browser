@@ -125,7 +125,7 @@ describe('[SP-10][SP-23] switching', () => {
 })
 
 describe('[SP-23][TB-17] Spaces across windows', () => {
-  it('switching Space never leaves two windows on the same tab (the switching window keeps it)', () => {
+  it('a switch never takes a tab another window shows: the switching window picks another', () => {
     const { state, a, win, addTab } = world()
     const b = createSpaceInDraft(state, { name: 'B', afterSpaceId: a })
     const t1 = addTab(a, 'today')
@@ -137,8 +137,66 @@ describe('[SP-23][TB-17] Spaces across windows', () => {
     w2.activeTab[a] = t1
     state.windows[w2.id] = w2
     switchSpaceInDraft(state, win, a)
-    expect(state.windows[win]?.activeTab[a]).toBe(t1)
-    expect(state.windows[w2.id]?.activeTab[a]).toBe(t2)
+    expect(state.windows[w2.id]?.activeTab[a]).toBe(t1)
+    expect(state.windows[win]?.activeTab[a]).toBe(t2)
+  })
+})
+
+describe('[SP-10][SP-23][SP-24] a window with no tab of its own for a Space', () => {
+  /** Window 1 on A shows One; Two, Three and One were used in that order. A second window opens on A. */
+  function twoWindows() {
+    const w = world()
+    const b = createSpaceInDraft(w.state, { name: 'B', afterSpaceId: w.a })
+    const one = w.addTab(w.a, 'today')
+    const two = w.addTab(w.a, 'today')
+    const three = w.addTab(w.a, 'today')
+    w.state.tabs[two]!.lastActiveAt = 10
+    w.state.tabs[three]!.lastActiveAt = 20
+    w.state.tabs[one]!.lastActiveAt = 30
+    w.state.windows[w.win]!.activeTab[w.a] = one
+    const w2 = createWindowState(w.a)
+    w.state.windows[w2.id] = w2
+    return { ...w, b: b.id, w2: w2.id, one, two, three }
+  }
+
+  it('selects, on its first visit, the most recently used tab that no other window shows', () => {
+    const { state, a, b, win, w2, one, three } = twoWindows()
+    switchSpaceInDraft(state, w2, b)
+    expect(state.windows[w2]?.activeTab[b] ?? null).toBeNull()
+    switchSpaceInDraft(state, w2, a)
+    expect(state.windows[w2]?.activeTab[a]).toBe(three)
+    expect(state.windows[win]?.activeTab[a]).toBe(one)
+  })
+
+  it('does the same when the tab it remembers has gone', () => {
+    const { state, a, b, w2, three, two } = twoWindows()
+    state.windows[w2]!.activeTab[a] = 't-gone'
+    state.windows[w2]!.spaceId = b
+    delete state.tabs[three]
+    state.spaces[a]!.today = state.spaces[a]!.today.filter((id) => id !== three)
+    switchSpaceInDraft(state, w2, a)
+    expect(state.windows[w2]?.activeTab[a]).toBe(two)
+  })
+
+  it('shows the empty state when every tab of the Space shows in another window, a split pane too', () => {
+    const { state, a, b, win, w2, one, two, three } = twoWindows()
+    // Two and Three are one split view, which window 1 shows; One shows in a third window.
+    const leaf = (tabId: string) => ({ type: 'leaf' as const, tabId })
+    state.splits['v-1'] = {
+      id: 'v-1',
+      layout: { type: 'row', children: [leaf(two), leaf(three)], sizes: [1, 1] },
+      createdAt: 0,
+    }
+    state.spaces[a]!.today = [one, 'v-1']
+    state.windows[win]!.activeTab[a] = three
+    const w3 = createWindowState(a)
+    w3.activeTab[a] = one
+    state.windows[w3.id] = w3
+    switchSpaceInDraft(state, w2, b)
+    switchSpaceInDraft(state, w2, a)
+    expect(state.windows[w2]?.activeTab[a] ?? null).toBeNull()
+    expect(state.windows[win]?.activeTab[a]).toBe(three)
+    expect(state.windows[w3.id]?.activeTab[a]).toBe(one)
   })
 })
 

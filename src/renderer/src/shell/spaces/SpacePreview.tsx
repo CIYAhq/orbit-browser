@@ -1,6 +1,7 @@
 import { ChevronRight, Folder, Plus } from 'lucide-react'
 import { memo, type ReactNode } from 'react'
 import { isFolderId, isSplitId, isTabId } from '../../../../shared/ids'
+import { paneOrder } from '../../../../shared/split'
 import type { ItemId, OrbitState, SpaceId } from '../../../../shared/state'
 import { splitLeaves } from '../../../../shared/tree'
 import { getOrbitState, useOrbit } from '../../store'
@@ -39,35 +40,23 @@ export const SpacePreview = memo(function SpacePreview({
   const state = getOrbitState()
   const scrollTop = scrollMemory.get(spaceId) ?? 0
   const budget = Math.ceil((scrollTop + (height || 900)) / ROW_PITCH) + 4
+  // Tabs and split views, counted as the real grid counts them (FV-02, SV-23).
+  const tiles = favorites?.filter((id) => isTabId(id) || isSplitId(id)) ?? []
   const pinnedRows = collectRows(state, space.pinned, 0, budget, active)
   const todayRows = collectRows(state, space.today, 0, Math.max(0, budget - pinnedRows.length - 2), active)
   return (
     <div className={`space-page space-page--preview${standIn ? ' is-stand-in' : ''}`} aria-hidden={!standIn}>
       <div className="space-page__favorites" data-favorites-layer>
-        {favorites && favorites.length > 0 ? (
+        {tiles.length > 0 ? (
           // Same grid and tiles as the tabs lane's Favorites, so a stand-in or a cross-fading
           // neighbour never changes the tiles' size or place (PR-06; review V2).
           <div
             className="favorites"
             style={{
-              gridTemplateColumns: `repeat(${Math.max(1, Math.min(MAX_FAVORITE_COLUMNS, favorites.filter(isTabId).length))}, minmax(0, 1fr))`,
+              gridTemplateColumns: `repeat(${Math.max(1, Math.min(MAX_FAVORITE_COLUMNS, tiles.length))}, minmax(0, 1fr))`,
             }}
           >
-            {favorites.filter(isTabId).map((id) => {
-              const tab = state.tabs[id]
-              return (
-                <div
-                  key={id}
-                  className={`favorite${active === id ? ' is-active' : ''}${tab?.asleep ? ' is-asleep' : ''}`}
-                >
-                  {tab?.icon ? (
-                    <span className="favorite__emoji">{tab.icon}</span>
-                  ) : (
-                    <Favicon src={tab?.favicon} size={20} />
-                  )}
-                </div>
-              )
-            })}
+            {tiles.map((id) => favoriteTile(state, id, active))}
           </div>
         ) : null}
       </div>
@@ -95,6 +84,35 @@ export const SpacePreview = memo(function SpacePreview({
     </div>
   )
 })
+
+/** A Favorites tile as the real grid draws it, without handlers: a tab's, or a split view's (SV-23). */
+function favoriteTile(state: OrbitState, id: string, active: string | null): ReactNode {
+  if (isSplitId(id)) {
+    const split = state.splits[id]
+    if (!split) return null
+    const panes = paneOrder(split.layout)
+    return (
+      <div key={id} className={`favorite split-favorite${active && panes.includes(active) ? ' is-active' : ''}`}>
+        {split.icon ? (
+          <span className="favorite__emoji">{split.icon}</span>
+        ) : (
+          <span className="split-favorite__icons">
+            {panes.map((pane) => (
+              <Favicon key={pane} src={state.tabs[pane]?.favicon} size={14} />
+            ))}
+          </span>
+        )}
+      </div>
+    )
+  }
+  const tab = state.tabs[id]
+  if (!tab) return null
+  return (
+    <div key={id} className={`favorite${active === id ? ' is-active' : ''}${tab.asleep ? ' is-asleep' : ''}`}>
+      {tab.icon ? <span className="favorite__emoji">{tab.icon}</span> : <Favicon src={tab.favicon} size={20} />}
+    </div>
+  )
+}
 
 function collectRows(state: OrbitState, items: ItemId[], depth: number, budget: number, active: string | null) {
   const rows: ReactNode[] = []

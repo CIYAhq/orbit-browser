@@ -461,7 +461,7 @@ test('[TB-14][SV-22] a split row’s Change Icon…, though the page had the key
   await expect(picker).toBeVisible()
   await expect.poll(focusedUrl).toContain('view=shell')
   await typeText('rocket')
-  await expect(picker.locator('.icon-picker__search')).toHaveValue('rocket')
+  await expect(picker.getByTestId('emoji-search')).toHaveValue('rocket')
   await keys(['Enter'])
   await expect.poll(async () => (await state(app)).splits[split]?.icon).toBe('🚀')
 })

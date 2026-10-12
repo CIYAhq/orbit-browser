@@ -41,7 +41,24 @@ export type Target =
       text?: boolean
       /** Attributes to keep, e.g. `['aria-selected', 'data-kind']`. */
       attrs?: string[]
+      /** Keep the element's own running animations (`getAnimations()`), each as an `Anim`. */
+      animations?: boolean
+      /**
+       * With `key`, for matches that share their key (e.g. a page's tiles, keyed by the page): key each
+       * as `<key>#<n>`, its place among those on screen, in document order, counted from 0.
+       */
+      nth?: boolean
     }
+
+/**
+ * An animation running on an element in a frame: a CSS animation by its `animation-name`, a Web
+ * Animations API one by its `id`. `start` is its start time on the document timeline (null while it
+ * waits for its first frame): an animation that restarts, or plays again, has a new one.
+ */
+export interface Anim {
+  name: string
+  start: number | null
+}
 
 export interface Box {
   x: number
@@ -61,6 +78,7 @@ export interface Box {
   matched?: string[]
   text?: string
   attrs?: Record<string, string | null>
+  animations?: Anim[]
 }
 
 export interface Frame {
@@ -141,6 +159,8 @@ export async function record(
         matches?: string[]
         text?: boolean
         attrs?: string[]
+        animations?: boolean
+        nth?: boolean
       }
       type W = { __feelRec?: PageRecorder }
       const w = window as unknown as W
@@ -167,6 +187,15 @@ export async function record(
         if (spec.matches) out.matched = spec.matches.filter((m) => el.matches(m))
         if (spec.text) out.text = el instanceof HTMLInputElement ? el.value : (el.textContent ?? '')
         if (spec.attrs) out.attrs = Object.fromEntries(spec.attrs.map((a) => [a, el.getAttribute(a)]))
+        if (spec.animations) {
+          out.animations = el
+            .getAnimations()
+            .filter((a) => a.playState === 'running')
+            .map((a) => ({
+              name: a instanceof CSSAnimation ? a.animationName : a.id,
+              start: typeof a.startTime === 'number' ? a.startTime : null,
+            }))
+        }
         if (spec.style) {
           const cs = spec.pseudo ? getComputedStyle(el, spec.pseudo) : getComputedStyle(el)
           out.style = Object.fromEntries(spec.style.map((p) => [p, cs.getPropertyValue(p)]))
@@ -231,10 +260,17 @@ export async function record(
         for (const [name, spec] of specs) {
           if (spec.key) {
             const all: Record<string, Box> = {}
+            const shared = new Map<string, number>()
             for (const el of document.querySelectorAll(spec.selector)) {
               const b = box(el, spec)
-              const k = el.closest(`[${spec.key}]`)?.getAttribute(spec.key)
-              if (b && k != null) all[k] = b
+              let k = el.closest(`[${spec.key}]`)?.getAttribute(spec.key)
+              if (!b || k == null) continue
+              if (spec.nth) {
+                const n = shared.get(k) ?? 0
+                shared.set(k, n + 1)
+                k = `${k}#${n}`
+              }
+              all[k] = b
             }
             frame.lists[name] = all
           } else {
