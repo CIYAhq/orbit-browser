@@ -390,6 +390,10 @@ export interface Settings {
    * become short cross-fades. Off: Orbit follows the OS setting.
    */
   reduceMotion: boolean
+  /** Apply Tweaks on websites (BO-16): off, none applies anywhere; each Tweak keeps its own switch. */
+  tweaksEnabled: boolean
+  /** The Tweak editor's one-screen intro was dismissed (BO-01): it never shows again. */
+  tweakIntroSeen: boolean
 }
 
 /** Secure DNS choices (ST-12): providers are src/main/settings/dns.ts's DOH_SERVERS. */
@@ -465,15 +469,62 @@ export interface Download {
   danger?: 'file-type'
 }
 
-/** Per-site customisation ("Tweak"): CSS/JS applied to matching hosts. */
+/**
+ * Per-site customisation ("Tweak", BO-*): no-code style, CSS and JavaScript applied to matching
+ * hosts. Pure logic (matching, CSS) is in src/shared/tweaks.ts.
+ */
 export interface Tweak {
   id: string
+  /** The host it was made on: a lowercase hostname without the port (BO-17). */
   host: string
   name: string
   enabled: boolean
   css: string
   js: string
   createdAt: number
+  /** The last edit, for "most recent" orders. */
+  updatedAt: number
+  /** Also applies on the host's subdomains (BO-17; off by default). */
+  subdomains: boolean
+  /** Its JavaScript may run on this device (BO-11, BO-18): an imported Tweak's is off until allowed. */
+  jsAllowed: boolean
+  /** Its JavaScript runs in private windows too (BO-17; off by default). Its CSS always does. */
+  jsInPrivate: boolean
+  /** The no-code controls (BO-03 to BO-10). */
+  style: TweakStyle
+  /** The origin it was made on (scheme, host and port): where the Library's Open Site goes (BO-15). */
+  origin: string
+}
+
+/** A Tweak's no-code controls; every field at its default changes nothing. */
+export interface TweakStyle {
+  /** Colour wheel (BO-03): main hue in degrees; how strong the tint is, 0 (none) to 1. */
+  hue: number
+  intensity: number
+  /** The wheel's rim handle (BO-03): the accent hue, in degrees. */
+  accent: number
+  /** Invert lightness (BO-04). */
+  invert: boolean
+  /** Advanced colour sliders (BO-05), in percent: 100 changes nothing. */
+  contrast: number
+  brightness: number
+  saturation: number
+  /** A font preset's id (BO-07); '' keeps the site's fonts. */
+  font: string
+  /** Page size in percent (BO-08), 90 to 150; it multiplies with page zoom (NV-06). */
+  size: number
+  /** Text case (BO-09). */
+  textCase: 'none' | 'lower' | 'upper' | 'capitalize'
+  /** Hidden elements (BO-10), oldest first. */
+  hidden: TweakHidden[]
+}
+
+/** One Hide-element action (BO-10): plain CSS selector, hidden with `display: none`. */
+export interface TweakHidden {
+  id: string
+  selector: string
+  /** What was hidden, in words, for its restore marker. */
+  label: string
 }
 
 export interface OrbitState {

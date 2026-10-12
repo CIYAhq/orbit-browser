@@ -2,6 +2,7 @@ import { Wrench } from 'lucide-react'
 import { SLEEP_AFTER_CHOICES } from '../../../../shared/commands/settings'
 import { invoke } from '../../api'
 import { useOrbit } from '../../store'
+import { TweaksSetting } from '../../tweaks/TweaksSetting'
 import { Button, Select, SettingGroup, SettingRow, Switch } from '../controls'
 import { durationLabel, withCurrent } from '../format'
 import { useMainValue } from '../hooks'
@@ -9,7 +10,7 @@ import type { SettingsSection } from '../registry'
 
 const SLEEP_OPTIONS = SLEEP_AFTER_CHOICES.map((ms) => ({ value: ms, label: durationLabel(ms) }))
 
-/** Advanced (ST-10): tab sleeping, picture in picture and graphics acceleration (ST-12). */
+/** Advanced (ST-10): tab sleeping, picture in picture, Tweaks (BO-16) and graphics acceleration (ST-12). */
 function AdvancedPage() {
   const sleepAfter = useOrbit((s) => s.settings.sleepAfterMs)
   const autoPip = useOrbit((s) => s.settings.autoPip)
@@ -42,6 +43,7 @@ function AdvancedPage() {
           />
         </SettingRow>
       </SettingGroup>
+      <TweaksSetting />
       <SettingGroup title="System">
         <GraphicsRow />
       </SettingGroup>
@@ -85,5 +87,17 @@ export default {
   icon: Wrench,
   order: 70,
   component: AdvancedPage,
-  keywords: ['graphics acceleration', 'hardware acceleration', 'gpu', 'picture in picture', 'sleep', 'memory'],
+  keywords: [
+    'graphics acceleration',
+    'hardware acceleration',
+    'gpu',
+    'picture in picture',
+    'sleep',
+    'memory',
+    // Tweaks (BO-16), from the tweaks lane
+    'tweaks',
+    'customize',
+    'customizations',
+    'site style',
+  ],
 } satisfies SettingsSection
