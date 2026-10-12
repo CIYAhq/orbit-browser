@@ -35,6 +35,13 @@ export type InstallResult =
   /** `cancelled`: no file chosen, or Cancel in the confirmation. Otherwise `error` says why, in words. */
   | { ok: false; cancelled?: boolean; error?: string }
 
+/** A store listing page (EX-01): the extension it is for. */
+export interface StoreListing {
+  id: string
+  /** A private window's tab: nothing is added there. */
+  private: boolean
+}
+
 /** The extensions page's own profile (EX-07, EX-09). */
 export interface ExtensionsPageInfo {
   profileId: ProfileId
@@ -67,10 +74,20 @@ export interface ExtensionCommands {
   'extensions.setDevMode': { args: { on: boolean }; result: void }
   /** The dialog's answer (EX-02, EX-08). */
   'extensions.answer': { args: { requestId: string; accept: boolean }; result: void }
+  /** The store listing a tab shows (EX-01), from its own address; null on any other page. */
+  'extensions.storeListing': { args: { tabId: string }; result: StoreListing | null }
+  /** Add to Orbit (EX-01): downloads the listing's extension into the tab's profile, after Orbit's confirmation. */
+  'extensions.installFromStore': { args: { tabId: string }; result: InstallResult }
 }
 
 /** The command bar's and menus' extension actions (EX-01, EX-07). */
 export const EXTENSION_ACTIONS: ActionDef[] = [
+  {
+    id: 'extension.add',
+    title: 'Add Extension',
+    category: 'App',
+    keywords: ['extension store', 'add-on', 'addon', 'plugin', 'install extension', 'get extensions'],
+  },
   {
     id: 'extension.manage',
     title: 'Manage Extensions',

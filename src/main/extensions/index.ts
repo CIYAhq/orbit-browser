@@ -1,5 +1,5 @@
 import { readFile, stat } from 'node:fs/promises'
-import { dialog, type OpenDialogOptions } from 'electron'
+import { app, dialog, type OpenDialogOptions } from 'electron'
 import {
   EXTENSIONS_PAGE,
   EXTENSIONS_URL,
@@ -7,6 +7,7 @@ import {
   type InstallResult,
 } from '../../shared/commands/extensions'
 import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
+import { storeConfig } from '../../shared/extension-store'
 import { isPrivateProfileId } from '../../shared/private'
 import type { ProfileId, Tab, TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
@@ -16,6 +17,7 @@ import { withDialog } from '../media/dialog-watch'
 import type { ActionContext, CallContext } from '../registry'
 import { ExtensionDialogs } from './dialogs'
 import { ExtensionService } from './service'
+import { registerStore } from './store'
 
 /** A .crx file larger than this isn't read (EX-09). */
 const MAX_FILE_BYTES = 256 * 1024 * 1024
@@ -230,6 +232,16 @@ export function registerExtensions(ctx: MainContext): void {
 
   actions.register('extension.installFile', async (c) => {
     await commands.run('extensions.installFile', {}, { windowId: c.windowId ?? windows.focusedWindowId() })
+  })
+
+  // ---- The extension store (EX-01) ----
+
+  registerStore(ctx, storeConfig(process.env, app.isPackaged), {
+    service,
+    dialogs,
+    report,
+    privateRefusal,
+    mainWindowFor: (c) => mainWindowFor(c),
   })
 
   if (ctx.e2e) {

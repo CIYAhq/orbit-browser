@@ -27,12 +27,16 @@
  *
  * In a website's main frame, before the page's first paint, it puts in the stylesheets of the site's
  * Tweaks, and takes them out when main's own copies are in (BO-18, D85: `applyTweakSheets`).
+ *
+ * In the main frame of a page of exactly the extension store's origin, and nowhere else, it gives
+ * the store's install button the two calls it makes (EX-01, D40 (3): `exposeStoreInstall`).
  */
 import { contextBridge, type IpcRendererEvent, ipcRenderer, webFrame } from 'electron'
 import { isWheelNotch } from '../renderer/src/shell/spaces/physics'
 import type { OrbitBridge, StatePatch } from '../shared/rpc'
 import { PAGE_CHANNEL } from '../shared/site'
 import type { OrbitState } from '../shared/state'
+import { exposeStoreInstall } from './store-install'
 import { HistorySwipe, RELEASE_GAP_MS, type SwipeUpdate, scrollsToward } from './swipe'
 import { insertTweakSheets, tweakAnswer } from './tweak-sheets'
 
@@ -651,4 +655,6 @@ if (location.protocol === 'orbit:') {
     exposeLeave()
     holdForPrint()
   }
+  // The extension store's install button, on its own main frames only (EX-01, D40 (3)).
+  exposeStoreInstall()
 }

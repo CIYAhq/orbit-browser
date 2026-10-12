@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 312 built (67 partial) · 385 tested · 202 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 312 built (68 partial) · 386 tested · 202 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 160 | 173 |
-| P1 | 219 | 132 | 186 |
+| P1 | 219 | 132 | 187 |
 | P2 | 79 | 20 | 26 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -465,7 +465,7 @@ Spec: `spec/extensions.md`
 
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
-| EX-01 | Install an extension from the Chrome Web Store | P1 | – | – | – |  |
+| EX-01 | Install an extension from the Chrome Web Store | P1 | 🟡 partial | ✅ e2e+unit | – | the store's own install button works on its pages: on main frames of exactly the store's origin the page preload adds the two calls the button makes, and only the extension's ID reaches main (D40 (3)), which checks the calling frame's origin on every call, takes the profile from the tab, downloads the file itself, checks its CRX3 signature and that its ID is the one asked for, and adds it only after Orbit's own dialog (EX-02), with the toast “<name> added” and Pin; a listing page's site controls panel also has Orbit's own Add to Orbit; Add Extension (command bar) opens the store in a new tab; private windows add nothing. Tested against a fixture store on this machine only (tests never reach the store; e2e and development builds make no store request unless a test names a fixture store). Not yet: a check with the real store, which may tell a browser it doesn't know to switch browsers (a person should try a listing's button and Add to Orbit in a packaged build); the app menu's Extensions → Add extension… (EX-17); an extension's welcome page (tabs an extension opens, EX-12); the store's publisher signature isn't checked (the CRX3 signature and ID are) |
 | EX-02 | Install confirmation and permission prompt | P1 | 🟡 partial | ✅ e2e+unit | – | before an install Orbit shows its own dialog in the window's overlay, never in a page: the extension's icon and name, what it may do in plain words (all sites, or the sites it names; history, bookmarks, downloads and the like; file pages), Add extension / Cancel; Cancel, Esc or a click outside leave no trace (no state entry, no files, nothing loaded); a .crx is verified (every CRX3 proof's signature, and that the extension's own key gives the ID it names) and unpacked inside its own folder before the dialog shows. Not yet: an update asking for new permissions held for the user's answer (EX-15), the prompt for optional permissions an extension asks for while it runs |
 | EX-03 | Extensions list in the site controls panel | P1 | – | – | – |  |
 | EX-04 | Pinned extensions: where their icons appear | P1 | – | – | – |  |

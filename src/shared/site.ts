@@ -247,6 +247,13 @@ export const PAGE_CHANNEL = {
    * its own document's (src/preload/tweak-sheets.ts).
    */
   tweakRetire: 'orbit-page:tweak-retire',
+  /**
+   * invoke(id): the extension store's install button asks to add the extension `id` (EX-01; D40 (3);
+   * src/preload/store-install.ts). Main answers only a tab's main frame showing a page of exactly the
+   * store's origin, takes the profile from the tab, downloads and checks the file itself, and asks
+   * the user in Orbit's own dialog first (src/main/extensions/store.ts). Only the ID crosses.
+   */
+  storeInstall: 'orbit-page:store-install',
 } as const
 
 /** Main's answer to the page preload's `PAGE_CHANNEL.tweakSheets` read (BO-18, D85). */

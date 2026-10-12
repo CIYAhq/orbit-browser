@@ -1,0 +1,15 @@
+/* Extensions in the site controls panel (EX-01, EX-03): built from the panel's own classes (site.css). */
+
+.ext-site-row .ext-icon {
+  border-radius: 4px;
+}
+
+.ext-site-row .ext-icon--generic {
+  color: var(--text-muted, rgba(28, 28, 31, 0.56));
+  background: transparent;
+}
+
+.ext-site-row .site-panel__button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

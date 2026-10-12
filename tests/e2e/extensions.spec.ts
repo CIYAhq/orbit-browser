@@ -1,31 +1,131 @@
 import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 import type { OrbitState } from '../../src/shared/state'
-import { type CrxKey, FIXTURES, makeKey, packFolder } from '../fixtures/extensions/pack'
-import { action, type Fixtures, launchOrbit, type Orbit, run, startFixtures, state, tabPage, viewPage } from './helpers'
+import { type CrxKey, crx, FIXTURES, folderFiles, makeKey, packFolder, zip } from '../fixtures/extensions/pack'
+import {
+  action,
+  type Fixtures,
+  launchOrbit,
+  listenInRange,
+  type Orbit,
+  run,
+  startFixtures,
+  state,
+  tabPage,
+  viewPage,
+} from './helpers'
 import { newTab, waitTab } from './tabs-support'
 
 /**
  * Chrome extensions (EX-*), with the fixture extensions only (tests/fixtures/extensions/), packed on
  * the spot: nothing here reaches the network or a store. The file picker is replaced in main, so no
- * dialog waits for a person.
+ * dialog waits for a person. The extension store is a fixture server on this machine (`startStore`),
+ * which each launch names (EX-01).
  */
 
+/**
+ * A store on this machine (EX-01): listing pages whose button calls the install API as the store's
+ * own does, and the extensions' files.
+ */
+interface FixtureStore {
+  origin: string
+  /** The same server under another origin: not the store. */
+  otherOrigin: string
+  /** The file served for each ID. */
+  files: Map<string, Buffer>
+  /** The IDs whose files were asked for, in order. */
+  downloads: string[]
+  close: () => Promise<void>
+}
+
+/** A listing page: its button calls the API with what the store would send, a manifest of its own included. */
+const LISTING = (id: string) => `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Listing ${id}</title></head>
+<body style="font:16px system-ui;padding:40px">
+<h1>A listing</h1>
+<button id="add" style="font-size:20px;padding:12px 20px">Add</button>
+<iframe id="frame" src="/frame" width="300" height="80"></iframe>
+<script>
+  const root = document.documentElement
+  const api = window.chrome && window.chrome.webstorePrivate
+  root.dataset.api = api ? Object.keys(api).join(',') : 'none'
+  document.getElementById('add').addEventListener('click', () => {
+    root.dataset.begin = 'waiting'
+    const manifest = '{"name":"What the page says","version":"9","manifest_version":3,"permissions":["tabs"]}'
+    api.beginInstallWithManifest3({ id: ${JSON.stringify(id)}, manifest }, (result) => {
+      root.dataset.begin = result
+      if (result === '') api.completeInstall(${JSON.stringify(id)}, () => { root.dataset.complete = 'done' })
+    })
+  })
+</script></body></html>`
+
+async function startStore(): Promise<FixtureStore> {
+  const files = new Map<string, Buffer>()
+  const downloads: string[] = []
+  const html = (res: import('node:http').ServerResponse, body: string) => {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+    res.end(body)
+  }
+  const server = createServer((req, res) => {
+    const u = new URL(req.url ?? '/', 'http://localhost')
+    const listing = /^\/detail\/[^/]+\/([a-p]{32})$/.exec(u.pathname)
+    const file = /^\/crx\/([a-p]{32})$/.exec(u.pathname)
+    if (listing?.[1]) return html(res, LISTING(listing[1]))
+    if (u.pathname === '/frame') {
+      return html(
+        res,
+        '<!doctype html><html lang="en"><body><script>document.documentElement.dataset.api = window.chrome && window.chrome.webstorePrivate ? "yes" : "none"</script></body></html>',
+      )
+    }
+    if (u.pathname === '/')
+      return html(res, '<!doctype html><html lang="en"><title>Fixture store</title><h1>Store</h1></html>')
+    if (file?.[1]) {
+      downloads.push(file[1])
+      const bytes = files.get(file[1])
+      if (bytes) {
+        res.writeHead(200, { 'content-type': 'application/x-chrome-extension' })
+        res.end(bytes)
+        return
+      }
+    }
+    res.writeHead(404, { 'content-type': 'text/plain' })
+    res.end('not found')
+  })
+  const port = await listenInRange(server, 3350)
+  return {
+    origin: `http://localhost:${port}`,
+    otherOrigin: `http://127.0.0.1:${port}`,
+    files,
+    downloads,
+    close: () => new Promise((r) => server.close(() => r())),
+  }
+}
+
 let fx: Fixtures
+let store: FixtureStore
 let orbit: Orbit
 let scratch: string
 
+/** Points Orbit's store settings at the fixture store. */
+const storeEnv = () => ({
+  ORBIT_STORE_ORIGIN: store.origin,
+  ORBIT_STORE_DOWNLOAD_URL: `${store.origin}/crx/{id}?prodversion={version}`,
+})
+
 test.beforeAll(async () => {
   fx = await startFixtures()
+  store = await startStore()
 })
 test.afterAll(async () => {
   await fx.close()
+  await store.close()
 })
 test.beforeEach(async () => {
   scratch = mkdtempSync(join(tmpdir(), 'orbit-ext-'))
-  orbit = await launchOrbit()
+  orbit = await launchOrbit({ env: storeEnv() })
 })
 test.afterEach(async () => {
   await orbit.app.close()
@@ -477,4 +577,227 @@ test('[EX] Isolation: content scripts never run in Orbit’s views or internal p
   await expect.poll(async () => (await loaded(app, profileId)).sort()).toEqual([broad.id, basic.id].sort())
   await reload(app, web, '/page/ExtIsolation')
   await expect.poll(() => mark(app, web, 'orbitTestExtension')).toBe(basic.id)
+})
+
+// ---- The extension store (EX-01): a fixture store on this machine ----
+
+/** Runs a command as window `windowId` would. */
+const runIn = (app: ElectronApplication, windowId: string, name: string, args: unknown) =>
+  app.evaluate(
+    (_e, [w, n, a]) =>
+      (globalThis as unknown as { __orbit: { run: (n: string, a: unknown, w?: string) => unknown } }).__orbit.run(
+        n as string,
+        a,
+        w as string,
+      ),
+    [windowId, name, args] as const,
+  )
+
+/** Opens a store listing in a new tab (of window `windowId`, else the first) and gives its page. */
+async function openListing(
+  app: ElectronApplication,
+  id: string,
+  opts: { origin?: string; slug?: string; windowId?: string } = {},
+): Promise<{ tabId: string; page: Page; url: string }> {
+  const url = `${opts.origin ?? store.origin}/detail/${opts.slug ?? 'orbit-test'}/${id}`
+  const tabId = opts.windowId
+    ? ((await runIn(app, opts.windowId, 'tabs.create', { url, activate: true })) as string)
+    : await newTab(app, url)
+  await waitTab(app, tabId, `/detail/${opts.slug ?? 'orbit-test'}/${id}`)
+  const page = await tabPage(app, url)
+  await expect(page.locator('#add')).toBeVisible()
+  return { tabId, page, url }
+}
+
+/** What the listing page's own script says (`data-<name>` on its root). */
+const said = (page: Page, name: string) => page.evaluate((n) => document.documentElement.dataset[n] ?? '', name)
+
+/** The extension installed in a profile, from the state. */
+const entryOf = async (app: ElectronApplication, profileId: string, id: string) =>
+  (await state(app)).extensions[`${profileId}:${id}`]
+
+test('[EX-01][EX-02] The store’s own button adds an extension once Orbit’s dialog says yes, into the tab’s profile; only the ID crosses, and a script can’t press it', async () => {
+  const { app, shell } = orbit
+  const { profileId } = await current(app)
+  const key = makeKey()
+  store.files.set(key.id, packFolder(FIXTURES.basic, key).file)
+  const { tabId, page, url } = await openListing(app, key.id)
+
+  // The store's main frame has the two install calls and nothing else; its frames have none.
+  await expect.poll(() => said(page, 'api')).toBe('beginInstallWithManifest3,completeInstall')
+  await expect
+    .poll(async () => {
+      const frame = page.frames().find((f) => f.url().endsWith('/frame'))
+      return frame ? frame.evaluate(() => document.documentElement.dataset.api ?? '') : ''
+    })
+    .toBe('none')
+
+  // A script that calls it without a click on the page gets nothing, and Orbit downloads nothing. (A
+  // page Orbit loads has the user's activation for a moment, so this one is the page's own reload.)
+  await inContents(app, url, 'location.replace(location.pathname + "?again"), true')
+  const again = `${url}?again`
+  await expect.poll(() => inContents(app, again, 'document.readyState')).toBe('complete')
+  expect(await inContents(app, again, 'navigator.userActivation.isActive')).toBe(false)
+  const scripted = await inContents(
+    app,
+    again,
+    `window.chrome.webstorePrivate.beginInstallWithManifest3({ id: ${JSON.stringify(key.id)} })`,
+  )
+  expect(scripted).toBe('user_gesture_required')
+  expect(store.downloads).not.toContain(key.id)
+
+  // The button: Orbit downloads the file and asks in its own dialog, naming what the file says, not
+  // what the page sent. Cancel: nothing is added, and the page hears so.
+  await page.locator('#add').click()
+  const overlay = await viewPage(app, 'overlay')
+  const dialog = overlay.getByTestId('ext-dialog')
+  await expect(dialog).toHaveAttribute('data-kind', 'install')
+  await expect(overlay.getByTestId('ext-dialog-title')).toHaveText(`Add “${NAME}”?`)
+  await expect(overlay.getByTestId('ext-dialog-permissions')).toHaveText(
+    'Read and change your data on localhost and 127.0.0.1',
+  )
+  expect(store.downloads.filter((id) => id === key.id)).toHaveLength(1)
+  await overlay.getByTestId('ext-dialog-cancel').click()
+  await expect.poll(() => said(page, 'begin')).toBe('user_cancelled')
+  expect(await installed(app, profileId)).toEqual([])
+
+  // Add extension: it's in the tab's profile, from the store, and running; the page's install completes.
+  await page.locator('#add').click()
+  await overlay.getByTestId('ext-dialog-confirm').click()
+  await expect.poll(() => said(page, 'complete')).toBe('done')
+  expect(await said(page, 'begin')).toBe('')
+  expect(await installed(app, profileId)).toEqual([key.id])
+  const entry = await entryOf(app, profileId, key.id)
+  expect(entry?.source).toBe('store')
+  expect(entry?.name).toBe(NAME)
+  await expect(shell.getByTestId('toast').filter({ hasText: `${NAME} added` })).toBeVisible()
+  await expect.poll(() => loaded(app, profileId)).toEqual([key.id])
+  const web = await visit(app, 'FromStore')
+  await expect.poll(() => mark(app, web, 'orbitTestExtension')).toBe(key.id)
+
+  // Once it's in, the button says so without downloading it again.
+  const before = store.downloads.length
+  await page.locator('#add').click()
+  await expect.poll(() => said(page, 'begin')).toBe('already_installed')
+  expect(store.downloads.length).toBe(before)
+  expect((await state(app)).tabs[tabId]?.profileId).toBe(profileId)
+})
+
+test('[EX-01] A store file that isn’t the one asked for, or isn’t signed right, is refused with the reason; pages of other origins and private windows add nothing', async () => {
+  const { app, shell, userData } = orbit
+  const { profileId } = await current(app)
+  const toast = (text: string) => shell.getByTestId('toast').filter({ hasText: text })
+
+  // Another extension's file under this ID.
+  const asked = makeKey()
+  store.files.set(asked.id, packFolder(FIXTURES.basic, makeKey()).file)
+  const wrong = await openListing(app, asked.id)
+  await wrong.page.locator('#add').click()
+  await expect.poll(() => said(wrong.page, 'begin')).toBe('unknown_error')
+  await expect(toast('Couldn’t add the extension. It isn’t the extension that was asked for.')).toBeVisible()
+
+  // A file changed after it was signed.
+  const changed = makeKey()
+  const archive = zip(folderFiles(FIXTURES.basic))
+  store.files.set(changed.id, crx(zip(folderFiles(FIXTURES.broad)), changed, { signedArchive: archive }))
+  const tampered = await openListing(app, changed.id)
+  await tampered.page.locator('#add').click()
+  await expect.poll(() => said(tampered.page, 'begin')).toBe('unknown_error')
+  await expect(toast('Its signature doesn’t match its contents.')).toBeVisible()
+
+  // A file the store doesn't have.
+  const missing = makeKey()
+  const none = await openListing(app, missing.id)
+  await none.page.locator('#add').click()
+  await expect.poll(() => said(none.page, 'begin')).toBe('unknown_error')
+  await expect(toast('The store didn’t send it (404).')).toBeVisible()
+  expect(await installed(app, profileId)).toEqual([])
+  expect(filesOf(userData, profileId)).toEqual([])
+
+  // The same page under another origin isn't the store: no API.
+  const good = makeKey()
+  store.files.set(good.id, packFolder(FIXTURES.basic, good).file)
+  const elsewhere = await openListing(app, good.id, { origin: store.otherOrigin, slug: 'elsewhere' })
+  expect(await said(elsewhere.page, 'api')).toBe('none')
+
+  // A private window's store page: refused before anything is downloaded.
+  await action(app, 'window.newPrivate')
+  let privateWindow = ''
+  await expect
+    .poll(async () => {
+      privateWindow = Object.values((await state(app)).windows).find((w) => w.kind === 'private')?.id ?? ''
+      return privateWindow
+    })
+    .not.toBe('')
+  const before = store.downloads.length
+  const hidden = await openListing(app, good.id, { slug: 'private', windowId: privateWindow })
+  await hidden.page.locator('#add').click()
+  await expect.poll(() => said(hidden.page, 'begin')).toBe('blocked_by_policy')
+  expect(store.downloads.length).toBe(before)
+  expect(Object.keys((await state(app)).extensions)).toEqual([])
+})
+
+test('[EX-01] Add to Orbit in a listing’s site controls; Add Extension opens the store', async () => {
+  const { app, shell } = orbit
+  const { profileId } = await current(app)
+  const key = makeKey()
+  store.files.set(key.id, packFolder(FIXTURES.basic, key).file)
+  await openListing(app, key.id, { slug: 'panel' })
+  const overlay = await viewPage(app, 'overlay')
+
+  await run(app, 'site.openControls', {})
+  const row = overlay.getByTestId('ext-store-row')
+  await expect(row).toHaveAttribute('data-state', 'new')
+  await overlay.getByTestId('ext-store-add').click()
+  await expect(overlay.getByTestId('ext-dialog-title')).toHaveText(`Add “${NAME}”?`)
+  await overlay.getByTestId('ext-dialog-confirm').click()
+  await expect.poll(() => installed(app, profileId)).toEqual([key.id])
+  expect((await entryOf(app, profileId, key.id))?.source).toBe('store')
+  await expect(shell.getByTestId('toast').filter({ hasText: `${NAME} added` })).toBeVisible()
+
+  // Once it's in, the row names it and offers nothing to add.
+  await run(app, 'site.openControls', {})
+  await expect(row).toHaveAttribute('data-state', 'added')
+  await expect(row).toContainText(NAME)
+  await expect(overlay.getByTestId('ext-store-add')).toHaveCount(0)
+  await overlay.keyboard.press('Escape')
+
+  // Any other page has no store row.
+  await visit(app, 'NotAListing')
+  await run(app, 'site.openControls', {})
+  await expect(overlay.getByTestId('site-controls')).toBeVisible()
+  await expect(overlay.getByTestId('ext-store')).toHaveCount(0)
+  await overlay.keyboard.press('Escape')
+
+  // Add Extension (the command bar's, the menu's): the store, in a new tab.
+  await action(app, 'extension.add')
+  await expect
+    .poll(async () => {
+      const s = await state(app)
+      const win = Object.values(s.windows)[0]
+      const active = win ? win.activeTab[win.spaceId] : undefined
+      return active ? s.tabs[active]?.url : ''
+    })
+    .toBe(`${store.origin}/`)
+})
+
+test('[EX-01] Without a store a test names, Orbit makes no store request: no API, no Add to Orbit, and Add Extension says so', async () => {
+  await orbit.app.close()
+  orbit = await launchOrbit()
+  const { app, shell } = orbit
+  const key = makeKey()
+  store.files.set(key.id, packFolder(FIXTURES.basic, key).file)
+  const before = store.downloads.length
+  const { page } = await openListing(app, key.id, { slug: 'off' })
+  expect(await said(page, 'api')).toBe('none')
+  const overlay = await viewPage(app, 'overlay')
+  await run(app, 'site.openControls', {})
+  await expect(overlay.getByTestId('site-controls')).toBeVisible()
+  await expect(overlay.getByTestId('ext-store')).toHaveCount(0)
+  await overlay.keyboard.press('Escape')
+  const tabs = Object.keys((await state(app)).tabs).length
+  await action(app, 'extension.add')
+  await expect(shell.getByTestId('toast').filter({ hasText: 'doesn’t open the extension store' })).toBeVisible()
+  expect(Object.keys((await state(app)).tabs).length).toBe(tabs)
+  expect(store.downloads.length).toBe(before)
 })
