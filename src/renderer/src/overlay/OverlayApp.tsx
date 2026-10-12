@@ -2,12 +2,14 @@ import { applyPatches } from 'immer'
 import { AnimatePresence, domAnimation, LazyMotion } from 'motion/react'
 import { type CSSProperties, useEffect, useRef, useState } from 'react'
 import { DOWNLOADS_FLYOUT_PANEL } from '../../../shared/commands/downloads'
+import { EXTENSION_DIALOG_PANEL } from '../../../shared/commands/extensions'
 import { SHORTCUT_SHEET } from '../../../shared/commands/keys'
 import { ROW_MENU_PANEL } from '../../../shared/row-menu'
 import type { CommandBarMode } from '../../../shared/state'
 import { TAB_SWITCHER_PANEL } from '../../../shared/tab-switcher'
 import { invoke } from '../api'
 import { DownloadsFlyout } from '../downloads/DownloadsFlyout'
+import { ExtensionDialog } from '../extensions/ExtensionDialog'
 import { ShortcutSheet } from '../keys/ShortcutSheet'
 import { OrbitMotionConfig } from '../motion'
 import { isSpacePanel, SpacePanels } from '../shell/spaces/SpacePanels'
@@ -158,6 +160,10 @@ export function OverlayApp() {
           )}
           {overlay?.kind === 'panel' && overlay.panel === SHORTCUT_SHEET && (
             <ShortcutSheet key={overlay.nonce} dark={palette?.dark} />
+          )}
+          {/* Orbit's dialog about an extension (extensions lane, EX-02, EX-08). */}
+          {overlay?.kind === 'panel' && overlay.panel === EXTENSION_DIALOG_PANEL && (
+            <ExtensionDialog key={overlay.nonce} overlay={overlay} />
           )}
           {overlay?.kind === 'peek' && <PeekLayer key={overlay.nonce} overlay={overlay} />}
           {/* The downloads flyout (downloads lane, DL-14). */}

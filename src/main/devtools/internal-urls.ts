@@ -21,6 +21,19 @@ export const INTERNAL_PAGE_COMMANDS: Readonly<Record<string, readonly CommandNam
   version: ['settings.buildInfo', 'settings.copyBuildInfo'],
   // History (AR-10): its own tab's profile only (src/main/pages/history.ts).
   history: ['pages.history', 'pages.historyOpen', 'pages.historyDelete', 'pages.historyMenu'],
+  // Extensions (EX-07): its own tab's profile only (src/main/extensions/index.ts).
+  extensions: [
+    'extensions.pageInfo',
+    'extensions.setEnabled',
+    'extensions.setAllowed',
+    'extensions.pin',
+    'extensions.remove',
+    'extensions.reload',
+    'extensions.openOptions',
+    'extensions.setDevMode',
+    'extensions.installFile',
+    'extensions.loadUnpacked',
+  ],
 }
 
 /**

@@ -54,6 +54,7 @@ export const DEFAULT_SETTINGS: Settings = {
   libraryScreenshots: false,
   tweaksEnabled: true,
   tweakIntroSeen: false,
+  extensionsDevMode: false,
 }
 
 /** Favorites per profile (FV-02). */
@@ -144,5 +145,6 @@ export function createInitialState(now = Date.now()): OrbitState {
     settings: { ...DEFAULT_SETTINGS, siteSearch: DEFAULT_SITE_SEARCH.map((s) => ({ ...s })) },
     downloads: {},
     tweaks: {},
+    extensions: {},
   }
 }

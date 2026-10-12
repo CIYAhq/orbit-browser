@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Orbit Broad Test Extension",
+  "description": "Asks for every site, the tabs and the history: Orbit's tests check what it is shown to ask for, and where its content script may not run.",
+  "version": "2.1",
+  "icons": { "48": "icon-48.png" },
+  "permissions": ["tabs", "history", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ]
+}

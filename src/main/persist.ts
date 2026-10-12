@@ -12,6 +12,7 @@ import {
   MAX_SIDEBAR_WIDTH,
   MIN_SIDEBAR_WIDTH,
 } from '../shared/defaults'
+import { normalizeExtensionSettings, normalizeExtensions } from '../shared/extensions'
 import { isFolderId, isSplitId, isTabId } from '../shared/ids'
 import { normalizeMediaSettings } from '../shared/media'
 import { withoutPrivate } from '../shared/private'
@@ -105,6 +106,7 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
     settings: { ...DEFAULT_SETTINGS, ...(isRecord(input.settings) ? input.settings : {}) },
     downloads: record(input.downloads),
     tweaks: normalizeTweaks(input.tweaks),
+    extensions: {},
   }
   if (!['system', 'light', 'dark'].includes(state.settings.appearance)) state.settings.appearance = 'system'
   normalizeMediaSettings(state.settings, Date.now())
@@ -186,6 +188,9 @@ export function normalizeState(input: Partial<OrbitState>): OrbitState {
   normalizeDownloads(state)
   normalizeSettingsPrefs(state)
   normalizeKeySettings(state.settings, process.platform)
+  // Extensions (EX-09): only those of profiles that still exist; why one couldn't load is runtime only.
+  state.extensions = normalizeExtensions(input.extensions, state.profiles)
+  normalizeExtensionSettings(state.settings)
   return state
 }
 
@@ -503,6 +508,7 @@ const RUNTIME_ONLY: Record<string, ReadonlySet<string>> = {
   ]),
   windows: new Set(['focused', 'fullscreen', 'overlay']),
   downloads: new Set(['receivedBytes', 'speed']),
+  extensions: new Set(['error']),
 }
 
 /** True when a patch only changes runtime-only fields, so the saved file stays the same. */

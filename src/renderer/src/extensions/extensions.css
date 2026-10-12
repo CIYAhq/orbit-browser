@@ -1,0 +1,354 @@
+/* Extensions (EX-*): the extensions page (an internal page) and Orbit's dialog in the overlay. */
+
+.ext-icon {
+  flex: none;
+  display: block;
+  border-radius: 6px;
+  object-fit: contain;
+}
+
+.ext-icon--generic {
+  display: grid;
+  place-items: center;
+  color: var(--internal-muted, var(--text-muted));
+  background: var(--internal-line, var(--hover));
+}
+
+.ext-button {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--internal-text, var(--text));
+  background: var(--internal-line, var(--hover));
+  cursor: pointer;
+  transition:
+    filter var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+
+.ext-button:hover:not(:disabled) {
+  filter: brightness(0.94);
+}
+
+.ext-button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.ext-button:focus-visible,
+.ext-switch:focus-visible,
+.ext-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 60%, transparent);
+}
+
+.ext-button.is-primary {
+  color: #fff;
+  background: var(--accent);
+}
+
+.ext-button.is-danger {
+  color: #fff;
+  background: #d6453b;
+}
+
+.ext-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ext-link {
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  font: inherit;
+  color: var(--internal-link, var(--accent));
+  background: none;
+  cursor: pointer;
+}
+
+.ext-link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.ext-link:disabled {
+  color: var(--internal-muted, var(--text-muted));
+  cursor: default;
+}
+
+/* ---------- Switch ---------- */
+
+.ext-switch {
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--internal-line, var(--hover));
+  box-shadow: inset 0 0 0 1px var(--internal-line, var(--divider));
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease-out);
+}
+
+.ext-switch[aria-checked="true"] {
+  background: var(--accent);
+  box-shadow: none;
+}
+
+.ext-switch:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ext-switch__knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform var(--dur) var(--ease-out);
+}
+
+.ext-switch[aria-checked="true"] .ext-switch__knob {
+  transform: translateX(14px);
+}
+
+/* ---------- The extensions page (EX-07) ---------- */
+
+.ext-page__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ext-page__title {
+  margin-bottom: 4px;
+}
+
+.ext-page__profile {
+  margin: 0;
+  color: var(--internal-muted);
+}
+
+.ext-page__dev {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 6px;
+  color: var(--internal-muted);
+  white-space: nowrap;
+}
+
+.ext-page__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 20px 0;
+}
+
+.ext-page__empty {
+  color: var(--internal-muted);
+}
+
+.ext-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ext-card {
+  padding: 14px 16px;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px var(--internal-line);
+}
+
+.ext-card[data-enabled="false"] .ext-icon {
+  filter: grayscale(1);
+  opacity: 0.6;
+}
+
+.ext-card__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.ext-card__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.ext-card__name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ext-card__version {
+  margin-left: 8px;
+  font-weight: 400;
+  color: var(--internal-muted);
+}
+
+.ext-card__desc {
+  color: var(--internal-muted);
+  overflow-wrap: anywhere;
+}
+
+.ext-card__error {
+  margin-top: 4px;
+  color: #d6453b;
+  overflow-wrap: anywhere;
+}
+
+.ext-card__dev {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--internal-muted);
+  overflow-wrap: anywhere;
+}
+
+.ext-card__actions {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 0 44px;
+}
+
+.ext-details {
+  margin: 14px 0 0 44px;
+  border-top: 1px solid var(--internal-line);
+}
+
+.ext-fact {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 16px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--internal-line);
+}
+
+.ext-fact__label {
+  color: var(--internal-muted);
+}
+
+.ext-fact__value {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.ext-details__list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+@media (max-width: 560px) {
+  .ext-fact {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .ext-card__actions,
+  .ext-details {
+    margin-left: 0;
+  }
+}
+
+/* ---------- Orbit's dialog (EX-02, EX-08), in the overlay ---------- */
+
+.ext-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(10, 10, 14, 0.24);
+  animation: ext-backdrop-in var(--dur-fast) var(--ease-out);
+}
+
+.ext-dialog {
+  width: min(400px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 18px;
+  border-radius: 14px;
+  color: var(--text);
+  background: var(--surface, #fff);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.16),
+    0 14px 36px rgba(0, 0, 0, 0.22),
+    0 2px 8px rgba(0, 0, 0, 0.1);
+  animation: ext-pop-in var(--dur) var(--ease-out);
+}
+
+.ext-dialog__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.ext-dialog__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.ext-dialog__text {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.ext-dialog__perms {
+  margin: 0 0 16px;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ext-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+@keyframes ext-backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes ext-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* Reduced motion (FL-28): no pop, no slide; colours still change. */
+.reduce-motion .ext-dialog,
+.reduce-motion .ext-dialog-backdrop {
+  animation: none;
+}
+
+.reduce-motion .ext-switch__knob,
+.reduce-motion .ext-button {
+  transition: none;
+}

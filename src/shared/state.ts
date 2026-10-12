@@ -394,6 +394,8 @@ export interface Settings {
   tweaksEnabled: boolean
   /** The Tweak editor's one-screen intro was dismissed (BO-01): it never shows again. */
   tweakIntroSeen: boolean
+  /** The extensions page's Developer mode (EX-07): its Load unpacked button, IDs and folders. */
+  extensionsDevMode: boolean
 }
 
 /** Secure DNS choices (ST-12): providers are src/main/settings/dns.ts's DOH_SERVERS. */
@@ -527,6 +529,46 @@ export interface TweakHidden {
   label: string
 }
 
+/**
+ * A Chrome extension installed in one profile (EX-09). Main installs and runs it
+ * (src/main/extensions/); the pure logic (manifests, permissions, CRX files) is
+ * src/shared/extensions.ts.
+ */
+export interface InstalledExtension {
+  /** Chromium's extension ID: 32 letters a–p. */
+  id: string
+  profileId: ProfileId
+  name: string
+  version: string
+  description: string
+  /** How it came: a packed .crx file, a folder loaded where it is (Developer mode), or the store. */
+  source: 'crx' | 'folder' | 'store'
+  /** The folder it runs from: Orbit's own copy of a .crx or store install, or the developer's folder. */
+  path: string
+  /** Off: installed, but it runs nowhere (EX-07). */
+  enabled: boolean
+  /** When it was pinned (EX-04): pinned icons show in this order. Unset: not pinned. */
+  pinnedAt?: number
+  /** It runs in private windows too (EX-10). Off by default. */
+  allowPrivate: boolean
+  /** It may read file:// pages (EX-07). Off by default. */
+  allowFileAccess: boolean
+  /** The API permissions it asks for, from its manifest (EX-02, EX-07). */
+  permissions: string[]
+  /** The sites it asks for: host permissions and where its content scripts run. */
+  hosts: string[]
+  /** Its icon, a small PNG data URL ('' when it has none: the UI draws a generic one). */
+  icon: string
+  /** Its popup and its options page: paths inside the extension ('' for none). */
+  popup: string
+  options: string
+  installedAt: number
+  /** Where its updates come from (EX-15), from its manifest. */
+  updateUrl?: string
+  /** Why it isn't running (it couldn't load): shown on the extensions page. Runtime only. */
+  error?: string
+}
+
 export interface OrbitState {
   /** Schema version of the persisted state. */
   schema: number
@@ -542,6 +584,8 @@ export interface OrbitState {
   settings: Settings
   downloads: Record<string, Download>
   tweaks: Record<string, Tweak>
+  /** Chrome extensions (EX-09): each profile's own, keyed by `extensionKey(profileId, id)`. */
+  extensions: Record<string, InstalledExtension>
   /** Update checks (UP-01): runtime only, dropped on load and never a reason to save (persist.ts). */
   updates?: UpdateStatus
 }

@@ -1,0 +1,6 @@
+{
+  "name": { "message": "Orbit Test Extension" },
+  "description": {
+    "message": "A small extension Orbit's tests install: a popup, a content script, an options page and a service worker."
+  }
+}

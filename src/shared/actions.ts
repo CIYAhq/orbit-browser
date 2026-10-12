@@ -12,6 +12,7 @@
  * The default set follows the KS-* tables of the shortcuts spec.
  */
 
+import { EXTENSION_ACTIONS } from './commands/extensions'
 import { IMPORT_ACTIONS } from './commands/import'
 import type { ShortcutPriority } from './commands/keys'
 import { SETTINGS_ACTIONS, SETTINGS_LANE_ACTIONS } from './commands/settings'
@@ -629,6 +630,8 @@ export const ACTIONS: ActionDef[] = [
   ...IMPORT_ACTIONS,
   // Tweaks (BO-21): none bound by default
   ...TWEAK_ACTIONS,
+  // Extensions (EX-01, EX-06, EX-07)
+  ...EXTENSION_ACTIONS,
 ]
 
 export const ACTIONS_BY_ID: Record<string, ActionDef> = Object.fromEntries(ACTIONS.map((a) => [a.id, a]))
