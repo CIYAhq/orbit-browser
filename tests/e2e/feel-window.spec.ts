@@ -105,8 +105,12 @@ test('[FL-23] a slow page shows the loading pill about 150 ms after it starts, s
   // The window's first indicator makes its view and loads its page: one slow load first, so the
   // one measured is like every later one.
   const warm = fx.url('/slow/Warm')
+  const asked = fx.hits('/slow/Warm')
   await cmd(app, 'tabs.navigate', { tabId: id, url: warm })
   await expect.poll(async () => (await loading(app)).visible).toBe(true)
+  // The server holds the page until it is released, so the release waits for its request: on a
+  // busy machine the indicator can be up before the request is there (or still up for Start).
+  await expect.poll(() => fx.hits('/slow/Warm')).toBeGreaterThan(asked)
   fx.release('/slow/Warm')
   await waitLoaded(app, id, warm)
   await expect.poll(async () => (await loading(app)).visible).toBe(false)
