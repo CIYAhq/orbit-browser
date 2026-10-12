@@ -58,14 +58,15 @@ function SiteSettingsPage() {
   const defaults = useOrbit((s) => s.profiles[profileId]?.siteDefaults)
   const profileName = useProfileName(profileId)
 
-  // Each opening acts for its window's profile; one asked to show a site opens at its page.
+  // Each opening acts for its window's profile, or for the one a profile's page opened it for
+  // (ST-07); one asked to show a site opens at its page. Coming back from another section is a
+  // visit of its own, for the window's profile.
   // biome-ignore lint/correctness/useExhaustiveDependencies: once per opening of Settings
   useEffect(() => {
-    setProfileId(context.profileId)
-    if (target.site && handledNonce !== nonce) {
-      handledNonce = nonce
-      setView({ kind: 'site', origin: target.site })
-    }
+    const asked = handledNonce !== nonce && target.section === 'site-settings'
+    if (asked) handledNonce = nonce
+    setProfileId(asked && target.profileId ? target.profileId : context.profileId)
+    if (asked && target.site) setView({ kind: 'site', origin: target.site })
   }, [nonce, context.profileId])
 
   const go = (next: View, from?: string) => {

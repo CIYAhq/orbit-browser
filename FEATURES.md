@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 324 built (57 partial) · 387 tested · 202 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 324 built (58 partial) · 388 tested · 202 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 161 | 173 |
-| P1 | 219 | 143 | 188 |
+| P1 | 219 | 143 | 189 |
 | P2 | 79 | 20 | 26 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -541,7 +541,7 @@ Spec: `spec/settings.md`
 | ST-04 | Profiles section (list, rename, delete) | P1 | ✅ | ✅ e2e | ✅ | list with Default first, rename any profile, New Profile…, delete with confirmation (off while a Space uses it, and says why) |
 | ST-05 | Per-profile: auto-archive timing | P1 | ✅ | ✅ e2e+unit | ✅ | 12 hours (default), 24 hours, 7 days, 30 days per profile; no Never; other profiles follow Default until set |
 | ST-06 | Per-profile: default search engine and custom engines | P0 | ✅ | ✅ e2e+unit | ✅ | per-profile default engine (8 built-ins), custom engines with keyword and %s URL, Make default from the row menu; no extension override in Electron, so that row does not exist |
-| ST-07 | Per-profile: download location, new-document app, data shortcuts | P1 | – | – | – |  |
+| ST-07 | Per-profile: download location, new-document app, data shortcuts | P1 | 🟡 partial | ✅ e2e | – | Settings → Profiles → [profile]: Download location, the profile's own folder, Other… or Ask every time (DL-07); Clear browsing data… opens the clear-data dialog for that profile (ST-12); Site settings… opens Site settings at that profile, and its "notifications" link at the Notifications row (ST-13, which lists notifications with the other permissions). Privacy & Security has no per-profile setting but Clear browsing data, so it has no row of its own. Not built: New documents, the default notes app (NT-07, P2: Orbit has none to choose from). Passwords and Payment methods / addresses are out of scope (D52): Orbit has no password manager or autofill store, so Settings shows no rows for them |
 | ST-08 | Shortcuts section (remapping) | P1 | 🟡 partial | ✅ e2e+unit | – | Settings → Shortcuts: every action Orbit has (the action table, as main registers it) in groups with a search by name, search words or keys; click a key, press the new one (a modifier first except F1–F12; system and reserved keys refused, with the reason, and on macOS ⌃ with a lone letter, which moves the caret in text fields, D60); + adds another (up to 5), ⌫ while listening removes one, Esc cancels; a key another action has asks: Swap (when replacing) or Remove from the other; right-click: Reset to Default, Remove Shortcut, Prefer Websites / Prefer Orbit (KS-02); Reset All asks first; Go to Tab: Include Favorites in ordering and ⌘9 last or ninth item; actions with no keys (Duplicate Tab…) show Record Shortcut; keys the system keeps are marked (KS-03); Settings search finds rows; stored per device; Exit Full Screen (Esc in full screen, NV-20) has its row with no keys of its own, preferring websites by default, and its priority sets Esc's |
 | ST-09 | Links section | P1 | ✅ | ✅ e2e+unit | ✅ | links from other apps open in a Mini Window (default), the most recent Space or one Space; routing rules (address contains / is exactly → a Space; first match wins; add, edit, reorder, remove); Peek options |
 | ST-10 | Advanced section | P1 | 🟡 partial | ✅ e2e+unit | – | tab sleep timer (TB-16), picture in picture, graphics acceleration; no site customizations, full-URL toggle, sounds or haptics, or edge-drag settings because those features don't exist yet |
@@ -554,7 +554,7 @@ Spec: `spec/settings.md`
 | ST-17 | About Orbit | P1 | ✅ | ✅ e2e+unit | – | Settings → About: logo, version (a click copies it), build date, Chromium and Electron versions, system (read once before Settings first paints, so About and its update line draw them in their first frame, with no row moving after; sign-off 3), Check for updates, release notes, Copy build info. Licence and Open-source credits open credits.html, built with the app (D43): Orbit's and Electron's licences, a link to the LICENSES.chromium.html Electron ships, and the licence of each npm package whose code ships. Release notes and Report a Bug need access to the private repository for now; Help is Orbit's own page (OB-13) |
 | ST-18 | Account, sign-in and sync sections | OOS | ⛔ out of scope | – | – | the spec leaves it out |
 | ST-19 | AI features section | OOS | ⛔ out of scope | – | – | the spec leaves it out |
-| ST-20 | Which settings are global and which are per profile | P1 | 🟡 partial | ✅ e2e+unit | – | per-profile rows carry the profile's name: archive timing, search engine (another profile shows “Same as Default (…)” until it picks its own, and can go back to it), download location (DL-07), cookies and history (each profile has its own session), Clear browsing data, and site permissions (Site settings, ST-13); global: theme mode, shortcuts, link routing, Mini Window, Peek, advanced, updates. Passwords and autofill are out of scope (D52). Not built: the new-document app (ST-07), languages (ST-14, P2), extensions (EX-09), app icon (AP-09), site customizations (BO-17) |
+| ST-20 | Which settings are global and which are per profile | P1 | 🟡 partial | ✅ e2e+unit | – | per-profile rows carry the profile's name: archive timing, search engine (another profile shows “Same as Default (…)” until it picks its own, and can go back to it), download location (DL-07), cookies and history (each profile has its own session), Clear browsing data, and site permissions (Site settings, ST-13); global: theme mode, shortcuts, link routing, Mini Window, Peek, advanced, updates. Passwords and autofill, and their settings, are out of scope (D52): Orbit has no password manager or autofill store. Not built: the new-document app (ST-07, NT-07), languages (ST-14, P2), extensions (EX-09), app icon (AP-09), site customizations (BO-17) |
 | ST-21 | Enterprise / managed policies | P2 | – | – | – |  |
 
 ## Import of data from other browsers

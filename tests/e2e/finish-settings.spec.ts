@@ -46,6 +46,39 @@ test('[ST-20][ST-06] another profile’s search engine is “Same as Default (�
   await expect(chosen).toHaveText('Same as Default (DuckDuckGo)')
 })
 
+test('[ST-07] a profile’s page has its download location and opens its browsing data and site settings; nothing offers passwords, autofill or payment methods (D52)', async () => {
+  const work = (await run(orbit.app, 'profiles.create', { name: 'Work' })) as string
+  let page = await openSettings(orbit.app, { section: 'profiles', profileId: work })
+  const group = page.locator('[data-setting-group="profile-settings"]')
+  await expect(group.locator('[data-setting="download-location"]')).toContainText('Work')
+
+  // Clear browsing data… opens the dialog for this profile, whichever window Settings came from.
+  await group.getByTestId('profile-clear-data').click()
+  await expect(page.getByTestId('clear-data-dialog')).toBeVisible()
+  await expect(page.getByTestId('clear-data-profile')).toHaveValue(work)
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('clear-data-dialog')).toHaveCount(0)
+
+  // Site settings… opens Site settings at this profile, and "notifications" at its Notifications row.
+  page = await openSettings(orbit.app, { section: 'profiles', profileId: work })
+  await page.getByTestId('profile-site-settings').click()
+  await expect(page.getByTestId('site-settings')).toHaveAttribute('data-profile', work)
+  page = await openSettings(orbit.app, { section: 'profiles', profileId: work })
+  await page.getByTestId('profile-notifications').click()
+  await expect(page.getByTestId('site-settings')).toHaveAttribute('data-profile', work)
+  await expect(page.locator('[data-setting="site-category-notifications"]')).toHaveAttribute('data-flash', '')
+  // Opened from its own tab, Site settings is for the window's profile again.
+  await page.locator('#settings-tab-profiles').click()
+  await page.locator('#settings-tab-site-settings').click()
+  await expect(page.getByTestId('site-settings')).toHaveAttribute('data-profile', DEFAULT_PROFILE_ID)
+
+  // Passwords, autofill and payment methods are out of scope (D52): no row offers them.
+  for (const word of ['password', 'autofill', 'payment']) {
+    await page.getByTestId('settings-search').fill(word)
+    await expect(page.getByTestId('settings-no-results'), word).toBeVisible()
+  }
+})
+
 /** The state Chromium keeps for the page a tab shows (its scroll position among it), as main reads it. */
 const pageStateOf = (app: ElectronApplication, url: string) =>
   app.evaluate(({ webContents }, u) => {

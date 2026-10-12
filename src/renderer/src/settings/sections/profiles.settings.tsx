@@ -213,6 +213,7 @@ function ProfileSettings({ profileId }: { profileId: ProfileId }) {
         </SettingRow>
         {/* Downloads lane (DL-07). */}
         <DownloadLocationRow profileId={profileId} name={name} />
+        <DataRows profileId={profileId} name={name} />
       </SettingGroup>
       {!isDefault && (
         <SettingGroup>
@@ -265,6 +266,49 @@ function ProfileSettings({ profileId }: { profileId: ProfileId }) {
           }
         />
       )}
+    </>
+  )
+}
+
+/**
+ * The profile's browsing data and site settings (ST-07): each opens where it lives, for this profile.
+ * Orbit has no password manager or autofill store (D52), so there are no rows for them.
+ */
+function DataRows({ profileId, name }: { profileId: ProfileId; name: string }) {
+  const open = (section: string, item?: string) => void invoke('settings.open', { section, item, profileId })
+  return (
+    <>
+      <SettingRow
+        id="profile-clear-data"
+        label="Clear browsing data"
+        description="History, downloads, cookies and other site data, cached files and site settings."
+        profile={name}
+      >
+        <Button testId="profile-clear-data" onClick={() => open('privacy', 'clear-data')}>
+          Clear…
+        </Button>
+      </SettingRow>
+      <SettingRow
+        id="profile-site-settings"
+        label="Site settings"
+        description={
+          <>
+            What sites may do in this profile, such as use your location or camera, or show{' '}
+            <LinkButton
+              testId="profile-notifications"
+              onClick={() => open('site-settings', 'site-category-notifications')}
+            >
+              notifications
+            </LinkButton>
+            .
+          </>
+        }
+        profile={name}
+      >
+        <Button testId="profile-site-settings" onClick={() => open('site-settings')}>
+          Site settings…
+        </Button>
+      </SettingRow>
     </>
   )
 }
