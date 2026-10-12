@@ -18,7 +18,7 @@
   align-items: flex-start;
   gap: 8px;
   width: 100%;
-  padding: 7px 28px 7px 9px;
+  padding: 7px 9px;
   border: 0;
   border-radius: inherit;
   background: transparent;
@@ -57,16 +57,27 @@
   min-width: 0;
 }
 
+/* The whole title shows at any sidebar width: it wraps rather than being cut (UP-12). */
 .upd__title {
-  overflow: hidden;
   font-size: 12.5px;
   font-weight: 600;
   line-height: 18px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 
-/* Collapsed to the one line until hovered or focused (UP-02). */
+/* The ✕'s room, on the title's first line only: the ✕ never covers it, and nothing moves when it shows. */
+.upd__title::before {
+  content: "";
+  float: right;
+  width: 16px;
+  height: 18px;
+}
+
+/*
+ * Collapsed to the one line until hovered, or focused from the keyboard (UP-02). A click's focus
+ * doesn't keep it open: it closes once the pointer leaves (UP-10).
+ */
 .upd__more {
   display: grid;
   grid-template-rows: 0fr;
@@ -79,7 +90,7 @@
 }
 
 .upd:hover .upd__more,
-.upd:focus-within .upd__more {
+.upd:has(:focus-visible) .upd__more {
   grid-template-rows: 1fr;
 }
 
@@ -101,17 +112,19 @@
   line-clamp: 2;
 }
 
+/* "Relaunch to update" shows whole at any sidebar width too: at the narrowest it wraps. */
 .upd__cta {
   display: inline-block;
+  max-width: 100%;
   margin: 7px 0 2px;
-  padding: 3px 10px;
-  border-radius: 999px;
+  padding: 3px 9px;
+  border-radius: 12px;
   background: linear-gradient(135deg, var(--accent), color-mix(in oklab, var(--accent) 55%, #ff6fb5));
   color: #fff;
   font-size: 12px;
   font-weight: 600;
   line-height: 16px;
-  white-space: nowrap;
+  text-wrap: balance;
 }
 
 .upd__link {
@@ -126,8 +139,8 @@
   right: 6px;
   display: grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   padding: 0;
   border: 0;
   border-radius: 6px;
@@ -138,7 +151,7 @@
 }
 
 .upd:hover .upd__close,
-.upd:focus-within .upd__close {
+.upd:has(:focus-visible) .upd__close {
   opacity: 1;
 }
 

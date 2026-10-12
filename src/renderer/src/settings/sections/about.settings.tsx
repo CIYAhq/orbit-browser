@@ -1,9 +1,9 @@
 import { Copy, ExternalLink, Info } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import type { BuildInfo } from '../../../../shared/commands/settings'
 import { RELEASES_URL } from '../../../../shared/project'
 import { invoke } from '../../api'
 import { OrbitLogo } from '../../onboarding/OrbitLogo'
+import { useBuildInfo } from '../build-info'
 import { Button, SettingGroup, SettingRow } from '../controls'
 import type { SettingsSection } from '../registry'
 import { UpdateCheckRow } from '../updates'
@@ -21,12 +21,9 @@ function useCopied(): [boolean, () => void] {
 
 /** About Orbit (ST-17, UP-07): logo, version, engine, build date, updates, credits and build info. */
 function AboutPage() {
-  const [info, setInfo] = useState<BuildInfo>()
+  const info = useBuildInfo()
   const [copied, markCopied] = useCopied()
   const [versionCopied, markVersionCopied] = useCopied()
-  useEffect(() => {
-    void invoke('settings.buildInfo', {}).then(setInfo)
-  }, [])
   return (
     <>
       <div className="st-about">

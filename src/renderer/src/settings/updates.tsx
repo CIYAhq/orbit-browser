@@ -1,13 +1,11 @@
 import { Download, LoaderCircle, RotateCw, ShieldAlert } from 'lucide-react'
 import { type ReactNode, useEffect, useState } from 'react'
-import type { BuildInfo } from '../../../shared/commands/settings'
 import { invoke } from '../api'
 import { useOrbit } from '../store'
+import { useBuildInfo } from './build-info'
 import { Button, LinkButton, SettingRow, Switch, TextField } from './controls'
 import { ago } from './format'
-import { useMainValue } from './hooks'
-
-const readBuildInfo = () => invoke('settings.buildInfo', {})
+import { useRedrawOnFocus } from './hooks'
 
 /**
  * Check for updates (UP-03, ST-03, ST-17): what the last check found, Check Now, and the newer
@@ -18,9 +16,10 @@ export function UpdateCheckRow({ id, feedHere = false }: { id: string; feedHere?
   const updates = useOrbit((s) => s.updates)
   const feed = useOrbit((s) => s.settings.updateFeedUrl)
   const auto = useOrbit((s) => s.settings.updateChecks)
-  // Read again whenever Settings comes to the front, which also refreshes "Checked 5 minutes ago"
-  // without a timer running while Settings sits in the background.
-  const [info] = useMainValue<BuildInfo>(readBuildInfo)
+  const info = useBuildInfo()
+  // "Checked 5 minutes ago" is drawn again when Settings comes to the front, with no timer running
+  // while Settings sits in the background.
+  useRedrawOnFocus()
   const state = updates?.state ?? 'idle'
   const latest = updates?.latest
   const installs = updates?.installable === true

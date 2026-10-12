@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useReducer, useState } from 'react'
 
 /**
  * Reads something main doesn't keep in state again whenever Settings comes to the front or main says
@@ -20,4 +20,13 @@ export function useMainValue<T>(read: () => Promise<T>): [T | undefined, (value:
     }
   }, [])
   return [value, setValue]
+}
+
+/** Draws the component again whenever Settings comes to the front (for texts like "5 minutes ago"). */
+export function useRedrawOnFocus(): void {
+  const [, redraw] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => {
+    window.addEventListener('focus', redraw)
+    return () => window.removeEventListener('focus', redraw)
+  }, [])
 }

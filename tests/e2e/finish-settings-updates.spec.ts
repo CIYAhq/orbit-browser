@@ -5,6 +5,8 @@ import { loadavg } from 'node:os'
 import { join } from 'node:path'
 import { type ElectronApplication, expect, test } from '@playwright/test'
 import { TEST_RELAUNCH_FILE } from '../../src/main/updates/install'
+import { DEFAULT_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH } from '../../src/shared/defaults'
+import { record } from './frames'
 import { action, launchOrbit, listenInRange, type Orbit, run, state } from './helpers'
 import { clickInPage } from './nav-support'
 import { dialogPage, type PagesFixtures, pageDialogs, startPagesFixtures, waitDialog } from './pages-support'
@@ -38,10 +40,14 @@ interface UpdateFeed {
   url: string
   page: (path: string) => string
   /**
-   * Offers `version`, with its file for this system. `hold`: the file's download stops half-way
-   * until `finish()`. `badSum`: the SHA-256 the feed gives isn't the file's.
+   * Offers `version`, with its file for this system (none with `file: false`: Orbit opens its page,
+   * UP-10). `hold`: the file's download stops half-way until `finish()`. `badSum`: the SHA-256 the
+   * feed gives isn't the file's. `security`: a security fix (UP-12).
    */
-  offer: (version: string, opts?: { summary?: string; hold?: boolean; badSum?: boolean }) => void
+  offer: (
+    version: string,
+    opts?: { summary?: string; hold?: boolean; badSum?: boolean; file?: boolean; security?: boolean },
+  ) => void
   finish: () => void
   /** The requests for the update's file, with their headers. */
   downloads: IncomingHttpHeaders[]
@@ -97,7 +103,12 @@ async function startUpdateFeed(system: string): Promise<UpdateFeed> {
         version,
         url: `${base}/release/${version}`,
         ...(opts.summary ? { summary: opts.summary } : {}),
-        files: { [system]: { url: `${base}/pkg/orbit-${version}-${system}${ext}`, sha256, size: body.length } },
+        ...(opts.security ? { security: true } : {}),
+        ...(opts.file === false
+          ? {}
+          : {
+              files: { [system]: { url: `${base}/pkg/orbit-${version}-${system}${ext}`, sha256, size: body.length } },
+            }),
       }
     },
     finish: () => finish(),
@@ -135,6 +146,14 @@ const runIn = (app: ElectronApplication, windowId: string, name: string, args: u
       ),
     [name, args, windowId] as const,
   )
+
+/** The address of the first window's shown tab. */
+async function activeUrl(app: ElectronApplication): Promise<string | undefined> {
+  const s = await state(app)
+  const win = Object.values(s.windows)[0]
+  const tabId = win?.activeTab[win.spaceId]
+  return tabId ? s.tabs[tabId]?.url : undefined
+}
 
 /** What a test run's relaunch recorded it would install, or null when Orbit didn't relaunch. */
 function relaunched(userData: string): { version: string; file: string } | null {
@@ -420,16 +439,166 @@ test('[UP-06] What’s new for a version Orbit didn’t install itself takes the
     await expect(banner).toContainText(`Updated to Orbit ${version}`)
     await expect(banner.getByTestId('update-banner-summary')).toHaveText('Quieter tab sounds')
     await orbit.shell.getByTestId('update-banner-open').click()
-    await expect
-      .poll(async () => {
-        const s = await state(orbit.app)
-        const win = Object.values(s.windows)[0]
-        const tabId = win?.activeTab[win.spaceId]
-        return tabId ? s.tabs[tabId]?.url : undefined
-      })
-      .toBe(feed.page(`/release/${version}`))
+    await expect.poll(() => activeUrl(orbit.app)).toBe(feed.page(`/release/${version}`))
     // Nothing to download: the feed's version is the one running.
     expect(feed.downloads).toEqual([])
+  } finally {
+    await feed.close()
+  }
+})
+
+// ---- From the lead's sign-off 3 (D83) ----
+
+test('[ST-17] About draws the version, engine, build date and update line in its first frame, opened there or switched to', async () => {
+  const feed = await startUpdateFeed(await systemOf(orbit.app))
+  try {
+    const version = await appVersion(orbit.app)
+    const next = newerThan(version)
+    // A newer version with no file for this system: the update line says "(you have …)".
+    feed.offer(next, { file: false })
+    await run(orbit.app, 'updates.setFeed', { url: feed.url })
+    await expect.poll(async () => (await state(orbit.app)).updates?.state).toBe('available')
+    const arch = await orbit.app.evaluate(() => process.arch)
+    const expected = {
+      version,
+      built: expect.stringMatching(/^Built \d{4}-\d{2}-\d{2}$/),
+      engine: expect.stringMatching(/^Chromium [\d.]+ · Electron [\d.]+$/),
+      system: expect.stringMatching(new RegExp(`.+ \\(${arch}\\)$`)),
+      status: `Orbit ${next} is available (you have ${version}).`,
+    }
+
+    // Opened straight at About: what its first render put in the page, before the first paint.
+    await orbit.app.context().addInitScript(() => {
+      new MutationObserver((_records, observer) => {
+        const text = (selector: string) => document.querySelector(selector)?.textContent ?? null
+        if (!document.querySelector('[data-testid="about-version"]')) return
+        ;(window as unknown as { __aboutFirst: Record<string, string | null> }).__aboutFirst = {
+          version: text('[data-testid="about-version"]'),
+          built: text('[data-testid="about-built"]'),
+          engine: text('[data-testid="about-engine"]'),
+          system: text('[data-setting="system"] .st-muted'),
+          status: text('[data-setting="check-updates"] [data-testid="updates-status"]'),
+        }
+        observer.disconnect()
+      }).observe(document, { childList: true, subtree: true })
+    })
+    let page = await openSettings(orbit.app, { section: 'about' })
+    expect(await page.evaluate(() => (window as unknown as { __aboutFirst?: unknown }).__aboutFirst)).toEqual(expected)
+    await page.close()
+    await expect.poll(() => orbit.app.windows().filter((p) => p.url().includes('view=settings')).length).toBe(0)
+
+    // Settings already open elsewhere, then About: its first frame has them, and no row moves after.
+    page = await openSettings(orbit.app, { section: 'general' })
+    const about = '[data-testid="settings-content"][data-section="about"]'
+    const rec = await record(page, {
+      version: { selector: `${about} [data-testid="about-version"]`, text: true },
+      built: { selector: `${about} [data-testid="about-built"]`, text: true },
+      engine: { selector: `${about} [data-testid="about-engine"]`, text: true },
+      system: { selector: `${about} [data-setting="system"] .st-muted`, text: true },
+      status: { selector: `${about} [data-setting="check-updates"] [data-testid="updates-status"]`, text: true },
+      credits: `${about} [data-setting="credits"]`,
+    })
+    await run(orbit.app, 'settings.open', { section: 'about' })
+    const { frames } = await rec.until(1200)
+    const drawn = frames.filter((f) => f.els.version)
+    const first = drawn[0]
+    expect(first, 'About was drawn').toBeDefined()
+    expect({
+      version: first?.els.version?.text,
+      built: first?.els.built?.text,
+      engine: first?.els.engine?.text,
+      system: first?.els.system?.text,
+      status: first?.els.status?.text,
+    }).toEqual(expected)
+    expect(new Set(drawn.map((f) => Math.round(f.els.credits?.y ?? -1))).size).toBe(1)
+  } finally {
+    await feed.close()
+  }
+})
+
+test('[UP-10] after a click opens the release page, the pill closes once the pointer leaves it; focused from the keyboard it opens', async () => {
+  const feed = await startUpdateFeed(await systemOf(orbit.app))
+  try {
+    const next = newerThan(await appVersion(orbit.app))
+    feed.offer(next, { summary: 'Calmer colours', file: false })
+    await run(orbit.app, 'updates.setFeed', { url: feed.url })
+    const banner = orbit.shell.getByTestId('update-banner')
+    await expect(banner).toHaveAttribute('data-action', 'open')
+    await expect(banner).toContainText('New version available')
+    const open = orbit.shell.getByTestId('update-banner-open')
+    const close = orbit.shell.getByTestId('update-banner-dismiss')
+    const more = async () => (await banner.locator('.upd__more').boundingBox())?.height ?? 0
+    const closeShows = () => close.evaluate((el) => getComputedStyle(el).opacity)
+
+    await banner.hover()
+    await expect.poll(more).toBeGreaterThan(20)
+    await open.click()
+    await expect.poll(() => activeUrl(orbit.app)).toBe(feed.page(`/release/${next}`))
+    // The pointer moves up the sidebar: the pill closes, and its ✕ goes.
+    const side = (await orbit.shell.getByTestId('sidebar').boundingBox()) as { x: number; y: number; width: number }
+    await orbit.shell.mouse.move(side.x + side.width / 2, side.y + 14)
+    await expect.poll(more).toBeLessThan(1)
+    await expect.poll(closeShows).toBe('0')
+
+    // From the keyboard (Shift+Tab from its ✕), it opens with its ✕.
+    await close.focus()
+    await orbit.shell.keyboard.press('Shift+Tab')
+    await expect(open).toBeFocused()
+    await expect.poll(more).toBeGreaterThan(20)
+    await expect.poll(closeShows).toBe('1')
+  } finally {
+    await feed.close()
+  }
+})
+
+test('[UP-12] the security update’s whole title and its Relaunch to update show at the default and the narrowest sidebar widths, the ✕ over none of the title', async () => {
+  const feed = await startUpdateFeed(await systemOf(orbit.app))
+  try {
+    const next = newerThan(await appVersion(orbit.app))
+    feed.offer(next, { security: true })
+    await run(orbit.app, 'updates.setFeed', { url: feed.url })
+    const banner = orbit.shell.getByTestId('update-banner')
+    await expect(banner).toHaveAttribute('data-kind', 'security')
+    await expect(banner).toHaveAttribute('data-action', 'relaunch')
+    const title = banner.locator('.upd__title')
+    const cta = banner.locator('.upd__cta')
+    const close = orbit.shell.getByTestId('update-banner-dismiss')
+    const sidebar = orbit.shell.getByTestId('sidebar')
+    const windowId = Object.keys((await state(orbit.app)).windows)[0] as string
+    for (const width of [DEFAULT_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH]) {
+      await runIn(orbit.app, windowId, 'window.setSidebar', { width })
+      await expect.poll(async () => Math.round((await sidebar.boundingBox())?.width ?? 0)).toBe(width)
+      await expect(title).toHaveText('Important security update')
+      const fits = await title.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }))
+      expect(fits.scroll, `title at ${width} px: ${JSON.stringify(fits)}`).toBeLessThanOrEqual(fits.client)
+
+      // Hovered: the ✕ shows beside the title's text, over none of it, and the button shows whole.
+      await banner.hover()
+      await expect.poll(() => close.evaluate((el) => getComputedStyle(el).opacity)).toBe('1')
+      const covered = await title.evaluate((el) => {
+        const x = document.querySelector('[data-testid="update-banner-dismiss"]')?.getBoundingClientRect()
+        const range = document.createRange()
+        range.selectNodeContents(el)
+        return [...range.getClientRects()].some(
+          (r) => x && r.width > 0 && r.right > x.left && r.left < x.right && r.bottom > x.top && r.top < x.bottom,
+        )
+      })
+      expect(covered, `✕ over the title at ${width} px`).toBe(false)
+      await expect(cta).toHaveText('Relaunch to update')
+      await expect
+        .poll(() =>
+          cta.evaluate((el) => {
+            const shown = (el.closest('.upd__more-inner') as Element).getBoundingClientRect()
+            const box = el.getBoundingClientRect()
+            return (
+              el.scrollWidth <= el.clientWidth && box.right <= shown.right + 0.5 && box.bottom <= shown.bottom + 0.5
+            )
+          }),
+        )
+        .toBe(true)
+      const box = (await sidebar.boundingBox()) as { x: number; y: number; width: number }
+      await orbit.shell.mouse.move(box.x + box.width / 2, box.y + 14)
+    }
   } finally {
     await feed.close()
   }

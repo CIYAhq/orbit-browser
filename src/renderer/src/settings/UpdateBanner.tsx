@@ -42,7 +42,11 @@ function Release({ release, ready }: { release: ReleaseInfo; ready: boolean }) {
         className="upd__main"
         data-testid="update-banner-open"
         aria-label={`${title}: Orbit ${release.version}. ${ready ? 'Relaunch to update' : 'Open its page'}`}
-        onClick={() => void invoke(ready ? 'updates.relaunch' : 'updates.open', {})}
+        onClick={(e) => {
+          // A click lets go of focus, so the pill closes when the pointer leaves (UP-10).
+          if (e.detail > 0) e.currentTarget.blur()
+          void invoke(ready ? 'updates.relaunch' : 'updates.open', {})
+        }}
       >
         <span className="upd__icon" aria-hidden="true">
           {release.security ? (
