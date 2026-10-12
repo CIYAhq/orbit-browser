@@ -249,7 +249,29 @@ export const PAGE_CHANNEL = {
    * only for that tab's sharing indicators.
    */
   screenShare: 'orbit-page:screen-share',
+  /**
+   * sendSync(): the stylesheets of the Tweaks for this page (BO-18; D40, D85), inserted before first
+   * paint: a TweakSheetsAnswer, or null where none apply. Main answers only a main frame showing a
+   * website, from the frame's own URL (src/main/tweaks/pages.ts); the message carries nothing.
+   */
+  tweakSheets: 'orbit-page:tweak-sheets',
+  /**
+   * Main → page: (doc) main's own copies of the Tweak sheets are in, so the preload takes out the
+   * sheets it inserted before first paint (BO-18, D85). Main sends it only to the main frame whose
+   * sheets its copies replace, and never waits for it. It carries only the number main gave that
+   * document's read (`TweakSheetsAnswer.doc`), and the preload acts on it only when the number is
+   * its own document's (src/preload/tweak-sheets.ts).
+   */
+  tweakRetire: 'orbit-page:tweak-retire',
 } as const
+
+/** Main's answer to the page preload's `PAGE_CHANNEL.tweakSheets` read (BO-18, D85). */
+export interface TweakSheetsAnswer {
+  /** The number main gave this document's read: `PAGE_CHANNEL.tweakRetire` repeats it. */
+  doc: number
+  /** The CSS of each sheet, in order. */
+  sheets: string[]
+}
 
 /** A tab comes forward for its notifications' clicks at most this often (a flood can't stall the shell). */
 export const NOTIFICATION_CLICK_GAP_MS = 500

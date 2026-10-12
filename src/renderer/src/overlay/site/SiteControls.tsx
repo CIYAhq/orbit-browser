@@ -26,6 +26,7 @@ import type { OverlayState } from '../../../../shared/state'
 import { invoke } from '../../api'
 import { DEVICE_ICON, PERMISSION_ICON } from '../../shell/chrome/PermissionPrompt'
 import { useOrbit } from '../../store'
+import { BUILT_IN_ORDER, SITE_CONTROLS_SECTIONS } from './registry'
 import './site.css'
 
 type PanelOverlay = Extract<OverlayState, { kind: 'panel' }>
@@ -64,7 +65,7 @@ function connectionLine(connection: Connection): { icon: ReactNode; text: string
  * permissions the site was given, refused or asked for with a switch each (pop-ups too), devices
  * it may use, zoom with a reset, and clearing its cookies and data. Changes apply at once; when the
  * page only sees them after a reload, a Reload button says so. Esc or a click outside closes it;
- * arrows move between its controls.
+ * arrows move between its controls. Other features add their sections through `./registry`.
  */
 export function SiteControls({ overlay, dark = false }: { overlay: PanelOverlay; dark?: boolean }) {
   const params = overlay.params ?? {}
@@ -157,6 +158,14 @@ export function SiteControls({ overlay, dark = false }: { overlay: PanelOverlay;
     refresh()
   }
 
+  // Other features' sections (./registry), between the built-in ones by their `order`.
+  const registered = (from: number, to: number) =>
+    info
+      ? SITE_CONTROLS_SECTIONS.filter((s) => s.order >= from && s.order < to).map((s) => (
+          <s.component key={s.id} tabId={tabId} info={info} refresh={refresh} close={close} />
+        ))
+      : null
+
   const conn = info ? connectionLine(info.connection) : null
   return (
     <div
@@ -211,6 +220,7 @@ export function SiteControls({ overlay, dark = false }: { overlay: PanelOverlay;
             </div>
           )}
 
+          {registered(Number.NEGATIVE_INFINITY, BUILT_IN_ORDER.permissions)}
           {info.web && (
             <section className="site-panel__section" aria-label="Permissions">
               <h3 className="site-panel__title">Permissions</h3>
@@ -228,6 +238,7 @@ export function SiteControls({ overlay, dark = false }: { overlay: PanelOverlay;
             </section>
           )}
 
+          {registered(BUILT_IN_ORDER.permissions, BUILT_IN_ORDER.devices)}
           {info.devices.length > 0 && (
             <section className="site-panel__section" aria-label="Devices">
               <h3 className="site-panel__title">Devices</h3>
@@ -259,7 +270,9 @@ export function SiteControls({ overlay, dark = false }: { overlay: PanelOverlay;
             </section>
           )}
 
+          {registered(BUILT_IN_ORDER.devices, BUILT_IN_ORDER.pip)}
           {info.web && <PipRow url={info.url} />}
+          {registered(BUILT_IN_ORDER.pip, BUILT_IN_ORDER.zoom)}
 
           <section className="site-panel__section" aria-label="Zoom">
             <div className="site-panel__row site-panel__zoom">
@@ -295,6 +308,7 @@ export function SiteControls({ overlay, dark = false }: { overlay: PanelOverlay;
               )}
             </div>
           </section>
+          {registered(BUILT_IN_ORDER.zoom, Number.POSITIVE_INFINITY)}
 
           {info.web && (
             <footer className="site-panel__foot">

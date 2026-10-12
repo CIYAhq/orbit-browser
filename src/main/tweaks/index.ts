@@ -1,4 +1,335 @@
+import { newId } from '../../shared/ids'
+import { peekShown } from '../../shared/nav'
+import type { Tab, TabId, Tweak, WindowId } from '../../shared/state'
+import {
+  applyTweakPatch,
+  clearTweak,
+  isEmptyTweak,
+  newTweak,
+  removeHidden,
+  tweakAppliesTo,
+  tweakHostOf,
+  tweakOriginOf,
+  tweaksFor,
+} from '../../shared/tweaks'
 import type { MainContext } from '../context'
+import type { CallContext } from '../registry'
+import { activeTabOf, shownTabs } from '../windows'
+import { registerTweakEditor, type TweakEditorInfo } from './editor'
+import { type PickerInfo, registerTweakHide } from './hide'
+import { registerTweakPages, type TweakPages } from './pages'
 
-/** Tweaks feature (main process). Owned by its build lane; see docs/ARCHITECTURE.md. */
-export function registerTweaks(_ctx: MainContext): void {}
+/** What a window says when Tweaks can't go where they were asked to (BO-01, BO-16). */
+export const TWEAK_MESSAGES = {
+  web: 'Tweaks work on websites only',
+  off: 'Tweaks are turned off in Settings',
+  peek: 'Open the page in a tab to tweak it',
+  mini: 'Move the Mini Window’s page into a Space to tweak it',
+  none: 'This site has no Tweaks',
+  unloaded: 'The site didn’t load, so the Tweak can’t open',
+} as const
+
+/**
+ * How long the Library's Edit waits for the Tweak's site to load before giving up (BO-15); a load
+ * that fails ends the wait at once.
+ */
+const OPEN_WAIT_MS = 20_000
+
+/** Test-only handle (ORBIT_E2E=1): globalThis.__orbitTweaks. */
+export interface TweakTestHooks {
+  editor: (windowId?: WindowId) => TweakEditorInfo
+  page: (tabId: TabId) => ReturnType<TweakPages['info']>
+  /** What Hide-element mode's picker in a tab's page says (BO-10); null where there is none. */
+  picker: (tabId: TabId) => Promise<PickerInfo | null>
+}
+
+/**
+ * Tweaks (BO-01 to BO-21): per-site restyling the user makes in the editor panel. Main keeps the
+ * Tweaks in state (they never leave the device), applies them to pages (pages.ts) and places the
+ * editor panel (editor.ts); the panel's page is src/renderer/src/tweaks/.
+ */
+export function registerTweaks(ctx: MainContext): void {
+  const { store, commands, events, actions, windows, tabs } = ctx
+  const pages = registerTweakPages(ctx)
+  const editor = registerTweakEditor(ctx)
+  const hiding = registerTweakHide(ctx, editor, pages)
+  // A hidden element shown while its restore marker was hovered hides again as the panel leaves.
+  editor.onLeave((windowId) => {
+    const at = editor.editing(windowId)
+    if (at) pages.setShowHidden(at.tabId, undefined)
+  })
+
+  const windowOf = (c: CallContext): WindowId | undefined => c.windowId ?? windows.focusedWindowId()
+
+  /**
+   * The host a tab's Tweaks are for: its page's, once that page asked for its Tweaks (a website, not
+   * a PDF or an error page); a sleeping tab's from its address.
+   */
+  const hostOf = (tabId: TabId): string | null =>
+    tabs.contents(tabId) ? pages.hostOf(tabId) : tweakHostOf(store.state.tabs[tabId]?.url)
+
+  /**
+   * Shows a note for a window: in it; for a Mini Window, which shows none, in the window where View
+   * Tweaks opens the Library (the Library's `mainWindowOf`, src/main/archive/index.ts): the focused
+   * browser window that isn't private, else the last such one opened; with none, nowhere (BO-21;
+   * tweaks fix check 2, follow-up 1).
+   */
+  const say = (windowId: WindowId, message: string) => {
+    const kindOf = (id: WindowId | undefined) => (id ? store.state.windows[id]?.kind : undefined)
+    const isMain = (id: WindowId | undefined): id is WindowId => kindOf(id) === 'main'
+    const focused = windows.focusedWindowId()
+    const to =
+      isMain(windowId) || kindOf(windowId) === 'private'
+        ? windowId
+        : isMain(focused)
+          ? focused
+          : windows.ids().filter(isMain).pop()
+    if (to) ctx.toast(to, message)
+  }
+
+  /**
+   * The tab an entry point acts on, shown in its window so the panel can go over it; null (with a
+   * note saying why) where Tweaks can't open: the panel goes over a page in a browser window only,
+   * never a Peek's or a Mini Window's.
+   */
+  const target = async (
+    asked: TabId | undefined,
+    c: CallContext,
+  ): Promise<{ windowId: WindowId; tabId: TabId; host: string } | null> => {
+    const state = store.state
+    const windowId = (asked ? windows.windowOfTab(asked) : undefined) ?? windowOf(c)
+    if (!windowId) return null
+    const tabId = asked ?? activeTabOf(state, windowId)
+    if (!tabId || !state.tabs[tabId]) return null
+    if (!state.settings.tweaksEnabled) {
+      say(windowId, TWEAK_MESSAGES.off)
+      return null
+    }
+    const floating = state.tabs[tabId]?.floating
+    if (floating === 'mini' || state.windows[windowId]?.kind === 'mini') {
+      say(windowId, TWEAK_MESSAGES.mini)
+      return null
+    }
+    if (floating === 'peek' || peekShown(state, windowId)) {
+      say(windowId, TWEAK_MESSAGES.peek)
+      return null
+    }
+    const host = hostOf(tabId)
+    if (!host) {
+      say(windowId, TWEAK_MESSAGES.web)
+      return null
+    }
+    // The tab menu's tab may be another one: it is shown first, as the panel goes over its page.
+    if (!shownTabs(state, windowId).has(tabId)) await commands.run('tabs.activate', { tabId }, { windowId })
+    return { windowId, tabId, host }
+  }
+
+  // ---- Commands ----
+
+  commands.register('tweaks.create', async ({ tabId: asked }, c) => {
+    const at = await target(asked, c)
+    if (!at) return null
+    const { windowId, tabId, host } = at
+    // The panel already shows a Tweak it just made for this page, still empty: that one it is.
+    const editing = editor.editing(windowId)
+    const current = editing?.tabId === tabId ? store.state.tweaks[editing.tweakId] : undefined
+    if (current && current.host === host && isEmptyTweak(current) && current.name === current.host) {
+      editor.open(windowId, tabId, current.id)
+      return current.id
+    }
+    const id = newId('x')
+    const tweak = newTweak(id, host, Date.now(), tweakOriginOf(store.state.tabs[tabId]?.url, host))
+    store.update((draft) => {
+      draft.tweaks[id] = tweak
+    })
+    editor.open(windowId, tabId, id, true)
+    return id
+  })
+
+  commands.register('tweaks.edit', async ({ id, tabId: asked }, c) => {
+    const tweak = store.state.tweaks[id]
+    if (!tweak) return false
+    const at = await target(asked, c)
+    if (!at || !tweakAppliesTo(tweak, at.host)) return false
+    editor.open(at.windowId, at.tabId, id)
+    return true
+  })
+
+  commands.register('tweaks.update', ({ id, patch }) => {
+    if (!store.state.tweaks[id]) return false
+    store.update((draft) => {
+      const tweak = draft.tweaks[id]
+      if (tweak) applyTweakPatch(tweak, patch, Date.now())
+    })
+    return true
+  })
+
+  commands.register('tweaks.runNow', ({ id, tabId }) => pages.runNow(tabId, id))
+
+  commands.register('tweaks.reset', ({ id }) => {
+    store.update((draft) => {
+      const tweak = draft.tweaks[id]
+      if (tweak) clearTweak(tweak, Date.now())
+    })
+  })
+
+  // ---- Hide-element mode (BO-10): in the calling window's editor ----
+
+  commands.register('tweaks.hideMode', async ({ on }, c) => {
+    const windowId = windowOf(c)
+    return windowId ? hiding.setMode(windowId, on === true) : false
+  })
+  commands.register('tweaks.hidePreview', async ({ choice }, c) => {
+    const windowId = windowOf(c)
+    return windowId ? hiding.preview(windowId, choice) : 0
+  })
+  commands.register('tweaks.hide', ({ choice }, c) => {
+    const windowId = windowOf(c)
+    return windowId ? hiding.hide(windowId, choice) : false
+  })
+  commands.register('tweaks.hideCancel', (_args, c) => {
+    const windowId = windowOf(c)
+    if (windowId) hiding.cancel(windowId)
+  })
+  commands.register('tweaks.showHidden', ({ hiddenId }, c) => {
+    const windowId = windowOf(c)
+    const at = windowId ? editor.editing(windowId) : null
+    if (at) pages.setShowHidden(at.tabId, typeof hiddenId === 'string' ? hiddenId : undefined)
+  })
+  commands.register('tweaks.unhide', ({ id, hiddenId }) => {
+    store.update((draft) => {
+      const tweak = draft.tweaks[id]
+      if (tweak) removeHidden(tweak, hiddenId, Date.now())
+    })
+  })
+
+  commands.register('tweaks.setEnabled', ({ id, enabled }) => {
+    if (typeof enabled !== 'boolean') return
+    store.update((draft) => {
+      const tweak = draft.tweaks[id]
+      if (tweak) applyTweakPatch(tweak, { enabled }, Date.now())
+    })
+  })
+
+  commands.register('tweaks.delete', ({ id }) => {
+    store.update((draft) => {
+      delete draft.tweaks[id]
+    })
+  })
+
+  /**
+   * A tab of the window's Space on a Tweak's site: one shown, else the one used last. Never a Peek's
+   * or a Mini Window's page, which the window can't show.
+   */
+  const siteTab = (windowId: WindowId, tweak: Tweak): TabId | null => {
+    const state = store.state
+    const spaceId = state.windows[windowId]?.spaceId
+    const shown = shownTabs(state, windowId)
+    let last: Tab | undefined
+    for (const tab of Object.values(state.tabs)) {
+      if (tab.spaceId !== spaceId || tab.floating || tab.error || !tweakAppliesTo(tweak, tweakHostOf(tab.url))) continue
+      if (shown.has(tab.id)) return tab.id
+      if (!last || tab.lastActiveAt > last.lastActiveAt) last = tab
+    }
+    return last?.id ?? null
+  }
+
+  commands.register('tweaks.open', async ({ id, edit }, c) => {
+    const tweak = store.state.tweaks[id]
+    const windowId = windowOf(c)
+    if (!tweak || !windowId || !store.state.windows[windowId]) return false
+    if (edit && !store.state.settings.tweaksEnabled) {
+      ctx.toast(windowId, TWEAK_MESSAGES.off)
+      return false
+    }
+    let tabId = siteTab(windowId, tweak)
+    if (!tabId) tabId = await commands.run('tabs.create', { url: `${tweak.origin}/` }, { windowId })
+    else if (!shownTabs(store.state, windowId).has(tabId)) await commands.run('tabs.activate', { tabId }, { windowId })
+    await commands.run('library.close', {}, { windowId })
+    if (!edit) return true
+    // A tab just made, woken or still waiting for its server: the editor opens once its page can take
+    // it. Unless the user moved on meanwhile; a site that didn't load says so.
+    const ready = await pages.whenTweakable(tabId, OPEN_WAIT_MS)
+    if (!store.state.tweaks[id] || !shownTabs(store.state, windowId).has(tabId)) return false
+    if (!ready) {
+      say(windowId, TWEAK_MESSAGES.unloaded)
+      return false
+    }
+    return commands.run('tweaks.edit', { id, tabId }, { windowId })
+  })
+
+  commands.register('tweaks.setGlobal', ({ enabled }) => {
+    if (typeof enabled !== 'boolean') return
+    store.update((draft) => {
+      draft.settings.tweaksEnabled = enabled
+    })
+  })
+
+  commands.register('tweaks.editorState', (_args, c) => editor.state(c.windowId))
+  commands.register('tweaks.closeEditor', (_args, c) => {
+    if (c.windowId) editor.close(c.windowId)
+  })
+  commands.register('tweaks.editorLayout', ({ width, height }, c) => {
+    if (c.windowId && Number.isFinite(width) && Number.isFinite(height)) editor.layout(c.windowId, { width, height })
+  })
+  commands.register('tweaks.dismissIntro', () => {
+    store.update((draft) => {
+      draft.settings.tweakIntroSeen = true
+    })
+  })
+
+  events.on('tweaks.editorDrag', ({ phase, x, y }, c) => {
+    if (c.windowId && (phase === 'start' || phase === 'move' || phase === 'end')) editor.drag(c.windowId, phase, x, y)
+  })
+
+  // ---- Actions (BO-21): none bound by default ----
+
+  actions.register('tweak.new', async ({ windowId }) => {
+    await commands.run('tweaks.create', {}, { windowId })
+  })
+
+  // The shown page's Tweak in the panel; with several, the site controls panel lists them to pick from.
+  actions.register('tweak.edit', async ({ windowId }) => {
+    const at = await target(undefined, { windowId })
+    if (!at) return
+    const list = tweaksFor(store.state.tweaks, at.host)
+    const only = list.length === 1 ? list[0] : undefined
+    if (only) editor.open(at.windowId, at.tabId, only.id)
+    else if (list.length === 0) ctx.toast(at.windowId, TWEAK_MESSAGES.none)
+    else await commands.run('site.openControls', {}, { windowId: at.windowId })
+  })
+
+  /** Turns every Tweak of the shown page's site on or off (BO-21, BO-14). */
+  const setSite = async (windowId: WindowId | undefined, enabled: boolean) => {
+    const at = await target(undefined, { windowId })
+    if (!at) return
+    const ids = tweaksFor(store.state.tweaks, at.host).map((t) => t.id)
+    if (ids.length === 0) {
+      ctx.toast(at.windowId, TWEAK_MESSAGES.none)
+      return
+    }
+    const now = Date.now()
+    store.update((draft) => {
+      for (const id of ids) {
+        const tweak = draft.tweaks[id]
+        if (tweak) applyTweakPatch(tweak, { enabled }, now)
+      }
+    })
+    ctx.toast(at.windowId, `Tweaks ${enabled ? 'on' : 'off'} for ${at.host}`)
+  }
+  actions.register('tweak.siteOff', ({ windowId }) => setSite(windowId, false))
+  actions.register('tweak.siteOn', ({ windowId }) => setSite(windowId, true))
+  // The Library's list of every Tweak (BO-15).
+  actions.register('tweak.view', async ({ windowId }) => {
+    await commands.run('library.open', { section: 'tweaks' }, { windowId })
+  })
+
+  if (ctx.e2e) {
+    const hooks: TweakTestHooks = {
+      editor: (windowId) => editor.info(windowId ?? windows.ids()[0] ?? ''),
+      page: (tabId) => pages.info(tabId),
+      picker: (tabId) => hiding.info(tabId),
+    }
+    ;(globalThis as unknown as { __orbitTweaks: TweakTestHooks }).__orbitTweaks = hooks
+  }
+}

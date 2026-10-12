@@ -52,6 +52,8 @@ export const DEFAULT_SETTINGS: Settings = {
   archiveKeepDays: 30,
   recentFiles: { downloads: true, screenshots: false },
   libraryScreenshots: false,
+  tweaksEnabled: true,
+  tweakIntroSeen: false,
 }
 
 /** Favorites per profile (FV-02). */

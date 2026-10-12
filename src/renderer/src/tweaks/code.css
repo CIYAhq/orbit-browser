@@ -1,0 +1,292 @@
+/*
+ * The Tweak editor's code area (BO-11): the CSS and JavaScript tabs, the code editor (a text field
+ * over a coloured copy of its text, with line numbers), and the JavaScript's buttons.
+ */
+
+.tweak-code {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 8px 4px 2px;
+  border-top: 1px solid var(--tweak-line);
+}
+
+.tweak-code__tabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--tweak-fill);
+  align-self: flex-start;
+}
+
+.tweak-code__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--tweak-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: default;
+}
+
+.tweak-code__tab[aria-selected="true"] {
+  background: var(--surface, #fff);
+  color: inherit;
+  box-shadow: 0 0 0 0.5px var(--tweak-line);
+}
+
+.tweak-code__badge {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent, #5865d8) 16%, transparent);
+  color: var(--accent, #5865d8);
+  font-size: 9.5px;
+  font-weight: 750;
+  letter-spacing: 0.03em;
+  line-height: 15px;
+}
+
+.tweak-code__bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tweak-code__bar .tweak-button {
+  padding: 4px 10px;
+}
+
+.tweak-code__notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, #e5a50a 16%, transparent);
+  font-size: 12px;
+}
+
+.tweak-code__notice > svg {
+  flex: none;
+  color: #b07a00;
+}
+
+.tweak-code__notice > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.tweak-tool {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: var(--tweak-fill);
+  color: inherit;
+  cursor: default;
+}
+
+.tweak-tool:hover {
+  background: var(--tweak-fill-hover);
+}
+
+.tweak-tool[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent, #5865d8) 18%, transparent);
+  color: var(--accent, #5865d8);
+}
+
+.tweak-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--tweak-muted);
+  font-size: 12px;
+}
+
+.tweak-check input {
+  flex: none;
+  margin: 0;
+  accent-color: var(--accent, #5865d8);
+}
+
+.tweak-check span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tweak-check:has(input:disabled) {
+  opacity: 0.55;
+}
+
+.tweak-panel__spacer {
+  flex: 1;
+  margin-right: auto;
+}
+
+/* ---------- The code editor ---------- */
+
+.code-editor {
+  --code-font:
+    ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace;
+  display: flex;
+  height: 208px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--text, #1c1c1f) 4%, var(--surface, #fff));
+  box-shadow: inset 0 0 0 1px var(--tweak-line);
+  user-select: text;
+}
+
+.code-editor:focus-within {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent, #5865d8) 70%, transparent);
+}
+
+.code-editor__gutter {
+  flex: none;
+  min-width: 34px;
+  overflow: hidden;
+  border-right: 1px solid var(--tweak-line);
+  color: color-mix(in srgb, var(--text, #1c1c1f) 38%, transparent);
+  text-align: right;
+}
+
+.code-editor__numbers,
+.code-editor__layer,
+.code-editor__input {
+  margin: 0;
+  padding: 8px 10px;
+  font-family: var(--code-font);
+  font-size: 12px;
+  line-height: 18px;
+  font-variant-ligatures: none;
+  tab-size: 2;
+  white-space: pre;
+}
+
+.code-editor__numbers {
+  padding: 8px 8px 8px 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.code-editor__main {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.code-editor__layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  min-width: 100%;
+  box-sizing: border-box;
+  color: var(--text, #1c1c1f);
+  pointer-events: none;
+}
+
+.code-editor__input {
+  position: relative;
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text, #1c1c1f);
+  caret-color: var(--text, #1c1c1f);
+  overflow: auto;
+  resize: none;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text, #1c1c1f) 28%, transparent) transparent;
+}
+
+.code-editor__input.is-coloured {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+.code-editor__input::selection {
+  background: color-mix(in srgb, var(--accent, #5865d8) 28%, transparent);
+}
+
+.code-editor__input::placeholder {
+  color: color-mix(in srgb, var(--text, #1c1c1f) 32%, transparent);
+  -webkit-text-fill-color: color-mix(in srgb, var(--text, #1c1c1f) 32%, transparent);
+}
+
+/* Token colours: one set for light panels, one for dark. */
+.code-editor {
+  --tok-comment: #8a8f98;
+  --tok-string: #1a7f37;
+  --tok-number: #b35900;
+  --tok-keyword: #8f3fd1;
+  --tok-atrule: #8f3fd1;
+  --tok-selector: #0b63c9;
+  --tok-property: #b8326a;
+  --tok-value: inherit;
+  --tok-color: #b35900;
+  --tok-important: #c4321b;
+  --tok-punct: color-mix(in srgb, var(--text, #1c1c1f) 55%, transparent);
+}
+
+.tweak-view.is-dark .code-editor {
+  --tok-comment: #8b93a1;
+  --tok-string: #7ccf8e;
+  --tok-number: #f0a86a;
+  --tok-keyword: #c79bff;
+  --tok-atrule: #c79bff;
+  --tok-selector: #7cb7ff;
+  --tok-property: #ff8fb8;
+  --tok-color: #f0a86a;
+  --tok-important: #ff8a73;
+}
+
+/* Colour only: a bold or slanted glyph could be wider, and the caret would drift from the text. */
+.tok-comment {
+  color: var(--tok-comment);
+}
+.tok-string {
+  color: var(--tok-string);
+}
+.tok-number {
+  color: var(--tok-number);
+}
+.tok-keyword {
+  color: var(--tok-keyword);
+}
+.tok-atrule {
+  color: var(--tok-atrule);
+}
+.tok-selector {
+  color: var(--tok-selector);
+}
+.tok-property {
+  color: var(--tok-property);
+}
+.tok-value {
+  color: var(--tok-value);
+}
+.tok-color {
+  color: var(--tok-color);
+}
+.tok-important {
+  color: var(--tok-important);
+}
+.tok-punct {
+  color: var(--tok-punct);
+}
