@@ -277,6 +277,11 @@
   transform: translateX(12px);
 }
 
+/* A switch that a setting for every site turns off (ad blocking, OB-06). */
+.site-switch:disabled {
+  opacity: 0.45;
+}
+
 .reduce-motion .site-panel {
   animation: none;
 }

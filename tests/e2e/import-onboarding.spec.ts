@@ -75,6 +75,8 @@ test('[OB-03][OB-09][IM-13] onboarding imports inline; the import is added when 
   await page.getByTestId('onboarding-next').click()
   await expect(page.getByTestId('onboarding-step-favorites')).toBeVisible()
   await page.getByTestId('onboarding-next').click()
+  await expect(page.getByTestId('onboarding-step-ads')).toBeVisible()
+  await page.getByTestId('onboarding-next').click()
   await page.getByTestId('onboarding-browser-later').click()
   await expect(page.getByTestId('onboarding-step-done')).toBeVisible()
   // OB-09: the Done screen says what will be imported, and from where.
@@ -164,6 +166,8 @@ test('[OB-03][IM-02][IM-06][IM-16] onboarding offers the browsers on this comput
   await expect(page.getByTestId('onboarding-step-theme')).toBeVisible()
   await page.getByTestId('onboarding-next').click()
   await page.getByTestId('onboarding-next').click()
+  await expect(page.getByTestId('onboarding-step-ads')).toBeVisible()
+  await page.getByTestId('onboarding-next').click()
   await page.getByTestId('onboarding-browser-later').click()
   await expect(page.getByTestId('onboarding-summary-import')).toHaveText('9 bookmarks · 7 history items from Chrome')
   // The history, too, waits for Start browsing (D44).
@@ -226,6 +230,8 @@ test('[IM-16] Dismiss all: none of the suggestions is added', async () => {
   await expect(page.getByTestId('onboarding-step-theme')).toBeVisible()
   await page.getByTestId('onboarding-next').click()
   await page.getByTestId('onboarding-next').click()
+  await expect(page.getByTestId('onboarding-step-ads')).toBeVisible()
+  await page.getByTestId('onboarding-next').click()
   await page.getByTestId('onboarding-browser-later').click()
   await page.getByTestId('import-suggestion').first().click()
   await expect(page.getByTestId('import-suggestion').first()).toHaveAttribute('aria-pressed', 'true')
@@ -246,6 +252,8 @@ test('[OB-09] Do this later: the Done screen says nothing was imported and where
   await expect(page.getByTestId('onboarding-step-theme')).toBeVisible()
   await page.getByTestId('onboarding-next').click()
   await expect(page.getByTestId('onboarding-step-favorites')).toBeVisible()
+  await page.getByTestId('onboarding-next').click()
+  await expect(page.getByTestId('onboarding-step-ads')).toBeVisible()
   await page.getByTestId('onboarding-next').click()
   await page.getByTestId('onboarding-browser-later').click()
   await expect(page.getByTestId('onboarding-summary-import')).toHaveText(

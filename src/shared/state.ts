@@ -350,6 +350,8 @@ export interface Settings {
    * Skip setup puts them back (OB-14, D44). Kept until onboarding ends, across a quit.
    */
   onboardingThemeBefore?: { spaceId: SpaceId; theme: SpaceTheme; appearance: ColorMode }
+  /** The ads step's choice so far (OB-06): Start browsing applies it, Skip setup doesn't (D44). */
+  onboardingAdBlocking?: boolean
   /** How many times each kind of hint has shown (OB-11; HINT_LIMITS in hints.ts): each shows a few times at most. */
   hintsShown?: Partial<Record<HintKind, number>>
   /** The Settings window's section shown last: Settings reopens there (ST-01). */
@@ -378,6 +380,11 @@ export interface Settings {
   hardwareAcceleration: boolean
   /** Secure DNS (ST-12): the engine's automatic upgrade, off, or always one DNS-over-HTTPS provider. */
   secureDns: SecureDnsChoice
+  /**
+   * Block ads and trackers (OB-06): pages load nothing from the servers on Orbit's list
+   * (src/main/settings/ad-hosts.ts). On by default; a site can be let off in its site controls.
+   */
+  adBlocking: boolean
   /** Where update checks look (UP-01, UP-10; see src/shared/updates.ts). Empty (the default): Orbit never checks. */
   updateFeedUrl: string
   /** Check for updates on launch and every few hours, when a feed is set (UP-01). */

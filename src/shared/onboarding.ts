@@ -7,10 +7,11 @@ import { MAX_FAVORITES } from './defaults'
 import type { KeyRemap } from './system-keys'
 
 /**
- * The steps, in order. Import is the import flow inline (OB-03). Keys shows only on Linux, when the
- * desktop keeps keys Orbit's actions are bound to (KS-03).
+ * The steps, in order. Import is the import flow inline (OB-03); ads is the ad and tracker blocking
+ * choice (OB-06). Keys shows only on Linux, when the desktop keeps keys Orbit's actions are bound to
+ * (KS-03).
  */
-export const ONBOARDING_STEPS = ['welcome', 'import', 'theme', 'favorites', 'browser', 'keys', 'done'] as const
+export const ONBOARDING_STEPS = ['welcome', 'import', 'theme', 'favorites', 'ads', 'browser', 'keys', 'done'] as const
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number]
 
 export function isOnboardingStep(value: unknown): value is OnboardingStep {
@@ -66,6 +67,8 @@ export interface OnboardingInfo {
   returning: boolean
   /** The Favorites picked so far (STARTER_APPS ids), when resuming after a quit (OB-14). */
   favorites: string[]
+  /** The ads step's switch (OB-06): the choice made so far, else the setting (on by default). */
+  adBlocking: boolean
   /** Linux: the keys the desktop keeps that Orbit's actions are bound to, with others to use (KS-03). */
   keys: KeyRemap[]
 }

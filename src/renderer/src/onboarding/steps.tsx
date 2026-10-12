@@ -16,6 +16,7 @@ import { swatchBackground, ThemeEditor } from '../shell/spaces/ThemeEditor'
 import '../shell/spaces/spaces.css'
 import { useOrbit } from '../store'
 import { cachedPalette, prefersReducedMotion, useDark } from '../theme'
+import { AdsSample } from './ads-sample'
 import { OrbitLogo } from './OrbitLogo'
 
 /** A step's title, focused when the step appears (Enter continues from there). */
@@ -300,6 +301,58 @@ export function FavoritesStep({
   )
 }
 
+// ---- OB-06 ----
+
+/**
+ * Ad and tracker blocking (OB-06): on by default, tried on Orbit's own sample page. The choice is
+ * applied by Start browsing (Skip setup leaves the setting as it is, D44); a site can be let off
+ * later from its site controls, and every site from Settings → Privacy.
+ */
+export function AdsStep({
+  on,
+  onChange,
+  onNext,
+}: {
+  on: boolean
+  onChange: (on: boolean) => void
+  onNext: () => void
+}) {
+  return (
+    <div className="ob-ads">
+      <div className="ob-ads__intro">
+        <Title id="ads">Block ads and trackers</Title>
+        <p className="ob-lead">
+          Orbit can keep pages from loading ads, and the trackers that follow you from site to site. It works on this
+          computer, from a list that comes with Orbit. Try it on the sample page.
+        </p>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={on}
+          className={`ob-switch${on ? ' is-on' : ''}`}
+          data-testid="onboarding-ads-switch"
+          onClick={() => onChange(!on)}
+        >
+          Block ads and trackers
+          <span className="ob-switch__track" aria-hidden="true">
+            <span className="ob-switch__knob" />
+          </span>
+        </button>
+        <p className="ob-note">
+          Some sites rely on ads to pay for what they make. You can turn blocking off for a single site from its site
+          controls, or for every site in Settings, under Privacy.
+        </p>
+        <Actions>
+          <Button primary onClick={onNext} testId="onboarding-next">
+            Continue
+          </Button>
+        </Actions>
+      </div>
+      <AdsSample blocking={on} />
+    </div>
+  )
+}
+
 // ---- OB-07 ----
 
 export function BrowserStep({
@@ -563,6 +616,7 @@ function SearchChoice({ id }: { id: string }) {
 export function DoneStep({
   spaceId,
   favorites,
+  adBlocking,
   browser,
   declined,
   importJob,
@@ -573,6 +627,8 @@ export function DoneStep({
 }: {
   spaceId: string | undefined
   favorites: string[]
+  /** The ads step's switch (OB-06). */
+  adBlocking: boolean
   browser: DefaultBrowserStatus | undefined
   declined: boolean
   importJob: string | undefined
@@ -600,6 +656,12 @@ export function DoneStep({
         <div>
           <dt>Favorites</dt>
           <dd data-testid="onboarding-summary-favorites">{favoritesLabel(favorites)}</dd>
+        </div>
+        <div>
+          <dt>Ads and trackers</dt>
+          <dd data-testid="onboarding-summary-ads">
+            {adBlocking ? 'Blocked' : 'Not blocked: it’s in Settings, under Privacy'}
+          </dd>
         </div>
         <div>
           <dt>Default browser</dt>

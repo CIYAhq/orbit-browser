@@ -5,7 +5,7 @@ import type { ProfileId, SecureDnsChoice } from '../../../../shared/state'
 import { invoke } from '../../api'
 import { useOrbit } from '../../store'
 import { useSettingsContext } from '../context'
-import { Button, Checkbox, Dialog, type Option, Select, SettingGroup, SettingRow } from '../controls'
+import { Button, Checkbox, Dialog, type Option, Select, SettingGroup, SettingRow, Switch } from '../controls'
 import { useProfileName, useProfiles } from '../profiles'
 import type { SettingsSection } from '../registry'
 
@@ -28,7 +28,7 @@ const SECURE_DNS: Option<SecureDnsChoice>[] = [
 /** The Clear browsing data request each opening of Settings handled (so returning to the page doesn't reopen it). */
 let handledNonce = -1
 
-/** Privacy & security (ST-12): what Orbit sends (nothing), clearing browsing data, Secure DNS. */
+/** Privacy & security (ST-12): what Orbit sends (nothing), clearing browsing data, ad blocking (OB-06), Secure DNS. */
 function PrivacyPage() {
   const { context, target, nonce } = useSettingsContext()
   const [clearing, setClearing] = useState<ProfileId>()
@@ -69,6 +69,7 @@ function PrivacyPage() {
           </Button>
         </SettingRow>
       </SettingGroup>
+      <AdsGroup />
       <SecurityGroup />
       {clearing && (
         <ClearDataDialog
@@ -80,6 +81,27 @@ function PrivacyPage() {
         />
       )}
     </>
+  )
+}
+
+/** Ad and tracker blocking (OB-06): on by default; a site's own switch is in its site controls. */
+function AdsGroup() {
+  const adBlocking = useOrbit((s) => s.settings.adBlocking)
+  return (
+    <SettingGroup title="Ads and trackers">
+      <SettingRow
+        id="ad-blocking"
+        label="Block ads and trackers"
+        description="Pages load nothing from the ad and tracking servers on a list that comes with Orbit; the check happens on this computer. To let one site show its ads, turn blocking off in its site controls."
+      >
+        <Switch
+          label="Block ads and trackers"
+          checked={adBlocking}
+          testId="ad-blocking"
+          onChange={(next) => void invoke('settings.update', { adBlocking: next })}
+        />
+      </SettingRow>
+    </SettingGroup>
   )
 }
 
@@ -206,7 +228,7 @@ function ClearDataDialog({
       />
       <Checkbox
         label="Site settings"
-        description="From all time. What you allowed or blocked for single sites, and their zoom; sites ask again."
+        description="From all time. What you allowed or blocked for single sites, their zoom, and the sites ad blocking is off for; sites ask again."
         checked={kinds.siteSettings}
         testId="clear-data-site-settings"
         onChange={toggle('siteSettings')}
@@ -221,5 +243,16 @@ export default {
   icon: ShieldCheck,
   order: 60,
   component: PrivacyPage,
-  keywords: ['clear browsing data', 'cookies', 'cache', 'history', 'secure dns', 'dns over https', 'privacy'],
+  keywords: [
+    'clear browsing data',
+    'cookies',
+    'cache',
+    'history',
+    'secure dns',
+    'dns over https',
+    'privacy',
+    'ads',
+    'ad blocking',
+    'trackers',
+  ],
 } satisfies SettingsSection

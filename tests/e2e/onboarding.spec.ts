@@ -182,6 +182,10 @@ test('[OB-01][OB-04][OB-05][OB-07][OB-08][OB-09] a first run starts with onboard
   await expect(page.getByTestId('onboarding-app-github')).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByTestId('onboarding-favorites-count')).toHaveText('2 chosen')
   expect(await accountPrompts(page)).toEqual([])
+  await next(page, 'ads')
+  // OB-06: ad and tracker blocking, on to start with (finish-settings-ads.spec.ts has the rest).
+  await expect(page.getByTestId('onboarding-ads-switch')).toHaveAttribute('aria-checked', 'true')
+  expect(await accountPrompts(page)).toEqual([])
   await next(page, 'browser')
   expect(await accountPrompts(page)).toEqual([])
 
@@ -196,6 +200,7 @@ test('[OB-01][OB-04][OB-05][OB-07][OB-08][OB-09] a first run starts with onboard
   // OB-09 and OB-08: a summary, and the default profile's search engine, Google until changed.
   await expect(page.getByTestId('onboarding-summary-favorites')).toHaveText('Gmail and GitHub')
   await expect(page.getByTestId('onboarding-summary-browser')).toHaveText('Orbit')
+  await expect(page.getByTestId('onboarding-summary-ads')).toHaveText('Blocked')
   const engine = page.getByTestId('onboarding-search-engine')
   await expect(engine).toHaveValue('google')
   await engine.selectOption('duckduckgo')
@@ -383,6 +388,7 @@ test('[OB-14] Reset Onboarding runs it again over the open window and keeps ever
   // Finishing goes back to the same window; nothing was deleted.
   await next(page, 'theme')
   await next(page, 'favorites')
+  await next(page, 'ads')
   await next(page, 'browser')
   await page.getByTestId('onboarding-browser-later').click()
   await expect(page.getByTestId('onboarding-step-done')).toBeVisible()

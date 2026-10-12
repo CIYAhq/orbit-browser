@@ -34,6 +34,7 @@ export function normalizeSettingsPrefs(state: OrbitState): void {
   }
   if (typeof s.hardwareAcceleration !== 'boolean') s.hardwareAcceleration = DEFAULT_SETTINGS.hardwareAcceleration
   if (!SECURE_DNS_CHOICES.includes(s.secureDns)) s.secureDns = DEFAULT_SETTINGS.secureDns
+  if (typeof s.adBlocking !== 'boolean') s.adBlocking = DEFAULT_SETTINGS.adBlocking
   normalizeUpdatePrefs(s)
   const size: unknown = s.settingsWindowSize
   if (isRecord(size) && saneSize(size.width) && saneSize(size.height)) {
@@ -61,6 +62,7 @@ function normalizeOnboardingPicks(state: OrbitState): void {
   const picked = chosenApps(s.onboardingFavorites).map((app) => app.id)
   if (s.onboarded || picked.length === 0) delete s.onboardingFavorites
   else s.onboardingFavorites = picked
+  if (s.onboarded || typeof s.onboardingAdBlocking !== 'boolean') delete s.onboardingAdBlocking
   const before: unknown = s.onboardingThemeBefore
   if (s.onboarded || !isRecord(before) || typeof before.spaceId !== 'string' || !state.spaces[before.spaceId]) {
     delete s.onboardingThemeBefore

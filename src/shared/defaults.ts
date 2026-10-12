@@ -46,6 +46,7 @@ export const DEFAULT_SETTINGS: Settings = {
   lastTabOnCmd9: true,
   hardwareAcceleration: true,
   secureDns: 'automatic',
+  adBlocking: true,
   updateFeedUrl: '',
   updateChecks: true,
   librarySection: 'archive',

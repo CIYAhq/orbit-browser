@@ -42,6 +42,8 @@ async function walkToKeys(page: Page): Promise<void> {
   await page.getByTestId('onboarding-next').click()
   await expect(page.getByTestId('onboarding-step-favorites')).toBeVisible()
   await page.getByTestId('onboarding-next').click()
+  await expect(page.getByTestId('onboarding-step-ads')).toBeVisible()
+  await page.getByTestId('onboarding-next').click()
   await expect(page.getByTestId('onboarding-step-browser')).toBeVisible()
   await page.getByTestId('onboarding-browser-later').click()
 }
@@ -73,8 +75,8 @@ test('[KS-03] Linux first run: onboarding offers other keys for the ones the des
   orbit = await launchWithOnboarding({ kept: GNOME_KEYS })
   const { app } = orbit
   const page = await onboardingPage(app, 'welcome')
-  // The flow has a step for it: seven steps, not six.
-  await expect(page.locator('.ob-progress__dot')).toHaveCount(7)
+  // The flow has a step for it: eight steps, not seven.
+  await expect(page.locator('.ob-progress__dot')).toHaveCount(8)
   await walkToKeys(page)
   await expect(page.getByTestId('onboarding-step-keys')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Some shortcuts are taken' })).toBeFocused()
@@ -174,7 +176,7 @@ test('[KS-03] with no keys the desktop keeps, onboarding has no shortcuts step',
   orbit = await launchWithOnboarding()
   const { app } = orbit
   const page = await onboardingPage(app, 'welcome')
-  await expect(page.locator('.ob-progress__dot')).toHaveCount(6)
+  await expect(page.locator('.ob-progress__dot')).toHaveCount(7)
   await walkToKeys(page)
   await expect(page.getByTestId('onboarding-step-done')).toBeVisible()
   await expect(page.getByTestId('onboarding-summary-keys')).toHaveCount(0)

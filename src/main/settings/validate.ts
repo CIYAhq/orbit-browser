@@ -29,6 +29,7 @@ const CHECKS: { [K in keyof Required<SettingsPatch>]: Check } = {
   sleepAfterMs: (v) => typeof v === 'number' && Number.isInteger(v) && (v === 0 || (v >= 60_000 && v <= DAY)),
   hardwareAcceleration: bool,
   secureDns: (v) => (SECURE_DNS_CHOICES as readonly unknown[]).includes(v),
+  adBlocking: bool,
   updateChecks: bool,
   reduceMotion: bool,
 }

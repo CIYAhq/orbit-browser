@@ -43,6 +43,7 @@ function forgetProgress(settings: Settings): void {
   delete settings.onboardingStep
   delete settings.onboardingFavorites
   delete settings.onboardingThemeBefore
+  delete settings.onboardingAdBlocking
 }
 
 /** Brings the onboarding window forward if it is open (a second launch, say). Returns whether it is. */
@@ -101,6 +102,7 @@ class Onboarding {
       spaceId: spaceOrder[0],
       returning: this.browserWindows().length > 0,
       favorites: chosenApps(settings.onboardingFavorites).map((app) => app.id),
+      adBlocking: settings.onboardingAdBlocking ?? settings.adBlocking,
       keys,
     }
   }
@@ -150,9 +152,18 @@ class Onboarding {
     })
   }
 
+  /** Keeps the ads step's choice (OB-06) until Start browsing applies it; a quit resumes with it. */
+  setAdBlocking(on: unknown): void {
+    if (!this.window || this.finishing || this.ctx.store.state.settings.onboarded || typeof on !== 'boolean') return
+    this.ctx.store.update((d) => {
+      d.settings.onboardingAdBlocking = on
+    })
+  }
+
   /**
    * Skip setup (OB-14, D44): a default first window, as the spec words it: the theme step's change
-   * is undone (the colours and mode from before it), and no Favorites are added or anything imported.
+   * is undone (the colours and mode from before it), no Favorites are added or anything imported,
+   * and the ads step's choice isn't applied.
    */
   skip(): Promise<void> {
     return this.finish([], true)
@@ -198,6 +209,9 @@ class Onboarding {
         room--
       }
       this.ctx.store.update((d) => {
+        // The ads step's choice (OB-06), unless setup was skipped.
+        const ads = d.settings.onboardingAdBlocking
+        if (!skipped && typeof ads === 'boolean') d.settings.adBlocking = ads
         d.settings.onboarded = true
         forgetProgress(d.settings)
       })
@@ -328,6 +342,7 @@ export function registerOnboarding(ctx: MainContext): void {
   commands.register('onboarding.setStep', ({ step }) => onboarding.setStep(step))
   commands.register('onboarding.setTheme', ({ theme, appearance }) => onboarding.setTheme(theme, appearance))
   commands.register('onboarding.setFavorites', ({ favorites }) => onboarding.setFavorites(favorites))
+  commands.register('onboarding.setAdBlocking', ({ on }) => onboarding.setAdBlocking(on))
   commands.register('onboarding.finish', ({ favorites }) => onboarding.finish(favorites))
   commands.register('onboarding.skip', () => onboarding.skip())
   actions.register('onboarding.reset', () => onboarding.reset())

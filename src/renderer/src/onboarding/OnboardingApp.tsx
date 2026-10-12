@@ -6,7 +6,7 @@ import { NEUTRAL_THEME } from '../../../shared/theme'
 import { invoke, isMac } from '../api'
 import { useOrbit } from '../store'
 import { cachedPalette, paletteVars, prefersReducedMotion, useDark } from '../theme'
-import { BrowserStep, DoneStep, FavoritesStep, ImportStep, KeysStep, ThemeStep, WelcomeStep } from './steps'
+import { AdsStep, BrowserStep, DoneStep, FavoritesStep, ImportStep, KeysStep, ThemeStep, WelcomeStep } from './steps'
 import './onboarding.css'
 
 /** Each step's name in the progress dots, for screen readers. */
@@ -15,6 +15,7 @@ const STEP_NAMES: Record<OnboardingStep, string> = {
   import: 'Import',
   theme: 'Colours',
   favorites: 'Favorites',
+  ads: 'Ads and trackers',
   browser: 'Default browser',
   keys: 'Shortcuts',
   done: 'Done',
@@ -82,6 +83,11 @@ function Flow({ info }: { info: OnboardingInfo }) {
   const pickFavorites = useCallback((ids: string[]) => {
     setFavorites(ids)
     void invoke('onboarding.setFavorites', { favorites: ids })
+  }, [])
+  const [adBlocking, setAdBlocking] = useState(info.adBlocking)
+  const pickAds = useCallback((on: boolean) => {
+    setAdBlocking(on)
+    void invoke('onboarding.setAdBlocking', { on })
   }, [])
   const [browser, setBrowser] = useState<DefaultBrowserStatus>()
   const [declined, setDeclined] = useState(false)
@@ -204,6 +210,7 @@ function Flow({ info }: { info: OnboardingInfo }) {
           {step === 'import' && <ImportStep onNext={next} onImport={pickImport} />}
           {step === 'theme' && info.spaceId && <ThemeStep spaceId={info.spaceId} onNext={next} />}
           {step === 'favorites' && <FavoritesStep chosen={favorites} onChange={pickFavorites} onNext={next} />}
+          {step === 'ads' && <AdsStep on={adBlocking} onChange={pickAds} onNext={next} />}
           {step === 'browser' && (
             <BrowserStep
               status={browser}
@@ -220,6 +227,7 @@ function Flow({ info }: { info: OnboardingInfo }) {
             <DoneStep
               spaceId={info.spaceId}
               favorites={favorites}
+              adBlocking={adBlocking}
               browser={browser}
               declined={declined}
               importJob={importJob}

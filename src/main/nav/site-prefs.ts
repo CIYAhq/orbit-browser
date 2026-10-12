@@ -16,6 +16,8 @@ interface SitePrefsData {
   permissions: Record<string, Record<string, SitePermissions>>
   /** Devices a site may use again without asking, per profile and origin (NV-15). */
   devices: Record<string, Record<string, DeviceGrant[]>>
+  /** Hosts the user turned ad and tracker blocking off for, per profile (OB-06). */
+  ads: Record<string, Record<string, true>>
 }
 
 export type SitePermissions = Partial<Record<PermissionKind, PermissionChoice>>
@@ -32,9 +34,24 @@ const DEVICE_KINDS: readonly DeviceKind[] = ['serial', 'usb', 'hid']
 const MIN_ZOOM = ZOOM_STEPS[0] as number
 const MAX_ZOOM = ZOOM_STEPS[ZOOM_STEPS.length - 1] as number
 
-type SiteChoices = Pick<SitePrefsData, 'zoom' | 'popups' | 'permissions' | 'devices'>
+type SiteChoices = Pick<SitePrefsData, 'zoom' | 'popups' | 'permissions' | 'devices' | 'ads'>
 
-const emptyChoices = (): SiteChoices => ({ zoom: {}, popups: {}, permissions: {}, devices: {} })
+const emptyChoices = (): SiteChoices => ({ zoom: {}, popups: {}, permissions: {}, devices: {}, ads: {} })
+
+/** A saved map of profile → host → true (pop-ups, ads), keeping only what fits. */
+function hostSets(raw: unknown): Record<string, Record<string, true>> {
+  const kept: Record<string, Record<string, true>> = {}
+  if (!raw || typeof raw !== 'object') return kept
+  for (const [profile, hosts] of Object.entries(raw)) {
+    if (!hosts || typeof hosts !== 'object') continue
+    for (const [host, on] of Object.entries(hosts)) {
+      if (on !== true) continue
+      kept[profile] ??= {}
+      ;(kept[profile] as Record<string, true>)[host] = true
+    }
+  }
+  return kept
+}
 
 /**
  * The chrome lane's small per-user settings, kept out of OrbitState so they never travel to the
@@ -67,15 +84,7 @@ export class SitePrefs {
           ;(zoom[profile] as Record<string, number>)[host] = factor
         }
       }
-      const popups: Record<string, Record<string, true>> = {}
-      for (const [profile, hosts] of Object.entries(raw.popups ?? {})) {
-        if (!hosts || typeof hosts !== 'object') continue
-        for (const [host, allowed] of Object.entries(hosts)) {
-          if (allowed !== true) continue
-          popups[profile] ??= {}
-          ;(popups[profile] as Record<string, true>)[host] = true
-        }
-      }
+      const popups = hostSets(raw.popups)
       const permissions: Record<string, Record<string, SitePermissions>> = {}
       for (const [profile, origins] of Object.entries(raw.permissions ?? {})) {
         if (!origins || typeof origins !== 'object') continue
@@ -112,7 +121,7 @@ export class SitePrefs {
           }))
         }
       }
-      this.data = { hints, zoom, popups, permissions, devices }
+      this.data = { hints, zoom, popups, permissions, devices, ads: hostSets(raw.ads) }
     } catch {
       // No file yet, or unreadable: start empty.
     }
@@ -160,6 +169,22 @@ export class SitePrefs {
     else delete hosts[host]
     if (Object.keys(hosts).length > 0) choices.popups[profileId] = hosts
     else delete choices.popups[profileId]
+    this.changed(profileId)
+  }
+
+  /** Whether the user turned ad and tracker blocking off for a host in a profile (OB-06). */
+  adsAllowed(profileId: string, host: string): boolean {
+    return this.choices(profileId).ads[profileId]?.[host] === true
+  }
+
+  setAdsAllowed(profileId: string, host: string, allowed: boolean): void {
+    if (this.adsAllowed(profileId, host) === allowed) return
+    const choices = this.choices(profileId)
+    const hosts = { ...choices.ads[profileId] }
+    if (allowed) hosts[host] = true
+    else delete hosts[host]
+    if (Object.keys(hosts).length > 0) choices.ads[profileId] = hosts
+    else delete choices.ads[profileId]
     this.changed(profileId)
   }
 
@@ -240,10 +265,15 @@ export class SitePrefs {
     this.ephemeral = emptyChoices()
   }
 
-  /** Forgets a deleted profile's choices: zoom, pop-up hosts, permissions and devices (review B-F7). */
+  /**
+   * Forgets a profile's choices (deleted, review B-F7, or Clear browsing data's site settings): zoom,
+   * pop-up hosts, permissions, devices and the sites ads are allowed on.
+   */
   forgetProfile(profileId: string): void {
     const choices = this.choices(profileId)
-    const kept = [choices.zoom, choices.popups, choices.permissions, choices.devices].filter((map) => profileId in map)
+    const kept = [choices.zoom, choices.popups, choices.permissions, choices.devices, choices.ads].filter(
+      (map) => profileId in map,
+    )
     if (kept.length === 0) return
     for (const map of kept) delete map[profileId]
     this.changed(profileId)

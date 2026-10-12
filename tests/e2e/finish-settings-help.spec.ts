@@ -92,7 +92,7 @@ test('[OB-09][OB-10][OB-11] the first window: about 80% of the screen, centred, 
   // Through every step, choosing nothing: no import, no Favorites.
   await page.getByTestId('onboarding-next').click()
   await page.getByTestId('onboarding-import-later').click()
-  for (const step of ['theme', 'favorites']) {
+  for (const step of ['theme', 'favorites', 'ads']) {
     await expect(page.getByTestId(`onboarding-step-${step}`)).toBeVisible()
     await page.getByTestId('onboarding-next').click()
   }

@@ -1,4 +1,5 @@
 import type { ActionDef } from '../actions'
+import type { AdBlockSite } from '../ad-block'
 import type { OnboardingInfo, OnboardingStep } from '../onboarding'
 import type { SiteCategory, SiteChoice, SiteDefault, SiteSettingsSite } from '../site-settings'
 import type {
@@ -10,6 +11,7 @@ import type {
   Settings,
   SpaceId,
   SpaceTheme,
+  TabId,
   WindowId,
 } from '../state'
 import type { UpdateStatus } from '../updates'
@@ -117,6 +119,13 @@ export const SETTINGS_ACTIONS: SettingsActionDef[] = [
     category: 'App',
     settings: { section: 'privacy' },
     keywords: ['secure dns', 'dns over https', 'cookies', 'privacy'],
+  },
+  {
+    id: 'settings.adBlocking',
+    title: 'Ad and Tracker Blocking',
+    category: 'App',
+    settings: { section: 'privacy', item: 'ad-blocking' },
+    keywords: ['block ads', 'ad blocker', 'adblock', 'trackers', 'tracking'],
   },
   {
     id: 'settings.clearBrowsingData',
@@ -263,6 +272,7 @@ export type SettingsPatch = Partial<
     | 'sleepAfterMs'
     | 'hardwareAcceleration'
     | 'secureDns'
+    | 'adBlocking'
     | 'updateChecks'
     | 'reduceMotion'
   >
@@ -448,6 +458,8 @@ export interface SettingsCommands {
   'onboarding.setTheme': { args: { theme?: SpaceTheme; appearance?: ColorMode }; result: void }
   /** Remembers the Favorites picked so far (STARTER_APPS ids), so a quit resumes with them (OB-14). */
   'onboarding.setFavorites': { args: { favorites: string[] }; result: void }
+  /** Remembers the ads step's choice (OB-06); Start browsing applies it, Skip setup doesn't. */
+  'onboarding.setAdBlocking': { args: { on: boolean }; result: void }
   /**
    * Ends onboarding (OB-09): adds the chosen Favorites (STARTER_APPS ids) and opens the first browser
    * window, or returns to the one already open.
@@ -458,6 +470,13 @@ export interface SettingsCommands {
    * are added and nothing is imported; then as onboarding.finish.
    */
   'onboarding.skip': { args: Record<string, never>; result: void }
+  /**
+   * Ad and tracker blocking on a tab's site (OB-06), for its site controls: whether it is on, whether
+   * the site is let off, and how many requests the page had stopped. Null for a page that isn't a web page.
+   */
+  'adBlock.site': { args: { tabId: TabId }; result: AdBlockSite | null }
+  /** Turns blocking on or off for a tab's site (OB-06), then loads the page again. */
+  'adBlock.setSite': { args: { tabId: TabId; blocked: boolean }; result: void }
   /** Copies Orbit's version (UP-03: clicking the version copies it) and returns it. */
   'settings.copyVersion': { args: Record<string, never>; result: string }
   /**
