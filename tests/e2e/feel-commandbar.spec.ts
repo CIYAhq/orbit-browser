@@ -244,7 +244,7 @@ test('[CB-22][FL-16][FL-29] ⌘T and ⌘L: the bar shows in the first frame, foc
   // CB-22: the overlay's work for the first open, which a cold renderer made two to three times
   // longer, is held to the later opens' in the same launch. (Nor may it resize the overlay: checked
   // in every open below.) Its frame is logged, not judged: it still shows in the second frame in
-  // about a third of launches, which FL-29's note counts among its misses (D90).
+  // about two launches in five (13 of 31 so far), which FL-29's note counts among its misses (D90).
   const asFast = (r: Round) => r.first.work <= r.later * 1.5 + 2
   const meets = (r: Round) => r.first.focusedAtFirst && asFast(r) && entersWell(r.t.best) && shows(r.l.best)
   // A round that misses is measured again in a fresh launch, up to three rounds (D46): each round's

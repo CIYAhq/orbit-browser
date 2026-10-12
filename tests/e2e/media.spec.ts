@@ -1075,7 +1075,8 @@ interface WayBack {
  * tab, from a quiet tab selected over it; ⌘W on a quiet tab right above it, so that it comes next
  * (TB-06); and selecting it from an empty Space, alone and then in a split with a quiet tab. In the
  * last three no page the window showed stays over its view while it comes back: the closed tab's
- * view is gone, an empty Space shows none, and a split's other pane sits beside it.
+ * view is gone, an empty Space shows none, and a split's other pane sits beside it. Its pane shows
+ * its blank card until the page has drawn there (FL-29 allows that placeholder).
  */
 function waysBack(app: ElectronApplication, pip: Page, tabId: string): WayBack[] {
   const select = () => cmd(app, 'tabs.activate', { tabId })

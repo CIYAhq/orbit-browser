@@ -7,14 +7,17 @@
  * corner. Orbit's controls (renderer view "pip") sit in a transparent view on top.
  *
  * Returning to the tab: the window manager attaches the tab's view to its window again (taking it
- * out of this one), and the page puts the video back on that very frame (see agent.ts). Until the
- * page has drawn that layout, the view waits out of sight at its pane's size, all of it but its
- * corner pixel outside the window, and then moves into its pane (arriving(),
- * WindowManager.holdArrivals); the page its window showed before stays there, and takes clicks,
- * meanwhile. So no frame of the player's layout reaches the page area (MD-01), if the page draws
- * within the hold's 250 ms: a page slower than that shows what it drew last. The player then just
- * hides. Closing the player (×) hides it and leaves the view detached, like any background tab, so
- * the media plays on as audio (MD-07).
+ * out of this one), and the page puts the video back on that very frame (see agent.ts). The player
+ * hides first (Back to tab flies a still of its last frame back to the page, MD-16). Until the page
+ * has drawn that layout, the view waits out of sight at its pane's size, all of it but its corner
+ * pixel outside the window, and then moves into its pane (arriving(), WindowManager.holdArrivals).
+ * Meanwhile the page area keeps the page its window showed there, which takes clicks; with none
+ * there (after ⌘W on the tab over it, or back from an empty Space, alone or in a split), it shows
+ * the pane's blank card, a placeholder FL-29 allows. The window's bottom-right pixel shows the
+ * view's top-left one. So no frame of the player's layout reaches the page area (MD-01), if the
+ * page draws within the hold's 250 ms: a page slower than that shows what it drew last. Closing
+ * the player (×) hides it and leaves the view detached, like any background tab, so the media plays
+ * on as audio (MD-07).
  */
 import {
   app,

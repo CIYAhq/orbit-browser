@@ -332,9 +332,11 @@ export class WindowManager {
    * A view whose size changed shows the last frame its page drew until the page draws at the new
    * size, so meanwhile it waits at its pane's size with all of it but its corner pixel outside the
    * window (outOfSight()), where its page lays out and draws; then it moves into its pane, at the
-   * same size. The pages the window showed stay, and take clicks, until then (MD-01: no frame of
-   * the player's layout in the page area, if the page draws within HOLD_MS). A view hidden, or
-   * wholly outside the window, would draw nothing.
+   * same size. Until then the pages the window showed stay, and take clicks. Where it showed none
+   * in that pane (after ⌘W on the tab over it, or from an empty Space, alone or in a split), the
+   * pane shows its blank card. The corner pixel shows at the window's bottom-right corner (MD-01:
+   * no frame of the player's layout in the page area, if the page draws within HOLD_MS). A view
+   * hidden, or wholly outside the window, would draw nothing.
    */
   holdArrivals(hold: (tabId: TabId, view: WebContentsView) => Promise<unknown> | undefined): void {
     this.arrivalHolds.push(hold)
@@ -758,7 +760,7 @@ export class WindowManager {
       // A tab whose page crashed while in the background shows its crash screen when it is shown
       // again, until the user reloads it (NV-14: the pages lane's screen over the page).
     }
-    // While a view coming back is held out of sight (holdArrivals), the pages shown before stay.
+    // While a view coming back is held out of sight (holdArrivals), the pages shown before, if any, stay.
     const holding = [...this.held.values()].some((h) => h.windowId === rec.id)
     for (const tabId of new Set([...rec.visible, ...rec.lingering])) {
       rec.lingering.delete(tabId)
