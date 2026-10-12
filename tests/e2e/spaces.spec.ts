@@ -1085,10 +1085,11 @@ test('[SP-23][TB-17] switching Space never puts two windows on the same tab', as
   await runIn(w1, 'spaces.switch', { spaceId: b })
   await runIn(w2, 'tabs.activate', { tabId: t1 })
   await expect.poll(async () => (await state(app)).windows[w2]?.activeTab[a]).toBe(t1)
-  // Window 1 comes back to A: it keeps t1, and window 2 shows another tab.
+  // Window 1 comes back to A: a switch never takes a tab from another window, so window 2 keeps t1
+  // and window 1 shows t2, the most recent tab window 2 doesn't show (SP-10, feel-fix-2).
   await runIn(w1, 'spaces.switch', { spaceId: a })
   await expect.poll(async () => (await state(app)).windows[w1]?.spaceId).toBe(a)
   const s = await state(app)
-  expect(s.windows[w1]?.activeTab[a]).toBe(t1)
-  expect(s.windows[w2]?.activeTab[a]).toBe(t2)
+  expect(s.windows[w2]?.activeTab[a]).toBe(t1)
+  expect(s.windows[w1]?.activeTab[a]).toBe(t2)
 })

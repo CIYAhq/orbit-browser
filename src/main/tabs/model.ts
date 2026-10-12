@@ -145,6 +145,20 @@ export function displayedTabs(state: OrbitState): Set<TabId> {
   return out
 }
 
+/**
+ * The tab a window selects as it switches to `spaceId` (SP-10): the one it last used there, unless
+ * that tab has gone or another window shows it (or a pane of its split view); else the Space's most
+ * recently used tab that no other window shows; else none, the empty state. A switch never takes a
+ * tab from another window (SP-23, TB-17).
+ */
+export function tabOnSwitch(state: OrbitState, windowId: WindowId, spaceId: SpaceId): TabId | null {
+  const elsewhere = shownElsewhere(state, windowId)
+  const free = (id: TabId) => !splitLeavesOf(state, id).some((t) => elsewhere.has(t))
+  const remembered = state.windows[windowId]?.activeTab[spaceId]
+  if (remembered && free(remembered) && sidebarTabOrder(state, spaceId).includes(remembered)) return remembered
+  return mostRecentTab(state, spaceId, elsewhere, (t) => free(t.id))
+}
+
 /** Most recently used tab of a Space (Favorites included), skipping `excluding`. */
 export function mostRecentTab(
   state: OrbitState,

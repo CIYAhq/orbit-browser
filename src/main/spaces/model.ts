@@ -26,7 +26,7 @@ import type {
 } from '../../shared/state'
 import { normalizeSpaceTheme, sameTheme } from '../../shared/theme'
 import { splitLeaves, tabsInItem } from '../../shared/tree'
-import { dedupeDisplayed } from '../tabs/model'
+import { dedupeDisplayed, tabOnSwitch } from '../tabs/model'
 
 /** Archive size cap; trimmed in chunks from the oldest end so trims are rare (review F2, same rule as tabs/ops.ts). */
 export const MAX_ARCHIVE = 5000
@@ -104,9 +104,12 @@ export function switchSpaceInDraft(d: OrbitState, windowId: WindowId, spaceId: S
   // A private or blank window keeps its own Space, and no other window shows one (NV-11, TB-17).
   if (isPrivateWindow(d, windowId) || isPrivateSpace(d, spaceId)) return false
   if (isBlankSpace(d, win.spaceId) || isBlankSpace(d, spaceId)) return false
+  // The tab it last used there; on a first visit, or when that tab has gone or shows in another
+  // window, the Space's most recently used tab no other window shows: a switch never takes a tab
+  // from another window (SP-10, SP-23, TB-17). None: the empty state. A new window still opens on
+  // its Space with no tab selected (SP-24).
+  win.activeTab[spaceId] = tabOnSwitch(d, windowId, spaceId)
   win.spaceId = spaceId
-  // The Space's remembered tab may be on screen in another window: a page is live in one
-  // window at a time, so the window that switched keeps it and the other picks again (TB-17).
   dedupeDisplayed(d, windowId)
   return true
 }

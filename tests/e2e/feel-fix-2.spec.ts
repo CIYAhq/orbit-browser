@@ -2,7 +2,7 @@
  * Feel fixes 2 (D91): the gaps sign-off 5 held back in the sidebar, Spaces and profiles, each with a
  * test that fails without its fix (D18).
  */
-import { expect, type Locator, type Page, test } from '@playwright/test'
+import { type ElectronApplication, expect, type Locator, type Page, test } from '@playwright/test'
 import { type Box, type Recording, record, type Target } from './frames'
 import {
   action,
@@ -13,6 +13,7 @@ import {
   run,
   startFixtures,
   state,
+  tabView,
   viewPage,
 } from './helpers'
 import { activeSpace, createSpace, hoverSidebar, settled as stripAtRest, swipe } from './spaces-support'
@@ -573,4 +574,65 @@ test('[PR-06][SP-10] between a one-row and a two-row Favorites grid, the title r
   const frames = await rec.stop()
   expect(outOfPlace(frames, one.title, two.title, two.bottom)).toEqual([])
   expect(offGrid(frames, [one.tiles, two.tiles])).toEqual([])
+})
+
+// ---------- SP-10, SP-23: a window's first visit to a Space selects the Space's last-used tab ----------
+
+/** Runs a command in the window `windowId`, as the user acting there would. */
+function runIn(app: ElectronApplication, windowId: string, name: string, args: unknown = {}): Promise<unknown> {
+  return app.evaluate(
+    (_e, [w, n, a]) =>
+      (
+        globalThis as unknown as { __orbit: { run: (n: string, a: unknown, w?: string) => Promise<unknown> } }
+      ).__orbit.run(n, a, w),
+    [windowId, name, args] as const,
+  )
+}
+
+test('[SP-10][SP-23][SP-24] a new window that leaves its Space and comes back selects the Space’s most recent tab the first window doesn’t show; a switch never takes a tab another window shows', async () => {
+  const { app } = await launch()
+  const a = await activeSpace(app)
+  // Window 1 on A with three tabs, used Two, Three, then One, which it shows.
+  const one = await newTab(app, fx.url('/page/One'), { activate: false })
+  const two = await newTab(app, fx.url('/page/Two'), { activate: false })
+  const three = await newTab(app, fx.url('/page/Three'), { activate: false })
+  for (const id of [two, three, one]) await run(app, 'tabs.activate', { tabId: id })
+  const b = await createSpace(app, { name: 'B', activate: false })
+  const w1 = Object.keys((await state(app)).windows)[0] as string
+  const win = async (id: string) => (await state(app)).windows[id]
+  // ⌘N: window 2 opens on A with no tab selected and the command bar open (SP-24).
+  await action(app, 'window.new')
+  await expect.poll(async () => Object.keys((await state(app)).windows).length).toBe(2)
+  const w2 = Object.keys((await state(app)).windows).find((id) => id !== w1) as string
+  expect((await win(w2))?.spaceId).toBe(a)
+  expect((await win(w2))?.activeTab[a] ?? null, 'no tab selected (SP-24)').toBeNull()
+  await expect.poll(async () => (await win(w2))?.overlay.kind).toBe('commandbar')
+  await runIn(app, w2, 'overlay.close')
+
+  // Window 2 goes to B, which has no tabs (the empty state), and back to A: it shows Three.
+  await runIn(app, w2, 'spaces.switch', { spaceId: b })
+  expect((await win(w2))?.activeTab[b] ?? null, 'B has no tabs').toBeNull()
+  await runIn(app, w2, 'spaces.switch', { spaceId: a })
+  expect((await win(w2))?.activeTab[a], 'A’s most recent tab window 1 doesn’t show').toBe(three)
+  expect((await win(w1))?.activeTab[a], 'window 1’s page stays').toBe(one)
+  await expect.poll(async () => (await tabView(app, three))?.visible, 'window 2 draws Three').toBe(true)
+  expect((await tabView(app, one))?.visible, 'window 1 still draws One').toBe(true)
+
+  // Window 2 goes to B, and window 1 selects Three, the tab window 2 remembers for A. Back on A,
+  // window 2 doesn't take it: it shows One, the most recent tab window 1 doesn't show (SP-23, TB-17).
+  await runIn(app, w2, 'spaces.switch', { spaceId: b })
+  await runIn(app, w1, 'tabs.activate', { tabId: three })
+  await runIn(app, w2, 'spaces.switch', { spaceId: a })
+  expect((await win(w1))?.activeTab[a], 'window 1 keeps Three').toBe(three)
+  expect((await win(w2))?.activeTab[a]).toBe(one)
+
+  // A Space whose only tab window 1 shows: window 2 gets its empty state.
+  const c = await createSpace(app, { name: 'C', activate: false })
+  const only = await newTab(app, fx.url('/page/Only'), { activate: false, spaceId: c })
+  await runIn(app, w1, 'tabs.activate', { tabId: only })
+  expect((await win(w1))?.spaceId).toBe(c)
+  await runIn(app, w2, 'spaces.switch', { spaceId: c })
+  expect((await win(w2))?.spaceId).toBe(c)
+  expect((await win(w2))?.activeTab[c] ?? null, 'the empty state').toBeNull()
+  expect((await win(w1))?.activeTab[c], 'window 1 keeps its tab').toBe(only)
 })

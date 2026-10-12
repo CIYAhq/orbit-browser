@@ -131,7 +131,7 @@ Spec: `spec/spaces.md`
 | SP-07 | Click to switch, and the switcher icon menu | P0 | ✅ | ✅ e2e | – | click slides one page; right-click opens that Space's menu without switching; Rename brings it into view for the inline rename |
 | SP-08 | Switch Spaces with a trackpad swipe | P0 | ✅ | ✅ e2e+unit | – | wheel deltaX and touch/pen drags; 1:1 tracking, projected-velocity commit, motion springs, rubber-band, over-swipe opens the new-Space flow; momentum detected heuristically |
 | SP-09 | Switch Spaces with the keyboard, mouse buttons and command bar | P0 | ✅ | ✅ e2e+unit | – | Ctrl/Alt+1-9 and Cmd/Ctrl+Alt+arrows (rate-limited, nudge at the ends), mouse back/forward over the sidebar |
-| SP-10 | What switching Space does | P0 | ✅ | ✅ e2e+unit | – | per-window Space, remembered tab per Space, page swap at commit, scroll position per Space |
+| SP-10 | What switching Space does | P0 | ✅ | ✅ e2e+unit | – | per-window Space, remembered tab per Space (on a first visit, or when that tab has gone or shows in another window, the Space's most recently used tab that no other window shows; the empty state only when there is none), page swap at commit, scroll position per Space |
 | SP-11 | Reorder Spaces | P1 | 🟡 partial | ✅ e2e+unit | – | drag targets in the switcher to reorder, and the Space shown stays; ⌘Z puts the Spaces back in their order and ⌘⇧Z reorders them again (TB-18); reordering in the Library's Spaces overview waits for SP-13 |
 | SP-12 | Delete a Space | P0 | ✅ | ✅ e2e+unit | – | confirmation dialog, tabs archived with the Space name, Undo toast and Cmd+Z, last Space protected |
 | SP-13 | Spaces overview in the Library | P1 | – | – | – |  |
@@ -144,8 +144,8 @@ Spec: `spec/spaces.md`
 | SP-20 | Per-Space pinned and Today sections | P0 | ✅ | ✅ e2e | – | per-Space pinned and Today containers (tab behaviour in the tabs lane) |
 | SP-21 | Move tabs between Spaces | P0 | ✅ | ✅ e2e | – | drop on a switcher target moves the tab (tabs lane drag); edge dwell slides the strip and measures once it settles |
 | SP-22 | Spaces in the command bar | P1 | 🟡 partial | ✅ e2e+unit | – | typing a Space's name shows it and Enter switches (CB-05); New Space, Rename Space, Edit Theme, Change Space Icon, Delete Space, Move to / Pin to [Space] (CB-13), Next and Previous Space (found as Select Next / Previous Space too), New Blank Window (TB-17); the bar stays open across a Space switch and its results follow the new Space and profile (CB-19), in the Space's theme (SP-16); Manage Spaces / View Spaces wait for the Spaces overview (SP-13) |
-| SP-23 | Spaces across windows | P0 | ✅ | ✅ e2e+unit | – | each window keeps its own Space; all windows share Spaces |
-| SP-24 | What a new window shows | P0 | ✅ | ✅ e2e | – | Cmd/Ctrl+N: same Space, sidebar shown, cascaded, command bar open, full screen follows |
+| SP-23 | Spaces across windows | P0 | ✅ | ✅ e2e+unit | – | each window keeps its own Space; all windows share Spaces; a Space switch never takes a tab another window shows |
+| SP-24 | What a new window shows | P0 | ✅ | ✅ e2e+unit | – | Cmd/Ctrl+N: same Space, sidebar shown, cascaded, command bar open, full screen follows |
 | SP-25 | Spaces menu in the app menu | P2 | – | – | – |  |
 | SP-26 | Sharing a Space (out of scope) | P2 | ⛔ out of scope | – | – | it needs an online service, so the spec leaves it out of milestone 1 (D41) |
 | PR-01 | What a profile is | P0 | ✅ | ✅ e2e+unit | – | Default profile always exists and cannot be deleted |
