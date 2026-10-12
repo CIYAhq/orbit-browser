@@ -4,12 +4,12 @@
 
 Every row is one behaviour from the clean-room spec. Status per ID: **spec’d** (every row) → **built** → **tested** (a unit or e2e test names the ID) → **feels right** (lead sign-off after a hands-on review against `feel.md`).
 
-**Totals:** 472 spec’d · 312 built (63 partial) · 381 tested · 202 feel right. 13 more are out of scope and not counted.
+**Totals:** 472 spec’d · 312 built (67 partial) · 385 tested · 202 feel right. 13 more are out of scope and not counted.
 
 | Priority | Spec’d | Built | Tested |
 |---|---|---|---|
 | P0 | 174 | 160 | 173 |
-| P1 | 219 | 132 | 182 |
+| P1 | 219 | 132 | 186 |
 | P2 | 79 | 20 | 26 |
 
 P0 = milestone-1 core experience, P1 = parity, P2 = later.
@@ -466,14 +466,14 @@ Spec: `spec/extensions.md`
 | ID | Feature | P | Built | Tested | Feels right | Notes |
 |---|---|---|---|---|---|---|
 | EX-01 | Install an extension from the Chrome Web Store | P1 | – | – | – |  |
-| EX-02 | Install confirmation and permission prompt | P1 | – | – | – |  |
+| EX-02 | Install confirmation and permission prompt | P1 | 🟡 partial | ✅ e2e+unit | – | before an install Orbit shows its own dialog in the window's overlay, never in a page: the extension's icon and name, what it may do in plain words (all sites, or the sites it names; history, bookmarks, downloads and the like; file pages), Add extension / Cancel; Cancel, Esc or a click outside leave no trace (no state entry, no files, nothing loaded); a .crx is verified (every CRX3 proof's signature, and that the extension's own key gives the ID it names) and unpacked inside its own folder before the dialog shows. Not yet: an update asking for new permissions held for the user's answer (EX-15), the prompt for optional permissions an extension asks for while it runs |
 | EX-03 | Extensions list in the site controls panel | P1 | – | – | – |  |
 | EX-04 | Pinned extensions: where their icons appear | P1 | – | – | – |  |
 | EX-05 | Extension popups | P1 | – | – | – |  |
 | EX-06 | Keyboard access to extensions | P1 | – | – | – |  |
-| EX-07 | Manage extensions page | P1 | – | – | – |  |
-| EX-08 | Remove an extension | P1 | – | – | – |  |
-| EX-09 | Per-profile extensions | P1 | – | – | – |  |
+| EX-07 | Manage extensions page | P1 | 🟡 partial | ✅ e2e+unit | – | orbit://extensions/, an internal page (typed, or Manage Extensions in the command bar): the extensions of the tab's profile, each with an on/off switch that acts at once (stopped or loaded in the session, its pages closed; a page loads again without or with it), Remove, and Details (description, version, permissions in plain words, site access, Allow in private windows, Allow access to file URLs, which loads it again, its options page in a tab, why it couldn't load); Developer mode shows IDs and folders and adds Load unpacked (a folder runs where it is, Reload reads it again); Install from file adds a .crx. An internal page rather than a Settings section: it is per profile (its tab's), and Settings is a window of its own, tied to no Space. Not yet: the app menu's and the site controls panel's ways in (EX-17, EX-03), extensions' keyboard shortcuts (EX-06) |
+| EX-08 | Remove an extension | P1 | 🟡 partial | ✅ e2e | – | Remove on the extensions page asks “Remove “<name>”?” in Orbit's dialog (Remove / Cancel); Remove takes it out of the profile at once (state, session, its tabs and popups), clears its chrome.storage from a page of its own first (the engine keeps it otherwise, also after a restart), then its site data and Orbit's copy of its files; installed again it starts empty. A developer's folder (Load unpacked) is never deleted. Not yet: Remove from Orbit in the site controls panel (EX-03), an uninstall page the extension asks for |
+| EX-09 | Per-profile extensions | P1 | 🟡 partial | ✅ e2e+unit | – | each profile has its own extensions, switches, pins and data: an extension loads into its profile's session only (that profile's tabs run it, another profile's never do), when the session is made, before its tabs load; installing from a Space installs into its profile; new profiles start with none; deleting a profile removes its extensions and their files. Installs from a .crx file (install from file) or a folder (Load unpacked, Developer mode). Not yet: the lists and pinned icons that swap with the Space (EX-03, EX-04), the store (EX-01) |
 | EX-10 | Extensions in private windows | P1 | – | – | – |  |
 | EX-11 | Extensions in Little windows and link previews | P1 | – | – | – |  |
 | EX-12 | Tabs and windows created by extensions | P1 | – | – | – |  |

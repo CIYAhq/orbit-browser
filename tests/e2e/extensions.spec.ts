@@ -181,7 +181,7 @@ test('[EX-09][EX-02] Install from file: Orbit’s own dialog names it and what i
   await expect(dialog).toHaveCount(0)
   expect(await installed(app, profileId)).toEqual([])
 
-  // Add extension: installed and running, "<name> added" with Pin (EX-01).
+  // Add extension: installed and running, "<name> added" with Pin.
   await pickNext(app, packed.path)
   await page.getByTestId('ext-install-file').click()
   await overlay.getByTestId('ext-dialog-confirm').click()
@@ -208,7 +208,7 @@ test('[EX-09][EX-02] Install from file: Orbit’s own dialog names it and what i
   expect(await loaded(app, other)).toEqual([])
   expect(await installed(app, other)).toEqual([])
 
-  // The Pin button pins it (EX-04's pins are per profile).
+  // The Pin button pins it, in this profile.
   await toast.getByTestId('toast-action').click()
   await expect
     .poll(async () => (await state(app)).extensions[`${profileId}:${packed.id}`]?.pinnedAt !== undefined)
@@ -426,7 +426,21 @@ test('[EX] Isolation: content scripts never run in Orbit’s views or internal p
   const web = await visit(app, 'ExtIsolation')
   await expect.poll(() => mark(app, web, 'orbitBroadExtension')).toBe('http:')
 
-  // …but not in an internal page, nor in Orbit's own views.
+  // …but not in an internal page, nor in Orbit's own views: they are in the session no extension runs in.
+  const views = await app.evaluate(({ session, webContents }) => {
+    const hooks = (
+      globalThis as unknown as { __orbit: { ctx: { windows: { isUi: (c: Electron.WebContents) => boolean } } } }
+    ).__orbit
+    const ui = webContents.getAllWebContents().filter((c) => !c.isDestroyed() && hooks.ctx.windows.isUi(c))
+    return {
+      count: ui.length,
+      elsewhere: ui.filter((c) => c.session !== session.defaultSession).map((c) => c.getURL()),
+      extensions: session.defaultSession.extensions.getAllExtensions().map((e) => e.id),
+    }
+  })
+  expect(views.count).toBeGreaterThan(1)
+  expect(views.elsewhere).toEqual([])
+  expect(views.extensions).toEqual([])
   const page = await openPage(app)
   await expect(page.getByTestId('ext-card')).toHaveCount(2)
   expect(await page.evaluate(() => document.documentElement.dataset.orbitBroadExtension ?? '')).toBe('')

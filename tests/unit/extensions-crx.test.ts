@@ -8,7 +8,7 @@ import { CrxError, parseCrx } from '../../src/shared/extensions'
 import { crx, FIXTURES, folderFiles, makeKey, packFolder, zip } from '../fixtures/extensions/pack'
 
 /**
- * Packed extensions (EX-01, EX-09): a CRX3 file is used only once its signature checks out and its
+ * Packed extensions (EX-09): a CRX3 file is used only once its signature checks out and its
  * own key gives the ID it names; its archive is written out only inside its folder. The files come
  * from the tests' own packer (tests/fixtures/extensions/pack.ts), written apart from Orbit's reader.
  */
@@ -62,7 +62,7 @@ describe('verifyCrx', () => {
     await expect(verifyCrx(file)).rejects.toThrow('It isn’t signed with its own key.')
   })
 
-  it('refuses a file that isn’t the extension asked for (a store install, EX-01)', async () => {
+  it('refuses a file that isn’t the extension asked for (as a store install asks)', async () => {
     const { file } = packFolder(FIXTURES.basic, rsa)
     await expect(verifyCrx(file, other.id)).rejects.toThrow('It isn’t the extension that was asked for.')
     expect((await verifyCrx(file, rsa.id)).id).toBe(rsa.id)

@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { crc32, deflateRawSync } from 'node:zlib'
 
 /**
- * Packs the fixture extensions into CRX3 files for the tests (EX-01, EX-09): a ZIP of the folder,
+ * Packs the fixture extensions into CRX3 files for the tests (EX-09): a ZIP of the folder,
  * signed with a key made on the spot. Nothing here reaches the network. Written apart from Orbit's
  * own reader (src/shared/extensions.ts, src/main/extensions/), so the tests check one against the other.
  *

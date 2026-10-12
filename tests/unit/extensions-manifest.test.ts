@@ -154,7 +154,7 @@ describe('what it may do (EX-02)', () => {
     expect(siteAccessText(['http://localhost/*', 'http://127.0.0.1/*'])).toBe('On localhost and 127.0.0.1')
   })
 
-  it('finds what an update asks for that it didn’t before (EX-15)', () => {
+  it('finds what an update asks for that it didn’t before', () => {
     const before = { permissions: ['storage'], hosts: ['https://a.com/*'] }
     expect(addedPermissions(before, before)).toEqual([])
     expect(addedPermissions(before, { permissions: ['storage', 'history'], hosts: ['<all_urls>'] })).toEqual([
