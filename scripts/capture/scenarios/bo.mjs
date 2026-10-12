@@ -274,13 +274,30 @@ export default async function (t) {
   await click(t, editor, editor.page.getByTestId('tweak-hide-this'))
   await t.sleep(1200)
 
-  // BO-10: Hide all similar, from a card's heading, with the count on the panel.
+  // BO-10: Hide all similar, first from a card's heading, which has no class of its own.
   mark('hide-similar')
   await hover(page, card('Starred').locator('h3'), 18)
   await t.sleep(400)
   await page.page.mouse.click(at.x - page.x, at.y - page.y)
   await waitFor(t, () => editor.page.getByTestId('tweak-hide-similar').isVisible())
   await t.sleep(500)
+  await hover(editor, editor.page.getByTestId('tweak-hide-similar'))
+  await t.sleep(1600)
+  console.error(
+    `[check] Starred's title: Hide all similar ${(await editor.page.getByTestId('tweak-hide-similar').isEnabled()) ? 'on' : 'off'}, count ${await editor.page.getByTestId('tweak-hide-count').innerText()}`,
+  )
+  await click(t, editor, editor.page.getByTestId('tweak-hide-cancel'), 4)
+  await t.sleep(700)
+  // A card's icon, which has a class: the panel counts the six, and Hide all similar takes them all.
+  mark('hide-similar-icon')
+  await hover(page, card('Recent').locator('.dot'), 18)
+  await t.sleep(400)
+  await page.page.mouse.click(at.x - page.x, at.y - page.y)
+  await waitFor(t, () => editor.page.getByTestId('tweak-hide-similar').isEnabled())
+  await t.sleep(600)
+  console.error(
+    `[check] Recent's icon: count ${await editor.page.getByTestId('tweak-hide-count').innerText()}, slider ${(await editor.page.getByTestId('tweak-hide-breadth').isVisible()) ? 'shown' : 'not shown'}`,
+  )
   await hover(editor, editor.page.getByTestId('tweak-hide-similar'))
   await t.sleep(1200)
   await click(t, editor, editor.page.getByTestId('tweak-hide-similar'), 4)
@@ -332,6 +349,15 @@ export default async function (t) {
   mark('reload')
   await t.key('Shift+Mod+R')
   await t.sleep(2200)
+
+  // BO-17: the Tweak is for the site's pages, so a link to another of them opens with it.
+  mark('other-page')
+  await click(t, page, page.page.getByRole('link', { name: 'Updates' }))
+  await waitFor(t, async () => {
+    const now = (await t.state()).tabs[tab]
+    return now?.url.endsWith('/Updates') && !now.loading
+  })
+  await t.sleep(1800)
 
   // BO-14: the site controls list the site's Tweak; its name turns it off and on, with no reload.
   mark('site-controls')
