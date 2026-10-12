@@ -1,3 +1,4 @@
+import { execFileSync, spawn } from 'node:child_process'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { crc32, deflateSync } from 'node:zlib'
@@ -174,6 +175,13 @@ const FORGE = `
  * A page that makes Orbit's script believe its own exit from picture-in-picture failed, then exits
  * anyway: the engine's leave then looks like its Back to tab (D74). Goes before the page's media.
  */
+/**
+ * A page slow to lay out at a new size, like a heavy page or one in a busy process: each resize
+ * keeps its main thread busy for `ms`, so its first frame at the new size comes that much later.
+ */
+const SLOW_RESIZE = (ms: number) =>
+  `<script>addEventListener('resize', () => { const end = performance.now() + ${ms}; while (performance.now() < end); })</script>`
+
 const HOLD = `
 <script>
 (() => {
@@ -298,6 +306,7 @@ async function startMediaFixtures(): Promise<Fixtures> {
       return html(
         (u.searchParams.has('forge') ? FORGE : '') +
           (u.searchParams.has('hold') ? HOLD : '') +
+          (u.searchParams.has('slow') ? SLOW_RESIZE(Number(u.searchParams.get('slow')) || 150) : '') +
           LONG_VIDEO(Number(u.searchParams.get('s') ?? 60)),
       )
     if (parts[0] === 'media' && parts[1] === 'call') return html(CALL(u.searchParams.has('participant')))
@@ -412,6 +421,15 @@ async function openFramePlaying(
 /** Selects a quiet tab (leaving the current one). */
 async function leave(app: ElectronApplication): Promise<string> {
   const id = await newTab(app, fx.url('/page/Other/Quiet'))
+  await waitTab(app, id, '/page/Other')
+  return id
+}
+
+/** Selects a quiet tab put right above `tabId` in Today: closing it selects `tabId` again (TB-06). */
+async function leaveAbove(app: ElectronApplication, tabId: string): Promise<string> {
+  const s = await state(app)
+  const today = s.spaces[s.tabs[tabId]?.spaceId as string]?.today ?? []
+  const id = await cmd<string>(app, 'tabs.create', { url: fx.url('/page/Other/Quiet'), index: today.indexOf(tabId) })
   await waitTab(app, id, '/page/Other')
   return id
 }
@@ -571,7 +589,8 @@ async function dragPlayer(
   }
 }
 
-type Frames = { w: number; h: number; lifted: boolean }[]
+/** Each frame the page drew: its size, whether its video floated, and when (system clock, ms). */
+type Frames = { w: number; h: number; lifted: boolean; t: number }[]
 
 /**
  * From now on, records each frame the page draws: its size, and whether its video floats. Each is
@@ -593,6 +612,7 @@ async function recordFrames(p: Page | Frame): Promise<void> {
         w: innerWidth,
         h: innerHeight,
         lifted: !!document.querySelector('video[data-orbit-pip]'),
+        t: performance.timeOrigin + performance.now(),
       })
     }).observe(tick)
     let n = 0
@@ -649,6 +669,188 @@ async function holdDrops(app: ElectronApplication): Promise<() => Promise<void>>
 }
 
 const boxOf = (b: Box): Box => ({ x: b.x, y: b.y, width: b.width, height: b.height })
+
+/**
+ * From now on, notes in the main process each moment a tab's view comes to show in a main window:
+ * in it, visible, more of it than a corner pixel inside the window (out of sight, a view waits with
+ * all of it but that pixel outside), and under no other visible page's view that overlaps it
+ * (system clock, ms). Each change is looked at once the task that made it is done, as the window
+ * would draw it.
+ */
+async function watchShown(app: ElectronApplication, tabId: string): Promise<void> {
+  await app.evaluate(({ BrowserWindow }, id) => {
+    type View = Electron.WebContentsView
+    type Watch = { at: number[]; stop: () => void }
+    const g = globalThis as unknown as {
+      __orbit: { ctx: { tabs: { get(id: string): View | undefined } }; state: () => { tabs: object } }
+      __shownWatch?: Watch
+    }
+    g.__shownWatch?.stop()
+    const at: number[] = []
+    const views = () => new Set(Object.keys(g.__orbit.state().tabs).map((t) => g.__orbit.ctx.tabs.get(t)))
+    const overlaps = (a: Electron.Rectangle, b: Electron.Rectangle) =>
+      a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+    let was = false
+    const check = () => {
+      const view = g.__orbit.ctx.tabs.get(id)
+      let shown = false
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!view || win.isDestroyed()) continue
+        const children = win.contentView.children
+        const i = children.indexOf(view)
+        if (i < 0 || !view.getVisible()) continue
+        const pages = views()
+        const box = view.getBounds()
+        const [width = 0, height = 0] = win.getContentSize()
+        const across = Math.min(box.x + box.width, width) - Math.max(box.x, 0)
+        const down = Math.min(box.y + box.height, height) - Math.max(box.y, 0)
+        if (across <= 1 || down <= 1) continue
+        shown = !children
+          .slice(i + 1)
+          .some((c) => pages.has(c as View) && c.getVisible() && overlaps(c.getBounds(), box))
+      }
+      if (shown && !was) at.push(performance.timeOrigin + performance.now())
+      was = shown
+    }
+    const undo: (() => void)[] = []
+    const wrap = (o: object, name: string) => {
+      const target = o as Record<string, (...a: unknown[]) => unknown>
+      const own = Object.hasOwn(target, name)
+      const fn = target[name] as (...a: unknown[]) => unknown
+      target[name] = function (this: unknown, ...a: unknown[]) {
+        queueMicrotask(check)
+        return fn.apply(this, a)
+      }
+      undo.push(() => {
+        if (own) target[name] = fn
+        else delete target[name]
+      })
+    }
+    for (const win of BrowserWindow.getAllWindows()) {
+      wrap(win.contentView, 'addChildView')
+      wrap(win.contentView, 'removeChildView')
+    }
+    for (const view of views()) {
+      if (!view) continue
+      wrap(view, 'setVisible')
+      wrap(view, 'setBounds')
+    }
+    const timer = setInterval(check, 4)
+    check()
+    g.__shownWatch = {
+      at,
+      stop: () => {
+        clearInterval(timer)
+        for (const u of undo) u()
+      },
+    }
+  }, tabId)
+}
+
+/** Stops watchShown: each moment the view came to show in a window since it began. */
+function shownAt(app: ElectronApplication): Promise<number[]> {
+  return app.evaluate(() => {
+    const g = globalThis as unknown as { __shownWatch?: { at: number[]; stop: () => void } }
+    g.__shownWatch?.stop()
+    return g.__shownWatch?.at ?? []
+  })
+}
+
+/**
+ * An ffmpeg that can grab the X display (ORBIT_FFMPEG, else ffmpeg on the PATH), where there is a
+ * display; undefined elsewhere.
+ */
+function x11grab(): string | undefined {
+  if (process.platform !== 'linux' || !process.env.DISPLAY) return undefined
+  const bin = process.env.ORBIT_FFMPEG || 'ffmpeg'
+  try {
+    const devices = execFileSync(bin, ['-hide_banner', '-devices'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 10_000,
+    })
+    return /\bx11grab\b/.test(devices) ? bin : undefined
+  } catch {
+    return undefined
+  }
+}
+
+interface Grab {
+  /** Each frame grabbed so far: RGB, at a quarter of the screen's size. */
+  frames: Buffer[]
+  width: number
+  stop: () => Promise<void>
+}
+
+/** Grabs the screen 60 times a second until stopped: only a grab sees which frame of a view reaches the screen. */
+function grabScreen(bin: string, screen: { width: number; height: number }): Grab {
+  const width = Math.round(screen.width / 4)
+  const height = Math.round(screen.height / 4)
+  const ff = spawn(
+    bin,
+    [
+      '-loglevel',
+      'error',
+      '-f',
+      'x11grab',
+      '-framerate',
+      '60',
+      '-video_size',
+      `${screen.width}x${screen.height}`,
+      '-i',
+      process.env.DISPLAY as string,
+      '-vf',
+      `scale=${width}:${height}`,
+      '-f',
+      'rawvideo',
+      '-pix_fmt',
+      'rgb24',
+      'pipe:1',
+    ],
+    { stdio: ['ignore', 'pipe', 'ignore'] },
+  )
+  const frames: Buffer[] = []
+  const size = width * height * 3
+  let rest: Buffer = Buffer.alloc(0)
+  ff.stdout.on('data', (d: Buffer) => {
+    rest = rest.length > 0 ? Buffer.concat([rest, d]) : d
+    while (rest.length >= size) {
+      frames.push(Buffer.from(rest.subarray(0, size)))
+      rest = rest.subarray(size)
+    }
+  })
+  const exited = new Promise<void>((done) => ff.once('exit', () => done()))
+  return {
+    frames,
+    width,
+    stop: async () => {
+      if (ff.exitCode === null && ff.signalCode === null) ff.kill('SIGTERM')
+      await exited
+    },
+  }
+}
+
+/** The share of a screen area's pixels in a grabbed frame that are dark (luma under 40) and light (over 200). */
+function tone(frame: Buffer, width: number, area: Box): { dark: number; light: number } {
+  const x0 = Math.max(0, Math.round(area.x / 4))
+  const y0 = Math.max(0, Math.round(area.y / 4))
+  const x1 = Math.min(width, Math.round((area.x + area.width) / 4))
+  const y1 = Math.round((area.y + area.height) / 4)
+  let dark = 0
+  let light = 0
+  let n = 0
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const i = (y * width + x) * 3
+      if (i + 2 >= frame.length) continue
+      const luma = 0.299 * (frame[i] ?? 0) + 0.587 * (frame[i + 1] ?? 0) + 0.114 * (frame[i + 2] ?? 0)
+      if (luma < 40) dark++
+      if (luma > 200) light++
+      n++
+    }
+  }
+  return n > 0 ? { dark: dark / n, light: light / n } : { dark: 0, light: 0 }
+}
 
 // ---- Floating player (MD-01 to MD-08, MD-16) ----
 
@@ -858,6 +1060,208 @@ test('[MD-04] a live stream shows a live badge instead of a seekable bar', async
   await expect(pip.getByTestId('pip-progress')).toHaveCount(0)
   await expect(pip.getByTestId('pip-forward15')).toHaveCount(0)
   await expect(pip.getByTestId('pip-play')).toBeVisible()
+})
+
+/** A way back to the video's tab from the player (MD-07), after its own way away from the tab. */
+interface WayBack {
+  way: string
+  /** Leaves the video's tab: its video then plays in the player. */
+  away: () => Promise<unknown>
+  back: () => Promise<unknown>
+}
+
+/**
+ * The ways back from the player (MD-01, MD-07): selecting the tab again, and the player's Back to
+ * tab, from a quiet tab selected over it; ⌘W on a quiet tab right above it, so that it comes next
+ * (TB-06); and selecting it from an empty Space, alone and then in a split with a quiet tab. In the
+ * last three no page the window showed stays over its view while it comes back: the closed tab's
+ * view is gone, an empty Space shows none, and a split's other pane sits beside it. Its pane shows
+ * its blank card until the page has drawn there (FL-29 allows that placeholder).
+ */
+function waysBack(app: ElectronApplication, pip: Page, tabId: string): WayBack[] {
+  const select = () => cmd(app, 'tabs.activate', { tabId })
+  const emptySpace = () => cmd(app, 'spaces.create', { name: 'Empty' })
+  return [
+    { way: 'selecting the tab', away: () => leave(app), back: select },
+    {
+      way: 'Back to tab',
+      away: () => leave(app),
+      back: async () => {
+        await pip.getByTestId('pip').hover({ position: { x: 40, y: 60 } })
+        await pip.getByTestId('pip-back').click()
+      },
+    },
+    { way: '⌘W on the tab over it', away: () => leaveAbove(app, tabId), back: () => act(app, 'tab.archive') },
+    { way: 'selecting it from an empty Space', away: emptySpace, back: select },
+    {
+      way: 'selecting its split from an empty Space',
+      away: async () => {
+        const other = await newTab(app, fx.url('/page/Other/Quiet'), { activate: false })
+        const full = (await tabView(app, tabId))?.bounds.width ?? 0
+        await cmd(app, 'split.create', { tabIds: [tabId, other], focus: tabId })
+        await waitTab(app, other, '/page/Other')
+        // The split at rest, the video's pane on the left.
+        let last = ''
+        await expect
+          .poll(async () => {
+            const box = (await tabView(app, tabId))?.bounds
+            const was = last
+            last = JSON.stringify(box)
+            return last === was && (box?.width ?? full) < full * 0.7 && !!(await tabView(app, other))?.visible
+          })
+          .toBe(true)
+        await emptySpace()
+      },
+      back: select,
+    },
+  ]
+}
+
+test('[MD-01][MD-07] back from the player, by selecting the tab, Back to tab, ⌘W on the tab over it, or from an empty Space (alone or in a split), the page shows in its window only once it has drawn its own layout there: never a frame of its player layout', async () => {
+  test.setTimeout(120_000)
+  orbit = await launchOrbit()
+  const { app } = orbit
+  // A page slow to lay out at its new size: its first frame back comes well after the view does.
+  const v = await openPlaying(app, '/media/long-video/Film?slow=150')
+  await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
+  const pip = await pipPage(app)
+  const results: { way: string; shown: number[]; drawn: number | undefined; blank: Frames }[] = []
+  for (const { way, away, back } of waysBack(app, pip, v.id)) {
+    await away()
+    await expectPlayer(app, v.id)
+    await recordFrames(v.page)
+    await watchShown(app, v.id)
+    await back()
+    await expect.poll(() => activeId(app)).toBe(v.id)
+    await expectNoPlayer(app)
+    await expect.poll(() => floated(v.page)).toBe('')
+    const { frames, blank } = await framesBack(v.page)
+    const shown = await shownAt(app)
+    const size = frames.at(-1) as Frames[number]
+    // The page's first frame at its size in its window, with its video back in the page.
+    const drawn = frames.find((f) => f.w === size.w && f.h === size.h && !f.lifted)?.t
+    results.push({ way, shown, drawn, blank })
+    expect(await paused(v.page, '#v')).toBe(false)
+  }
+  for (const { way, shown, drawn } of results) {
+    const after = shown.map((t) => (drawn === undefined ? '?' : (t - drawn).toFixed(1)))
+    console.info(`[media e2e] ${way}: shown in its window ${after.join(', ')} ms after its first frame there`)
+  }
+  for (const { shown, drawn, blank } of results) {
+    expect(blank).toEqual([])
+    expect(drawn).toBeDefined()
+    expect(shown.length).toBeGreaterThan(0)
+    // Until that frame, the view still holds its last frame from the player: the page area black,
+    // the video small at its top-left. So the window must not show it before.
+    expect(shown[0] as number).toBeGreaterThanOrEqual(drawn as number)
+  }
+})
+
+test('[MD-01][MD-07] on screen, back from the player the page area shows no frame of the player layout, and the player hides with no empty frame (a grab of the screen)', async () => {
+  const bin = x11grab()
+  test.skip(
+    !bin,
+    'needs an X display and an ffmpeg with x11grab (ORBIT_FFMPEG, or ffmpeg on the PATH): only a grab of the screen sees which frame of a view reaches it',
+  )
+  test.setTimeout(120_000)
+  orbit = await launchOrbit()
+  const { app } = orbit
+  // The window leaves the screen's bottom-right corner free: with no window manager, nothing keeps
+  // the player above a window.
+  const main = Object.values((await state(app)).windows).find((w) => w.kind === 'main')
+  const windowId = main?.id as string
+  await app.evaluate((_e, id) => {
+    const g = globalThis as unknown as { __orbit: { ctx: { windows: { get(id: string): Electron.BrowserWindow } } } }
+    g.__orbit.ctx.windows.get(id)?.setBounds({ x: 0, y: 0, width: 1000, height: 640 })
+  }, windowId)
+  const display = await app.evaluate(({ screen }) => screen.getPrimaryDisplay().bounds)
+  // A page slow to lay out at its new size: the window draws before it does.
+  const v = await openPlaying(app, '/media/long-video/Film?slow=150')
+  await expect.poll(async () => (await media(app, v.id))?.video).toBe(true)
+  const pip = await pipPage(app)
+  const results: { way: string; frames: number; dark: number[]; empty: number[] }[] = []
+  for (const { way, away, back } of waysBack(app, pip, v.id)) {
+    await away()
+    const corner = (await expectPlayer(app, v.id)).bounds as Box
+    const grab = grabScreen(bin as string, display)
+    try {
+      await expect.poll(() => grab.frames.length).toBeGreaterThan(4)
+      const from = grab.frames.length
+      await back()
+      await expect.poll(() => activeId(app)).toBe(v.id)
+      await expectNoPlayer(app)
+      await expect.poll(() => floated(v.page)).toBe('')
+      const enough = grab.frames.length + 30
+      await expect.poll(() => grab.frames.length).toBeGreaterThan(enough)
+      await grab.stop()
+      const content = await app.evaluate((_e, id) => {
+        const g = globalThis as unknown as {
+          __orbit: { ctx: { windows: { get(id: string): Electron.BrowserWindow } } }
+        }
+        return g.__orbit.ctx.windows.get(id)?.getContentBounds()
+      }, windowId)
+      const pane = (await tabView(app, v.id))?.bounds as Box
+      const area = {
+        x: (content?.x ?? 0) + pane.x,
+        y: (content?.y ?? 0) + pane.y,
+        width: pane.width,
+        height: pane.height,
+      }
+      const frames = grab.frames.slice(from)
+      // The player layout: the page area black but for the video, small at its top-left.
+      const dark = frames.flatMap((f, i) => (tone(f, grab.width, area).dark > 0.5 ? [i] : []))
+      // The player's window showing nothing (it lost the video's view) before it hides. Back to tab's
+      // still flies in a window that grows, whose new part Xvfb fills before the compositor draws
+      // (frame pacing): only selecting the tab is looked at for this.
+      const empty =
+        way === 'Back to tab' ? [] : frames.flatMap((f, i) => (tone(f, grab.width, corner).light > 0.5 ? [i] : []))
+      results.push({ way, frames: frames.length, dark, empty })
+    } finally {
+      await grab.stop()
+    }
+  }
+  for (const r of results) {
+    console.info(
+      `[media e2e] ${r.way}: ${r.frames} frames grabbed; the page area in the player layout in ${r.dark.length} (${r.dark.join(', ')}), the player empty in ${r.empty.length}`,
+    )
+  }
+  for (const r of results) {
+    expect(r.dark).toEqual([])
+    expect(r.empty).toEqual([])
+  }
+})
+
+test('[MD-01][PK-13] a Peek whose video plays, replaced by the command bar, never asks the player to open: its page goes with it', async () => {
+  orbit = await launchOrbit()
+  const { app } = orbit
+  const source = await newTab(app, fx.url('/page/Source/Quiet'))
+  await waitTab(app, source, '/page/Source')
+  await cmd(app, 'peek.open', { url: fx.url('/media/long-video/Film') })
+  await expect.poll(async () => (await windowState(app)).overlay.kind).toBe('peek')
+  const overlay = (await windowState(app)).overlay
+  const peekTab = overlay.kind === 'peek' ? overlay.tabId : ''
+  const p = await tabPage(app, '/media/long-video')
+  await expect.poll(() => p.evaluate(() => document.body.dataset.state ?? ''), { timeout: 20_000 }).toBe('playing')
+  await expect.poll(async () => (await media(app, peekTab))?.video).toBe(true)
+  // Main: each tab the player is asked to open for.
+  await app.evaluate(() => {
+    const g = globalThis as unknown as { __orbitMedia: MediaTestHooks; __playerAsked?: string[] }
+    const player = g.__orbitMedia.manager.player
+    const asked: string[] = []
+    g.__playerAsked = asked
+    const open = player.open.bind(player)
+    player.open = (tabId, opts) => {
+      asked.push(tabId)
+      return open(tabId, opts)
+    }
+  })
+  // ⌘T: the command bar takes the overlay's place, and the Peek and its page go.
+  await act(app, 'tab.new')
+  await expect.poll(async () => (await windowState(app)).overlay.kind).toBe('commandbar')
+  await expect.poll(async () => (await state(app)).tabs[peekTab]).toBeUndefined()
+  // Leaving the screen this way is not leaving a tab: nothing floats.
+  expect(await app.evaluate(() => (globalThis as unknown as { __playerAsked: string[] }).__playerAsked)).toEqual([])
+  await expectNoPlayer(app)
 })
 
 test('[MD-04][MD-07][MD-10][MD-16] Back to tab and double-click return to the tab, flying back into the page; × keeps it playing in the sidebar, whose PiP button floats it again', async () => {

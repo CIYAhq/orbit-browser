@@ -62,6 +62,10 @@ interface Mini {
    * the page's view sits out the grow (`pageOut`) and joins at full size when it ends.
    */
   grow?: { ready?: (ms: number | null) => void; pageOut: boolean }
+  /** "Open in…" is moving the page out (MW-05): a second one does nothing. */
+  leaving?: boolean
+  /** Waiting for the card to show the still of the page that leaves (MW-15). */
+  stillShown?: () => void
   /** Find in the page (NV-05): its field is in the top bar. */
   find?: MiniFind
 }
@@ -96,6 +100,8 @@ const canFade = isMac || process.platform === 'win32'
 const GROW_FROM = 0.92
 /** How long main waits for the UI to take its starting size before showing the window anyway. */
 const GROW_READY_WAIT_MS = 100
+/** How long "Open in…" waits for the card to show the still of its page before the page leaves anyway. */
+const STILL_WAIT_MS = 150
 /** When a Linux folder build checks its desktop entry (MW-14), after launch. */
 const DESKTOP_ENTRY_DELAY_MS = 3000
 
@@ -409,6 +415,9 @@ export function registerMiniWindow(ctx: MainContext): void {
     send(mini, 'mini:grow', { phase: 'prepare', scale: GROW_FROM, fade: !canFade })
   }
 
+  /** Whether the window fades out as it closes (where windows can fade), rather than going at once. */
+  const fadesOut = (mini: Mini) => canFade && !reducedMotion(ctx) && !mini.win.isDestroyed() && mini.win.isVisible()
+
   /**
    * Closes with a quick fade (about 150 ms, MW-15) where windows can fade. After "Open in…" it
    * also shrinks a little, as if the page went into the main window; its page has already left,
@@ -417,7 +426,7 @@ export function registerMiniWindow(ctx: MainContext): void {
   const closeWindow = (mini: Mini, opts: { shrink?: boolean } = {}) => {
     const win = mini.win
     if (win.isDestroyed()) return
-    if (!canFade || reducedMotion(ctx) || !win.isVisible()) {
+    if (!fadesOut(mini)) {
       win.close()
       return
     }
@@ -516,8 +525,11 @@ export function registerMiniWindow(ctx: MainContext): void {
     }
     win.on('resize', saveBounds)
     win.on('move', saveBounds)
-    win.on('close', () => {
+    win.on('close', (event) => {
       clearTimeout(mini.archiveTimer)
+      // Its UI and its page go before the window does, and it would show empty meanwhile: it leaves
+      // the screen now, whole (MW-15). One that faded out is out of sight already.
+      if (!event.defaultPrevented && win.isVisible()) win.hide()
       if (mini.moved || !mini.tabId) return
       const tab = store.state.tabs[mini.tabId]
       if (!tab) return
@@ -652,12 +664,68 @@ export function registerMiniWindow(ctx: MainContext): void {
     tabs.contents(tab.id)?.focus()
   }
 
-  /** Moves the page, live, into a Space of the main window and closes the Mini Window (MW-05). */
+  /**
+   * Moves the page, live, into a Space of the main window and closes the Mini Window (MW-05). The
+   * page leaves before the window has gone, and the window must not show empty meanwhile (MW-15):
+   * one that goes at once leaves the screen first, whole; one that shrinks and fades out does so
+   * with a still of its page on its card.
+   */
   const moveToSpace = (mini: Mini, spaceId?: SpaceId, pinned = false) => {
+    const tabId = mini.tabId
+    if (mini.leaving || !tabId || !store.state.tabs[tabId]) return
+    mini.leaving = true
+    if (fadesOut(mini)) {
+      void leaveWithStill(mini).then(() => movePage(mini, spaceId, pinned))
+      return
+    }
+    mini.win.hide()
+    send(mini, 'mini:leaving')
+    movePage(mini, spaceId, pinned)
+  }
+
+  /**
+   * The window keeps its bar as it was while it goes (MW-15), and its card shows a still of the
+   * page, under the page's view: resolves once the UI has drawn it, or a moment later without it.
+   * A capture that takes longer than STILL_WAIT_MS, or never ends, is not waited for: the window
+   * goes without a still. (Only where windows fade, macOS and Windows: fadesOut.)
+   */
+  const leaveWithStill = async (mini: Mini): Promise<void> => {
+    const contents = mini.tabId ? tabs.contents(mini.tabId) : undefined
+    let still: string | undefined
+    let late: ReturnType<typeof setTimeout> | undefined
+    try {
+      const capture = contents && !contents.isDestroyed() && !mini.fullscreen ? contents.capturePage() : undefined
+      const image = capture
+        ? await Promise.race([
+            capture,
+            new Promise<undefined>((done) => {
+              late = setTimeout(() => done(undefined), STILL_WAIT_MS)
+            }),
+          ])
+        : undefined
+      if (image && !image.isEmpty()) still = `data:image/jpeg;base64,${image.toJPEG(85).toString('base64')}`
+    } catch {
+      // The page went: the window goes without a still.
+    } finally {
+      clearTimeout(late)
+    }
+    if (mini.win.isDestroyed()) return
+    await new Promise<void>((done) => {
+      const timer = setTimeout(done, still ? STILL_WAIT_MS : 0)
+      mini.stillShown = () => {
+        clearTimeout(timer)
+        done()
+      }
+      send(mini, 'mini:leaving', { still })
+    })
+    mini.stillShown = undefined
+  }
+
+  const movePage = (mini: Mini, spaceId?: SpaceId, pinned = false) => {
     const state = store.state
     const tabId = mini.tabId
     const tab = tabId ? state.tabs[tabId] : undefined
-    if (!tabId || !tab) return
+    if (!tabId || !tab || mini.win.isDestroyed()) return
     const target =
       spaceId && state.spaces[spaceId]
         ? spaceId
@@ -668,9 +736,8 @@ export function registerMiniWindow(ctx: MainContext): void {
     const profileId = state.spaces[target]?.profileId ?? tab.profileId
     const mainId = mainWindowFor(ctx, target) ?? windows.open(undefined, target)
     const url = tabs.contents(tabId)?.getURL() || tab.url
-    // The main window takes the page's view: it leaves the Mini Window first. The page is the
-    // main window's from here on, while this window shrinks and fades out showing its old bar.
-    send(mini, 'mini:leaving')
+    // The main window takes the page's view. The page is the main window's from here on, while this
+    // window goes, showing its old bar.
     uncover(mini)
     detachPage(mini)
     mini.moved = true
@@ -935,6 +1002,8 @@ export function registerMiniWindow(ctx: MainContext): void {
     const ready = minis.get(windowId ?? '')?.grow?.ready
     if (ready) ready(Number.isFinite(ms) && ms > 0 ? Math.min(ms, 1000) : null)
   })
+  // The card shows the still of the page that leaves for a Space: the page goes now (MW-15).
+  ctx.events.on('mini.stillShown', (_args, { windowId }) => minis.get(windowId ?? '')?.stillShown?.())
 
   actions.register('window.newMini', () => {
     if (Date.now() - lastShortcutOpen < 250) return

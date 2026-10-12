@@ -133,7 +133,7 @@ export function CommandBar({
   mode: CommandBarMode
   initialQuery: string
   dark?: boolean
-  /** An inert, hidden instance rendered once at overlay start-up so the first real open is as fast as later ones (CB-22). */
+  /** An inert, invisible bar the overlay opens a few times after start-up, so the first real open is as fast as later ones (CB-22). */
   warm?: boolean
   /** A Mini Window's compact bar (CB-23). */
   mini?: MiniBar
@@ -374,7 +374,13 @@ export function CommandBar({
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per open (the component is keyed by nonce)
   useLayoutEffect(() => {
     const input = inputRef.current
-    if (!input || warm) return
+    if (!input) return
+    if (warm) {
+      // Out of sight (CB-22): the field takes focus and gives it back, so a real open's focus runs warm.
+      input.focus({ preventScroll: true })
+      input.blur()
+      return
+    }
     st.closed = false
     // A Mini Window's field takes keys itself from the start: nothing is buffered there.
     const buffered = mini ? { token: 0, text: '', enter: false } : claimTypeahead()

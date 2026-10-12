@@ -131,6 +131,9 @@ export function registerArchive(ctx: MainContext): ArchiveApi {
   }
   commands.register('library.open', (args, c) => openLibrary(c, args ?? {}))
   commands.register('library.close', (_args, c) => library.close(windowOf(c)))
+  commands.register('library.drawn', ({ away }, c) => {
+    if (typeof away === 'number') library.drawn(windowOf(c), away)
+  })
   commands.register('library.toggle', (_args, c) => {
     const windowId = windowOf(c)
     if (library.isOpen(windowId)) library.close(windowId)

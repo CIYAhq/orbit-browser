@@ -56,13 +56,26 @@ export function MiniApp() {
     return id ? s.tabs[id] : undefined
   })
   // After "Open in…" the page belongs to the main window, but this window keeps its bar as it was
-  // while it shrinks and fades away, rather than flashing the blank lookup bar (MW-15).
+  // while it shrinks and fades away, rather than flashing the blank lookup bar (MW-15). Where it
+  // fades out, its card shows a still of the page, under the page's view until the page leaves.
   const [leftWith, setLeftWith] = useState<Tab | undefined>()
+  const [leftStill, setLeftStill] = useState<string | undefined>()
   const liveRef = useRef(live)
   useEffect(() => {
     liveRef.current = live
   }, [live])
-  useEffect(() => window.orbit.on('mini:leaving', () => setLeftWith(liveRef.current)), [])
+  useEffect(
+    () =>
+      window.orbit.on('mini:leaving', (p) => {
+        setLeftWith(liveRef.current)
+        setLeftStill((p as { still?: string } | undefined)?.still)
+      }),
+    [],
+  )
+  // The page leaves once the still is on screen.
+  const stillShown = useCallback(() => {
+    requestAnimationFrame(() => requestAnimationFrame(() => window.orbit.send('mini.stillShown', {})))
+  }, [])
   const tab = leftWith ?? live
   const profileCount = useOrbit((s) => Object.keys(s.profiles).length)
   const profileName = useOrbit((s) => (tab ? s.profiles[tab.profileId]?.name : undefined))
@@ -131,7 +144,7 @@ export function MiniApp() {
 
   return (
     <div
-      className={`mini${win?.focused === false ? ' mini--blurred' : ''}`}
+      className={`mini${win ? '' : ' mini--ready'}${win?.focused === false ? ' mini--blurred' : ''}`}
       style={paletteVars(palette) as CSSProperties}
       data-testid="mini"
     >
@@ -212,6 +225,11 @@ export function MiniApp() {
         {barOpen && cover.src && (
           <div className="mini__cover" data-testid="mini-cover">
             <img src={cover.src} alt="" draggable={false} onLoad={cover.onShown} />
+          </div>
+        )}
+        {leftWith && leftStill && (
+          <div className="mini__cover mini__cover--page" data-testid="mini-leaving-still">
+            <img src={leftStill} alt="" draggable={false} onLoad={stillShown} />
           </div>
         )}
         {!tab && <LookupBar dark={dark} />}

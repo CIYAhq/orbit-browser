@@ -1,6 +1,6 @@
-import { expect, test } from '@playwright/test'
-import { bestOf } from './frames'
-import { FRAME_SLACK, launchOrbit, type Orbit, run, state, viewPage } from './helpers'
+import { expect, type Page, test } from '@playwright/test'
+import { bestOf, type Recording, record } from './frames'
+import { action, FRAME_SLACK, launchOrbit, type Orbit, run, state, viewPage } from './helpers'
 import {
   blockNetwork,
   clickInTab,
@@ -14,7 +14,10 @@ import {
   type Sites,
   sidebarCount,
   startSites,
+  stillReady,
   viewInfo,
+  viewMoves,
+  watchPeekView,
 } from './peek-helpers'
 
 /** Peek link previews (spec/peek.md). */
@@ -64,8 +67,6 @@ async function settledPeek(): Promise<string> {
   const overlay = await overlayOf(orbit.app)
   const tabId = overlay.kind === 'peek' ? overlay.tabId : ''
   // The open spring has run to its end ('peek:opened' after this Peek's 'peek:open', in main's clock).
-  // The page view follows the card frame by frame, so on a slow machine (the macOS CI VM) it also sits
-  // on the card mid-flight.
   await expect
     .poll(() =>
       orbit.app.evaluate(() => {
@@ -75,21 +76,31 @@ async function settledPeek(): Promise<string> {
       }),
     )
     .toBe(true)
-  const overlayPage = await viewPage(orbit.app, 'overlay')
-  // Settled: the page view sits exactly where the overlay draws the card.
-  await expect
-    .poll(async () => {
-      const info = await viewInfo(orbit.app, tabId)
-      const card = await overlayPage.getByTestId('peek-card').boundingBox()
-      if (!info.bounds || !info.area || !card) return 'pending'
-      const dx = Math.abs(info.bounds.x - (info.area.x + card.x))
-      const dy = Math.abs(info.bounds.y - (info.area.y + card.y))
-      const dw = Math.abs(info.bounds.width - card.width)
-      const dh = Math.abs(info.bounds.height - card.height)
-      return dx <= 1 && dy <= 1 && dw <= 1 && dh <= 1 && card.width > 200 ? 'on card' : 'moving'
-    })
-    .toBe('on card')
+  // Settled: the page view has joined the card, which it does once the card is at rest (PK-06).
+  await expect.poll(() => viewOnCard(tabId)).toBe('on card')
   return tabId
+}
+
+/** Whether the Peek's page view shows exactly where the overlay draws the card. */
+async function viewOnCard(tabId: string): Promise<'on card' | 'elsewhere' | 'pending'> {
+  const info = await viewInfo(orbit.app, tabId)
+  const card = await (await viewPage(orbit.app, 'overlay')).getByTestId('peek-card').boundingBox()
+  if (!info.bounds || !info.area || !card) return 'pending'
+  const dx = Math.abs(info.bounds.x - (info.area.x + card.x))
+  const dy = Math.abs(info.bounds.y - (info.area.y + card.y))
+  const dw = Math.abs(info.bounds.width - card.width)
+  const dh = Math.abs(info.bounds.height - card.height)
+  const placed = dx <= 1 && dy <= 1 && dw <= 1 && dh <= 1 && card.width > 200
+  return placed && info.visible && info.inWindow ? 'on card' : 'elsewhere'
+}
+
+/** The open's budget, first frame to within 2 px of the card's place: FL-19's 320 ms, and two frames' grace. */
+const OPEN_MS = 320 + 2000 / 60
+
+/** The Peek card's box in the overlay (page-area coordinates), with its centre's y. */
+async function cardBox(overlay: Page) {
+  const b = await overlay.getByTestId('peek-card').boundingBox()
+  return b ? { ...b, cy: b.y + b.height / 2 } : null
 }
 
 test('[PK-01][PK-02][PK-05][PK-13] an other-site link in a pinned tab opens a Peek card over it', async () => {
@@ -394,6 +405,107 @@ test('[PK-05][PK-09] the × button and a click outside the card close the Peek',
   await expectClosed(source, second)
 })
 
+test('[PK-09][PK-06] a Peek whose page goes away while it is open closes with it, and laying the window out then throws nothing (D28)', async () => {
+  const { source, peekTab } = await openPeekFromPinned()
+  const peekPage = await findPage(orbit.app, '/site/Other')
+  const area = async () => JSON.stringify((await viewInfo(orbit.app, peekTab)).area)
+  const before = await area()
+  // The page closes itself: its only document, so it may. Its view then has no page.
+  await peekPage.evaluate(() => window.close()).catch(() => {})
+  await expect
+    .poll(() =>
+      orbit.app.evaluate(
+        (_e, id) => (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id) === undefined,
+        peekTab,
+      ),
+    )
+    .toBe(true)
+  // The window lays out again, twice: the Peek's layout runs if the Peek is still there.
+  await action(orbit.app, 'sidebar.toggle')
+  await expect.poll(area).not.toBe(before)
+  await action(orbit.app, 'sidebar.toggle')
+  await expect.poll(area).toBe(before)
+  await expectClosed(source, peekTab)
+  expect(orbit.takeUncaught()).toBe('')
+})
+
+/** In main, from now: the channels main sends the window's shell, in order. Returns a reader. */
+async function shellChannels(): Promise<() => Promise<string[]>> {
+  await orbit.app.evaluate(() => {
+    const g = globalThis as unknown as OrbitGlobal & { __shellSent?: string[] }
+    const ctx = g.__orbit.ctx
+    const shell = ctx.windows.get(ctx.windows.ids()[0] as string)?.webContents
+    if (!shell) throw new Error('no window')
+    const sent: string[] = []
+    g.__shellSent = sent
+    const send = shell.send.bind(shell)
+    shell.send = (channel: string, ...args: unknown[]) => {
+      sent.push(channel)
+      send(channel, ...args)
+    }
+  })
+  return () => orbit.app.evaluate(() => [...((globalThis as unknown as { __shellSent?: string[] }).__shellSent ?? [])])
+}
+
+test("[PK-06] the Peek's stills of its page go to the overlay, which shows them, and never to the window's shell", async () => {
+  const sent = await shellChannels()
+  await openPeekFromPinned()
+  await stillReady(await viewPage(orbit.app, 'overlay'))
+  const channels = await sent()
+  // The shell heard from main meanwhile (the store's changes), but no still.
+  expect(channels.length).toBeGreaterThan(0)
+  expect(channels.filter((c) => c.includes('peek:still'))).toEqual([])
+})
+
+/** Checks `ok` every 50 ms for `ms`: it must hold each time. */
+async function holdsFor(ms: number, ok: () => Promise<boolean>, what: string): Promise<void> {
+  const end = Date.now() + ms
+  while (Date.now() < end) {
+    expect(await ok(), what).toBe(true)
+    await new Promise((r) => setTimeout(r, 50))
+  }
+}
+
+test('[PK-06] a Peek whose page crashes, or fails to load, drops its still: its card closes in its own colour; a page loaded again gives it one', async () => {
+  const STILL = { card: { selector: '[data-testid="peek-card"]' }, still: { selector: '[data-testid="peek-still"]' } }
+  for (const how of ['crashes', 'fails to load'] as const) {
+    const { source, peekTab } = await openPeekFromPinned(how === 'crashes' ? '/site/Crashes' : '/site/Fails')
+    const overlay = await viewPage(orbit.app, 'overlay')
+    const still = overlay.getByTestId('peek-still')
+    const ready = async () => (await still.getAttribute('data-ready')) === 'true'
+    await stillReady(overlay)
+    const breakIt = async () => {
+      if (how === 'crashes') {
+        await orbit.app.evaluate(
+          (_e, id) => (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.contents(id)?.forcefullyCrashRenderer(),
+          peekTab,
+        )
+      } else {
+        await run(orbit.app, 'tabs.navigate', { tabId: peekTab, url: 'http://nonexistent.invalid/' })
+      }
+      // Orbit's screen for it shows over the page (NV-13, NV-14), and the card has no still.
+      await expect.poll(async () => (await state(orbit.app)).tabs[peekTab]?.error, how).toBeTruthy()
+      await expect.poll(ready, `${how}: the still goes`).toBe(false)
+      // Nor does one of the blank page come after the load ends (a still follows a load by 200 ms).
+      await holdsFor(600, async () => !(await ready()), `${how}: no still comes back`)
+    }
+    await breakIt()
+    // Loaded again, the page gives the card stills again.
+    if (how === 'crashes') await run(orbit.app, 'tabs.reload', { tabId: peekTab })
+    else await run(orbit.app, 'tabs.navigate', { tabId: peekTab, url: sites.other('/site/Second') })
+    await stillReady(overlay)
+    await breakIt()
+    // The close: the card fades in its own colour, with no still in any frame.
+    const rec = await record(overlay, STILL, { maxMs: 3000 })
+    await run(orbit.app, 'peek.close', {})
+    await expectClosed(source, peekTab)
+    const frames = (await rec.stop()).frames
+    expect(frames.filter((f) => (f.els.card?.opacity ?? 0) > 0).length, `${how}: the card shows`).toBeGreaterThan(0)
+    expect(frames.filter((f) => (f.els.still?.opacity ?? 0) > 0).length, `${how}: frames with a still`).toBe(0)
+  }
+  expect(orbit.takeUncaught()).toBe('')
+})
+
 test('[PK-10] ⌘Z right after closing, or ⌘⇧T, reopens the Peek at the same page', async () => {
   const { source, peekTab } = await openPeekFromPinned()
   // Navigate inside the Peek first: the reopened Peek comes back on that page, with its history.
@@ -647,101 +759,113 @@ test('[PK-11] the sidebar address shows the Peek page while it is open; ⌘L mak
   await expect(pill).toContainText(peekHost)
 })
 
-test('[PK-06] the card grows out of the clicked link and shrinks away; both under 300 ms', async () => {
+test('[PK-06][FL-19] the card grows out of the clicked link and shrinks away: in place in about 300 ms, gone in under 300 ms', async () => {
   // Frame-timed: on the macOS CI VM a frame can take 100-200 ms, so fewer frames and more time (D17).
   const frameCount = (n: number) => Math.max(2, Math.floor(n / FRAME_SLACK))
-  const { page } = await pinned('/site/Motion')
-  // Record the page view's bounds on every change while it opens and closes.
-  await orbit.app.evaluate(() => {
-    const g = globalThis as unknown as OrbitGlobal & { __frames: { t: number; w: number; x: number }[] }
-    g.__frames = []
-    const ctx = g.__orbit.ctx
-    ctx.events.on('peek.frame', ({ rect }) => g.__frames.push({ t: Date.now(), w: rect.width, x: rect.x }))
-  })
+  const { tabId: source, page } = await pinned('/site/Motion')
+  const overlay = await viewPage(orbit.app, 'overlay')
   const link = await page.locator('#other').boundingBox()
-  type Frames = { t: number; w: number; x: number }[]
-  const take = () =>
-    orbit.app.evaluate(() => (globalThis as unknown as { __frames: Frames }).__frames.splice(0)) as Promise<Frames>
+  if (!link) throw new Error('no link')
+  // The card in every frame the overlay drew while it showed (the overlay draws it; the page view
+  // joins it at rest, PK-06).
+  const CARD = { card: '[data-testid="peek-card"]' }
+  type Shown = { t: number; x: number; y: number; width: number; height: number }
+  const shown = (r: Recording): Shown[] =>
+    r.frames.flatMap((f) => {
+      const c = f.els.card
+      return c && c.width > 0 && c.opacity > 0 ? [{ t: f.t, x: c.x, y: c.y, width: c.width, height: c.height }] : []
+    })
+  const off = (a: Shown, b: Shown) =>
+    Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y), Math.abs(a.width - b.width), Math.abs(a.height - b.height))
   // One round opens the Peek from the link and closes it again. A round that misses a budget is
   // measured again (D46): on a loaded machine fewer frames come, and later.
   const { best, all } = await bestOf(
     async (round) => {
-      // The last close's frames have all come: this round's start from none.
-      if (round > 1) await expect.poll(async () => (await take()).length).toBe(0)
-      await page.locator('#other').click({ noWaitAfter: true })
+      if (round > 1) await expect.poll(async () => (await overlayOf(orbit.app)).kind).toBe('none')
+      // The overlay is out of sight until the Peek opens: this records without waiting for a frame.
+      const opens = await record(overlay, CARD, { hidden: true, maxMs: 5000 })
+      await clickInTab(orbit.app, source, { x: link.x + link.width / 2, y: link.y + link.height / 2 })
       const peekTab = await settledPeek()
-      const opening = await take()
-      const end = opening[opening.length - 1]
-      const settledAt = opening.find((f) => end && Math.abs(f.w - end.w) < 1)
+      const opening = shown(await opens.stop())
+      const end = opening.at(-1)
+      const closes = await record(overlay, CARD, { maxMs: 5000 })
       await pressInTab(orbit.app, peekTab, 'Escape')
       await expect.poll(async () => (await overlayOf(orbit.app)).kind).toBe('none')
-      const closing = await take()
+      // The close's frames: the card smaller than at rest, until it has gone.
+      const closing = shown(await closes.stop()).filter((f) => end && f.width < end.width - 0.5)
+      // In place: within 2 px of where it comes to rest, from then on (FL-19's 280–320 ms).
+      const settledAt = opening.find((_f, k) => end && opening.slice(k).every((g) => off(g, end) <= 2))
       return {
         opening,
         closing,
         open: (settledAt?.t ?? Number.POSITIVE_INFINITY) - (opening[0]?.t ?? 0),
-        close: (closing[closing.length - 1]?.t ?? Number.POSITIVE_INFINITY) - (closing[0]?.t ?? 0),
+        close: (closing.at(-1)?.t ?? Number.POSITIVE_INFINITY) - (closing[0]?.t ?? 0),
       }
     },
     (r) =>
       r.opening.length >= frameCount(6) &&
-      r.open < 300 * FRAME_SLACK &&
+      r.open <= OPEN_MS * FRAME_SLACK &&
       r.closing.length >= frameCount(4) &&
       r.close < 300 * FRAME_SLACK,
   )
   console.info(
-    `[peek e2e perf] open ${all.map((r) => r.open).join(', ')} ms in ${all.map((r) => r.opening.length).join(', ')} frames; close ${all.map((r) => r.close).join(', ')} ms in ${all.map((r) => r.closing.length).join(', ')} frames (rounds)`,
+    `[peek e2e perf] open ${all.map((r) => Math.round(r.open)).join(', ')} ms in ${all.map((r) => r.opening.length).join(', ')} frames; close ${all.map((r) => Math.round(r.close)).join(', ')} ms in ${all.map((r) => r.closing.length).join(', ')} frames (rounds)`,
   )
   const { opening: frames, closing } = best
   expect(frames.length).toBeGreaterThanOrEqual(frameCount(6))
-  const first = frames[0] as { t: number; w: number; x: number }
-  const last = frames[frames.length - 1] as { t: number; w: number; x: number }
+  const first = frames[0] as Shown
+  const last = frames[frames.length - 1] as Shown
   // Starts small, near the link, and grows to the card (never instant).
-  expect(first.w).toBeLessThan(last.w / 3)
-  expect(Math.abs(first.x + first.w / 2 - ((link?.x ?? 0) + 8))).toBeLessThan(last.w / 2)
-  expect(best.open).toBeLessThan(300 * FRAME_SLACK)
+  expect(first.width).toBeLessThan(last.width / 3)
+  expect(Math.abs(first.x + first.width / 2 - (link.x + 8))).toBeLessThan(last.width / 2)
+  expect(best.open).toBeLessThanOrEqual(OPEN_MS * FRAME_SLACK)
   // Closing animates too: the card shrinks over a few frames.
   expect(closing.length).toBeGreaterThanOrEqual(frameCount(4))
-  expect((closing[closing.length - 1]?.w ?? 0) < (closing[0]?.w ?? 0)).toBe(true)
+  expect((closing[closing.length - 1]?.width ?? 0) < (closing[0]?.width ?? 0)).toBe(true)
   expect(best.close).toBeLessThan(300 * FRAME_SLACK)
 })
-
-/** The Peek page view's bounds, rounded, or null when it is not placed. */
-async function peekBounds(peekTab: string) {
-  const b = (await viewInfo(orbit.app, peekTab)).bounds
-  return b ? { x: b.x, y: b.y, width: b.width, height: b.height, cy: b.y + b.height / 2 } : null
-}
 
 test('[PK-06] dragging the handle moves the card with the pointer; let go early and it springs back', async () => {
   const { peekTab } = await openPeekFromPinned()
   const overlay = await viewPage(orbit.app, 'overlay')
-  const rest = await peekBounds(peekTab)
+  await stillReady(overlay)
+  const rest = await cardBox(overlay)
   const handle = await overlay.getByTestId('peek-handle').boundingBox()
   if (!rest || !handle) throw new Error('no card or handle')
   // The handle sits centred just above the card.
-  const area = (await viewInfo(orbit.app, peekTab)).area
-  expect(Math.abs(area ? area.x + handle.x + handle.width / 2 - (rest.x + rest.width / 2) : 99)).toBeLessThanOrEqual(1)
-  expect(area ? area.y + handle.y + handle.height : 0).toBeLessThanOrEqual(rest.y + 1)
+  expect(Math.abs(handle.x + handle.width / 2 - (rest.x + rest.width / 2))).toBeLessThanOrEqual(1)
+  expect(handle.y + handle.height).toBeLessThanOrEqual(rest.y + 1)
+  const views = await watchPeekView(orbit.app)
   const x = handle.x + handle.width / 2
   const y = handle.y + handle.height / 2
   await overlay.mouse.move(x, y)
   await overlay.mouse.down()
   await overlay.mouse.move(x, y + 40, { steps: 4 })
   await overlay.mouse.move(x, y + 80, { steps: 4 })
-  // The page follows the pointer 1:1 and shrinks a little (view bounds are whole pixels).
-  await expect.poll(async () => Math.abs(((await peekBounds(peekTab))?.cy ?? 0) - rest.cy - 80) <= 1).toBe(true)
-  const dragged = await peekBounds(peekTab)
+  // The card follows the pointer 1:1 and shrinks a little, showing the page's still.
+  await expect.poll(async () => Math.abs(((await cardBox(overlay))?.cy ?? 0) - rest.cy - 80) <= 1).toBe(true)
+  const dragged = await cardBox(overlay)
   expect(dragged?.width).toBeLessThan(rest.width)
   expect(dragged?.width).toBeGreaterThan(rest.width * 0.95)
+  expect(await overlay.getByTestId('peek-still').evaluate((el) => getComputedStyle(el).opacity)).toBe('1')
   // Held still, then let go well short of a quarter of the card's height: it springs back.
   await overlay.waitForTimeout(150)
   await overlay.mouse.up()
   await expect
     .poll(async () => {
-      const b = await peekBounds(peekTab)
+      const b = await cardBox(overlay)
       return !!b && Math.abs(b.y - rest.y) <= 1 && Math.abs(b.width - rest.width) <= 1
     })
     .toBe(true)
+  // At rest, the page's view is on the card again. While the card moved, the view waited out of
+  // sight at its size: it never showed, or laid its page out, anywhere else (PK-06, FL-01).
+  await expect.poll(() => viewOnCard(peekTab)).toBe('on card')
+  const samples = await views()
+  expect(
+    samples.some((v) => !v.shown),
+    'the view left the card while it moved',
+  ).toBe(true)
+  expect(viewMoves(samples)).toEqual({ resizes: 0, shownElsewhere: 0 })
   expect((await overlayOf(orbit.app)).kind).toBe('peek')
   expect((await state(orbit.app)).tabs[peekTab]?.floating).toBe('peek')
 })
@@ -749,7 +873,7 @@ test('[PK-06] dragging the handle moves the card with the pointer; let go early 
 test('[PK-06] dragged past a quarter of its height, or flicked down, the Peek closes', async () => {
   const { source, peekTab } = await openPeekFromPinned()
   const overlay = await viewPage(orbit.app, 'overlay')
-  const rest = await peekBounds(peekTab)
+  const rest = await cardBox(overlay)
   const handle = await overlay.getByTestId('peek-handle').boundingBox()
   if (!rest || !handle) throw new Error('no card or handle')
   const x = handle.x + handle.width / 2
@@ -758,7 +882,7 @@ test('[PK-06] dragged past a quarter of its height, or flicked down, the Peek cl
   await overlay.mouse.move(x, y)
   await overlay.mouse.down()
   await overlay.mouse.move(x, y + far, { steps: 8 })
-  await expect.poll(async () => Math.abs(((await peekBounds(peekTab))?.cy ?? 0) - rest.cy - far) <= 1).toBe(true)
+  await expect.poll(async () => Math.abs(((await cardBox(overlay))?.cy ?? 0) - rest.cy - far) <= 1).toBe(true)
   await overlay.waitForTimeout(150)
   await overlay.mouse.up()
   await expectClosed(source, peekTab)
@@ -790,37 +914,33 @@ test('[PK-06] dragged past a quarter of its height, or flicked down, the Peek cl
 test('[PK-06] a two-finger swipe down beside the card follows the fingers; a long one dismisses', async () => {
   const { source, peekTab } = await openPeekFromPinned()
   const overlay = await viewPage(orbit.app, 'overlay')
-  const rest = await peekBounds(peekTab)
+  const rest = await cardBox(overlay)
   const area = (await viewInfo(orbit.app, peekTab)).area
   if (!rest || !area) throw new Error('no card')
-  // Record the card's centre on every frame (overlay coordinates).
-  await orbit.app.evaluate(() => {
-    const g = globalThis as unknown as OrbitGlobal & { __swipe: number[]; __swipeAt: number }
-    g.__swipe = []
-    g.__swipeAt = 0
-    g.__orbit.ctx.events.on('peek.frame', ({ rect }) => {
-      g.__swipe.push(rect.y + rect.height / 2)
-      g.__swipeAt = Date.now()
-    })
-  })
+  // The card's centre in every frame the overlay draws (overlay coordinates).
+  const rec = await record(overlay, { card: '[data-testid="peek-card"]' }, { maxMs: 10_000 })
+  const views = await watchPeekView(orbit.app)
   // Over the dimmed page, left of the card.
   await overlay.mouse.move(8, Math.round(area.height / 2))
   // Fingers moving down scroll content up (a negative delta): the card goes down with them.
   await overlay.mouse.wheel(0, -60)
-  // A short swipe springs back once the fingers stop; the spring is at rest once it stops drawing.
+  // A short swipe springs back once the fingers stop. At rest, the page's view is on the card again.
+  await expect.poll(async () => (await cardBox(overlay))?.cy ?? 0).toBeGreaterThan(rest.cy + 1)
   await expect
     .poll(async () => {
-      const b = await peekBounds(peekTab)
-      const { frames, quiet } = await orbit.app.evaluate(() => {
-        const g = globalThis as unknown as { __swipe: number[]; __swipeAt: number }
-        return { frames: g.__swipe.length, quiet: Date.now() - g.__swipeAt }
-      })
-      return frames > 2 && quiet >= 200 && !!b && Math.abs(b.y - rest.y) <= 1 && Math.abs(b.width - rest.width) <= 1
+      const b = await cardBox(overlay)
+      return !!b && Math.abs(b.y - rest.y) <= 1 && Math.abs(b.width - rest.width) <= 1
     })
     .toBe(true)
-  const centres = await orbit.app.evaluate(() => (globalThis as unknown as { __swipe: number[] }).__swipe.splice(0))
+  await expect.poll(() => viewOnCard(peekTab)).toBe('on card')
+  const r: Recording = await rec.stop()
+  const centres = r.frames.flatMap((f) => (f.els.card ? [f.els.card.y + f.els.card.height / 2] : []))
   // It followed the 60 px swipe, then came back to rest (its last frame).
   expect(Math.abs(Math.max(...centres) - (centres[centres.length - 1] ?? 0) - 60)).toBeLessThanOrEqual(1)
+  // Meanwhile the page's view waited out of sight, at its size (PK-06).
+  const samples = await views()
+  expect(samples.some((v) => !v.shown)).toBe(true)
+  expect(viewMoves(samples)).toEqual({ resizes: 0, shownElsewhere: 0 })
   expect((await overlayOf(orbit.app)).kind).toBe('peek')
   // A long swipe dismisses it.
   await overlay.mouse.wheel(0, -Math.round(rest.height * 0.4))

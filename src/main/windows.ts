@@ -48,6 +48,12 @@ interface WindowRecord {
   /** Ignore renderer pane reports older than this state sequence (after a main-side fast switch). */
   minPaneSeq: number
   overlayShown: boolean
+  /** The overlay is shown outside the window while its renderer warms the bar up (CB-22). */
+  overlayWarming?: boolean
+  /** Hides the overlay if its renderer never says it is warm. */
+  overlayWarmTimer?: ReturnType<typeof setTimeout>
+  /** Warms the hidden overlay again at the window's new size once a resize has ended (CB-22). */
+  overlayRewarmTimer?: ReturnType<typeof setTimeout>
   /** Pending hide after the overlay's exit animation. */
   overlayHideTimer?: ReturnType<typeof setTimeout>
   /** The overlay closed while the window was in the background: give the page focus when it returns. */
@@ -82,6 +88,8 @@ interface WindowRecord {
    */
   toolsReady: boolean
   toolsPrewarm?: ReturnType<typeof setTimeout>
+  /** The page tools are leaving the window once their page has drawn itself empty (hideTools). */
+  toolsLeaving?: { timer?: ReturnType<typeof setTimeout> }
   /**
    * A permission prompt over the active page's top-left corner while the sidebar is hidden (NV-15;
    * with the sidebar showing, the prompt is part of it). Started when first needed.
@@ -109,6 +117,11 @@ interface WindowRecord {
    * the prompt and the small views above stay under it, with the page (setPageCover).
    */
   cover?: WebContentsView
+  /**
+   * Pages no longer wanted that stay shown, where they were, while a view is held out of sight
+   * until its page has drawn (holdArrivals); they hide once it shows.
+   */
+  lingering: Set<TabId>
 }
 
 /** A tab view placed in a window. */
@@ -121,8 +134,16 @@ interface Attachment {
 
 /** How long the overlay view stays up after closing so its exit animation can play (FL-16). */
 const OVERLAY_EXIT_MS = 110
+/** The longest the overlay waits, shown outside the window, for its renderer to warm up (CB-22). */
+const OVERLAY_WARM_MAX_MS = 3000
+/** A resize has ended once the window has kept its size this long: the hidden overlay warms again (CB-22). */
+const OVERLAY_REWARM_MS = 300
+/** The longest a view coming back into a window stays out of sight, waiting for its page to draw (holdArrivals). */
+const HOLD_MS = 250
 /** The page tools' renderer starts this long after the window shows (NV-05: ⌘F finds the bar ready). */
 const TOOLS_PREWARM_MS = 1500
+/** The longest the page tools stay in the window after they hide, waiting for their page to draw itself empty (NV-06). */
+const TOOLS_LEAVE_MS = 250
 
 /** The floating sidebar's card sits this far from the window's edges (SB-12, SB-19). */
 export const FLOAT_INSET = 6
@@ -232,6 +253,9 @@ export class WindowManager {
   /** Tabs whose page closed its own web contents (window.close()): not reopened until selected again. */
   private selfClosed = new Set<TabId>()
   private floatingOwners: ((tabId: TabId) => WindowId | undefined)[] = []
+  private arrivalHolds: ((tabId: TabId, view: WebContentsView) => Promise<unknown> | undefined)[] = []
+  /** Views held out of sight at their window's corner (holdArrivals). */
+  private held = new Map<TabId, { view: WebContentsView; windowId: WindowId; timer: ReturnType<typeof setTimeout> }>()
   /**
    * Views that stay above the page tools wherever either goes: a page's own dialog or print dialog
    * over its page, in a tab or a Peek (pages lane, NV-24, NV-07; keepAboveTools()).
@@ -300,6 +324,22 @@ export class WindowManager {
    */
   addFloatingOwner(owner: (tabId: TabId) => WindowId | undefined): void {
     this.floatingOwners.push(owner)
+  }
+
+  /**
+   * A feature that lends a tab's view to a window of its own (the floating player) can hold it out
+   * of sight when it comes back into a window: until the promise it returns settles, or HOLD_MS.
+   * A view whose size changed shows the last frame its page drew until the page draws at the new
+   * size, so meanwhile it waits at its pane's size with all of it but its corner pixel outside the
+   * window (outOfSight()), where its page lays out and draws; then it moves into its pane, at the
+   * same size. Until then the pages the window showed stay, and take clicks. Where it showed none
+   * in that pane (after ⌘W on the tab over it, or from an empty Space, alone or in a split), the
+   * pane shows its blank card. The corner pixel shows at the window's bottom-right corner (MD-01:
+   * no frame of the player's layout in the page area, if the page draws within HOLD_MS). A view
+   * hidden, or wholly outside the window, would draw nothing.
+   */
+  holdArrivals(hold: (tabId: TabId, view: WebContentsView) => Promise<unknown> | undefined): void {
+    this.arrivalHolds.push(hold)
   }
 
   private floatingWindowOf(tabId: TabId): WindowId | undefined {
@@ -435,6 +475,7 @@ export class WindowManager {
       promptShown: false,
       promptReady: false,
       uiViews: new Set(),
+      lingering: new Set(),
     }
     this.records.set(id, rec)
     // macOS: the traffic lights live in the sidebar's top row (SB-20).
@@ -476,7 +517,9 @@ export class WindowManager {
       if (!rec.htmlFullscreen) this.applyPanes(id, rec.panes, rec.radius)
     })
     win.on('resize', () => {
-      if (rec.overlayShown) this.fitOverlay(rec)
+      if (rec.overlayShown || rec.overlayWarming) this.fitOverlay(rec)
+      clearTimeout(rec.overlayRewarmTimer)
+      rec.overlayRewarmTimer = setTimeout(() => this.rewarmOverlay(rec), OVERLAY_REWARM_MS)
       if (rec.floatingShown) this.fitFloating(rec)
       if (rec.htmlFullscreen) this.applyPanes(id, rec.panes, rec.radius)
     })
@@ -509,16 +552,21 @@ export class WindowManager {
     }
     win.on('closed', () => {
       clearTimeout(rec.overlayHideTimer)
+      clearTimeout(rec.overlayWarmTimer)
+      clearTimeout(rec.overlayRewarmTimer)
       clearTimeout(rec.floatingTimer)
       clearTimeout(rec.floatingPrewarm)
       clearTimeout(rec.floatingDispose)
       clearTimeout(rec.buttonsTimer)
       clearTimeout(rec.toolsPrewarm)
+      clearTimeout(rec.toolsLeaving?.timer)
+      rec.toolsLeaving = undefined
       viewContents(rec.floating)?.close()
       viewContents(rec.tools)?.close()
       viewContents(rec.prompt)?.close()
       for (const view of rec.uiViews) viewContents(view)?.close()
       rec.uiViews.clear()
+      for (const [tabId, hold] of [...this.held]) if (hold.windowId === id) this.dropHold(tabId)
       this.records.delete(id)
       for (const [tabId, entry] of [...this.attached]) {
         if (entry.windowId === id) {
@@ -603,6 +651,11 @@ export class WindowManager {
     viewContents(rec.overlay)?.send(`orbit:${channel}`, payload)
   }
 
+  /** Sends to the window's overlay only: what only it shows, such as a Peek's still (PK-06). */
+  sendToOverlay(windowId: WindowId, channel: string, payload: unknown): void {
+    viewContents(this.records.get(windowId)?.overlay)?.send(`orbit:${channel}`, payload)
+  }
+
   /** The corner radius a shown page was last given (SB-19), for tests. */
   cornerOf(tabId: TabId): number | undefined {
     const entry = this.attached.get(tabId)
@@ -633,8 +686,11 @@ export class WindowManager {
    */
   tabViewBounds(tabId: TabId): Rect | undefined {
     const entry = this.attached.get(tabId)
-    if (!entry || !this.records.get(entry.windowId)?.visible.has(tabId)) return undefined
-    const view = entry.view.getBounds()
+    const rec = entry && this.records.get(entry.windowId)
+    if (!entry || !rec?.visible.has(tabId)) return undefined
+    // A view held out of sight (holdArrivals) is laid out at its pane, where it shows next.
+    const pane = this.held.get(tabId)?.view === entry.view ? rec.panes.find((p) => p.tabId === tabId) : undefined
+    const view = pane ? roundRect(pane.rect) : entry.view.getBounds()
     const page = this.devtoolsPages.get(tabId)
     return page ? pageInView(view, page) : view
   }
@@ -688,12 +744,7 @@ export class WindowManager {
     // Native full screen has no frame: square corners (SB-19).
     const corner = this.ctx.store.state.windows[windowId]?.fullscreen ? 0 : radius
     const wanted = new Set(panes.map((p) => p.tabId))
-    for (const tabId of rec.visible) {
-      if (wanted.has(tabId)) continue
-      // Only hide what this window holds: the view may have moved to another window since.
-      const entry = this.attached.get(tabId)
-      if (entry?.windowId === rec.id) entry.view.setVisible(false)
-    }
+    for (const [tabId, hold] of [...this.held]) if (hold.windowId === rec.id && !wanted.has(tabId)) this.dropHold(tabId)
     const shownBefore = rec.visible
     for (const pane of panes) {
       // A page that closed itself stays closed until the tab is selected again (onState).
@@ -701,12 +752,24 @@ export class WindowManager {
       const view = this.ensureView(pane.tabId)
       if (!view) continue
       this.attach(rec, pane.tabId, view)
-      view.setBounds(roundRect(pane.rect))
+      const rect = roundRect(pane.rect)
+      view.setBounds(this.held.get(pane.tabId)?.view === view ? this.outOfSight(rec, rect) : rect)
       view.setBorderRadius(corner)
       rec.corners.set(pane.tabId, corner)
       view.setVisible(true)
       // A tab whose page crashed while in the background shows its crash screen when it is shown
       // again, until the user reloads it (NV-14: the pages lane's screen over the page).
+    }
+    // While a view coming back is held out of sight (holdArrivals), the pages shown before, if any, stay.
+    const holding = [...this.held.values()].some((h) => h.windowId === rec.id)
+    for (const tabId of new Set([...rec.visible, ...rec.lingering])) {
+      rec.lingering.delete(tabId)
+      if (wanted.has(tabId)) continue
+      // Only hide what this window holds: the view may have moved to another window since.
+      const entry = this.attached.get(tabId)
+      if (entry?.windowId !== rec.id) continue
+      if (holding) rec.lingering.add(tabId)
+      else entry.view.setVisible(false)
     }
     rec.visible = wanted
     if (panes.length === 1) rec.lastSingleRect = panes[0]?.rect
@@ -759,6 +822,9 @@ export class WindowManager {
     const view = this.ensureTools(rec)
     view.setBounds(roundRect(bounds))
     rec.toolsShown = true
+    // Shown again while leaving: they stay, and draw what they show now.
+    clearTimeout(rec.toolsLeaving?.timer)
+    rec.toolsLeaving = undefined
     if (!rec.toolsReady) return false
     const parent = rec.win.contentView
     const children = parent.children
@@ -782,10 +848,12 @@ export class WindowManager {
   }
 
   /**
-   * Takes the page tools out of the window. The keyboard goes back to the page when they had it,
-   * or when nothing has it in the focused window (round 2 fix check, M3).
+   * Takes the page tools out of the window. The keyboard goes back to the page at once when they
+   * had it, or when nothing has it in the focused window (round 2 fix check, M3). With `drawn`, the
+   * view leaves once that settles (their page has drawn itself empty), TOOLS_LEAVE_MS at most: a view
+   * put back in the window shows the last frame it drew until it draws again (NV-06).
    */
-  hideTools(windowId: WindowId): void {
+  hideTools(windowId: WindowId, drawn?: Promise<unknown>): void {
     const rec = this.records.get(windowId)
     const view = rec?.tools
     if (!rec || !view || !rec.toolsShown) return
@@ -793,15 +861,33 @@ export class WindowManager {
     const contents = viewContents(view)
     const focused = webContents.getFocusedWebContents()
     if ((!focused || focused === contents) && !rec.overlayShown && rec.win.isFocused()) this.focusActiveTab(rec.id)
-    this.removeChild(rec, view)
+    clearTimeout(rec.toolsLeaving?.timer)
+    rec.toolsLeaving = undefined
+    if (!drawn) {
+      this.removeChild(rec, view)
+      return
+    }
+    const leaving: { timer?: ReturnType<typeof setTimeout> } = {}
+    const leave = () => {
+      if (rec.toolsLeaving !== leaving) return
+      clearTimeout(leaving.timer)
+      rec.toolsLeaving = undefined
+      if (rec.tools === view && !rec.toolsShown) this.removeChild(rec, view)
+    }
+    leaving.timer = setTimeout(leave, TOOLS_LEAVE_MS)
+    rec.toolsLeaving = leaving
+    void drawn.then(leave, leave)
   }
 
-  /** Test/debug view of a window's page tools; `ready`: their page has loaded. */
+  /**
+   * Test/debug view of a window's page tools; `ready`: their page has loaded; `placed`: they are in
+   * the window, shown (not on their way out).
+   */
   toolsInfo(windowId: WindowId): { exists: boolean; ready: boolean; placed: boolean; bounds?: Rect } {
     const rec = this.records.get(windowId)
     const view = rec?.tools
     if (!rec || !view || !viewContents(view)) return { exists: false, ready: false, placed: false }
-    const placed = rec.win.contentView.children.includes(view)
+    const placed = rec.toolsShown && rec.win.contentView.children.includes(view)
     return { exists: true, ready: rec.toolsReady, placed, bounds: view.getBounds() }
   }
 
@@ -1128,6 +1214,7 @@ export class WindowManager {
 
   /** Removes a (sleeping, closing or replaced) tab view from whatever window holds it. Safe for destroyed views. */
   detachView(tabId: TabId, view: WebContentsView): void {
+    if (this.held.get(tabId)?.view === view) this.dropHold(tabId)
     const entry = this.attached.get(tabId)
     if (entry?.view === view) {
       this.attached.delete(tabId)
@@ -1226,6 +1313,7 @@ export class WindowManager {
     const current = this.attached.get(tabId)
     const children = rec.win.contentView.children
     if (current?.view === view && current.windowId === rec.id && children.includes(view)) return
+    const arriving = !children.includes(view)
     let loser: WindowRecord | undefined
     if (current && current.view !== view) {
       this.removeEverywhere(current.view)
@@ -1239,6 +1327,7 @@ export class WindowManager {
     this.placeOnTop(rec, view)
     this.attached.set(tabId, { view, windowId: rec.id, contentsId: view.webContents.id })
     this.selfClosed.delete(tabId)
+    if (arriving) this.holdIfAsked(rec, tabId, view)
     if (loser && !loser.win.isDestroyed()) {
       this.applyPanes(
         loser.id,
@@ -1303,6 +1392,43 @@ export class WindowManager {
     } catch (err) {
       console.error('[windows] could not remove a view:', err)
     }
+  }
+
+  /** A view just came into the window: held out of sight if a feature asks (holdArrivals). */
+  private holdIfAsked(rec: WindowRecord, tabId: TabId, view: WebContentsView): void {
+    for (const ask of this.arrivalHolds) {
+      const ready = ask(tabId, view)
+      if (!ready) continue
+      this.dropHold(tabId)
+      const shown = () => this.unhold(tabId, view)
+      this.held.set(tabId, { view, windowId: rec.id, timer: setTimeout(shown, HOLD_MS) })
+      ready.then(shown, shown)
+      return
+    }
+  }
+
+  /** The held view's page has drawn (or HOLD_MS passed): its window lays out again and shows it. */
+  private unhold(tabId: TabId, view: WebContentsView): void {
+    const hold = this.held.get(tabId)
+    if (hold?.view !== view) return
+    this.dropHold(tabId)
+    const rec = this.records.get(hold.windowId)
+    if (rec && !rec.win.isDestroyed()) this.applyPanes(rec.id, rec.panes, rec.radius)
+  }
+
+  private dropHold(tabId: TabId): void {
+    clearTimeout(this.held.get(tabId)?.timer)
+    this.held.delete(tabId)
+  }
+
+  /**
+   * Where a held view waits (holdArrivals): at its pane's size, with all of it but its top-left
+   * pixel outside the window's bottom-right corner, as the overlay warms up (CB-22) and a Peek's
+   * page waits (PK-06). Its page lays out and draws there, and the hold's end only moves it.
+   */
+  private outOfSight(rec: WindowRecord, rect: Rect): Rect {
+    const [width = 0, height = 0] = rec.win.getContentSize()
+    return { x: width - 1, y: height - 1, width: rect.width, height: rect.height }
   }
 
   /** Follows a tab's live web contents: fullscreen requests, and pages that close themselves. */
@@ -1626,7 +1752,12 @@ export class WindowManager {
     if (rec.overlay) return rec.overlay
     const overlay = new WebContentsView({ webPreferences: uiWebPreferences(rec.id, 'overlay') })
     overlay.setBackgroundColor('#00000000')
-    overlay.setVisible(false)
+    // CB-22: shown at first, at the window's size but all but one corner pixel outside it, so its
+    // renderer lays out and draws the bar's warm-up at that size (a hidden view's renderer, or one
+    // wholly outside the window, gets no size, and the first open laid everything out again). It
+    // hides once warm (overlayWarm).
+    rec.overlayWarming = true
+    rec.overlayWarmTimer = setTimeout(() => this.overlayWarm(rec.id), OVERLAY_WARM_MAX_MS)
     rec.win.contentView.addChildView(overlay)
     this.registerUi(overlay.webContents, rec.id)
     this.reloadUiOnCrash(overlay.webContents, 'overlay')
@@ -1634,11 +1765,49 @@ export class WindowManager {
     this.hardenUi(overlay.webContents)
     loadRenderer(overlay.webContents, 'overlay')
     rec.overlay = overlay
+    this.fitOverlay(rec)
     return overlay
+  }
+
+  /** The overlay's renderer has warmed the bar up (CB-22): the overlay hides, in its place. */
+  overlayWarm(windowId: WindowId): void {
+    const rec = this.records.get(windowId)
+    if (!rec?.overlayWarming || rec.win.isDestroyed() || !viewContents(rec.overlay)) return
+    rec.overlayWarming = false
+    clearTimeout(rec.overlayWarmTimer)
+    if (rec.overlayShown) return
+    rec.overlay?.setVisible(false)
+    this.fitOverlay(rec)
+  }
+
+  /**
+   * A resize has ended: the hidden overlay, still at the size it had, warms again (CB-22). It shows
+   * at the window's new size with all but its corner pixel outside the window, where its renderer
+   * lays out at that size, so the next ⌘T doesn't; it hides once its renderer has drawn there
+   * (`search.warm`, overlayWarm), or after OVERLAY_WARM_MAX_MS.
+   */
+  private rewarmOverlay(rec: WindowRecord): void {
+    rec.overlayRewarmTimer = undefined
+    const overlay = rec.overlay
+    if (!overlay || !viewContents(overlay) || rec.overlayShown || rec.overlayWarming || rec.win.isDestroyed()) return
+    // Still playing its exit (OVERLAY_EXIT_MS): after that.
+    if (overlay.getVisible()) {
+      rec.overlayRewarmTimer = setTimeout(() => this.rewarmOverlay(rec), OVERLAY_REWARM_MS)
+      return
+    }
+    const [width = 0, height = 0] = rec.win.getContentSize()
+    const laidOut = overlay.getBounds()
+    if (laidOut.width === width && laidOut.height === height) return
+    rec.overlayWarming = true
+    clearTimeout(rec.overlayWarmTimer)
+    rec.overlayWarmTimer = setTimeout(() => this.overlayWarm(rec.id), OVERLAY_WARM_MAX_MS)
+    this.fitOverlay(rec)
+    overlay.setVisible(true)
   }
 
   private showOverlay(rec: WindowRecord): void {
     clearTimeout(rec.overlayHideTimer)
+    rec.overlayWarming = false
     rec.refocusPage = false
     const overlay = this.ensureOverlay(rec)
     this.fitOverlay(rec)
@@ -1674,9 +1843,11 @@ export class WindowManager {
 
   private fitOverlay(rec: WindowRecord): void {
     const [width = 0, height = 0] = rec.win.getContentSize()
+    // Warming up, it stays at the window's size with all but its corner pixel outside the window (CB-22).
+    const warming = rec.overlayWarming ? { x: width - 1, y: height - 1, width, height } : undefined
     // A Peek's overlay covers only the page area, so the sidebar stays usable beside it (PK-13).
     const area = this.ctx.store.state.windows[rec.id]?.overlay.kind === 'peek' ? this.pageArea(rec.id) : undefined
-    rec.overlay?.setBounds(area ?? { x: 0, y: 0, width, height })
+    rec.overlay?.setBounds(warming ?? area ?? { x: 0, y: 0, width, height })
   }
 
   /** The native background shows at the window's edges while resizing: keep it the frame's colour. */

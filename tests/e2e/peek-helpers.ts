@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http'
-import type { ElectronApplication, Page } from '@playwright/test'
+import { type ElectronApplication, expect, type Page } from '@playwright/test'
 import type { MainContext } from '../../src/main/context'
 import type { OrbitState, WindowState } from '../../src/shared/state'
 import { listenInRange, state } from './helpers'
@@ -255,4 +255,86 @@ export async function clickInTab(
     },
     [tabId, point.x, point.y, modifiers] as const,
   )
+}
+
+/** Where a Peek's page view was at a moment (main's wall clock). */
+export interface ViewSample {
+  wall: number
+  x: number
+  y: number
+  width: number
+  height: number
+  /** In sight: shown in the window, with more than its corner pixel inside it. */
+  shown: boolean
+}
+
+/**
+ * In main, from now: polls every millisecond where the open Peek's page view is (and, once the Peek
+ * has become a tab, that tab's view), and keeps a sample at each change of its bounds or of whether
+ * it is in sight. Returns a reader, which stops the polling.
+ */
+export async function watchPeekView(app: ElectronApplication): Promise<() => Promise<ViewSample[]>> {
+  await app.evaluate(() => {
+    type Watch = { samples: ViewSample[]; timer: ReturnType<typeof setInterval> }
+    const g = globalThis as unknown as OrbitGlobal & { __peekView?: Watch }
+    const ctx = g.__orbit.ctx
+    if (g.__peekView) clearInterval(g.__peekView.timer)
+    const windowId = ctx.windows.ids()[0] as string
+    const samples: ViewSample[] = []
+    let tabId: string | undefined
+    const timer = setInterval(() => {
+      const overlay = ctx.store.state.windows[windowId]?.overlay
+      if (overlay?.kind === 'peek') tabId = overlay.tabId
+      const win = ctx.windows.get(windowId)
+      const view = tabId ? ctx.tabs.get(tabId) : undefined
+      if (!win || win.isDestroyed() || !view || view.webContents.isDestroyed()) return
+      const b = view.getBounds()
+      const [cw = 0, ch = 0] = win.getContentSize()
+      const w = Math.max(0, Math.min(b.x + b.width, cw) - Math.max(b.x, 0))
+      const h = Math.max(0, Math.min(b.y + b.height, ch) - Math.max(b.y, 0))
+      const shown = view.getVisible() && win.contentView.children.includes(view) && w * h > 1
+      const last = samples.at(-1)
+      const same = last && last.x === b.x && last.y === b.y && last.width === b.width && last.height === b.height
+      if (same && last.shown === shown) return
+      samples.push({ wall: performance.timeOrigin + performance.now(), ...b, shown })
+    }, 1)
+    // A test that never reads it stops it anyway.
+    setTimeout(() => clearInterval(timer), 15_000)
+    g.__peekView = { samples, timer }
+  })
+  return () =>
+    app.evaluate(() => {
+      const g = globalThis as unknown as {
+        __peekView?: { samples: ViewSample[]; timer: ReturnType<typeof setInterval> }
+      }
+      if (g.__peekView) clearInterval(g.__peekView.timer)
+      return g.__peekView?.samples ?? []
+    })
+}
+
+/**
+ * How a Peek's page view went (PK-06): how often its size changed (each change lays its page out
+ * again), and how many samples had it in sight anywhere but where it was first or last (a page shown
+ * mid-motion).
+ */
+export function viewMoves(samples: ViewSample[]): { resizes: number; shownElsewhere: number } {
+  const first = samples[0]
+  const last = samples.at(-1)
+  let resizes = 0
+  for (let k = 1; k < samples.length; k++) {
+    const a = samples[k - 1] as ViewSample
+    const b = samples[k] as ViewSample
+    if (a.width !== b.width || a.height !== b.height) resizes++
+  }
+  const at = (v: ViewSample, o: ViewSample | undefined) =>
+    !!o && v.x === o.x && v.y === o.y && v.width === o.width && v.height === o.height
+  const shownElsewhere = samples.filter((v) => v.shown && !at(v, first) && !at(v, last)).length
+  return { resizes, shownElsewhere }
+}
+
+/** Waits until the Peek's card shows a still of its page, whole (main takes one once the page has drawn). */
+export async function stillReady(overlay: Page): Promise<void> {
+  const still = overlay.getByTestId('peek-still')
+  await expect(still).toHaveAttribute('data-ready', 'true')
+  await expect.poll(() => still.evaluate((el) => getComputedStyle(el).opacity)).toBe('1')
 }
