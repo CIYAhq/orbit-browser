@@ -276,8 +276,8 @@ export default async function (t) {
     ),
   )
   await t.sleep(900)
-  // A private window has no Library button: its sidebar's row and its Downloads list (Ctrl+J here) show
-  // its own session's downloads.
+  // A private window has no Library button: its sidebar's row and its Downloads list (Ctrl+J here, DL-14)
+  // show its own session's downloads (DL-16).
   mark('private-download')
   await clickFile(t, privTab[0], 'Site photo.png', privAt, 18)
   await waitFor(t, async () => (await privShell.getByTestId('downloads-tray').getAttribute('data-count')) === '1')
