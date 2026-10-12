@@ -1,4 +1,8 @@
-/* Peek card chrome (PK-05). The page itself is a native view main keeps on the card. */
+/*
+ * Peek card chrome (PK-05). The page itself is a native view main puts on the card once the card is
+ * at rest; while it moves, the card shows a still of the page (PK-06). The card and its shadow are
+ * laid out once at their size at rest and move by transform and opacity only (FL-01).
+ */
 
 .overlay--peek {
   /* The Peek draws its own fades. */
@@ -19,20 +23,46 @@
   will-change: opacity;
 }
 
-.peek__card {
+.peek__card,
+.peek__shadow {
   position: absolute;
   left: 0;
   top: 0;
   width: 0;
   height: 0;
-  background: #fff;
   border-radius: 12px;
+  transform-origin: 0 0;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+.peek__shadow {
   box-shadow:
     0 0 0 0.5px rgba(0, 0, 0, 0.16),
     0 22px 60px rgba(0, 0, 0, 0.3),
     0 6px 18px rgba(0, 0, 0, 0.14);
-  pointer-events: none;
-  will-change: transform, width, height, opacity;
+}
+
+.peek__card {
+  background: #fff;
+  overflow: hidden;
+}
+
+/* The page's still, which the card shows while it moves. It shows once decoded. */
+.peek__still {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 0 0;
+  transform-origin: 0 0;
+  opacity: 0;
+  user-select: none;
+}
+
+.peek__still[data-ready] {
+  opacity: 1;
 }
 
 .peek__handle {

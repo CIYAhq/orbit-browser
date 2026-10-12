@@ -6,10 +6,18 @@
  * page's top layer at the player's size at the top-left of the page; the window shows just that
  * corner. Orbit's controls (renderer view "pip") sit in a transparent view on top.
  *
- * Returning to the tab needs nothing from here: the window manager attaches the tab's view to its
- * window again (taking it out of this one), and the page puts the video back on that very frame
- * (see agent.ts). The player then just hides. Closing the player (×) hides it and leaves the view
- * detached, like any background tab, so the media plays on as audio (MD-07).
+ * Returning to the tab: the window manager attaches the tab's view to its window again (taking it
+ * out of this one), and the page puts the video back on that very frame (see agent.ts). The player
+ * hides first (Back to tab flies a still of its last frame back to the page, MD-16). Until the page
+ * has drawn that layout, the view waits out of sight at its pane's size, all of it but its corner
+ * pixel outside the window, and then moves into its pane (arriving(), WindowManager.holdArrivals).
+ * Meanwhile the page area keeps the page its window showed there, which takes clicks; with none
+ * there (after ⌘W on the tab over it, or back from an empty Space, alone or in a split), it shows
+ * the pane's blank card, a placeholder FL-29 allows. The window's bottom-right pixel shows the
+ * view's top-left one. So no frame of the player's layout reaches the page area (MD-01), if the
+ * page draws within the hold's 250 ms: a page slower than that shows what it drew last. Closing
+ * the player (×) hides it and leaves the view detached, like any background tab, so the media plays
+ * on as audio (MD-07).
  */
 import {
   app,
@@ -218,6 +226,7 @@ export class PipPlayer {
 
     screen.on('display-removed', () => this.refit())
     screen.on('display-metrics-changed', () => this.refit())
+    ctx.windows.holdArrivals((tabId, view) => this.arriving(tabId, view))
   }
 
   /** The tab whose video is in the player. */
@@ -370,6 +379,17 @@ export class PipPlayer {
     this.watchDialogs()
     this.host.changed(tabId, true, opts.auto)
     return true
+  }
+
+  /**
+   * The video's view goes back into a window (its tab was selected again, or Back to tab): it stays
+   * out of sight there until its page has put the video back and drawn at its size (MD-01). Until
+   * then the view would show the last frame the page drew: black, with the video small at its top-left.
+   */
+  private arriving(tabId: TabId, view: WebContentsView): Promise<unknown> | undefined {
+    const s = this.session
+    if (s?.tabId !== tabId || s.view !== view) return undefined
+    return this.host.call(tabId, 'drawn')
   }
 
   private isShown(tabId: TabId): boolean {

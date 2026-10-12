@@ -1,6 +1,7 @@
 import type { ElectronApplication, Page } from '@playwright/test'
 import { expect, test } from '@playwright/test'
-import { launchOrbit, type Orbit, run, state } from './helpers'
+import { type Box, type Frame, record, rgba } from './frames'
+import { action, launchOrbit, type Orbit, run, state } from './helpers'
 import {
   blockNetwork,
   clickInTab,
@@ -442,4 +443,227 @@ test('[MW-10] a Mini Window can reopen its page in another profile, remembered f
   await expect.poll(async () => (await minis(orbit.app))[0]?.url).toBe(sites.url('/site/Docs-2'))
   const [next] = await minis(orbit.app)
   expect((await state(orbit.app)).tabs[next?.tabId ?? '']?.profileId).toBe(work)
+})
+
+// ---- What a Mini Window shows as it comes and goes (MW-04, MW-15) ----
+
+/** The UI of the hidden ready window Orbit keeps (the harness asks for it), once its lookup bar is drawn. */
+async function readyUi(app: ElectronApplication): Promise<Page> {
+  await run(app, 'mini.prepare', {})
+  let ui: Page | undefined
+  await expect
+    .poll(async () => {
+      ui = undefined
+      for (const p of app.windows()) {
+        if (!p.url().includes('view=mini')) continue
+        const id = await p
+          .evaluate(() => (window as unknown as { orbit: { windowId: string } }).orbit.windowId)
+          .catch(() => '')
+        const taken = await app.evaluate(
+          (_e, wid) => !!(globalThis as unknown as OrbitGlobal).__orbit.ctx.store.state.windows[wid],
+          id,
+        )
+        if (id && !taken && (await p.getByTestId('mini-lookup').count()) > 0) ui = p
+      }
+      return !!ui
+    })
+    .toBe(true)
+  return ui as Page
+}
+
+test('[MW-04][MW-15] the ready window draws itself empty until it opens: a link never shows the lookup bar, and a blank window first shows at the start of its grow', async () => {
+  // A hidden window can go seconds without drawing: each case may wait for one frame of it.
+  test.setTimeout(120_000)
+  const { app } = orbit
+  for (const reduced of [false, true]) {
+    // Orbit's own Reduce Motion switch: no grow, so the window shows at its full size.
+    if (reduced) await action(app, 'app.toggleReduceMotion')
+    for (const kind of ['link', 'blank'] as const) {
+      const ui = await readyUi(app)
+      // When the window comes on screen: what it shows then is the frame its UI drew last.
+      await app.evaluate(({ BrowserWindow }) => {
+        const g = globalThis as unknown as { __miniShownAt?: number }
+        g.__miniShownAt = undefined
+        for (const b of BrowserWindow.getAllWindows()) {
+          if (b.isDestroyed() || b.isVisible() || !b.webContents.getURL().includes('view=mini')) continue
+          b.once('show', () => {
+            g.__miniShownAt = performance.timeOrigin + performance.now()
+          })
+        }
+      })
+      const rec = await record(
+        ui,
+        {
+          lookup: { selector: '.cmdbar--mini-blank', top: true },
+          address: { selector: '[data-testid="mini-address"]', top: true },
+          // The cover the ready window draws over itself (mini.css's `.mini--ready::after`).
+          cover: { selector: '.mini--ready', pseudo: '::after', style: ['content', 'background-color'] },
+          root: { selector: '[data-testid="mini"]', style: ['transform'] },
+        },
+        { hidden: true, maxMs: 60_000 },
+      )
+      const lastWall = () =>
+        ui.evaluate(
+          () =>
+            (window as unknown as { __feelRec?: { frames: { wall: number }[] } }).__feelRec?.frames.at(-1)?.wall ?? 0,
+        )
+      // Warm and idle, as a ready window usually is when a link comes: it has drawn, and draws no more
+      // for now (on Linux a hidden window draws about once a second, or now and then, seconds apart).
+      // Where a hidden window never draws, what it shows first can't be seen here.
+      if (process.platform === 'linux') {
+        await expect
+          .poll(
+            async () => {
+              const wall = await lastWall()
+              return wall > 0 && Date.now() - wall > 250
+            },
+            { timeout: 25_000 },
+          )
+          .toBe(true)
+      }
+      const url = sites.url(`/site/Warm-${kind}-${reduced ? 'still' : 'grow'}`)
+      if (kind === 'link') await openFromOtherApp(app, url)
+      else await run(app, 'mini.open', {})
+      const shownAt = () => app.evaluate(() => (globalThis as unknown as { __miniShownAt?: number }).__miniShownAt ?? 0)
+      await expect.poll(shownAt).toBeGreaterThan(0)
+      const shown = await shownAt()
+      // Frames past the grow (about 200 ms) after it showed.
+      await expect.poll(lastWall).toBeGreaterThan(shown + 300)
+      const { frames } = await rec.stop()
+      // On screen: the frame drawn last before the window showed, then each one drawn after.
+      const before = frames.filter((f) => f.wall <= shown).at(-1)
+      const screen = [...(before ? [before] : []), ...frames.filter((f) => f.wall > shown && f.wall <= shown + 300)]
+      // A computed transform reads `none` or `matrix(a, b, c, d, e, f)`: a scale's `a`.
+      const scale = (f: Frame) => Number(/^matrix\(([^,]+),/.exec(f.els.root?.style?.transform ?? '')?.[1] ?? 1)
+      /**
+       * The window draws itself empty in a frame: its cover is drawn (it has content and an opaque
+       * colour) and no bar is above it, from what the frame draws, not from a class.
+       */
+      const empty = (f: Frame) => {
+        const cover = f.els.cover?.style
+        if (!cover || cover.content === 'none' || cover.content === 'normal') return false
+        if (rgba(cover['background-color'])[3] < 0.999) return false
+        return !f.els.lookup?.top && !f.els.address?.top
+      }
+      /** The bar in sight in a frame: none while the window draws itself empty or (Linux) the grow has it unseen. */
+      const bar = (f: Frame) => {
+        if (empty(f)) return null
+        const seen = (b: Box | null | undefined) => !!b && b.opacity > 0.01
+        return seen(f.els.lookup) ? 'the lookup bar' : seen(f.els.address) ? "the page's bar" : null
+      }
+      const shows = screen.map((f) => `${bar(f) ?? (empty(f) ? 'empty' : 'nothing')} at ${scale(f).toFixed(2)}`)
+      const what = `${reduced ? 'reduced motion' : 'grow'}, ${kind}: ${shows.slice(0, 4).join(' → ')}`
+      console.info(`[MW-04] ${what}`)
+      if (process.platform === 'linux') expect(before, what).toBeDefined()
+      const first = screen.find((f) => bar(f) !== null)
+      expect(first, what).toBeDefined()
+      if (!first) continue
+      if (kind === 'link') {
+        // Never the lookup bar, first or later.
+        expect(screen.filter((f) => bar(f) === 'the lookup bar').length, what).toBe(0)
+        expect(bar(first), what).toBe("the page's bar")
+      } else expect(bar(first), what).toBe('the lookup bar')
+      // Its first frame in sight: early in the grow (from 92%), or full size without the grow.
+      if (reduced) expect(scale(first), what).toBe(1)
+      else expect(scale(first), what).toBeLessThan(0.99)
+      const [mini] = await minis(app)
+      if (!mini) throw new Error('no Mini Window')
+      await fromMini(app, mini.id, 'mini.control', { op: 'close' })
+      await expect.poll(async () => (await minis(app)).length).toBe(0)
+    }
+  }
+})
+
+test('[MW-15][MW-05] a Mini Window that closes, or moves its page into a Space, leaves the screen whole: never on screen without its UI or its page', async () => {
+  const { app } = orbit
+  for (const how of ['close', 'move'] as const) {
+    const url = sites.url(`/site/Leaving-${how}`)
+    await openFromOtherApp(app, url)
+    await expect.poll(async () => (await minis(app))[0]?.url).toBe(url)
+    const page = await findPage(app, `/site/Leaving-${how}`)
+    await expect(page.locator('#title')).toHaveText(`Leaving-${how}`)
+    const [mini] = await minis(app)
+    if (!mini?.tabId) throw new Error('no Mini Window')
+    const tabId = mini.tabId
+    // Grown open: its page shows on the card.
+    await expect
+      .poll(() =>
+        app.evaluate(
+          (_e, id) => (globalThis as unknown as OrbitGlobal).__orbit.ctx.tabs.get(id)?.getVisible() ?? false,
+          tabId,
+        ),
+      )
+      .toBe(true)
+    const ui = await miniUi(app, mini.id)
+    // Where windows fade out (macOS, Windows), the card shows a still of the page as the page leaves.
+    const rec = await record(ui, { still: '[data-testid="mini-leaving-still"] img' })
+    // In main: whether the window is on screen at the moment its page leaves it, at the moment its UI
+    // goes, and at each moment (every ms) it is on screen without its page.
+    await app.evaluate(
+      ({ BrowserWindow }, [wid, id]) => {
+        const ctx = (globalThis as unknown as OrbitGlobal).__orbit.ctx
+        const win = BrowserWindow.getAllWindows().find(
+          (b) => !b.isDestroyed() && ctx.windows.isUi(b.webContents) && ctx.windows.windowIdFor(b.webContents) === wid,
+        )
+        const view = ctx.tabs.get(id)
+        type Seen = { what: string; visible: boolean; wall: number }
+        const seen: Seen[] = []
+        ;(globalThis as unknown as { __leaving: Seen[] }).__leaving = seen
+        if (!win || !view) return
+        const now = () => performance.timeOrigin + performance.now()
+        win.webContents.once('destroyed', () =>
+          seen.push({ what: 'its UI went', visible: !win.isDestroyed() && win.isVisible(), wall: now() }),
+        )
+        const content = win.contentView
+        const remove = content.removeChildView.bind(content)
+        content.removeChildView = (v) => {
+          if (v === view) seen.push({ what: 'its page left', visible: win.isVisible(), wall: now() })
+          remove(v)
+        }
+        const timer = setInterval(() => {
+          if (win.isDestroyed()) return clearInterval(timer)
+          const placed = content.children.includes(view) && view.getVisible()
+          if (win.isVisible() && !placed) seen.push({ what: 'on screen without its page', visible: true, wall: now() })
+        }, 1)
+        setTimeout(() => clearInterval(timer), 5000)
+      },
+      [mini.id, tabId] as const,
+    )
+    await pressInTab(app, tabId, how === 'close' ? 'Mod+W' : 'Mod+O')
+    // The UI's frames so far, read often: the window closes with them.
+    type Drawn = { wall: number; still: boolean }
+    let frames: Drawn[] = []
+    const pull = async () => {
+      frames = await ui
+        .evaluate(() =>
+          (
+            (window as unknown as { __feelRec?: { frames: { wall: number; els: Record<string, unknown> }[] } })
+              .__feelRec?.frames ?? []
+          ).map((f) => ({ wall: f.wall, still: !!f.els.still })),
+        )
+        .catch(() => frames)
+    }
+    await expect
+      .poll(
+        async () => {
+          await pull()
+          return (await minis(app)).length
+        },
+        { intervals: [10] },
+      )
+      .toBe(0)
+    await rec.stop().catch(() => {})
+    const seen = await app.evaluate(
+      () => (globalThis as unknown as { __leaving: { what: string; visible: boolean; wall: number }[] }).__leaving,
+    )
+    // On screen, the still was drawn before that moment.
+    const stillBy = (wall: number) => frames.some((f) => f.wall <= wall && f.still)
+    const empty = seen.filter((s) => s.visible && !stillBy(s.wall))
+    console.info(
+      `[MW-15] ${how}: ${seen.map((s) => `${s.what} (${s.visible ? 'on screen' : 'off screen'})`).join(', ') || 'nothing seen'}`,
+    )
+    expect(seen.some((s) => s.what === 'its UI went')).toBe(true)
+    if (how === 'move') expect(seen.some((s) => s.what === 'its page left')).toBe(true)
+    expect(empty.map((s) => s.what)).toEqual([])
+  }
 })

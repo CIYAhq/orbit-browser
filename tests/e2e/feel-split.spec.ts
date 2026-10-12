@@ -66,8 +66,8 @@ const near = (a: Box | undefined, b: Box | undefined, tol = 0.5) =>
  * How the panes moved in a recording: the first frame any pane differs from where it started (or a
  * new pane shows), the frame from which every pane stays within 0.5 px of its final place, and the
  * largest one-frame step of any pane edge as a share of that edge's travel (1 = a jump). `seen` is
- * the same within 2 px: FL-01's standard spring (0.32 s / 0.88) overshoots by 0.3 % of the travel,
- * which over half a page card is about 2 px, so it comes within 0.5 px only after that overshoot.
+ * the same within 2 px. FL-01's standard spring (0.32 s / 0.88) would overshoot by 0.3 % of the
+ * travel, about 2 px over half a page card: panes stop where it first reaches their place instead.
  */
 function panesMotion(r: Recording) {
   const first = r.frames[0]?.lists.panes ?? {}
@@ -219,15 +219,15 @@ test('[FL-18] a tab dragged over the page: the drop zone fades in within about 1
     }
   }
   type Round = Awaited<ReturnType<typeof round>>
-  // A fade from 0 shows from its second frame, and React renders a pointer move's state in a task
-  // of its own, which can miss the next frame: 2 to 4 frames over seven runs, 3 in five.
+  // The move that finds a zone renders it at once, and its fade starts a frame along: it shows in
+  // the frame after the move (FL-18). A move to another half puts it there in that frame.
   const meets = (r: Round) =>
-    r.drawn <= 4 * FRAME_SLACK &&
+    r.drawn <= 2 * FRAME_SLACK &&
     r.shownMs <= 300 * FRAME_SLACK &&
     r.fadeMs <= (100 + 2 * FRAME) * FRAME_SLACK &&
-    r.placedIn <= 2 * FRAME_SLACK &&
+    r.placedIn <= FRAME_SLACK &&
     r.inSight <= 350 * FRAME_SLACK &&
-    r.inPlace <= 600 * FRAME_SLACK
+    r.inPlace <= 350 * FRAME_SLACK
   const { best, all } = await bestOf(round, meets)
   for (const r of all) {
     console.log(
@@ -256,12 +256,12 @@ test('[FL-18] a tab dragged over the page: the drop zone fades in within about 1
     expect(r.bottom, `round ${r.k}: the zone moved to the bottom half`).toBeGreaterThan(frame.height * 0.4)
     expect(r.panes, `round ${r.k}: both tabs are panes`).toEqual(r.pair)
   }
-  expect(best.drawn, 'the zone shows in the frames after the move').toBeLessThanOrEqual(4 * FRAME_SLACK)
+  expect(best.drawn, 'the zone shows within two frames of the move').toBeLessThanOrEqual(2 * FRAME_SLACK)
   expect(best.shownMs, 'the zone shows while the tab is over the page').toBeLessThanOrEqual(300 * FRAME_SLACK)
   expect(best.fadeMs, 'the zone is fully in').toBeLessThanOrEqual((100 + 2 * FRAME) * FRAME_SLACK)
-  expect(best.placedIn, 'the zone is in its new half in the frame after the move').toBeLessThanOrEqual(2 * FRAME_SLACK)
-  expect(best.inSight, 'both panes are in place').toBeLessThanOrEqual(350 * FRAME_SLACK)
-  expect(best.inPlace, 'and settle the last 2 px').toBeLessThanOrEqual(600 * FRAME_SLACK)
+  expect(best.placedIn, 'the zone is in its new half in the frame after the move').toBeLessThanOrEqual(FRAME_SLACK)
+  expect(best.inSight, 'both panes are within 2 px of their place').toBeLessThanOrEqual(350 * FRAME_SLACK)
+  expect(best.inPlace, 'both panes are in place (within 0.5 px)').toBeLessThanOrEqual(350 * FRAME_SLACK)
 })
 
 test('[FL-18] a pane added beside the page grows in with the standard spring; the divider follows the pointer; a flip moves the panes; closing one lets the other fill', async () => {
@@ -347,10 +347,11 @@ test('[FL-18] a pane added beside the page grows in with the standard spring; th
   note('FL-18', 'close: first move → the other pane in place', filled.ms, '260–300 ms (standard spring)')
   note('FL-18', 'close: largest step of a pane edge, share of its travel', filled.step * 100, '< 60 % (no jump)', '%')
 
-  // In place as the eye sees it (within 2 px) by 350 ms; the spring's last 2 px take until about 450 ms.
-  expect(made.seenMs, 'the new pane is in place').toBeLessThanOrEqual(350 * FRAME_SLACK)
-  expect(made.ms, 'and settles').toBeLessThanOrEqual(600 * FRAME_SLACK)
-  expect(widest - (newEnd?.width ?? 0), 'no visible overshoot').toBeLessThanOrEqual(4)
+  // In place (within 0.5 px) within 350 ms, with no overshoot: the panes stop where the standard
+  // spring first reaches their place, at about 280 ms (FL-18, SV-26).
+  expect(made.seenMs, 'the new pane is within 2 px of its place').toBeLessThanOrEqual(350 * FRAME_SLACK)
+  expect(made.ms, 'and in place').toBeLessThanOrEqual(350 * FRAME_SLACK)
+  expect(widest - (newEnd?.width ?? 0), 'no overshoot').toBeLessThanOrEqual(0.5)
   if (FRAME_SLACK === 1) {
     expect(made.step, 'the panes move with a spring').toBeLessThan(0.6)
     expect(flipped.step, 'a flip moves the panes').toBeLessThan(0.6)
@@ -359,5 +360,61 @@ test('[FL-18] a pane added beside the page grows in with the standard spring; th
   }
   expect(flipped.seenMs, 'the flip is done').toBeLessThanOrEqual(350 * FRAME_SLACK)
   expect(filled.seenMs, 'the other pane has filled').toBeLessThanOrEqual(350 * FRAME_SLACK)
-  expect(Math.max(flipped.ms, filled.ms), 'and they settle').toBeLessThanOrEqual(600 * FRAME_SLACK)
+  expect(Math.max(flipped.ms, filled.ms), 'and they are in place').toBeLessThanOrEqual(350 * FRAME_SLACK)
+})
+
+test('[SV-26][FL-18] closing a pane: its card fades and collapses with its page on it while the other pane grows', async () => {
+  const { app, shell } = orbit
+  const a = await openTab('Left')
+  await expect.poll(async () => (await tabView(app, a))?.visible).toBe(true)
+  const b = await openTab('Right', false)
+  await settled(shell)
+  expect(await run(app, 'split.addTab', { tabId: b, target: a, side: 'right' })).toBeTruthy()
+  await expect(shell.locator('[data-testid="split-pane"]')).toHaveCount(2)
+  await still(shell, '[data-testid="split-pane"]')
+  // At rest, each pane's card holds a still of its page, under the page's view: the moment the view
+  // goes, the card still shows the page.
+  const pane = shell.locator(`[data-testid="split-pane"][data-tab-id="${b}"]`)
+  await expect(pane.getByTestId('pane-still')).toHaveCount(1, { timeout: 10_000 })
+  type Rect = { x: number; y: number; width: number; height: number }
+  const same = (p: Rect | null | undefined, q: Rect | null | undefined) =>
+    !!p && !!q && (['x', 'y', 'width', 'height'] as const).every((k) => Math.abs(p[k] - q[k]) <= 1)
+  const card = await pane.boundingBox()
+  const held = await pane.getByTestId('pane-still').boundingBox()
+  expect(same(held, card), 'the still covers the card').toBe(true)
+
+  const GHOST = '[data-testid="split-ghost"]'
+  const rec = await record(shell, { ghost: GHOST, page: `${GHOST} [data-testid="pane-still"]`, panes: PANES })
+  await run(app, 'split.closePane', { tabId: b })
+  await expect(pane).toHaveCount(0)
+  await expect(shell.locator(GHOST)).toHaveCount(0)
+  await still(shell, '[data-testid="split-pane"]')
+  const r = await rec.stop()
+  const frames = r.frames.filter((f) => (f.els.ghost?.opacity ?? 0) > 0.02)
+  const first = frames[0]
+  const last = frames.at(-1)
+  if (!first?.els.ghost || !last?.els.ghost) throw new Error('the closing card never showed')
+  const gone = r.frames.find((f) => f.i > first.i && !f.els.ghost)
+  const fadeMs = (gone?.t ?? Number.POSITIVE_INFINITY) - first.t
+  const scale = last.els.ghost.width / first.els.ghost.width
+  const grown = panesMotion(r)
+  note('SV-26', 'close: the closing card shows its page in its first frame', first.els.page ? 1 : 0, '1 (yes)', '')
+  note('SV-26', 'close: the closing card, first frame → gone', fadeMs, 'about 200 ms')
+  note('SV-26', 'close: the closing card, smallest scale', scale, 'smaller (collapses)', '')
+  note('SV-26', 'close: first move → the other pane within 2 px', grown.seenMs, '260–300 ms (standard spring)')
+
+  // The page, at full opacity, where the pane was, in the first frame without its view.
+  expect(first.els.ghost.opacity).toBeGreaterThan(0.9)
+  expect(same(first.els.ghost, card), 'the closing card is where the pane was').toBe(true)
+  expect(first.els.page, 'the closing card shows its page').toBeTruthy()
+  // It keeps it on while it fades, and it fades over a few frames, getting smaller.
+  for (const f of frames) expect(f.els.page?.width ?? 0, `frame ${f.i}: the page on the card`).toBeGreaterThan(0)
+  expect(frames.length).toBeGreaterThanOrEqual(Math.max(2, Math.floor(4 / FRAME_SLACK)))
+  expect(last.els.ghost.opacity).toBeLessThan(first.els.ghost.opacity)
+  expect(scale, 'the card collapses as it fades').toBeLessThan(0.99)
+  expect(fadeMs).toBeGreaterThanOrEqual(150)
+  expect(fadeMs).toBeLessThanOrEqual((200 + 3 * FRAME) * FRAME_SLACK)
+  // Meanwhile the other pane grows into the space.
+  expect(Object.keys(grown.end)).toEqual([a])
+  expect(grown.seenMs, 'the other pane has filled').toBeLessThanOrEqual(350 * FRAME_SLACK)
 })
