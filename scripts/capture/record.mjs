@@ -13,7 +13,8 @@
  *
  * Scenarios live in scripts/capture/scenarios/<name>.mjs and export
  * `default async function (t)`; see helpers in `makeToolkit` below. A scenario may also export `env`:
- * more environment for Orbit's launch (fixture paths, say), as an object or a function of `{ fx }`.
+ * more environment for Orbit's launch (fixture paths, say), as an object or a function of `{ fx }`. It
+ * can't change the run's own profile or test hooks (ORBIT_USER_DATA, ORBIT_E2E).
  */
 import { execFile, spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, renameSync, rmSync } from 'node:fs'
@@ -68,6 +69,8 @@ async function startFixtures() {
   let offer = null
   // The `cut` files that broke off (`broken`, until a scenario calls fx.repair(name)) or were repaired.
   const cuts = new Map()
+  // The pages still waiting out their ?wait=, so close() can drop them.
+  const waits = new Set()
   const server = createServer((req, res) => {
     const at = new URL(req.url ?? '/', 'http://127.0.0.1')
     if (at.pathname.startsWith('/dl/')) {
@@ -118,18 +121,20 @@ async function startFixtures() {
 :root{color-scheme:light}body{font:16px/1.55 system-ui,sans-serif;margin:0;background:#fafafa;color:#1d1d1f}
 header{display:flex;align-items:center;gap:12px;padding:18px 40px;background:#fff;border-bottom:1px solid #eee}
 header .logo{width:30px;height:30px;border-radius:8px;background:${accent}}header b{font-size:18px}
-header nav{margin-left:auto;display:flex;gap:22px;color:#666;font-size:14px}
+header nav{margin-left:auto;display:flex;gap:22px;color:#666;font-size:14px}header nav a{color:inherit;text-decoration:none}
 main{padding:40px;max-width:1100px}h1{font-size:40px;margin:8px 0 6px;letter-spacing:-0.02em}
 .lead{color:#555;max-width:60ch;margin:0 0 28px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
 .card{background:#fff;border:1px solid #eee;border-radius:14px;padding:18px}.card h3{margin:10px 0 4px;font-size:16px}
 .card p{margin:0;color:#666;font-size:14px}.dot{width:36px;height:36px;border-radius:10px;background:${accent}}
 a.file{color:inherit;text-decoration:none}a.file:hover{border-color:${accent}}
-</style></head><body><header><div class="logo"></div><b>${esc(name)}</b><nav><span>Home</span><span>Library</span><span>Settings</span></nav></header>
+</style></head><body><header><div class="logo"></div><b>${esc(name)}</b><nav><a href="/Updates">Updates</a><a href="/Team">Team</a><a href="/About">About</a></nav></header>
 <main><h1>${esc(name)}</h1><p class="lead">A local demo page for Orbit screen captures, served from 127.0.0.1.</p><div class="grid">${cards}</div></main></body></html>`
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      waits.delete(timer)
       res.writeHead(200, { 'content-type': 'text/html' })
       res.end(page)
     }, wait)
+    waits.add(timer)
   })
   let port = PORT
   await new Promise((ok, fail) => {
@@ -147,6 +152,7 @@ a.file{color:inherit;text-decoration:none}a.file:hover{border-color:${accent}}
       cuts.set(file, 'repaired')
     },
     close: () => {
+      for (const timer of waits) clearTimeout(timer)
       server.closeAllConnections()
       server.close()
     },
@@ -177,7 +183,7 @@ function sendFile(req, res, at, cuts) {
     // A malformed escape: the name as it came.
   }
   const ext = name.split('.').pop()
-  const size = Math.min(Number(at.searchParams.get('size')) || 64 * 1024, 64 * MB)
+  const size = Math.max(0, Math.min(Number(at.searchParams.get('size')) || 64 * 1024, 64 * MB))
   const data = ext === 'pdf' ? pdfFile(name.replace(/\.pdf$/, '')) : ext === 'png' ? pngFile() : filler(size)
   const from = Number(/^bytes=(\d+)-/.exec(req.headers.range ?? '')?.[1] ?? 0)
   if (cuts.get(name) === 'broken') {
@@ -466,6 +472,8 @@ try {
     ? resolve(scenario)
     : resolve(import.meta.dirname, 'scenarios', `${scenario}.mjs`)
   const { default: play, setup, env = {} } = await import(pathToFileURL(scenarioFile).href)
+  // Downloads land in the run's profile (userData/Downloads), whatever the shell's own folder is.
+  const { ORBIT_DOWNLOADS_DIR: _shellDownloads, ...shellEnv } = process.env
   log('launching Orbit')
   app = await electron.launch({
     args: [
@@ -475,12 +483,12 @@ try {
       main,
     ],
     env: {
-      ...process.env,
-      ORBIT_E2E: '1',
-      ORBIT_USER_DATA: userData,
+      ...shellEnv,
       // Import searches no browser on this computer: a scenario that imports names its made-up ones.
       ORBIT_IMPORT_PLACES: '[]',
       ...(typeof env === 'function' ? await env({ fx }) : env),
+      ORBIT_E2E: '1',
+      ORBIT_USER_DATA: userData,
     },
   })
   let shell
