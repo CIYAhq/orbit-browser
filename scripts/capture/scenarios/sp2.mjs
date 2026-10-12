@@ -86,16 +86,20 @@ async function slide(t, on, input, to) {
   await glide(t, x(value), b.cy, 10, on)
   await t.sleep(120)
   await xButton('mousedown')
-  const from = at
-  const end = { x: on.x + x(to), y: on.y + b.cy }
-  for (let i = 1; i <= 22; i++) {
-    const k = 0.5 - 0.5 * Math.cos((Math.PI * i) / 22)
-    await xPointer(from.x + (end.x - from.x) * k, from.y + (end.y - from.y) * k)
-    await t.sleep(16)
+  // The button comes back up even if a step throws, so a failed run never leaves it held on the screen.
+  try {
+    const from = at
+    const end = { x: on.x + x(to), y: on.y + b.cy }
+    for (let i = 1; i <= 22; i++) {
+      const k = 0.5 - 0.5 * Math.cos((Math.PI * i) / 22)
+      await xPointer(from.x + (end.x - from.x) * k, from.y + (end.y - from.y) * k)
+      await t.sleep(16)
+    }
+    at = end
+    await t.sleep(100)
+  } finally {
+    await xButton('mouseup')
   }
-  at = end
-  await t.sleep(100)
-  await xButton('mouseup')
   const name = await input.getAttribute('data-testid')
   console.error(`[check] ${name}: ${value} → ${await input.inputValue()} (asked ${to})`)
 }
@@ -181,17 +185,19 @@ const focusEvent = (t, kind) =>
     for (const w of BrowserWindow.getAllWindows()) if (w.webContents.getURL().includes('view=shell')) w.emit(k)
   }, kind)
 
-export default async function (t) {
-  t0 = performance.now()
-  const s0 = await t.state()
-  const home = s0.spaceOrder[0]
-  const [main] = await windowIds(t)
-  const overlay = await uiPage(t, 'overlay', main)
-  const onOverlay = { page: overlay, x: 0, y: 0 }
+// Made in setup, before the recording starts; the clip uses them.
+let home
+let client
+let work
+const tabs = {}
+
+/**
+ * Two Favorites in the Default profile; Personal, then Client, then Work, each with tabs shown once so they
+ * have their titles and icons (a tab never shown doesn't load).
+ */
+export async function setup(t) {
+  home = (await t.state()).spaceOrder[0]
   await t.run('spaces.update', { spaceId: home, name: 'Personal' })
-  // Two Favorites in the Default profile; Personal, then Client, then Work, each with tabs shown once so they
-  // have their titles and icons (a tab never shown doesn't load), made before the clip has much to show.
-  const tabs = {}
   const shown = async (id, name) => {
     await t.run('tabs.activate', { tabId: id })
     await waitFor(t, async () => {
@@ -199,8 +205,8 @@ export default async function (t) {
       return tab?.title === name && !tab.loading
     })
   }
-  const client = await t.run('spaces.create', { name: 'Client', activate: false, afterSpaceId: home })
-  const work = await t.run('spaces.create', { name: 'Work', activate: false, afterSpaceId: client })
+  client = await t.run('spaces.create', { name: 'Client', activate: false, afterSpaceId: home })
+  work = await t.run('spaces.create', { name: 'Work', activate: false, afterSpaceId: client })
   for (const [n, space] of [
     ['Wiki', work],
     ['Tracker', work],
@@ -219,12 +225,19 @@ export default async function (t) {
     tabs[n] = await t.run('tabs.create', { url: t.fx.url(n), spaceId: home, activate: false })
     await shown(tabs[n], n)
   }
+}
+
+export default async function (t) {
+  t0 = performance.now()
+  const [main] = await windowIds(t)
+  const overlay = await uiPage(t, 'overlay', main)
+  const onOverlay = { page: overlay, x: 0, y: 0 }
   await restingOn(t, home)
   await glide(t, 700, 420, 4)
   await t.sleep(1500)
 
-  // SP-04, SB-06: hovering the title row shows the … button, which opens the Space menu; a right-click on
-  // another Space's icon opens its menu without leaving this Space.
+  // SP-04, SB-06: hovering the title row shows the … button, which opens the Space menu. SP-07: a
+  // right-click on another Space's icon in the switcher opens its menu without leaving this Space.
   mark('space-menu')
   await openSpaceMenu(t, overlay)
   for (const id of ['theme', 'icon', 'profile', 'rename', 'manage', 'delete']) {
