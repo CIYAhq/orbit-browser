@@ -71,17 +71,33 @@ async function click(t, locator, opts = {}) {
   await on.page.mouse.click(b.cx, b.cy, { button: opts.button ?? 'left' })
 }
 
-/** A range input's thumb dragged from where it is to `to` (0 to 100). */
+/** The on-screen pointer's button, pressed (`mousedown`) or let go (`mouseup`), as a person's. */
+const xButton = (action) => new Promise((r) => execFile('xdotool', [action, '1'], () => r()))
+
+/**
+ * A range input's thumb dragged from where it is to `to` (0 to 100), with the on-screen pointer and its
+ * button only. A native slider's drag ends at the first move of a pointer with no button held, so a drag
+ * by the page's pointer stops at the on-screen pointer's next move. Prints the value it ends on.
+ */
 async function slide(t, on, input, to) {
   const b = await box(input)
   const value = Number(await input.inputValue())
   const x = (v) => b.x + 8 + ((b.width - 16) * v) / 100
   await glide(t, x(value), b.cy, 10, on)
   await t.sleep(120)
-  await on.page.mouse.down()
-  await glide(t, x(to), b.cy, 22, on)
+  await xButton('mousedown')
+  const from = at
+  const end = { x: on.x + x(to), y: on.y + b.cy }
+  for (let i = 1; i <= 22; i++) {
+    const k = 0.5 - 0.5 * Math.cos((Math.PI * i) / 22)
+    await xPointer(from.x + (end.x - from.x) * k, from.y + (end.y - from.y) * k)
+    await t.sleep(16)
+  }
+  at = end
   await t.sleep(100)
-  await on.page.mouse.up()
+  await xButton('mouseup')
+  const name = await input.getAttribute('data-testid')
+  console.error(`[check] ${name}: ${value} → ${await input.inputValue()} (asked ${to})`)
 }
 
 const dot = (t, id, page = t.shell) => page.locator(`[data-testid="space-dot"][data-space-id="${id}"]`)
