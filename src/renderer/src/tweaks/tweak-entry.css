@@ -1,0 +1,20 @@
+/*
+ * The paintbrush in the address field (BO-01, BO-14): see TweakButton.tsx. It takes the field's
+ * button look (chrome.css, .address__button).
+ */
+
+/* No Tweak for the site yet: it shows with the copy button, while the pointer is over the field. */
+.address__tweak.is-none {
+  opacity: 0;
+}
+
+.address:hover .address__tweak.is-none,
+.address:focus-within .address__tweak.is-none {
+  opacity: 1;
+}
+
+/* A Tweak is on: the brush takes the Space's accent. */
+.address__tweak.is-on,
+.address__tweak.is-on:hover {
+  color: var(--accent);
+}

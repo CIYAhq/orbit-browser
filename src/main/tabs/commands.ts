@@ -32,6 +32,7 @@ import { onGesture } from '../pages/gestures'
 import type { CallContext } from '../registry'
 import { registerSpaceOrderUndo } from '../spaces/order-undo'
 import { tabSplitMenuItems } from '../split/menu'
+import { TWEAK_TAB_MENU_KEYS, tabTweakMenuItems } from '../tweaks/menu'
 import { registerBlankWindows } from './blank'
 import { registerLinkDrop } from './link-drop'
 import { TabMaintenance } from './maintenance'
@@ -246,6 +247,7 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     pasteUrlInto: (folderId) => void pasteUrlAsTab(windowId, { kind: 'folder', folderId }),
     deleteFolder: (folderId) => void confirmDeleteFolder(windowId, folderId),
     splitItems: (tabIds) => tabSplitMenuItems(ctx, tabIds, windowId),
+    tweakItems: (tabId) => tabTweakMenuItems(ctx, tabId, windowId),
   })
 
   const rowMenus = registerRowMenus(ctx)
@@ -434,7 +436,8 @@ export function registerTabs(ctx: MainContext): { ops: TabOps; maintenance: TabM
     const state = store.state
     const mo = menuOps(windowId)
     // Keys lane: an item that a key also does shows the key (KS-18).
-    const forTab = (tabId: TabId) => withKeyHints(tabMenu(state, tabId, selection, mo), TAB_MENU_KEYS)
+    const forTab = (tabId: TabId) =>
+      withKeyHints(tabMenu(state, tabId, selection, mo), [...TAB_MENU_KEYS, ...TWEAK_TAB_MENU_KEYS])
     const all = isFolderId(id) ? folderMenu(state, id, mo) : isTabId(id) ? forTab(id) : []
     // Private and blank windows have no pinned tabs, Favorites, folders or other Spaces (NV-11, SB-25, TB-17).
     const own = isTabId(id) && (isPrivateTab(state, id) || isBlankSpace(state, state.tabs[id]?.spaceId))

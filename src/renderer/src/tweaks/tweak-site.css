@@ -1,0 +1,51 @@
+/* The site's Tweaks in the site controls panel (BO-14): see tweaks.site-controls.tsx. */
+
+.tweak-site-row {
+  padding-right: 4px;
+}
+
+.tweak-site-row__toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 30px;
+  margin-left: -4px;
+  padding: 0 4px;
+  border-radius: 7px;
+  text-align: left;
+}
+
+.tweak-site-row__toggle:hover {
+  background: var(--site-fill);
+}
+
+.tweak-site-row__brush {
+  flex: none;
+  color: var(--text-muted, rgba(28, 28, 31, 0.56));
+  opacity: 0.7;
+}
+
+/* A Tweak that is on: its brush in the Space's accent. */
+.tweak-site-row.is-on .tweak-site-row__brush {
+  color: var(--accent, #5865d8);
+  opacity: 1;
+}
+
+.tweak-site-row__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tweak-site-row__badge {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--site-fill);
+  color: var(--text-muted, rgba(28, 28, 31, 0.56));
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}

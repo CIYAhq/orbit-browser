@@ -6,6 +6,7 @@ import { displayHost } from '../../../../shared/url'
 import { invoke, runAction } from '../../api'
 import { useKeymap } from '../../keys/live'
 import { useOrbit } from '../../store'
+import { TweakButton } from '../../tweaks/TweakButton'
 import { withShortcut } from './shortcut-label'
 
 /** How long the copy button shows its check mark. */
@@ -121,6 +122,7 @@ export function Address({ windowId }: { windowId: string }) {
           <ShieldBan size={13} />
         </button>
       )}
+      {page && !peek && <TweakButton windowId={windowId} />}
       {page && (
         <button
           type="button"

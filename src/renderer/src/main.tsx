@@ -186,6 +186,14 @@ async function boot(): Promise<void> {
         <LibraryApp />
       </StrictMode>,
     )
+  } else if (view === 'tweak') {
+    // The Tweak editor panel over the page's corner (tweaks lane, BO-02).
+    const { TweakEditorApp } = await import('./tweaks/TweakEditorApp')
+    root.render(
+      <StrictMode>
+        <TweakEditorApp />
+      </StrictMode>,
+    )
   } else if (view === 'strip') {
     // Split view pane strip (split lane, SV-12): a tiny transparent view over a pane's top edge.
     const { PaneStripApp } = await import('./shell/split/PaneStripApp')

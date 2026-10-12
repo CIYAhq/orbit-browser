@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, globalShortcut, Menu, nativeTheme, screen, type WebContents } from 'electron'
 import { toElectronAccelerator } from '../../shared/actions'
+import { TWEAK_ACTIONS } from '../../shared/commands/tweaks'
 import { createWindowState } from '../../shared/defaults'
 import { newId } from '../../shared/ids'
 import { routeFor } from '../../shared/link-routing'
@@ -944,7 +945,9 @@ export function registerMiniWindow(ctx: MainContext): void {
 
   // In a Mini Window, keys act on its page; sidebar, Space and tab-list keys do nothing (KS-20).
   // Help → Keyboard Shortcuts, File → Open File… and the Library's keys (⌘Y / Ctrl+H for History,
-  // ⌘⇧L) act in the browser window behind (OB-12, KS-12, AR-10, keys lane).
+  // ⌘⇧L) act in the browser window behind (OB-12, KS-12, AR-10, keys lane). So do the Tweak
+  // actions' own handlers (BO-21): View Tweaks opens the Library there, and the others say there
+  // why a Mini Window's page takes no Tweak (BO-01; tweaks review F7).
   const APP_ACTIONS = new Set([
     'window.new',
     'window.newBlank',
@@ -956,6 +959,7 @@ export function registerMiniWindow(ctx: MainContext): void {
     'app.library',
     'help.shortcuts',
     'file.open',
+    ...TWEAK_ACTIONS.map((a) => a.id),
   ])
   actions.intercept((id, c) => {
     const mini = miniOf(c)
