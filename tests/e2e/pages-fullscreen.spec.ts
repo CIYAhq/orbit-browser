@@ -218,6 +218,35 @@ test('[NV-20][KS-02] Esc goes to the page first: one press keeps full screen, an
   expect(await win(app)).toMatchObject({ fullscreen: false, sidebar: true })
 })
 
+test('[KS-02][NV-20] a first Esc the page used in full screen gets a toast offering Exit Full Screen; one it left alone gets none', async () => {
+  const { app } = orbit
+  const { tabId, escapes } = await escPage(app)
+  await enterFullScreen(app, '/esc')
+  // The page uses it (its preload says so, D59): full screen stays, and the toast offers the action.
+  await pressEscape(app, '/esc')
+  await expect.poll(escapes).toEqual(['keydown', 'keyup'])
+  // The sidebar is hidden: toasts show in a view of their own, made for the first (SB-13).
+  const toast = (await viewPage(app, 'toasts')).getByTestId('toast').filter({ hasText: 'The page used Esc' })
+  await expect(toast).toHaveCount(1)
+  expect(await win(app)).toMatchObject({ fullscreen: true, sidebar: false })
+  await expect(toast.getByTestId('toast-action')).toHaveText('Exit Full Screen')
+  await toast.getByTestId('toast-action').click()
+  await expect.poll(() => win(app)).toMatchObject({ fullscreen: false, sidebar: true })
+  await expect(toast).toHaveCount(0)
+
+  // A page that leaves Esc alone: full screen stays (one press never leaves, D60), and no toast.
+  await run(app, 'tabs.navigate', { tabId, url: fx.url('/esc') })
+  await waitTab(app, tabId, '/esc')
+  await expect.poll(() => focusedUrl(app)).toBe(fx.url('/esc'))
+  await enterFullScreen(app, '/esc')
+  await pressEscape(app, '/esc')
+  await expect.poll(escapes).toEqual(['keydown', 'keyup'])
+  // Longer than Orbit waits for the page's answer (250 ms).
+  await new Promise((r) => setTimeout(r, 600))
+  await expect(toast).toHaveCount(0)
+  expect(await win(app)).toMatchObject({ fullscreen: true, sidebar: false })
+})
+
 test('[NV-20] holding Esc leaves full screen: the page gets the press, not its repeats', async () => {
   const { app } = orbit
   const { escapes } = await escPage(app, false)

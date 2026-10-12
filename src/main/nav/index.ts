@@ -366,6 +366,7 @@ export function registerNav(ctx: MainContext, ops: TabOps): void {
           pending.markStopped(tabId)
           contents.stop()
         },
+        input,
       )
     })
     // The mouse's back/forward buttons over a page need nothing here: the page itself goes back or

@@ -3,6 +3,7 @@ import { ACTIONS_BY_ID, type ActionDef, priorityFor } from '../../shared/actions
 import type { ShortcutPriority } from '../../shared/commands/keys'
 import type { WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
+import { whenEscapeAnswered } from '../keys/escape'
 import { AGAIN_MS } from '../keys/router'
 
 /** Isolated world in which main asks a page to leave its own full screen (a video's). */
@@ -96,7 +97,8 @@ export interface FullScreenInfo {
  * video's) is the page's: the sidebar is left as it is, and Esc there is Chromium's.
  *
  * Esc follows `escapeInFullScreen`, with the priority of Exit Full Screen (Settings → Shortcuts,
- * KS-02). Only a main or private window goes full screen this way; a Mini Window doesn't.
+ * KS-02); a first press the page used gets KS-02's toast. Only a main or private window goes full
+ * screen this way; a Mini Window doesn't.
  */
 export function registerFullScreen(ctx: MainContext): FullScreen$ {
   const { store, windows, tabs, actions } = ctx
@@ -133,6 +135,19 @@ export function registerFullScreen(ctx: MainContext): FullScreen$ {
         .catch(() => false),
       new Promise((resolve) => setTimeout(resolve, PAGE_EXIT_WAIT_MS)),
     ])
+
+  /**
+   * A first Esc in full screen went to the page: if the page used it (the preload's Esc bit, D59),
+   * a toast offers Exit Full Screen, as for any key that prefers websites (KS-02).
+   */
+  const offerExit = (windowId: WindowId, contents: WebContents, input: Electron.Input) =>
+    whenEscapeAnswered(contents, input, (used) => {
+      if (!used || !fullScreenWindow(windowId)?.isFullScreen()) return
+      windows.sendToWindow(windowId, 'toast', {
+        message: 'The page used Esc',
+        action: { label: exitAction.title, command: 'action.run', args: { id: exitAction.id } },
+      })
+    })
 
   /** Leaves full screen: a page's own first (it would stay over the window), then the window's. */
   const leave = async (windowId: WindowId) => {
@@ -218,7 +233,12 @@ export function registerFullScreen(ctx: MainContext): FullScreen$ {
     const memory = escapes.get(contents.id) ?? {}
     const next = escapeInFullScreen(memory, { type, repeat: input.isAutoRepeat, now: Date.now(), fullScreen }, priority)
     escapes.set(contents.id, next.memory)
-    if (next.verdict === 'page') return
+    if (next.verdict === 'page') {
+      if (fullScreen && type === 'down' && !input.isAutoRepeat && windowId && tabs.tabIdFor(contents)) {
+        offerExit(windowId, contents, input)
+      }
+      return
+    }
     event.preventDefault()
     if (next.verdict === 'exit' && windowId) void leave(windowId)
   }
