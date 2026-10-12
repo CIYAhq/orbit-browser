@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingHttpHeaders } from 'node:http'
 import { loadavg } from 'node:os'
 import { join } from 'node:path'
-import { type ElectronApplication, expect, test } from '@playwright/test'
+import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 import { TEST_RELAUNCH_FILE } from '../../src/main/updates/install'
 import { DEFAULT_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH } from '../../src/shared/defaults'
 import { record } from './frames'
@@ -412,6 +412,85 @@ test('[UP-02] the relaunch asks first while a download runs or a page has unsave
     await leave('page-dialog-ok')
     await gone
     expect(relaunched(userData)).not.toBeNull()
+  } finally {
+    await feed.close()
+  }
+})
+
+/** A part of the sidebar's box once it has stopped moving: the trays slide in and out. */
+async function settledBox(shell: Page, testId: string): Promise<{ y: number; height: number }> {
+  let last = ''
+  let box: { y: number; height: number } | null = null
+  await expect
+    .poll(
+      async () => {
+        box = await shell.getByTestId(testId).boundingBox()
+        const now = JSON.stringify(box)
+        const same = now === last
+        last = now
+        return same && box !== null
+      },
+      { intervals: [200] },
+    )
+    .toBe(true)
+  return box as unknown as { y: number; height: number }
+}
+
+test('[SB-10] the update banner, a left video’s controls and a running download stack just above the bottom bar, pushing the list up, and give the room back when they go', async () => {
+  const { app, shell } = orbit
+  const bottom = (b: { y: number; height: number }) => b.y + b.height
+  // Nothing to show: no tray takes room, and the list reaches the bottom bar.
+  await expect(shell.getByTestId('update-banner')).toHaveCount(0)
+  expect((await settledBox(shell, 'media-tray')).height).toBe(0)
+  expect((await settledBox(shell, 'downloads-tray')).height).toBe(0)
+  const full = await settledBox(shell, 'space-strip')
+
+  await run(app, 'settings.update', { autoPip: false })
+  const { feed } = await readyUpdate()
+  try {
+    // A download that runs (DL-03); the tab opened only for it closes again.
+    await run(app, 'tabs.create', { url: feed.page('/held.bin') })
+    await expect.poll(() => run(app, 'downloads.active')).toBe(1)
+    // A video playing with sound, left for another tab: with PiP off, its controls go to the
+    // sidebar (MD-09).
+    const video = (await run(app, 'tabs.create', { url: pages.url('/video/Clip') })) as string
+    await waitTab(app, video, '/video/Clip')
+    await expect.poll(async () => (await state(app)).tabs[video]?.media?.playing).toBe(true)
+    const away = (await run(app, 'tabs.create', { url: pages.url('/page/Away') })) as string
+    await waitTab(app, away, '/page/Away')
+    await expect(shell.getByTestId('download-row')).toBeVisible()
+    await expect(shell.getByTestId('media-controller')).toBeVisible()
+    await expect(shell.getByTestId('update-banner')).toBeVisible()
+
+    // Stacked in that order, the last on the bottom bar, none over another or over the list.
+    const parts = ['space-strip', 'update-banner', 'media-tray', 'downloads-tray', 'spacebar']
+    const boxes = []
+    for (const part of parts) boxes.push(await settledBox(shell, part))
+    for (let i = 1; i < boxes.length; i++) {
+      const [upper, lower] = [boxes[i - 1], boxes[i]] as [{ y: number; height: number }, { y: number; height: number }]
+      expect(bottom(upper), `${parts[i - 1]} over ${parts[i]}`).toBeLessThanOrEqual(lower.y + 1)
+      if (i > 1) expect(lower.y - bottom(upper), `${parts[i - 1]} to ${parts[i]}`).toBeLessThanOrEqual(12)
+    }
+    expect(boxes[2]?.height).toBeGreaterThan(0)
+    expect(boxes[3]?.height).toBeGreaterThan(0)
+    // The list starts where it did and ends above the trays: they pushed it up.
+    const list = boxes[0] as { y: number; height: number }
+    expect(Math.abs(list.y - full.y)).toBeLessThanOrEqual(1)
+    expect(bottom(full) - bottom(list)).toBeGreaterThanOrEqual(
+      (boxes[1]?.height ?? 0) + (boxes[2]?.height ?? 0) + (boxes[3]?.height ?? 0) - 1,
+    )
+
+    // Each goes when it no longer applies: back on the video's tab, the download cancelled, the
+    // banner closed. The list has its room again.
+    await run(app, 'tabs.activate', { tabId: video })
+    await expect(shell.getByTestId('media-controller')).toHaveCount(0)
+    const [running] = (await run(app, 'downloads.list')) as { id: string }[]
+    await run(app, 'downloads.cancel', { id: running?.id })
+    await run(app, 'updates.dismiss', { banner: 'update' })
+    await expect(shell.getByTestId('update-banner')).toHaveCount(0)
+    await expect.poll(async () => (await shell.getByTestId('downloads-tray').boundingBox())?.height).toBe(0)
+    const back = await settledBox(shell, 'space-strip')
+    expect(Math.abs(bottom(back) - bottom(full))).toBeLessThanOrEqual(1)
   } finally {
     await feed.close()
   }
