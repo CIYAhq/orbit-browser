@@ -10,6 +10,10 @@ files:
 asarUnpack: []
 # Fails a packaged app without Chromium's licences, which the credits page links to (ST-17).
 afterPack: ./scripts/after-pack.mjs
+# Electron's GrantFileProtocolExtraPrivileges fuse stays on for now, though D53 (5) wants it off:
+# Orbit's own views load module scripts and stylesheets from file:, which Chromium refuses without
+# it, and every view draws empty. It can go off once they load from a privileged scheme
+# (docs/ARCHITECTURE.md §11).
 mac:
   category: public.app-category.productivity
   target:
