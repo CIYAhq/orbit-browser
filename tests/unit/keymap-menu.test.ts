@@ -156,8 +156,13 @@ describe('the macOS menu bar', () => {
     expect(find(fileMenu(), 'Open File…')?.registerAccelerator).toBe(false)
   })
 
-  it('[OB-12][OB-13] Help → Keyboard Shortcuts comes after Orbit Help', () => {
+  it('[OB-10][OB-12][OB-13] Help → Getting Started and Keyboard Shortcuts come after Orbit Help', () => {
     const help = build().help
-    expect(help?.map((i) => i.label).slice(0, 3)).toEqual(['Orbit Help', 'Keyboard Shortcuts', 'Report a Bug…'])
+    expect(help?.map((i) => i.label).slice(0, 4)).toEqual([
+      'Orbit Help',
+      'Getting Started',
+      'Keyboard Shortcuts',
+      'Report a Bug…',
+    ])
   })
 })

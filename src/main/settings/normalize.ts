@@ -1,5 +1,6 @@
 import { SECURE_DNS_CHOICES } from '../../shared/commands/settings'
 import { DEFAULT_SETTINGS } from '../../shared/defaults'
+import { HINT_KINDS, HINT_LIMITS, type HintKind } from '../../shared/hints'
 import { chosenApps, isOnboardingStep } from '../../shared/onboarding'
 import { cleanSiteDefaults } from '../../shared/site-settings'
 import type { ColorMode, OrbitState, Settings } from '../../shared/state'
@@ -27,6 +28,7 @@ export function normalizeSettingsPrefs(state: OrbitState): void {
   if (typeof s.onboarded !== 'boolean') s.onboarded = DEFAULT_SETTINGS.onboarded
   if (s.onboarded || !isOnboardingStep(s.onboardingStep)) delete s.onboardingStep
   normalizeOnboardingPicks(state)
+  normalizeHints(s)
   if (!(typeof s.settingsSection === 'string' && SECTION_ID_RE.test(s.settingsSection))) {
     s.settingsSection = DEFAULT_SETTINGS.settingsSection
   }
@@ -71,6 +73,20 @@ function normalizeOnboardingPicks(state: OrbitState): void {
 }
 
 const COLOR_MODES: readonly ColorMode[] = ['system', 'light', 'dark']
+
+/** How many times each hint has shown (OB-11): whole counts of the kinds there are; the rest is dropped. */
+function normalizeHints(s: Settings): void {
+  const shown: unknown = s.hintsShown
+  if (shown === undefined) return
+  const kept: Partial<Record<HintKind, number>> = {}
+  for (const kind of HINT_KINDS) {
+    const count = isRecord(shown) ? shown[kind] : undefined
+    if (typeof count === 'number' && Number.isInteger(count) && count > 0)
+      kept[kind] = Math.min(count, HINT_LIMITS[kind])
+  }
+  if (Object.keys(kept).length > 0) s.hintsShown = kept
+  else delete s.hintsShown
+}
 
 /** Update settings (UP-01, UP-06): a feed address that isn't usable turns checks off. */
 function normalizeUpdatePrefs(s: Settings): void {

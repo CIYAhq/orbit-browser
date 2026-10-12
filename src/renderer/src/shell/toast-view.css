@@ -30,3 +30,8 @@ html[data-view="toasts"] body {
 .toast-view .toast {
   pointer-events: auto;
 }
+
+/* A hint (OB-11) over the page wraps at a readable width, not the hidden sidebar's. */
+.toast-view .toast.is-hint {
+  max-width: 340px;
+}

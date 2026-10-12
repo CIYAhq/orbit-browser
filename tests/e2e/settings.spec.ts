@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
 import { DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
-import { ISSUES_URL, PROJECT_URL, RELEASES_URL } from '../../src/shared/project'
+import { HELP_URL, ISSUES_URL, RELEASES_URL } from '../../src/shared/project'
 import type { SpaceTheme } from '../../src/shared/state'
 import { paletteFor } from '../../src/shared/theme'
 import { bestOf } from './frames'
@@ -1030,7 +1030,7 @@ test('[ST-17][UP-07] Licence and Open-source credits open the credits that come 
   await expect.poll(activeUrl).toMatch(/^file:\/\/.*\/credits\.html\?chromium=file[^#]*$/)
 })
 
-test("[OB-13][UP-07] Report a Bug, Help and What's New open the project's pages in a tab; Copy Build Info copies it", async () => {
+test("[OB-13][UP-07] Report a Bug opens a draft issue, Help Orbit's own page and What's New the releases, in a tab; Copy Build Info copies it", async () => {
   const version = await appVersion()
   await orbit.app.evaluate(({ clipboard }) => clipboard.clear())
   await runFromCommandBar('Report a Bug')
@@ -1040,7 +1040,7 @@ test("[OB-13][UP-07] Report a Bug, Help and What's New open the project's pages 
   expect(body).toContain(`Orbit ${version}`)
 
   await action(orbit.app, 'help.open')
-  await expect.poll(activeUrl).toBe(`${PROJECT_URL}#readme`)
+  await expect.poll(activeUrl).toBe(HELP_URL)
   await action(orbit.app, 'help.releaseNotes')
   await expect.poll(activeUrl).toBe(RELEASES_URL)
 

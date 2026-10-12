@@ -18,6 +18,7 @@ import type { ItemId, OrbitState, TabId } from '../../../../shared/state'
 import { isAwayFromPinned, rowTitle } from '../../../../shared/tabs'
 import { splitOfTab, tabsInItem, visibleTabOrder } from '../../../../shared/tree'
 import { invoke, isMac } from '../../api'
+import { useShortcutLabel } from '../../keys/live'
 import {
   AT_ONCE,
   EASE,
@@ -646,6 +647,11 @@ function fadeHover(el: HTMLElement, entering: boolean) {
   hoverFades.set(el, fade)
 }
 
+/** A button's tooltip with its keys after its name, "Close (⌘W)", or just the name (OB-11). */
+function withKeys(label: string, keys: string): string {
+  return keys ? `${label} (${keys})` : label
+}
+
 function openContextMenu(e: ReactMouseEvent, id: ItemId) {
   e.preventDefault()
   const sel = useSelection.getState().ids
@@ -736,6 +742,9 @@ export const TabRowBody = memo(function TabRowBody({
   const focused = useKeyboardFocus((s) => s.id === tabId)
   const renaming = useRename((s) => (s.id === tabId ? s.mode : null))
   const menuOpen = useRowMenuOpen(tabId)
+  // The front tab's buttons name the keys that do the same to it (OB-11, KS-18).
+  const closeKeys = useShortcutLabel('tab.close')
+  const muteKeys = useShortcutLabel('tab.toggleMute')
   const [iconHover, setIconHover] = useState(false)
   // A tab that just opened in the background glows once so the eye finds it (FL-06).
   const [fresh] = useState(() => !!tab && !active && Date.now() - tab.createdAt < 1500)
@@ -826,7 +835,7 @@ export const TabRowBody = memo(function TabRowBody({
           className="tab-row__audio"
           data-testid="tab-audio"
           aria-label={tab.muted ? 'Unmute tab' : 'Mute tab'}
-          title={tab.muted ? 'Unmute' : 'Mute'}
+          title={withKeys(tab.muted ? 'Unmute' : 'Mute', active ? muteKeys : '')}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={() => void invoke('tabs.setMuted', { tabId, muted: !tab.muted })}
         >
@@ -837,7 +846,7 @@ export const TabRowBody = memo(function TabRowBody({
         type="button"
         className="tab-row__close"
         aria-label="Close tab"
-        title="Close"
+        title={withKeys('Close', active ? closeKeys : '')}
         data-testid="tab-close"
         onPointerDown={(e) => e.stopPropagation()}
         onClick={() => void invoke('tabs.close', { tabId })}

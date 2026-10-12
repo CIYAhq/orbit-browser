@@ -165,7 +165,7 @@ export const SETTINGS_ACTIONS: SettingsActionDef[] = [
 export const SETTINGS_LANE_ACTIONS: ActionDef[] = [
   // Runs the first-run flow again over the open windows, keeping all data (OB-14).
   { id: 'onboarding.reset', title: 'Reset Onboarding', category: 'App', keywords: ['welcome', 'first run', 'setup'] },
-  // Help and feedback (OB-13): the project's public pages, in a tab. Orbit has no support server.
+  // Help and feedback (OB-13): Orbit's own help page, in a tab. Orbit has no support server.
   {
     id: 'help.open',
     title: 'Help',
@@ -173,8 +173,16 @@ export const SETTINGS_LANE_ACTIONS: ActionDef[] = [
     // Windows and Linux: F1, which can't be changed (KS-15); macOS has ⌘? for the Help menu.
     other: ['F1'],
     fixed: 'other',
-    keywords: ['documentation', 'user guide', 'support', 'readme'],
+    keywords: ['documentation', 'user guide', 'support', 'readme', 'faq'],
   },
+  // The getting-started guide (OB-10): Orbit's own pages, in a tab.
+  {
+    id: 'help.gettingStarted',
+    title: 'Getting Started',
+    category: 'App',
+    keywords: ['guide', 'tutorial', 'basics', 'tips', 'learn', 'introduction', 'tour', 'how to'],
+  },
+  // A draft issue on the project's tracker, with the build info filled in, that the user sends.
   {
     id: 'help.reportBug',
     title: 'Report a Bug',
@@ -210,6 +218,10 @@ export const SETTINGS_LANE_ACTIONS: ActionDef[] = [
     keywords: ['reduced motion', 'animations', 'accessibility', 'motion sickness'],
   },
 ]
+
+/** The actions Orbit's help pages may run (`help.run`, OB-10, OB-13). */
+export const HELP_PAGE_ACTIONS = ['help.shortcuts', 'help.reportBug', 'help.copyBuildInfo', 'app.archive'] as const
+export type HelpPageAction = (typeof HELP_PAGE_ACTIONS)[number]
 
 /** The built-in search engines, in the order Settings and onboarding list them (ST-06, OB-08). */
 export const ENGINE_ORDER: readonly SearchEngineId[] = [
@@ -368,6 +380,13 @@ export interface SettingsCommands {
   'settings.buildInfo': { args: Record<string, never>; result: BuildInfo }
   /** Copies the build info for a bug report (ST-17) and returns the text copied. */
   'settings.copyBuildInfo': { args: Record<string, never>; result: string }
+  /**
+   * A button on Orbit's help pages (OB-10, OB-13): one of HELP_PAGE_ACTIONS, run for the window the
+   * page's tab is in. Nothing else can be asked this way.
+   */
+  'help.run': { args: { id: HelpPageAction }; result: void }
+  /** Whether a window's toasts show a hint now (OB-11): Esc anywhere in that window dismisses it. */
+  'hints.showing': { args: { showing: boolean }; result: void }
   /**
    * A profile's default search engine (ST-06): a built-in id or "site:<site search id>", or null for
    * a profile other than Default to follow the Default profile's (ST-20).

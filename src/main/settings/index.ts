@@ -1,13 +1,14 @@
 import { app, clipboard } from 'electron'
 import { ACTIONS_BY_ID } from '../../shared/actions'
-import { type BuildInfo, SETTINGS_ACTIONS } from '../../shared/commands/settings'
-import { PROJECT_URL, RELEASES_URL } from '../../shared/project'
+import { type BuildInfo, HELP_PAGE_ACTIONS, SETTINGS_ACTIONS } from '../../shared/commands/settings'
+import { GUIDE_URL, HELP_URL, RELEASES_URL } from '../../shared/project'
 import type { WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
 import type { CallContext } from '../registry'
 import { BUILD_DATE, bugReportUrl, buildInfoText, runningVersion } from './build-info'
 import { creditsUrl } from './credits'
 import { stubDefaultBrowser, systemDefaultBrowser } from './default-browser'
+import { registerHints } from './hints'
 import { registerLinkSettings } from './links'
 import { registerOnboarding } from './onboarding'
 import { stubPdfApp, systemPdfApp } from './pdf-app'
@@ -45,6 +46,8 @@ export function registerSettings(ctx: MainContext): void {
   registerLinkSettings(ctx)
   registerSystemSettings(ctx)
   registerOnboarding(ctx)
+  // One-time hints when Orbit does something that can surprise (OB-11).
+  registerHints(ctx)
   // Each tab's back/forward list and scroll position, from one launch to the next (ST-16).
   registerSessionRestore(ctx)
 
@@ -104,10 +107,17 @@ export function registerSettings(ctx: MainContext): void {
     return version
   })
 
-  // Help and feedback (OB-13), release notes (UP-06) and build info (UP-07): the project's public
-  // pages in a tab. Orbit has no support server; a bug report is written on the issue tracker.
-  actions.register('help.open', (c) => openPage(`${PROJECT_URL}#readme`, c.windowId))
+  // Help and feedback (OB-13), the getting-started guide (OB-10), release notes (UP-06) and build
+  // info (UP-07). Help and the guide are Orbit's own pages (orbit://help/, orbit://guide/), in a tab.
+  // Orbit has no support server: a bug report is a draft on the issue tracker that the user sends.
+  actions.register('help.open', (c) => openInTab(HELP_URL, { windowId: c.windowId }))
+  actions.register('help.gettingStarted', (c) => openInTab(GUIDE_URL, { windowId: c.windowId }))
   actions.register('help.reportBug', (c) => openPage(bugReportUrl(buildInfo()), c.windowId))
+  // The buttons on the help pages: only these actions, for the window the page's tab is in.
+  commands.register('help.run', ({ id }, c) => {
+    if (!(HELP_PAGE_ACTIONS as readonly string[]).includes(id)) return
+    return actions.run(id, { windowId: c.windowId })
+  })
   actions.register('help.releaseNotes', (c) => openPage(RELEASES_URL, c.windowId))
   actions.register('help.copyBuildInfo', (c) => {
     clipboard.writeText(buildInfoText(buildInfo()))

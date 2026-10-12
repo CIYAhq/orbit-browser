@@ -1,5 +1,7 @@
+import { X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { HINT_MS } from '../../../shared/hints'
 import type { ToastAction, ToastPayload } from '../../../shared/toast'
 import { invoke } from '../api'
 import { EASE, POP, SNAPPY, tween, useReducedMotion } from '../motion'
@@ -9,6 +11,8 @@ interface Toast {
   message: string
   /** A button that runs a command, e.g. "Go to Space" after a restore to another Space (AR-05). */
   action?: ToastAction
+  /** A hint (OB-11): it stays about 6 s, has a ✕, and Esc dismisses it. */
+  hint?: boolean
 }
 
 let nextId = 1
@@ -40,15 +44,21 @@ const FADE_OUT = { opacity: 0, y: 0, scale: 1, transition: { duration: 0.16, eas
 /**
  * Short confirmations from the main process (e.g. "Copied URL"), shown at the bottom of the sidebar;
  * while the sidebar is hidden, over the page card in a view of their own (ToastViewApp, SB-13).
+ *
+ * Hints (OB-11, src/main/settings/hints.ts) are toasts that teach: they stay about 6 s, wrap to the
+ * sidebar's width, and have a ✕. Esc dismisses them wherever the keyboard is in their window: main
+ * hears it (and lets it go on to where it was going), so it is told when this list shows one.
  */
 export function Toasts() {
   const [toasts, setToasts] = useState<Toast[]>([])
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>())
   const hovered = useRef<number | null>(null)
+  const hints = useRef(new Set<number>())
   const reduced = useReducedMotion()
   const dismiss = useCallback((id: number) => {
     clearTimeout(timers.current.get(id))
     timers.current.delete(id)
+    hints.current.delete(id)
     setToasts((list) => list.filter((t) => t.id !== id))
   }, [])
   // A hovered toast waits: it leaves once the pointer has left it (FL-22).
@@ -67,13 +77,34 @@ export function Toasts() {
   useEffect(
     () =>
       window.orbit.on('toast', (payload) => {
-        const { message, action } = payload as ToastPayload
+        const { message, action, hint } = payload as ToastPayload
         const id = nextId++
-        setToasts((list) => [...list.slice(-(MAX_TOASTS - 1)), { id, message, ...(action ? { action } : {}) }])
-        leaveAfter(id, action ? STAY_WITH_ACTION_MS : STAY_MS)
+        if (hint) hints.current.add(id)
+        setToasts((list) => [
+          ...list.slice(-(MAX_TOASTS - 1)),
+          { id, message, ...(action ? { action } : {}), ...(hint ? { hint: true } : {}) },
+        ])
+        leaveAfter(id, hint ? HINT_MS : action ? STAY_WITH_ACTION_MS : STAY_MS)
       }),
     [leaveAfter],
   )
+  // Esc in this window (OB-11): main says which window it was pressed in.
+  useEffect(
+    () =>
+      window.orbit.on('hints.dismiss', (payload) => {
+        if ((payload as { windowId?: string } | undefined)?.windowId !== window.orbit.windowId) return
+        for (const id of [...hints.current]) dismiss(id)
+      }),
+    [dismiss],
+  )
+  // Main hears Esc for this window only while a hint shows here.
+  const hintShown = toasts.some((t) => t.hint)
+  const toldHint = useRef(false)
+  useEffect(() => {
+    if (toldHint.current === hintShown) return
+    toldHint.current = hintShown
+    void invoke('hints.showing', { showing: hintShown }).catch(() => {})
+  }, [hintShown])
   useEffect(() => {
     const all = timers.current
     return () => {
@@ -87,9 +118,10 @@ export function Toasts() {
           <motion.div
             key={t.id}
             layout={reduced ? false : 'position'}
-            className={`toast${t.action ? ' has-action' : ''}`}
+            className={`toast${t.action ? ' has-action' : ''}${t.hint ? ' is-hint' : ''}`}
             data-testid="toast"
             data-toast-id={t.id}
+            data-hint={t.hint ? 'true' : undefined}
             initial={reduced ? FADE_IN : ENTER}
             animate={SHOWN}
             exit={reduced ? FADE_OUT : LEAVE}
@@ -113,10 +145,25 @@ export function Toasts() {
                 : undefined
             }
           >
-            {t.message}
+            {t.hint ? <span className="toast__message">{t.message}</span> : t.message}
             {t.action && (
               <button type="button" className="toast__action" data-testid="toast-action">
                 {t.action.label}
+              </button>
+            )}
+            {t.hint && (
+              <button
+                type="button"
+                className="toast__close"
+                aria-label="Dismiss"
+                title="Dismiss (Esc)"
+                data-testid="toast-close"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  dismiss(t.id)
+                }}
+              >
+                <X size={12} strokeWidth={2.4} />
               </button>
             )}
           </motion.div>

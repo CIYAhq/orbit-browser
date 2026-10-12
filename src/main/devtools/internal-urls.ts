@@ -21,6 +21,10 @@ export const INTERNAL_PAGE_COMMANDS: Readonly<Record<string, readonly CommandNam
   version: ['settings.buildInfo', 'settings.copyBuildInfo'],
   // History (AR-10): its own tab's profile only (src/main/pages/history.ts).
   history: ['pages.history', 'pages.historyOpen', 'pages.historyDelete', 'pages.historyMenu'],
+  // Orbit's help pages (OB-09, OB-10, OB-13): `help.run` runs only HELP_PAGE_ACTIONS.
+  guide: ['help.run', 'settings.open'],
+  help: ['help.run', 'settings.open'],
+  welcome: ['help.run', 'settings.open'],
 }
 
 /**

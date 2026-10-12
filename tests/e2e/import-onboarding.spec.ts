@@ -196,12 +196,14 @@ test('[OB-03][IM-02][IM-06][IM-16] onboarding offers the browsers on this comput
   expect(tabsUnder(s, folderId)).toHaveLength(9)
   // Both profiles' history, in the first Space's profile.
   await expect.poll(async () => (await titles()).slice(0, 3)).toEqual(['Inbox', 'Weather', 'Example News'])
-  // The suggestions taken, unloaded: a Favorite and, after the folder, a pinned tab.
+  // The suggestions taken, unloaded: a Favorite and, after the folder, a pinned tab. Orbit basics
+  // (OB-09) stays at the top.
   const first = s.spaces[s.spaceOrder[0] as string]
   const favorites = (s.profiles[profileId as string]?.favorites ?? []).map((id) => s.tabs[id])
   expect(favorites.filter((t) => t?.pinnedUrl === 'https://mail.example.net/inbox')).toHaveLength(1)
   expect(favorites.every((t) => t?.asleep)).toBe(true)
   expect(first?.pinned.map((id) => s.folders[id]?.name ?? s.tabs[id]?.pinnedUrl)).toEqual([
+    'Orbit basics',
     'Imported from Chrome',
     'https://weather.example.org/',
   ])

@@ -176,6 +176,9 @@ function SpaceHeader({ space, children }: { space: Space; children: ReactNode })
   const collapsed = !!space.pinnedCollapsed
   // The caret turns at once with reduced motion, also after the header was drawn (FL-28).
   const reduced = useReducedMotion()
+  // Its tooltip names the key, if the user gave it one (OB-11, KS-18).
+  const toggleKeys = useShortcutLabel('pinned.toggleCollapsed')
+  const toggleTitle = collapsed ? 'Expand Pinned' : 'Collapse Pinned'
   return (
     <div
       className={`space-header${collapsed ? ' is-collapsed' : ''}${collapsed && activePinned ? ' has-hidden-active' : ''}`}
@@ -188,7 +191,7 @@ function SpaceHeader({ space, children }: { space: Space; children: ReactNode })
         data-testid="pinned-toggle"
         aria-label={collapsed ? 'Expand pinned tabs' : 'Collapse pinned tabs'}
         aria-expanded={!collapsed}
-        title={collapsed ? 'Expand Pinned' : 'Collapse Pinned'}
+        title={toggleKeys ? `${toggleTitle} (${toggleKeys})` : toggleTitle}
         onClick={() => void invoke('tabs.setPinnedCollapsed', { spaceId: space.id, collapsed: !collapsed })}
       >
         <motion.span
@@ -256,8 +259,9 @@ const PinnedSection = memo(function PinnedSection({ space }: { space: Space }) {
 function TodayBlock({ space, clear }: { space: Space; clear: boolean }) {
   const y = useRowShift('divider')
   const hasToday = clear && space.today.length > 0
-  // The button's tooltip follows a remapped shortcut (KS-18).
+  // The buttons' tooltips follow a remapped shortcut (KS-18), and name it (OB-11).
   const clearShortcut = useShortcutLabel('tabs.clearToday')
+  const newTabShortcut = useShortcutLabel('tab.new')
   // With reduced motion the "+" doesn't nudge (FL-28: decorative motion is off).
   const reduced = useReducedMotion()
   return (
@@ -289,6 +293,7 @@ function TodayBlock({ space, clear }: { space: Space; clear: boolean }) {
         type="button"
         className="new-tab-button"
         data-testid="new-tab-button"
+        title={newTabShortcut ? `New Tab (${newTabShortcut})` : 'New Tab'}
         onClick={() => runAction('tab.new')}
       >
         {/* FL-15: the "+" scales to about 0.92 and back in about 150 ms (its own timing). */}

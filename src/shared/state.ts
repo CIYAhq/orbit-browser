@@ -7,6 +7,7 @@
  * s- space, p- profile, w- window. Sidebar containers hold ordered ItemId lists.
  */
 
+import type { HintKind } from './hints'
 import type { PermissionPrompt } from './site'
 import type { SiteCategory, SiteDefault } from './site-settings'
 import type { PendingUpdate, UpdateStatus, WhatsNew } from './updates'
@@ -349,6 +350,8 @@ export interface Settings {
    * Skip setup puts them back (OB-14, D44). Kept until onboarding ends, across a quit.
    */
   onboardingThemeBefore?: { spaceId: SpaceId; theme: SpaceTheme; appearance: ColorMode }
+  /** How many times each kind of hint has shown (OB-11; HINT_LIMITS in hints.ts): each shows a few times at most. */
+  hintsShown?: Partial<Record<HintKind, number>>
   /** The Settings window's section shown last: Settings reopens there (ST-01). */
   settingsSection: string
   /** The Settings window's size when last resized (ST-01). */

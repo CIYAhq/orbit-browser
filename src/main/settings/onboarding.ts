@@ -1,19 +1,23 @@
 import { BrowserWindow, nativeTheme, type Rectangle, screen } from 'electron'
 import { ACTIONS_BY_ID } from '../../shared/actions'
-import { DEFAULT_PROFILE_ID, MAX_FAVORITES } from '../../shared/defaults'
+import { createWindowState, DEFAULT_PROFILE_ID, MAX_FAVORITES } from '../../shared/defaults'
 import { chosenApps, isOnboardingStep, type OnboardingInfo } from '../../shared/onboarding'
+import { WELCOME_URL } from '../../shared/project'
 import type { ColorMode, Settings, WindowId } from '../../shared/state'
 import { type KeyRemap, keyRemaps } from '../../shared/system-keys'
 import { NEUTRAL_THEME, normalizeSpaceTheme, paletteFor } from '../../shared/theme'
 import type { MainContext } from '../context'
 import { systemClashes } from '../keys/system'
 import { loadRenderer, uiWebPreferences } from '../windows'
+import { addOrbitBasics } from './basics'
 import { guardOwnWindow } from './ui-window'
 
 /** The onboarding window's id for IPC. It is not a browser window: no WindowState, no tabs. */
 export const ONBOARDING_WINDOW_ID = 'w-onboarding'
 
 const SIZE = { width: 920, height: 660 }
+/** The first browser window's share of the screen's width and height (OB-09). */
+const FIRST_WINDOW_SHARE = 0.8
 const MIN_SIZE = { width: 720, height: 560 }
 const isMac = process.platform === 'darwin'
 /** The first-run key check (KS-03) is Linux's: macOS and Windows keep no keys Orbit binds by default. */
@@ -162,7 +166,10 @@ class Onboarding {
     })
   }
 
-  /** Adds the chosen Favorites, marks onboarding done and shows the browser window (OB-09). */
+  /**
+   * Adds the chosen Favorites, marks onboarding done and shows the browser window (OB-09): the
+   * first one, or after Reset onboarding the one open already, which gets nothing new.
+   */
   async finish(favorites: unknown, skipped = false): Promise<void> {
     if (!this.window || this.finishing) return
     this.finishing = true
@@ -198,13 +205,41 @@ class Onboarding {
       // After Reset onboarding a browser window is open already: go back to it. Otherwise this is the
       // first one. It opens before this window closes, so Orbit never has no window (and quits).
       const open = this.browserWindows()
-      const windowId = open[open.length - 1] ?? this.ctx.windows.open()
+      const windowId = open[open.length - 1] ?? (await this.openFirstWindow())
       const win = this.ctx.windows.get(windowId)
       if (win && !win.isDestroyed() && win.isVisible()) win.focus()
       this.window?.close()
     } finally {
       this.finishing = false
     }
+  }
+
+  /**
+   * The first browser window (OB-09): centred at about 80% of the screen, with a small pinned
+   * "Orbit basics" folder (the guide and help, OB-10, OB-13) at the top of the first Space's pinned
+   * section and Orbit's welcome page in Today, which it shows. The command bar stays closed.
+   */
+  private async openFirstWindow(): Promise<WindowId> {
+    const spaceId = this.ctx.store.state.spaceOrder[0]
+    if (!spaceId) return this.ctx.windows.open()
+    const area = screen.getPrimaryDisplay().workArea
+    const width = Math.round(area.width * FIRST_WINDOW_SHARE)
+    const height = Math.round(area.height * FIRST_WINDOW_SHARE)
+    const bounds = {
+      x: Math.round(area.x + (area.width - width) / 2),
+      y: Math.round(area.y + (area.height - height) / 2),
+      width,
+      height,
+    }
+    const first = { ...createWindowState(spaceId), bounds }
+    this.ctx.store.update((d) => {
+      addOrbitBasics(d, spaceId)
+      d.windows[first.id] = first
+    })
+    const windowId = this.ctx.windows.open(first)
+    // Shown from the window's first frame: the window shows itself once its sidebar has painted.
+    await this.ctx.commands.run('tabs.create', { url: WELCOME_URL, spaceId, activate: true }, { windowId })
+    return windowId
   }
 
   focus(): void {

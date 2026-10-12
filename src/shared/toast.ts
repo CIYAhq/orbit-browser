@@ -11,4 +11,9 @@ export interface ToastAction {
 export interface ToastPayload {
   message: string
   action?: ToastAction
+  /**
+   * A hint (OB-11): it stays about 6 s (HINT_MS), longer while the pointer is on it, has a ✕, and
+   * Esc dismisses it wherever the keyboard is in its window.
+   */
+  hint?: boolean
 }

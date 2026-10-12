@@ -1,0 +1,131 @@
+/* Orbit's own help pages (OB-09, OB-10, OB-13), in the internal pages' look (internal.css). */
+
+.help__lead {
+  margin: -12px 0 28px;
+  font-size: 16px;
+  color: var(--internal-muted);
+  text-wrap: pretty;
+}
+
+.help__contents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0 0 32px;
+  padding: 0;
+  list-style: none;
+}
+
+.help__section {
+  margin: 0 0 28px;
+  scroll-margin-top: 24px;
+}
+
+.help__section h2 {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.help__section p,
+.help__section li {
+  margin: 0 0 8px;
+  text-wrap: pretty;
+}
+
+.help__section ul {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.help__kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--internal-line);
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--internal-text) 5%, transparent);
+  font:
+    12px / 18px ui-monospace,
+    "SF Mono",
+    Menlo,
+    Consolas,
+    monospace;
+  white-space: nowrap;
+}
+
+.help__link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--internal-link);
+  font: inherit;
+  cursor: pointer;
+}
+
+.help__link-button:hover {
+  text-decoration: underline;
+}
+
+.help__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+/* The essential shortcuts (OB-10, OB-12): one table, a heading per group. */
+.help__shortcuts {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.help__shortcuts th {
+  padding: 16px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  color: var(--internal-muted);
+}
+
+.help__shortcuts td {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--internal-line);
+}
+
+.help__shortcuts td:last-child {
+  padding-left: 16px;
+  text-align: right;
+}
+
+.help__none {
+  color: var(--internal-muted);
+}
+
+/* The welcome page's tips (OB-09). */
+.help__tips {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 28px;
+  padding: 0;
+  list-style: none;
+}
+
+.help__tip {
+  padding: 12px 16px;
+  border: 1px solid var(--internal-line);
+  border-radius: 10px;
+}
+
+.help__tip strong {
+  display: block;
+  margin-bottom: 2px;
+  font-weight: 600;
+}
+
+.help__more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}

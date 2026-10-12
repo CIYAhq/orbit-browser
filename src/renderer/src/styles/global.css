@@ -1025,6 +1025,49 @@ html[data-view="strip"] body {
   background: color-mix(in oklab, var(--accent, #fff) 28%, transparent);
 }
 
+/* A hint (OB-11): its text wraps within the sidebar, with the ✕ at its top right and its button
+   below. It takes the pointer, so hovering it keeps it. */
+.toast.is-hint {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 6px 8px;
+  max-width: calc(var(--sidebar-live-w, var(--sidebar-w, 260px)) - 24px);
+  box-sizing: border-box;
+  line-height: 1.4;
+  pointer-events: auto;
+  cursor: default;
+}
+
+.toast.is-hint .toast__message {
+  grid-column: 1;
+  grid-row: 1;
+  overflow-wrap: anywhere;
+}
+
+.toast.is-hint .toast__action {
+  grid-column: 1;
+  grid-row: 2;
+  justify-self: start;
+}
+
+.toast__close {
+  grid-column: 2;
+  grid-row: 1;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin: -1px -4px 0 0;
+  border-radius: 5px;
+  color: color-mix(in oklab, var(--text, #fff) 65%, transparent);
+}
+
+.toast__close:hover {
+  color: var(--text, #fff);
+  background: color-mix(in oklab, var(--text, #fff) 12%, transparent);
+}
+
 /* ---------- Sidebar items: tabs, pinned, Favorites, Today, folders (tabs lane) ---------- */
 
 .sidebar-items {
