@@ -25,7 +25,7 @@ import type { SettingsCommands } from './commands/settings'
 import type { SpaceCommands } from './commands/spaces'
 import type { SplitCommands } from './commands/split'
 import type { TabCommands } from './commands/tabs'
-import type { TweakCommands } from './commands/tweaks'
+import type { TweakCommands, TweakEvents } from './commands/tweaks'
 import type { WindowMaterial } from './theme'
 
 export interface OrbitCommands
@@ -48,7 +48,7 @@ export interface OrbitCommands
     KeyCommands,
     PagesCommands {}
 
-export interface OrbitEvents extends CoreEvents, PeekEvents, MediaEvents {}
+export interface OrbitEvents extends CoreEvents, PeekEvents, MediaEvents, TweakEvents {}
 
 export type CommandName = keyof OrbitCommands
 export type CommandArgs<K extends CommandName> = OrbitCommands[K] extends { args: infer A } ? A : never
@@ -102,6 +102,8 @@ export type RendererView =
   | 'print'
   /** Pages lane: the arrow a two-finger swipe over a page slides in (NV-02). */
   | 'swipe'
+  /** Tweaks lane: the Tweak editor panel over the page (BO-02). */
+  | 'tweak'
 
 /** The API the preload exposes on `window.orbit` to Orbit's own UI renderers. */
 export interface OrbitBridge {

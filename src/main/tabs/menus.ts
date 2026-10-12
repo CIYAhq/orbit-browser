@@ -32,6 +32,8 @@ export interface MenuOps {
   deleteFolder(folderId: FolderId): void
   /** Split View items for these tabs ("Open in Split View", SV-06/SV-09), from the split lane. */
   splitItems?(tabIds: TabId[]): MenuItemConstructorOptions[]
+  /** "Tweak this Site…" for a tab (BO-01), from the tweaks lane. */
+  tweakItems?(tabId: TabId): MenuItemConstructorOptions[]
 }
 
 /** Folders of a Space's pinned area, depth-first, with indentation for the Move to menu. */
@@ -151,6 +153,7 @@ export function tabMenu(
     { label: 'Duplicate', click: () => ops.duplicate(tabId) },
     ...(ops.splitItems?.([tabId]) ?? []),
     { label: tab.muted ? 'Unmute Tab' : 'Mute Tab', click: () => ops.setMuted(tabId, !tab.muted) },
+    ...(ops.tweakItems?.(tabId) ?? []),
     {
       label: 'Move to',
       submenu: moveToMenu(state, [item], ops, { favoritesProfileId: section === 'favorite' ? undefined : profileId }),

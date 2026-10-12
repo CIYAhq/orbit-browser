@@ -24,13 +24,17 @@
  * the page (NV-07), and its `window.close()` waits while that dialog is open (`holdForPrint`); a
  * frame's `print()` is the engine's, the system's own dialog. It also answers main about the
  * leave-page warning (`exposeLeave`).
+ *
+ * In a website's main frame, before the page's first paint, it puts in the stylesheets of the site's
+ * Tweaks, and takes them out when main's own copies are in (BO-18, D85: `applyTweakSheets`).
  */
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, type IpcRendererEvent, ipcRenderer, webFrame } from 'electron'
 import { isWheelNotch } from '../renderer/src/shell/spaces/physics'
 import type { OrbitBridge, StatePatch } from '../shared/rpc'
 import { PAGE_CHANNEL } from '../shared/site'
 import type { OrbitState } from '../shared/state'
 import { HistorySwipe, RELEASE_GAP_MS, type SwipeUpdate, scrollsToward } from './swipe'
+import { insertTweakSheets, tweakAnswer } from './tweak-sheets'
 
 type StateOf = (name: string) => string | null
 
@@ -50,6 +54,34 @@ const notificationClicked = () => {
 const screenShared = (count: number) => {
   ipcRenderer.send(PAGE_CHANNEL.screenShare, count)
 }
+
+/**
+ * Tweaks (BO-18; D40, D85): the stylesheets of the site's Tweaks go into the page before its first
+ * paint. Main answers from the frame's own URL, for a website's main frame only. The sheets go in as
+ * injected author sheets (src/preload/tweak-sheets.ts), which the page can neither read nor remove,
+ * and nothing is added to the page's globals. Once main's own copies are in, main's retire message,
+ * with this document's number, takes them out (src/main/tweaks/pages.ts). A PDF shows in the
+ * engine's viewer, which no Tweak changes (BO-01).
+ */
+function applyTweakSheets(): void {
+  if (window.top !== window || !/^https?:$/.test(location.protocol) || document.contentType === 'application/pdf')
+    return
+  let value: unknown
+  try {
+    value = ipcRenderer.sendSync(PAGE_CHANNEL.tweakSheets)
+  } catch {
+    return
+  }
+  const answer = tweakAnswer(value)
+  if (!answer) return
+  const retire = insertTweakSheets(webFrame, answer)
+  const onRetire = (_event: IpcRendererEvent, doc: unknown) => {
+    if (retire(doc)) ipcRenderer.removeListener(PAGE_CHANNEL.tweakRetire, onRetire)
+  }
+  ipcRenderer.on(PAGE_CHANNEL.tweakRetire, onRetire)
+}
+
+applyTweakSheets()
 
 /**
  * Runs in the page's own world before its scripts (serialized: it may use only its arguments and

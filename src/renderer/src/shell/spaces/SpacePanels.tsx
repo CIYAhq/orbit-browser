@@ -28,6 +28,7 @@ import { isPrivateProfile } from '../../../../shared/private'
 import type { ColorMode, OverlayState, SpaceId, SpaceTheme } from '../../../../shared/state'
 import { invoke, runAction } from '../../api'
 import { useOrbit } from '../../store'
+import { useTweakMenuEntry } from '../../tweaks/entry'
 import { EmojiPicker } from './EmojiPicker'
 import { ThemeEditor } from './ThemeEditor'
 import './spaces.css'
@@ -336,6 +337,7 @@ function SpaceMenu({ spaceId, x, y, sidebar }: { spaceId: SpaceId; x: number; y:
 
 /** The bottom bar's "+" menu (SB-09). */
 function PlusMenu({ x, y }: { x: number; y: number }) {
+  const tweakEntry = useTweakMenuEntry(window.orbit.windowId)
   const act = (id: string) =>
     run(async () => {
       await close()
@@ -351,6 +353,7 @@ function PlusMenu({ x, y }: { x: number; y: number }) {
     },
     { id: 'plus-folder', label: 'New Folder', icon: <FolderPlus size={14} />, run: act('folder.new') },
     { id: 'plus-split', label: 'New Split View', icon: <Columns2 size={14} />, run: act('split.add') },
+    ...tweakEntry(act('tweak.new')),
   ]
   return <Menu entries={entries} x={x} y={y} align="end" above testId="plus-menu" label="New" />
 }

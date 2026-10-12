@@ -1,0 +1,369 @@
+import { type IpcMainEvent, ipcMain, type Session, type WebContents } from 'electron'
+import { isPrivateProfileId } from '../../shared/private'
+import { PAGE_CHANNEL, type TweakSheetsAnswer } from '../../shared/site'
+import type { OrbitState, ProfileId, TabId, Tweak } from '../../shared/state'
+import {
+  enabledTweaksFor,
+  type SheetOptions,
+  type SheetPart,
+  tweakHostOf,
+  tweakScript,
+  tweakSheets,
+} from '../../shared/tweaks'
+import type { MainContext } from '../context'
+import { insertSheet, type PlacedSheet, removeSheet } from './page-sheets'
+
+/** The isolated world main's own scripts for Tweaks run in (never the page's world). */
+export const TWEAK_WORLD = 1040
+
+/** Chromium's net::ERR_ABORTED: a navigation stopped or replaced, which leaves the page as it was. */
+const ERR_ABORTED = -3
+
+/** What main knows of a page that may have Tweaks: one per web contents whose preload asked. */
+interface PageRecord {
+  contents: WebContents
+  /** The page's URL when its preload asked (BO-18), followed through in-page navigations. */
+  url: string
+  /** Its host; null once it shows something Tweaks don't reach. */
+  host: string | null
+  /** Bumped by each new document's read: the number its answer carries (`TweakSheetsAnswer.doc`). */
+  doc: number
+  /** The preload's first-paint sheets are in the page, not yet replaced by main's own. */
+  preloaded: boolean
+  /** Main's sheets in the page, by part (`SheetPart.key`), each with the renderer that gave its key. */
+  inserted: Map<string, PlacedSheet & { css: string }>
+  /** The JavaScript of this document's Tweaks has run (once per load, BO-18). */
+  scripted: boolean
+  /** A change is being applied; `again` asks for another pass once it is done. */
+  busy: boolean
+  again: boolean
+  /**
+   * Settles once this document's passes stop waiting on its renderer (`leave()`): a new document
+   * asked, or the renderer went. An answer that never comes then holds up nothing.
+   */
+  gone: Promise<void>
+  leave: () => void
+  /** Sheet options for this page only: a hidden element shown while its restore marker is hovered. */
+  showHidden?: string
+}
+
+export interface TweakPages {
+  /** Whether a tab shows a page Tweaks can change now: a website whose preload asked (BO-01). */
+  tweakable(tabId: TabId): boolean
+  /** The host of a tab's page, where tweakable. */
+  hostOf(tabId: TabId): string | null
+  /**
+   * True once a tab shows a page Tweaks can change (now, or as its preload asks); false as soon as
+   * its page fails to load (an error page, a crash) or the tab goes, else after `ms`.
+   */
+  whenTweakable(tabId: TabId, ms: number): Promise<boolean>
+  /** Runs a Tweak's JavaScript in a tab's page now (BO-11's "Run now"); false where it may not run. */
+  runNow(tabId: TabId, tweakId: string): boolean
+  /** Shows one hidden element again for now, or none (BO-10's restore marker preview). */
+  setShowHidden(tabId: TabId, hiddenId: string | undefined): void
+  /** Test view: the sheets main has in a tab's page, and whether the preload's are still there. */
+  info(tabId: TabId): { host: string | null; preloaded: boolean; parts: string[]; scripted: boolean } | null
+}
+
+/**
+ * Applies Tweaks to pages (BO-18; D40, D85):
+ * - before first paint, the page preload asks main for its sheets (`PAGE_CHANNEL.tweakSheets`, a
+ *   sync message that carries nothing): main answers from the frame's own URL, for a main frame,
+ *   with the sheets and a number for this document's read; the preload inserts them as injected
+ *   author sheets, which the page can't see or remove;
+ * - at document ready, or at the first change before it, main puts its own copies in (`insertCSS`)
+ *   and tells the preload to take its sheets out (`PAGE_CHANNEL.tweakRetire`, with that number):
+ *   a message to the page's main frame that main never waits for. At document ready main also runs
+ *   the JavaScript Tweaks allowed here in the page's main world (`executeJavaScript` on its main
+ *   frame, never through the preload);
+ * - while the page is open, each change to its Tweaks replaces only the sheets that changed:
+ *   the new one goes in before the old one comes out, so nothing flashes. A change waits only on
+ *   `insertCSS`, never on a script in the page or an isolated world, so it shows while the page is
+ *   still loading; and only while its document is there: a renderer that never answers (it crashed,
+ *   or another site's page took its place while it was busy) holds up nothing for the next document
+ *   (page-sheets.ts).
+ */
+export function registerTweakPages(ctx: MainContext): TweakPages {
+  const { store, sessions, tabs } = ctx
+  const records = new Map<number, PageRecord>()
+  /** Waiting for a page to become tweakable (`whenTweakable`): each checks its tab as a page asks. */
+  const waiting = new Set<() => void>()
+  const profiles = new WeakMap<Session, ProfileId>()
+  sessions.onSessionCreated((ses, profileId) => profiles.set(ses, profileId))
+
+  const profileOf = (contents: WebContents): ProfileId | undefined => {
+    const tabId = tabs.tabIdFor(contents)
+    return (tabId ? store.state.tabs[tabId]?.profileId : undefined) ?? profiles.get(contents.session)
+  }
+
+  /** The record still describes the page on screen: no other document has come since it asked. */
+  const current = (record: PageRecord): boolean =>
+    !!record.host && !record.contents.isDestroyed() && record.contents.getURL() === record.url
+
+  const sheetOptions = (record: PageRecord): SheetOptions => ({ showHidden: record.showHidden })
+
+  const partsFor = (state: OrbitState, record: PageRecord): SheetPart[] =>
+    tweakSheets(enabledTweaksFor(state.tweaks, state.settings, record.host), sheetOptions(record))
+
+  /**
+   * Puts one part's sheet in a document. A key that comes back once a later document came, or
+   * the renderer went, comes out again, but only from the renderer that gave it (page-sheets.ts).
+   */
+  const insert = async (record: PageRecord, doc: number, gone: Promise<void>, part: SheetPart): Promise<void> => {
+    const sheet = await insertSheet(record.contents, part.css, gone, () => record.doc === doc && current(record))
+    if (!sheet) return
+    const old = record.inserted.get(part.key)
+    record.inserted.set(part.key, { ...sheet, css: part.css })
+    if (old) removeSheet(record.contents, old)
+  }
+
+  /**
+   * The preload takes out its first-paint sheets (D85): a message to the page's main frame that
+   * carries only the number of the document's read, and that main never waits for.
+   */
+  const retire = (record: PageRecord, doc: number) => {
+    try {
+      record.contents.mainFrame.send(PAGE_CHANNEL.tweakRetire, doc)
+    } catch {
+      // The frame went, and the document's sheets with it.
+    }
+  }
+
+  /** Brings a page's sheets in line with its Tweaks now. */
+  const syncOnce = async (record: PageRecord): Promise<void> => {
+    if (!current(record)) return
+    const { doc, gone } = record
+    const want = partsFor(store.state, record)
+    const keys = new Set(want.map((p) => p.key))
+    await Promise.all(
+      want.filter((p) => record.inserted.get(p.key)?.css !== p.css).map((p) => insert(record, doc, gone, p)),
+    )
+    // Its document went meanwhile (a new one asked, or the renderer went): the pass ends here.
+    if (record.doc !== doc || !current(record)) return
+    for (const [part, have] of record.inserted) {
+      if (keys.has(part)) continue
+      record.inserted.delete(part)
+      removeSheet(record.contents, have)
+    }
+    // Main's own sheets are all in: the preload's go.
+    if (record.preloaded && want.every((p) => record.inserted.get(p.key)?.css === p.css)) {
+      record.preloaded = false
+      retire(record, doc)
+    }
+  }
+
+  /** One pass at a time per page; changes that come meanwhile make one more. */
+  const sync = async (record: PageRecord): Promise<void> => {
+    if (record.busy) {
+      record.again = true
+      return
+    }
+    record.busy = true
+    try {
+      do {
+        record.again = false
+        await syncOnce(record)
+      } while (record.again)
+    } catch (err) {
+      console.error('[tweaks] page sheets', err)
+    } finally {
+      record.busy = false
+    }
+  }
+
+  /**
+   * A Tweak's JavaScript may run in a page: it has some, the user allowed it on this device, and
+   * in a private window allowed it there too (BO-11, BO-17, BO-18).
+   */
+  const mayRun = (record: PageRecord, tweak: Tweak): boolean =>
+    !!tweak.js.trim() && tweak.jsAllowed && (tweak.jsInPrivate || !isPrivateProfileId(profileOf(record.contents)))
+
+  /** Runs the JavaScript of a page's Tweaks once per load, where allowed (BO-11, BO-17, BO-18). */
+  const runScripts = (record: PageRecord) => {
+    if (record.scripted || !current(record)) return
+    record.scripted = true
+    const state = store.state
+    for (const tweak of enabledTweaksFor(state.tweaks, state.settings, record.host)) {
+      if (!mayRun(record, tweak)) continue
+      // A script error goes to the page's console; a rejection here is only that (D28).
+      record.contents.mainFrame.executeJavaScript(tweakScript(tweak)).catch(() => {})
+    }
+  }
+
+  /** A document's end, for its passes to stop waiting on (`PageRecord.gone`), and its trigger. */
+  const parting = (): Pick<PageRecord, 'gone' | 'leave'> => {
+    let leave = () => {}
+    const gone = new Promise<void>((resolve) => {
+      leave = resolve
+    })
+    return { gone, leave }
+  }
+
+  const track = (contents: WebContents): PageRecord => {
+    const record: PageRecord = {
+      contents,
+      url: '',
+      host: null,
+      doc: 0,
+      preloaded: false,
+      inserted: new Map(),
+      scripted: false,
+      busy: false,
+      again: false,
+      ...parting(),
+    }
+    records.set(contents.id, record)
+    const id = contents.id
+    contents.on('dom-ready', () => {
+      if (!current(record)) return
+      void sync(record)
+      runScripts(record)
+    })
+    contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
+      // Same document, same origin: the page keeps its sheets (BO-17: in-page navigations).
+      if (isMainFrame && record.host && tweakHostOf(url) === record.host) record.url = url
+    })
+    // An error page took the page's place, or the page crashed: no Tweak goes there, until a page
+    // asks again (a stopped or replaced navigation leaves the page as it was).
+    contents.on('did-fail-load', (_event, code, _description, _url, isMainFrame) => {
+      if (isMainFrame && code !== ERR_ABORTED) record.host = null
+    })
+    contents.on('render-process-gone', () => {
+      record.host = null
+      record.leave()
+    })
+    contents.once('destroyed', () => {
+      records.delete(id)
+      record.leave()
+    })
+    return record
+  }
+
+  ipcMain.on(PAGE_CHANNEL.tweakSheets, (event: IpcMainEvent) => {
+    let sheets: TweakSheetsAnswer | null = null
+    try {
+      sheets = answer(event)
+    } catch (err) {
+      console.error('[tweaks] page ask', err)
+    }
+    event.returnValue = sheets
+  })
+
+  /**
+   * The page preload's ask, before the page's first paint: the sheets, from the frame's own URL, and
+   * the number of this document's read; null where none apply.
+   */
+  const answer = (event: IpcMainEvent): TweakSheetsAnswer | null => {
+    const contents = event.sender
+    const frame = event.senderFrame
+    const main = contents.mainFrame
+    if (!frame || frame.detached || frame.processId !== main.processId || frame.routingId !== main.routingId)
+      return null
+    // Only pages of a profile's session: never Orbit's own views.
+    if (!profiles.has(contents.session)) return null
+    const url = frame.url
+    const host = tweakHostOf(url)
+    let record = records.get(contents.id)
+    if (!host && !record) return null
+    record ??= track(contents)
+    // A pass for the document before this one stops waiting on its renderer, which may never answer.
+    record.leave()
+    Object.assign(record, parting())
+    record.doc++
+    record.url = url
+    record.host = host
+    record.inserted.clear()
+    record.preloaded = false
+    record.scripted = false
+    record.showHidden = undefined
+    if (!host) return null
+    // After the answer: the page paints first.
+    if (waiting.size > 0) {
+      setImmediate(() => {
+        for (const check of [...waiting]) check()
+      })
+    }
+    const parts = partsFor(store.state, record)
+    if (parts.length === 0) return null
+    record.preloaded = true
+    return { doc: record.doc, sheets: parts.map((p) => p.css) }
+  }
+
+  // A change to the Tweaks, or the switch for all of them (BO-14, BO-16): open pages follow at once.
+  store.subscribe((next, prev) => {
+    if (next.tweaks === prev.tweaks && next.settings.tweaksEnabled === prev.settings.tweaksEnabled) return
+    for (const record of records.values()) {
+      if (!record.host) continue
+      const before = enabledTweaksFor(prev.tweaks, prev.settings, record.host)
+      const after = enabledTweaksFor(next.tweaks, next.settings, record.host)
+      if (before.length === 0 && after.length === 0) continue
+      void sync(record)
+    }
+  })
+
+  const recordOf = (tabId: TabId): PageRecord | undefined => {
+    const contents = tabs.contents(tabId)
+    const record = contents ? records.get(contents.id) : undefined
+    return record && current(record) ? record : undefined
+  }
+
+  return {
+    tweakable: (tabId) => !!recordOf(tabId),
+    hostOf: (tabId) => recordOf(tabId)?.host ?? null,
+    whenTweakable: (tabId, ms) =>
+      new Promise<boolean>((resolve) => {
+        if (recordOf(tabId)) {
+          resolve(true)
+          return
+        }
+        // The tab runtime marks a failed load on the tab (`error`), and clears it as a load starts.
+        const failed = (state: OrbitState) => {
+          const tab = state.tabs[tabId]
+          return !tab || !!tab.error
+        }
+        if (failed(store.state)) {
+          resolve(false)
+          return
+        }
+        const finish = (ok: boolean) => {
+          waiting.delete(check)
+          clearTimeout(timer)
+          unsubscribe()
+          resolve(ok)
+        }
+        const check = () => {
+          if (recordOf(tabId)) finish(true)
+        }
+        const timer = setTimeout(() => finish(false), ms)
+        const unsubscribe = store.subscribe((next) => {
+          if (failed(next)) finish(false)
+        })
+        waiting.add(check)
+      }),
+    runNow: (tabId, tweakId) => {
+      const record = recordOf(tabId)
+      const state = store.state
+      const tweak = record && enabledTweaksFor(state.tweaks, state.settings, record.host).find((t) => t.id === tweakId)
+      if (!record || !tweak || !mayRun(record, tweak)) return false
+      record.contents.mainFrame.executeJavaScript(tweakScript(tweak)).catch(() => {})
+      return true
+    },
+    setShowHidden: (tabId, hiddenId) => {
+      const record = recordOf(tabId)
+      if (!record || record.showHidden === hiddenId) return
+      record.showHidden = hiddenId
+      void sync(record)
+    },
+    info: (tabId) => {
+      const contents = tabs.contents(tabId)
+      const record = contents ? records.get(contents.id) : undefined
+      if (!record) return null
+      return {
+        host: current(record) ? record.host : null,
+        preloaded: record.preloaded,
+        parts: [...record.inserted.keys()],
+        scripted: record.scripted,
+      }
+    },
+  }
+}
