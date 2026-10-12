@@ -140,14 +140,17 @@ const NAMES = [
   'Yoga',
 ]
 
-export default async function (t) {
-  t0 = performance.now()
+// Made in setup, before the recording starts; the clip uses them.
+let sp
+const ids = {}
+
+/**
+ * A long Today, a page of files and two Favorites, each tab shown once so it has its title and icon (a tab
+ * never shown doesn't load). The newest is on top.
+ */
+export async function setup(t) {
   const s0 = await t.state()
-  const sp = s0.spaces[s0.spaceOrder[0]]
-  const [main] = await windowIds(t)
-  // A long Today, a page of files and two Favorites, each tab shown once so it has its title and icon (a
-  // tab never shown doesn't load), made before the clip has much to show. The newest is on top.
-  const ids = {}
+  sp = s0.spaces[s0.spaceOrder[0]]
   const shown = async (id, name) => {
     await t.run('tabs.activate', { tabId: id })
     await waitFor(t, async () => {
@@ -172,6 +175,11 @@ export default async function (t) {
   await shown(ids.Files, 'Field kit')
   ids.Docs = await t.run('tabs.create', { url: t.fx.url('Docs'), spaceId: sp.id, activate: false })
   await shown(ids.Docs, 'Docs')
+}
+
+export default async function (t) {
+  t0 = performance.now()
+  const [main] = await windowIds(t)
   await scrollRests(t)
   await glide(t, 760, 430, 4)
   await t.sleep(1500)

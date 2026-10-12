@@ -326,10 +326,14 @@ function startRecorder(file) {
   return {
     stop: () =>
       new Promise((done) => {
-        ff.on('exit', done)
+        // ffmpeg is stopped if it hasn't finished in 5 s. The timer goes when it exits, so it keeps nothing up.
+        const timer = setTimeout(() => ff.kill('SIGINT'), 5000)
+        ff.on('exit', () => {
+          clearTimeout(timer)
+          done()
+        })
         ff.stdin.write('q')
         ff.stdin.end()
-        setTimeout(() => ff.kill('SIGINT'), 5000)
       }),
   }
 }
@@ -455,7 +459,15 @@ async function quitOrbit(app) {
       electronApp.quit()
     })
     .catch(() => {})
-  await Promise.race([exited, sleep(15_000)])
+  // Up to 15 s for Orbit to exit. The timer goes when it does: a pending one kept the run up for all 15 s.
+  let timer
+  await Promise.race([
+    exited,
+    new Promise((r) => {
+      timer = setTimeout(r, 15_000)
+    }),
+  ])
+  clearTimeout(timer)
   await app.close()
 }
 
