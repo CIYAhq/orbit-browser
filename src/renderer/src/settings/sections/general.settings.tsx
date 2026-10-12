@@ -1,11 +1,11 @@
 import { CircleCheck, SlidersHorizontal } from 'lucide-react'
 import { useState } from 'react'
-import type { DefaultBrowserStatus, PdfAppStatus, SettingsCapabilities } from '../../../../shared/commands/settings'
+import type { DefaultBrowserStatus, PdfAppStatus } from '../../../../shared/commands/settings'
 import { invoke, isMac } from '../../api'
 import { useOrbit } from '../../store'
 import { Button, Checkbox, type Option, Select, SettingGroup, SettingRow, Switch } from '../controls'
 import { HOUR, withCurrent } from '../format'
-import { useMainValue } from '../hooks'
+import { readEarly, useMainValue } from '../hooks'
 import type { SettingsSection } from '../registry'
 import { UpdateCheckRow, UpdateSettingsRows } from '../updates'
 
@@ -43,8 +43,8 @@ function ExportPinnedRow() {
   )
 }
 
-const readDefaultBrowser = () => invoke('settings.defaultBrowser', {})
-const readCapabilities = () => invoke('settings.capabilities', {})
+// Read before Settings first paints: the row's line is there in its first frame (ST-03).
+const readDefaultBrowser = readEarly(() => invoke('settings.defaultBrowser', {}))
 
 function DefaultBrowserRow() {
   const [status, setStatus] = useMainValue<DefaultBrowserStatus>(readDefaultBrowser)
@@ -80,7 +80,7 @@ function DefaultBrowserRow() {
   )
 }
 
-const readPdfApp = () => invoke('settings.pdfApp', {})
+const readPdfApp = readEarly(() => invoke('settings.pdfApp', {}))
 
 /**
  * Orbit for the computer's PDF files (DL-13, ST-03): on Windows, where the installer registers Orbit
@@ -125,7 +125,6 @@ const TRAY_LABEL = isMac ? 'Show the Mini Window button in the menu bar' : 'Show
 function GeneralPage() {
   const miniAfter = useOrbit((s) => s.settings.miniWindowArchiveAfterMs)
   const trayButton = useOrbit((s) => s.settings.miniWindowTrayButton)
-  const [capabilities] = useMainValue<SettingsCapabilities>(readCapabilities)
   return (
     <>
       <SettingGroup title="Default browser">
@@ -137,20 +136,19 @@ function GeneralPage() {
         <UpdateCheckRow id="updates" feedHere />
         <UpdateSettingsRows />
       </SettingGroup>
-      {capabilities?.importer && (
-        <SettingGroup title="Import and export">
-          <SettingRow
-            id="import"
-            label="Import bookmarks and data"
-            description="Bring bookmarks, history and more from another browser."
-          >
-            <Button testId="import-open" onClick={() => void invoke('settings.openImport', {})}>
-              Import…
-            </Button>
-          </SettingRow>
-          <ExportPinnedRow />
-        </SettingGroup>
-      )}
+      {/* Import (IM-01) and export (IM-17): drawn in the page's first frame, as every row is. */}
+      <SettingGroup title="Import and export">
+        <SettingRow
+          id="import"
+          label="Import bookmarks and data"
+          description="Bring bookmarks, history and more from another browser."
+        >
+          <Button testId="import-open" onClick={() => void invoke('settings.openImport', {})}>
+            Import…
+          </Button>
+        </SettingRow>
+        <ExportPinnedRow />
+      </SettingGroup>
       <SettingGroup title="Mini Window">
         <SettingRow
           id="mini-window-archive"

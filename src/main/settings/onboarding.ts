@@ -99,7 +99,6 @@ class Onboarding {
     return {
       step: isOnboardingStep(settings.onboardingStep) ? settings.onboardingStep : 'welcome',
       spaceId: spaceOrder[0],
-      importer: this.ctx.commands.has('import.open'),
       returning: this.browserWindows().length > 0,
       favorites: chosenApps(settings.onboardingFavorites).map((app) => app.id),
       keys,

@@ -342,12 +342,6 @@ export interface PdfAppStatus {
   note?: string
 }
 
-/** Optional features other lanes provide, which Settings and onboarding offer when present. */
-export interface SettingsCapabilities {
-  /** The import lane's flow (`import.open`, IM-01). */
-  importer: boolean
-}
-
 /** What About shows and "Copy build info" copies (ST-17). */
 export interface BuildInfo {
   version: string
@@ -441,8 +435,7 @@ export interface SettingsCommands {
   'settings.pdfApp': { args: Record<string, never>; result: PdfAppStatus }
   /** Opens Windows' Default apps settings, where only the user can choose Orbit for PDF files (DL-13). */
   'settings.setPdfApp': { args: Record<string, never>; result: PdfAppStatus }
-  'settings.capabilities': { args: Record<string, never>; result: SettingsCapabilities }
-  /** Opens the import flow (IM-01) in the browser window Settings belongs to, when the import lane provides it. */
+  /** Opens the import flow (IM-01) in the browser window Settings belongs to. */
   'settings.openImport': { args: Record<string, never>; result: boolean }
   /** Where first-run onboarding starts and what it can offer (OB-01, OB-03). */
   'onboarding.info': { args: Record<string, never>; result: OnboardingInfo }

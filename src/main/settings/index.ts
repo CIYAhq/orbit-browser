@@ -80,18 +80,11 @@ export function registerSettings(ctx: MainContext): void {
   commands.register('settings.pdfApp', () => pdfApp.status())
   commands.register('settings.setPdfApp', () => pdfApp.set())
 
-  // Import (IM-01) is the import lane's: offered when it registers `import.open`.
-  commands.register('settings.capabilities', () => ({ importer: commands.has('import.open') }))
+  // Import (IM-01): the import flow, in the browser window Settings belongs to.
   commands.register('settings.openImport', async () => {
-    if (!commands.has('import.open')) return false
     const windowId = settings.browserWindow() ?? windows.open()
     windows.get(windowId)?.focus()
-    const run = commands.run.bind(commands) as unknown as (
-      name: string,
-      args: unknown,
-      c: CallContext,
-    ) => Promise<unknown>
-    await run('import.open', {}, { windowId })
+    await commands.run('import.open', {}, { windowId })
     return true
   })
 

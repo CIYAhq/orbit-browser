@@ -1,5 +1,6 @@
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 import { DEFAULT_PROFILE_ID } from '../../src/shared/defaults'
+import { record } from './frames'
 import { type Fixtures, launchOrbit, type Orbit, run, startFixtures, state, tabPage } from './helpers'
 import { openSettings } from './settings-support'
 
@@ -105,4 +106,30 @@ test('[ST-03][DL-13] General offers Orbit for the computer’s PDF files on Wind
   await row.getByTestId('pdf-app-set').click()
   await expect(row.getByTestId('pdf-app-status')).toHaveText('Orbit opens PDF files')
   await expect(row).toContainText('PDF files on this computer open in Orbit.')
+})
+
+test('[OB-03][ST-03] General draws Import and export and the default browser line in its first frame, and no row below them moves after', async () => {
+  const page = await openSettings(orbit.app, { section: 'about' })
+  const general = '[data-testid="settings-content"][data-section="general"]'
+  const rec = await record(page, {
+    general,
+    defaultLine: `${general} [data-setting="default-browser"] .st-row__desc`,
+    importRow: `${general} [data-setting="import"]`,
+    exportRow: `${general} [data-setting="export-pinned"]`,
+    mini: `${general} [data-setting="mini-window-archive"]`,
+  })
+  await run(orbit.app, 'settings.open', { section: 'general' })
+  const { frames } = await rec.until(1200)
+  const drawn = frames.filter((f) => f.els.general)
+  expect(drawn.length, 'General was drawn').toBeGreaterThan(0)
+  // The import is part of Orbit (IM-01): no question to main before the group is drawn.
+  expect(drawn[0]?.els.importRow, 'Import in General’s first frame').toBeTruthy()
+  expect(drawn[0]?.els.exportRow, 'Export in General’s first frame').toBeTruthy()
+  // Read before Settings first painted: the line is there at once, so nothing under it moves.
+  expect(drawn[0]?.els.defaultLine, 'the default browser line in General’s first frame').toBeTruthy()
+  const tops = drawn.map((f) => Math.round(f.els.mini?.y ?? -1))
+  expect(new Set(tops).size, `the Mini Window row’s top in each frame: ${tops.join(', ')}`).toBe(1)
+  // It opens the import flow.
+  await page.locator(`${general} [data-testid="import-open"]`).click()
+  await expect.poll(async () => orbit.app.windows().some((w) => w.url().includes('view=import'))).toBe(true)
 })

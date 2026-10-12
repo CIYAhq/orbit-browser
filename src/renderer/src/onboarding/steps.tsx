@@ -81,31 +81,13 @@ export function WelcomeStep({ onNext }: { onNext: () => void }) {
 // ---- OB-03 ----
 
 export function ImportStep({
-  importer,
   onNext,
   onImport,
 }: {
-  importer: boolean
   onNext: () => void
-  /** An import was started (the import lane's flow, OB-03): it is added when onboarding ends. */
+  /** An import was started (the import flow, OB-03): it is added when onboarding ends. */
   onImport: (jobId: string) => void
 }) {
-  if (!importer) {
-    // The import lane hasn't shipped its flow (`import.open`): say so plainly and move on.
-    return (
-      <div className="ob-narrow" data-testid="onboarding-import-placeholder">
-        <Title id="import">Bring your bookmarks along</Title>
-        <p className="ob-lead">
-          Orbit can’t import from other browsers yet. When it can, you’ll find it in Settings, under General.
-        </p>
-        <Actions>
-          <Button primary onClick={onNext} testId="onboarding-next">
-            Continue
-          </Button>
-        </Actions>
-      </div>
-    )
-  }
   // The import flow inline; its "Do this later" has the same weight as its Next.
   return (
     <OnboardingImport
@@ -583,7 +565,6 @@ export function DoneStep({
   favorites,
   browser,
   declined,
-  importer,
   importJob,
   keys,
   returning,
@@ -594,7 +575,6 @@ export function DoneStep({
   favorites: string[]
   browser: DefaultBrowserStatus | undefined
   declined: boolean
-  importer: boolean
   importJob: string | undefined
   /** The keys step's list (KS-03), empty when it didn't show. */
   keys: KeyRemap[]
@@ -633,7 +613,9 @@ export function DoneStep({
         </div>
         <div>
           <dt>Import</dt>
-          <dd>{importer ? <ImportSummary jobId={importJob} /> : 'Not yet available'}</dd>
+          <dd>
+            <ImportSummary jobId={importJob} />
+          </dd>
         </div>
         {keys.length > 0 && (
           <div>
@@ -650,7 +632,7 @@ export function DoneStep({
           </dd>
         </div>
       </dl>
-      {importer && <ImportSuggestions jobId={importJob} />}
+      <ImportSuggestions jobId={importJob} />
       <Actions>
         <Button primary onClick={onStart} disabled={finishing} testId="onboarding-start">
           {returning ? 'Back to browsing' : 'Start browsing'}

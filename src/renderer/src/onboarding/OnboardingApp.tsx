@@ -201,7 +201,7 @@ function Flow({ info }: { info: OnboardingInfo }) {
           data-testid={`onboarding-step-${step}`}
         >
           {step === 'welcome' && <WelcomeStep onNext={next} />}
-          {step === 'import' && <ImportStep importer={info.importer} onNext={next} onImport={pickImport} />}
+          {step === 'import' && <ImportStep onNext={next} onImport={pickImport} />}
           {step === 'theme' && info.spaceId && <ThemeStep spaceId={info.spaceId} onNext={next} />}
           {step === 'favorites' && <FavoritesStep chosen={favorites} onChange={pickFavorites} onNext={next} />}
           {step === 'browser' && (
@@ -222,7 +222,6 @@ function Flow({ info }: { info: OnboardingInfo }) {
               favorites={favorites}
               browser={browser}
               declined={declined}
-              importer={info.importer}
               importJob={importJob}
               keys={info.keys}
               returning={info.returning}
