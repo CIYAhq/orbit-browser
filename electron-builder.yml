@@ -8,6 +8,8 @@ files:
   - out/**/*
   - package.json
 asarUnpack: []
+# Fails a packaged app without Chromium's licences, which the credits page links to (ST-17).
+afterPack: ./scripts/after-pack.mjs
 mac:
   category: public.app-category.productivity
   target:

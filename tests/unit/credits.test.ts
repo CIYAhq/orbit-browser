@@ -6,9 +6,12 @@ import {
   type Credit,
   creditOf,
   creditsHtml,
+  creditsPage,
   importedPackages,
   packageDirOf,
   runtimeClosure,
+  VITE_PRELOAD_HELPER,
+  viteCredit,
 } from '../../scripts/credits'
 
 const root = join(import.meta.dirname, '../..')
@@ -45,5 +48,32 @@ describe('[ST-17][UP-07] the open-source credits that come with Orbit (D43)', ()
     expect(html).toContain(`script-src 'sha256-${hash}'`)
     expect(html).toContain(`<script>${CREDITS_SCRIPT}</script>`)
     expect(html).toContain("default-src 'none'")
+  })
+
+  it('says Chromium’s licences aren’t in this copy, with no link, until main gives their file', () => {
+    const html = creditsHtml(credit('Orbit'), credit('Electron'), [])
+    expect(html).toContain('<span id="chromium-found" hidden>')
+    expect(html).toContain('<a id="chromium-link">LICENSES.chromium.html</a>')
+    expect(html).toMatch(/<span id="chromium-missing">[^<]*isn’t in this copy of Orbit\.<\/span>/)
+  })
+
+  it('credits Vite, with its own licence only, when the bundle has its preload helper', () => {
+    const vite = viteCredit(join(root, 'node_modules/vite'))
+    expect(vite).toMatchObject({ name: 'vite', license: 'MIT' })
+    expect(vite?.text).toMatch(/^# Vite core license[\s\S]*Permission is hereby granted/)
+    expect(vite?.text).not.toContain('bundled dependencies')
+    const page = (modules: Record<string, { renderedLength: number }>) => {
+      let source = ''
+      const hook = creditsPage(root).generateBundle as (this: unknown, options: unknown, bundle: unknown) => void
+      hook.call(
+        { emitFile: (file: { source: string }) => (source = file.source) },
+        {},
+        { 'index.js': { type: 'chunk', modules } },
+      )
+      return source
+    }
+    expect(page({ [VITE_PRELOAD_HELPER]: { renderedLength: 120 } })).toContain('<section id="pkg-vite">')
+    expect(page({ [VITE_PRELOAD_HELPER]: { renderedLength: 0 } })).not.toContain('<section id="pkg-vite">')
+    expect(page({})).not.toContain('<section id="pkg-vite">')
   })
 })

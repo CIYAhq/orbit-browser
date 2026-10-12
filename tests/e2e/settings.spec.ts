@@ -1018,12 +1018,15 @@ test('[ST-17][UP-07] Licence and Open-source credits open the credits that come 
   const chromium = (await credits.locator('#chromium-link').getAttribute('href')) ?? ''
   expect(chromium).toMatch(/^file:\/\/.*\/LICENSES\.chromium\.html$/)
   expect(existsSync(fileURLToPath(chromium))).toBe(true)
-  // The npm packages whose code ships, each with its licence in full; none that only build Orbit.
+  // The npm packages whose code ships, each with its licence in full (Vite for the preload helper it
+  // writes into the bundle); none that only build Orbit.
   const names = await credits
     .locator('#packages h3')
     .evaluateAll((hs) => hs.map((h) => h.firstChild?.textContent?.trim() ?? ''))
-  expect(names).toEqual(expect.arrayContaining(['immer', 'react', 'react-dom', 'scheduler', 'zustand', 'lucide-react']))
-  for (const tool of ['electron', 'vite', 'typescript', '@playwright/test']) expect(names).not.toContain(tool)
+  expect(names).toEqual(
+    expect.arrayContaining(['immer', 'react', 'react-dom', 'scheduler', 'zustand', 'lucide-react', 'vite']),
+  )
+  for (const tool of ['electron', 'electron-vite', 'typescript', '@playwright/test']) expect(names).not.toContain(tool)
   await expect(credits.locator('#packages pre')).toHaveCount(names.length)
 
   await page.locator('[data-setting="credits"]').getByRole('button').click()

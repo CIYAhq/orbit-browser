@@ -8,9 +8,9 @@ import type { Plugin } from 'vite'
  * Open-source credits rows of About open it offline and for anyone. It gives Orbit's licence,
  * Electron's, a link to Chromium's (Electron ships them as LICENSES.chromium.html, 20 MB, which main
  * finds at run time) and the licence of every npm package whose code ships: the ones the renderer
- * bundle took code from, and package.json's dependencies (main loads them from node_modules) with
- * the packages they need. The renderer build emits it as credits.html beside index.html; the
- * development server serves it at /credits.html.
+ * bundle took code from (Vite's preload helper among them), and package.json's dependencies (main
+ * loads them from node_modules) with the packages they need. The renderer build emits it as
+ * credits.html beside index.html; the development server serves it at /credits.html.
  */
 
 export interface Credit {
@@ -101,10 +101,29 @@ const escapeHtml = (text: string) =>
 
 const anchor = (name: string) => `pkg-${name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '')}`
 
-/** Main opens the page with ?chromium=<file URL of LICENSES.chromium.html> when it finds that file. */
-export const CREDITS_SCRIPT = `const to = new URLSearchParams(location.search).get('chromium');
-const link = document.getElementById('chromium-link');
-if (link && to && to.startsWith('file:')) link.href = to;`
+/**
+ * Main opens the page with ?chromium=<file URL of LICENSES.chromium.html> when it finds that file.
+ * Without one, the page says the file isn't in this copy of Orbit, and draws no link.
+ */
+export const CREDITS_SCRIPT = `const to = new URLSearchParams(location.search).get('chromium') || '';
+if (to.startsWith('file:') && to.endsWith('/LICENSES.chromium.html')) {
+  document.getElementById('chromium-link').href = to;
+  document.getElementById('chromium-found').hidden = false;
+  document.getElementById('chromium-missing').hidden = true;
+}`
+
+/** Vite's module preload helper (`__vitePreload`), which Vite writes into a bundle that imports lazily. */
+export const VITE_PRELOAD_HELPER = '\0vite/preload-helper.js'
+
+/**
+ * Vite's credit, for that helper: Vite's own licence. The rest of its licence file is for the code
+ * Vite's own build bundles, none of which ships in Orbit.
+ */
+export function viteCredit(dir: string): Credit | undefined {
+  const credit = creditOf(dir)
+  const end = credit?.text.indexOf('\n# Licenses of bundled dependencies') ?? -1
+  return credit && end > 0 ? { ...credit, text: credit.text.slice(0, end).trim() } : credit
+}
 
 function section(id: string, credit: Credit, heading: 'h2' | 'h3'): string {
   const site = credit.homepage?.startsWith('https://')
@@ -156,7 +175,7 @@ a { color: LinkText; }
 ${section('orbit', orbit, 'h2')}
 ${section('electron', electron, 'h2')}
 <section id="chromium"><h2>Chromium</h2>
-<p>Electron is built on Chromium, whose own code is under a BSD-style licence, and Chromium uses many other open-source projects. Their licences all come with Orbit, in <a id="chromium-link">LICENSES.chromium.html</a>.</p></section>
+<p>Electron is built on Chromium, whose own code is under a BSD-style licence, and Chromium uses many other open-source projects. <span id="chromium-found" hidden>Their licences all come with Orbit, in <a id="chromium-link">LICENSES.chromium.html</a>.</span><span id="chromium-missing">Electron ships their licences as LICENSES.chromium.html, but that file isn’t in this copy of Orbit.</span></p></section>
 <section id="packages"><h2>npm packages</h2>
 <p>The packages whose code is part of Orbit.</p>
 ${sorted.map((credit) => section(anchor(credit.name), credit, 'h3')).join('\n')}
@@ -168,8 +187,11 @@ ${sorted.map((credit) => section(anchor(credit.name), credit, 'h3')).join('\n')}
 `
 }
 
-/** The page, for these package directories plus package.json's dependencies and what they need. */
-function creditsFor(root: string, packageDirs: Iterable<string>): string {
+/**
+ * The page, for these package directories plus package.json's dependencies and what they need, and
+ * Vite when the bundle has its preload helper.
+ */
+function creditsFor(root: string, packageDirs: Iterable<string>, viteHelper = false): string {
   const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { dependencies?: object }
   const dirs = new Set([...packageDirs].map((dir) => resolve(dir)))
   for (const dir of runtimeClosure(Object.keys(pkg.dependencies ?? {}), root)) dirs.add(resolve(dir))
@@ -177,6 +199,8 @@ function creditsFor(root: string, packageDirs: Iterable<string>): string {
   const electron = creditOf(join(root, 'node_modules', 'electron'))
   if (!orbit || !electron) throw new Error('credits: no package.json for Orbit or Electron')
   const packages = [...dirs].map((dir) => creditOf(dir)).filter((credit): credit is Credit => !!credit)
+  const vite = viteHelper ? viteCredit(join(root, 'node_modules', 'vite')) : undefined
+  if (vite) packages.push(vite)
   return creditsHtml({ ...orbit, name: 'Orbit' }, { ...electron, name: 'Electron' }, packages)
 }
 
@@ -194,14 +218,17 @@ export function creditsPage(root = process.cwd()): Plugin {
     },
     generateBundle(_options, bundle) {
       const dirs = new Set<string>()
+      let viteHelper = false
       for (const chunk of Object.values(bundle)) {
         if (chunk.type !== 'chunk') continue
         for (const [id, info] of Object.entries(chunk.modules)) {
-          const dir = info.renderedLength > 0 ? packageDirOf(id) : undefined
+          if (info.renderedLength === 0) continue
+          if (id === VITE_PRELOAD_HELPER) viteHelper = true
+          const dir = packageDirOf(id)
           if (dir) dirs.add(dir)
         }
       }
-      this.emitFile({ type: 'asset', fileName: 'credits.html', source: creditsFor(root, dirs) })
+      this.emitFile({ type: 'asset', fileName: 'credits.html', source: creditsFor(root, dirs, viteHelper) })
     },
   }
 }

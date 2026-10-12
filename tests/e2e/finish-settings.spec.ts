@@ -79,6 +79,56 @@ test('[ST-07] a profile’s page has its download location and opens its browsin
   }
 })
 
+test('[ST-17] without Chromium’s licences, the credits page says this copy of Orbit lacks them and draws no link (settings fix check 1)', async () => {
+  const page = await openSettings(orbit.app, { section: 'about', item: 'licence' })
+  await page.locator('[data-setting="licence"]').getByRole('button').click()
+  const credits = await tabPage(orbit.app, 'credits.html')
+  const chromium = credits.locator('#chromium p')
+  const link = credits.locator('#chromium-link')
+  const shown = { useInnerText: true }
+  const found = 'Their licences all come with Orbit, in LICENSES.chromium.html.'
+  const missing = 'Electron ships their licences as LICENSES.chromium.html, but that file isn’t in this copy of Orbit.'
+  await expect(chromium).toContainText(found, shown)
+  await expect(chromium).not.toContainText(missing, shown)
+  await expect(link).toBeVisible()
+  // Main leaves chromium= out when it finds no copy; anything but a file: URL of that file is none.
+  const bare = credits.url().replace(/[?#].*$/, '')
+  for (const url of [
+    bare,
+    `${bare}?chromium=file:///etc/hostname`,
+    `${bare}?chromium=https://example.test/LICENSES.chromium.html`,
+  ]) {
+    await credits.goto(url)
+    await expect(chromium, url).toContainText(missing, shown)
+    await expect(chromium).not.toContainText(found, shown)
+    await expect(link).toBeHidden()
+    expect(await link.getAttribute('href')).toBeNull()
+  }
+})
+
+test('[AP-01] under Match system, Settings takes the system’s mode whenever it draws, before the change event comes (settings fix check 2)', async () => {
+  const page = await openSettings(orbit.app, { section: 'general' })
+  expect((await state(orbit.app)).settings.appearance).toBe('system')
+  const settings = page.getByTestId('settings')
+  const dark = (await settings.getAttribute('data-dark')) !== null
+  // The system's mode turns over, and the change event hasn't come: Chromium sends it with a frame,
+  // which a hidden or starved window may not draw for seconds.
+  await page.evaluate((now) => {
+    const read = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, 'matches')?.get
+    Object.defineProperty(MediaQueryList.prototype, 'matches', {
+      configurable: true,
+      get(this: MediaQueryList) {
+        return this.media.includes('prefers-color-scheme: dark') ? now : read?.call(this)
+      },
+    })
+  }, !dark)
+  // Anything that draws Settings again reads the new mode: here, a search.
+  await page.getByTestId('settings-search').fill('appearance')
+  await expect(page.getByTestId('settings-no-results')).toHaveCount(0)
+  if (dark) await expect(settings).not.toHaveAttribute('data-dark')
+  else await expect(settings).toHaveAttribute('data-dark', '')
+})
+
 /** The state Chromium keeps for the page a tab shows (its scroll position among it), as main reads it. */
 const pageStateOf = (app: ElectronApplication, url: string) =>
   app.evaluate(({ webContents }, u) => {
