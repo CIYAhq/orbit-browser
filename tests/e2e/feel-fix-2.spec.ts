@@ -3,17 +3,19 @@
  * test that fails without its fix (D18).
  */
 import { expect, type Locator, type Page, test } from '@playwright/test'
-import { type Recording, record, type Target } from './frames'
+import { type Box, type Recording, record, type Target } from './frames'
 import {
   action,
   type Fixtures,
   launchOrbit,
   type Orbit,
   openViaCommandBar,
+  run,
   startFixtures,
   state,
   viewPage,
 } from './helpers'
+import { activeSpace, createSpace, hoverSidebar, settled as stripAtRest, swipe } from './spaces-support'
 import {
   act,
   activeId,
@@ -387,3 +389,188 @@ for (const reduced of [false, true]) {
     expect(closing.length, 'it fades out').toBeGreaterThanOrEqual(2)
   })
 }
+
+// ---------- PR-06, SP-10: between profiles the Favorites grid swaps in place ----------
+
+/** Each page's title row in the Space strip, and every Favorites tile, by page and place. */
+const STRIP: Record<string, Target> = {
+  titles: { selector: '.space-strip .space-title', key: 'data-slot' },
+  tiles: { selector: '.space-strip .favorite', key: 'data-slot', nth: true },
+}
+
+/** Space `a` on the Default profile with `mine` Favorites, Space `b` on a Work profile with `theirs`. */
+async function twoProfiles(o: Orbit, mine: number, theirs: number): Promise<{ a: string; b: string; work: string }> {
+  const { app, shell } = o
+  const a = Object.values((await state(app)).windows)[0]?.spaceId as string
+  const work = (await run(app, 'profiles.create', { name: 'Work' })) as string
+  const b = await createSpace(app, { name: 'Work', activate: false, profileId: work, afterSpaceId: a })
+  const favorite = (profileId: string, spaceId: string, name: string) =>
+    newTab(app, fx.url(`/page/${name}`), { activate: false, spaceId, container: { kind: 'favorites', profileId } })
+  for (let i = 0; i < mine; i++) await favorite('p-default', a, `Mine${i}`)
+  for (let i = 0; i < theirs; i++) await favorite(work, b, `Theirs${i}`)
+  await stripAtRest(shell)
+  return { a, b, work }
+}
+
+interface Rest {
+  /** The title row's top. */
+  title: number
+  /** The Favorites grid's area, top to bottom. */
+  top: number
+  bottom: number
+  /** Each tile's x, y, width and height. */
+  tiles: number[][]
+}
+
+/** Where the title row and the Favorites grid rest on the active Space, once its `tiles` stopped moving. */
+async function rest(shell: Page, tiles: number): Promise<Rest> {
+  let last = ''
+  await expect
+    .poll(
+      async () => {
+        const now = await shell.evaluate(() => {
+          const real = document.querySelector('[data-slot="0"] .space-slot__real')
+          const title = real?.querySelector('.space-title')?.getBoundingClientRect()
+          const grid = real?.querySelector('[data-favorites-layer]')?.getBoundingClientRect()
+          const tiles = [...(real?.querySelectorAll('.favorite') ?? [])].map((el) => {
+            const r = el.getBoundingClientRect()
+            return [r.x, r.y, r.width, r.height].map((v) => Math.round(v * 10) / 10)
+          })
+          return JSON.stringify({ title: title?.top, top: grid?.top, bottom: grid?.bottom, tiles })
+        })
+        const still = now === last
+        last = now
+        return still && (JSON.parse(now).tiles as number[][]).length === tiles
+      },
+      { intervals: [100, 150, 250] },
+    )
+    .toBe(true)
+  return JSON.parse(last) as Rest
+}
+
+/** What a recorded switch drew out of place: title rows off `[lo, hi]`, tiles past the grid's area. */
+function outOfPlace(rec: Recording, lo: number, hi: number, gridBottom: number): string[] {
+  const out: string[] = []
+  for (const f of rec.frames) {
+    for (const [page, b] of Object.entries(f.lists.titles ?? {})) {
+      if (b.opacity > 0.01 && (b.y < lo - 1 || b.y > hi + 1))
+        out.push(`frame ${f.i}: page ${page}'s title row at ${b.y.toFixed(1)}`)
+    }
+    for (const [tile, b] of Object.entries(f.lists.tiles ?? {})) {
+      const end = b.y + b.height
+      if (b.opacity > 0.01 && end > gridBottom + 1) out.push(`frame ${f.i}: tile ${tile} down to ${end.toFixed(1)}`)
+    }
+  }
+  return out
+}
+
+/**
+ * Frames where a page drew its Favorites otherwise than one of the resting `grids` does: a tile that
+ * pops in or out, shrinks, moves, or is missing.
+ */
+function offGrid(rec: Recording, grids: number[][][]): string[] {
+  const out: string[] = []
+  for (const f of rec.frames) {
+    const pages = new Map<string, Box[]>()
+    for (const [tile, b] of Object.entries(f.lists.tiles ?? {})) {
+      const page = tile.slice(0, tile.indexOf('#'))
+      if (b.opacity > 0.01) pages.set(page, [...(pages.get(page) ?? []), b])
+    }
+    for (const [page, tiles] of pages) {
+      const drawnAs = (grid: number[][]) =>
+        grid.length === tiles.length &&
+        grid.every((g, i) => {
+          const t = tiles[i] as Box
+          return [t.x, t.y, t.width, t.height].every((v, j) => Math.abs(v - (g[j] as number)) <= 1)
+        })
+      if (!grids.some(drawnAs)) {
+        const drawn = tiles.map(
+          (t) => `${t.x.toFixed(0)},${t.y.toFixed(0)} ${t.width.toFixed(0)}×${t.height.toFixed(0)}`,
+        )
+        out.push(`frame ${f.i}: page ${page} drew ${drawn.join('; ')}`)
+      }
+    }
+  }
+  return out
+}
+
+for (const motion of ['full', 'reduced'] as const) {
+  test(`[PR-06][SP-10]${motion === 'reduced' ? '[FL-28] with reduced motion,' : ''} between Spaces of two profiles the Favorites grid swaps in place: by a click and by a swipe, the title row stays put and no tile shows below the grid`, async () => {
+    const o = await launch()
+    const { app, shell } = o
+    if (motion === 'reduced') {
+      // Orbit's own switch: a click cross-fades the sidebar instead of sliding it (FL-28).
+      await run(app, 'settings.update', { reduceMotion: true })
+      await expect(shell.locator('html')).toHaveClass(/\breduce-motion\b/)
+    }
+    // One row each: two Favorites in the Default profile, four in Work, the last a split view (the
+    // stand-in page draws it as the real grid does, SV-23).
+    const { a, b, work } = await twoProfiles(o, 2, 3)
+    const panes = [
+      await newTab(app, fx.url('/page/Left'), { activate: false, spaceId: b }),
+      await newTab(app, fx.url('/page/Right'), { activate: false, spaceId: b }),
+    ]
+    const split = (await run(app, 'split.create', { tabIds: panes })) as string
+    expect(await run(app, 'tabs.move', { id: split, to: { kind: 'favorites', profileId: work }, index: 3 })).toBe(true)
+    await run(app, 'spaces.switch', { spaceId: a })
+    await expect.poll(() => activeSpace(app)).toBe(a)
+    await stripAtRest(shell)
+    const at = await rest(shell, 2)
+    expect(await rest(shell, 2)).toEqual(at)
+    const rec = await record(shell, STRIP, { maxMs: 60_000 })
+    const dot = (id: string) => shell.locator(`[data-testid="space-dot"][data-space-id="${id}"]`)
+    const reach = async (id: string, tiles: number) => {
+      await expect.poll(() => activeSpace(app)).toBe(id)
+      await stripAtRest(shell)
+      return rest(shell, tiles)
+    }
+    // By a click, there and back.
+    await dot(b).click()
+    const there = await reach(b, 4)
+    expect(there.title, 'Work’s title row rests where Personal’s did').toBeCloseTo(at.title, 0)
+    await dot(a).click()
+    await reach(a, 2)
+    // By a swipe, there and back.
+    await hoverSidebar(shell)
+    await swipe(shell, 12, 16, 16)
+    await reach(b, 4)
+    await swipe(shell, -12, 16, 16)
+    await reach(a, 2)
+    const frames = await rec.stop()
+    const drawn = frames.frames.filter((f) => Object.keys(f.lists.titles ?? {}).length > 1).length
+    expect(drawn, 'the switches were recorded').toBeGreaterThan(4)
+    expect(outOfPlace(frames, at.title, at.title, at.bottom)).toEqual([])
+    expect(offGrid(frames, [at.tiles, there.tiles])).toEqual([])
+  })
+}
+
+test('[PR-06][SP-10] between a one-row and a two-row Favorites grid, the title row moves once, from its place to the other, never past either', async () => {
+  const o = await launch()
+  const { app, shell } = o
+  // One row in the Default profile, two in Work.
+  const { a, b } = await twoProfiles(o, 2, 5)
+  const one = await rest(shell, 2)
+  const rec = await record(shell, STRIP, { maxMs: 60_000 })
+  const dot = (id: string) => shell.locator(`[data-testid="space-dot"][data-space-id="${id}"]`)
+  await dot(b).click()
+  await expect.poll(() => activeSpace(app)).toBe(b)
+  await stripAtRest(shell)
+  const two = await rest(shell, 5)
+  expect(two.title, 'a row lower').toBeGreaterThan(one.title + 40)
+  await dot(a).click()
+  await expect.poll(() => activeSpace(app)).toBe(a)
+  await stripAtRest(shell)
+  await rest(shell, 2)
+  await hoverSidebar(shell)
+  await swipe(shell, 12, 16, 16)
+  await expect.poll(() => activeSpace(app)).toBe(b)
+  await stripAtRest(shell)
+  await rest(shell, 5)
+  await swipe(shell, -12, 16, 16)
+  await expect.poll(() => activeSpace(app)).toBe(a)
+  await stripAtRest(shell)
+  await rest(shell, 2)
+  const frames = await rec.stop()
+  expect(outOfPlace(frames, one.title, two.title, two.bottom)).toEqual([])
+  expect(offGrid(frames, [one.tiles, two.tiles])).toEqual([])
+})

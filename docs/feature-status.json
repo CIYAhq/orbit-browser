@@ -185,7 +185,7 @@
   "PR-03": {"built": "yes", "note": "tabs move with the Space and restart in the new session"},
   "PR-04": {"built": "yes", "note": "profile step when more than one profile exists, active Space's profile preselected, inline New Profile…"},
   "PR-05": {"built": "yes", "note": "one persistent session partition per profile; cookie isolation covered by e2e"},
-  "PR-06": {"built": "yes", "note": "Favorites per profile; still during same-profile swipes, cross-fade between profiles"},
+  "PR-06": {"built": "yes", "note": "Favorites per profile; still during same-profile swipes; between profiles the whole grid cross-fades in place, no tile pops, leaves or moves, and the list below moves once if the grids differ in height"},
   "PR-07": {"built": "yes", "note": "hover badge on the title row, 'Space · Profile' tooltip, check mark in the Profile submenu"},
   "PR-08": {"built": "yes", "note": "Settings → Profiles → Delete Profile…, disabled with a reason while a Space or a blank window uses the profile, and not offered for Default; the confirmation names the profile and what goes (logins, cookies, history, Favorites, site data; Orbit has no extensions yet); on confirm its Favorites close, its session's data is cleared, its history and archive entries go, and its folder on disk is removed at once and again at the next launch, in case its session wrote to it as Orbit quit; a Space deleted keeps its profile (SP-12)"},
   "PR-09": {"built": "yes", "note": "Settings → Profiles → select a profile and rename it inline, Default too when it is the only one; the new name shows at once in Settings, the Space menu, the profile badge (PR-07) and the switcher's tooltip"},

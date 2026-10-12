@@ -39,6 +39,11 @@ export type Target =
       attrs?: string[]
       /** Keep the element's own running animations (`getAnimations()`), each as an `Anim`. */
       animations?: boolean
+      /**
+       * With `key`, for matches that share their key (e.g. a page's tiles, keyed by the page): key each
+       * as `<key>#<n>`, its place among those on screen, in document order, counted from 0.
+       */
+      nth?: boolean
     }
 
 /**
@@ -144,6 +149,7 @@ export async function record(
         text?: boolean
         attrs?: string[]
         animations?: boolean
+        nth?: boolean
       }
       type W = { __feelRec?: PageRecorder }
       const w = window as unknown as W
@@ -239,10 +245,17 @@ export async function record(
         for (const [name, spec] of specs) {
           if (spec.key) {
             const all: Record<string, Box> = {}
+            const shared = new Map<string, number>()
             for (const el of document.querySelectorAll(spec.selector)) {
               const b = box(el, spec)
-              const k = el.closest(`[${spec.key}]`)?.getAttribute(spec.key)
-              if (b && k != null) all[k] = b
+              let k = el.closest(`[${spec.key}]`)?.getAttribute(spec.key)
+              if (!b || k == null) continue
+              if (spec.nth) {
+                const n = shared.get(k) ?? 0
+                shared.set(k, n + 1)
+                k = `${k}#${n}`
+              }
+              all[k] = b
             }
             frame.lists[name] = all
           } else {
