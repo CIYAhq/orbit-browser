@@ -2,10 +2,32 @@
  * Feel fixes 2 (D91): the gaps sign-off 5 held back in the sidebar, Spaces and profiles, each with a
  * test that fails without its fix (D18).
  */
-import { expect, type Page, test } from '@playwright/test'
+import { expect, type Locator, type Page, test } from '@playwright/test'
 import { type Recording, record, type Target } from './frames'
-import { action, type Fixtures, launchOrbit, type Orbit, openViaCommandBar, startFixtures } from './helpers'
-import { act, activeId, cmd, drag, newTab, row, rowIds, settled } from './tabs-support'
+import {
+  action,
+  type Fixtures,
+  launchOrbit,
+  type Orbit,
+  openViaCommandBar,
+  startFixtures,
+  state,
+  viewPage,
+} from './helpers'
+import {
+  act,
+  activeId,
+  chooseRowMenu,
+  cmd,
+  drag,
+  menuFor,
+  newTab,
+  row,
+  rowIds,
+  settled,
+  tab,
+  waitTab,
+} from './tabs-support'
 
 let fx: Fixtures
 let orbit: Orbit | undefined
@@ -187,5 +209,181 @@ for (const how of ['switch', 'system'] as const) {
     const g = glowOf(frames, quiet)
     expect(g.drawn.length, 'the row was drawn').toBeGreaterThan(0)
     expect(g.glowing, 'and never glowed').toEqual([])
+  })
+}
+
+// ---------- TB-12, FD-07: Change Icon… opens the Space icon's emoji picker ----------
+
+/** Right-clicks a row or tile and chooses Change Icon… in Orbit's menu: the icon picker, open. */
+async function changeIcon(o: Orbit, target: Locator, key: string): Promise<Locator> {
+  await target.click({ button: 'right' })
+  await menuFor(o.app, key)
+  expect(await chooseRowMenu(o.app, 'Change Icon…')).toBe(true)
+  const picker = o.shell.getByTestId('icon-picker')
+  await expect(picker).toBeVisible()
+  return picker
+}
+
+/** The picker's cell for an emoji, in one of its sections. */
+function option(picker: Locator, emoji: string, section: string): Locator {
+  return picker.locator(`[data-section="${section}"] [data-testid="emoji-option"][data-emoji="${emoji}"]`)
+}
+
+/** The emoji a picker offers as recently used, newest first. */
+function recents(picker: Locator): Promise<string[]> {
+  return picker
+    .locator('[data-section="recent"] [data-testid="emoji-option"]')
+    .evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.emoji ?? ''))
+}
+
+/** It opens under `target`, with its top below the target's bottom. */
+async function under(picker: Locator, target: Locator): Promise<void> {
+  const [p, t] = [await picker.boundingBox(), await target.boundingBox()]
+  if (!p || !t) throw new Error('not on screen')
+  expect(p.y, 'the picker opens under its row').toBeGreaterThanOrEqual(t.y + t.height - 1)
+}
+
+test('[TB-12][FD-07][SP-05] Change Icon… on a tab, a folder or a Favorite opens the Space icon’s emoji picker: its search, its skin tones and the emoji used last, an emoji typed as it is, and Remove icon brings back the favicon', async () => {
+  const o = await launch()
+  const { app, shell } = o
+  const t = await newTab(app, fx.url('/page/Sunny'))
+  await waitTab(app, t, '/page/Sunny')
+  await expect.poll(async () => !!(await tab(app, t))?.favicon).toBe(true)
+  const other = await newTab(app, fx.url('/page/Other'), { activate: false })
+  await settled(shell)
+  const r = row(shell, t)
+  const icon = r.locator('.tab-row__emoji')
+  await expect(r.locator('img.favicon')).toBeVisible()
+
+  // A tab: the emoji picker opens under its row, its search with the keyboard; "sun" finds the sun.
+  let picker = await changeIcon(o, r, t)
+  await expect(picker.getByTestId('emoji-picker')).toBeVisible()
+  const search = picker.getByTestId('emoji-search')
+  await expect(search).toBeFocused()
+  await under(picker, r)
+  await shell.keyboard.type('sun')
+  await option(picker, '☀️', 'results').click()
+  await expect(picker).toHaveCount(0)
+  await expect(icon).toHaveText('☀️')
+
+  // A skin tone, and a hand in it.
+  picker = await changeIcon(o, r, t)
+  await picker.getByTestId('emoji-tone').click()
+  await picker.getByRole('radio', { name: 'Medium', exact: true }).click()
+  await search.fill('wave')
+  await option(picker, '👋🏽', 'results').click()
+  await expect(picker).toHaveCount(0)
+  await expect(icon).toHaveText('👋🏽')
+
+  // An emoji typed or pasted is offered as it is, also one the picker doesn't list; Enter takes it.
+  picker = await changeIcon(o, r, t)
+  await expect(search).toBeFocused()
+  await shell.keyboard.insertText('🫎')
+  await expect(picker.getByTestId('emoji-option').first()).toHaveAttribute('data-emoji', '🫎')
+  await shell.keyboard.press('Enter')
+  await expect(picker).toHaveCount(0)
+  await expect(icon).toHaveText('🫎')
+  expect((await tab(app, t))?.icon).toBe('🫎')
+
+  // A folder: the same picker, under the folder, with the emoji used last.
+  const s = await state(app)
+  const spaceId = Object.values(s.windows)[0]?.spaceId as string
+  const folder = await cmd<string>(app, 'folders.create', {
+    container: { kind: 'pinned', spaceId },
+    name: 'Box',
+    items: [other],
+  })
+  const folderRow = shell.locator(`[data-folder-id="${folder}"] [data-testid="folder-row"]`).first()
+  await settled(shell)
+  picker = await changeIcon(o, folderRow, folder)
+  await expect(picker.getByTestId('emoji-picker')).toBeVisible()
+  await expect(search).toBeFocused()
+  await under(picker, folderRow)
+  expect(await recents(picker)).toEqual(['🫎', '👋🏽', '☀️'])
+  await option(picker, '☀️', 'recent').click()
+  await expect(picker).toHaveCount(0)
+  await expect(folderRow.locator('.tab-row__emoji')).toHaveText('☀️')
+  expect((await state(app)).folders[folder]?.icon).toBe('☀️')
+
+  // A Favorite: the same picker, under its tile.
+  const fav = await newTab(app, fx.url('/page/Starred'), { activate: false })
+  await cmd(app, 'tabs.favorite', { tabId: fav })
+  const tile = shell.locator(`[data-testid="favorite-tile"][data-fav-id="${fav}"]`)
+  await expect(tile).toBeVisible()
+  await settled(shell)
+  picker = await changeIcon(o, tile, fav)
+  await expect(picker.getByTestId('emoji-picker')).toBeVisible()
+  await under(picker, tile)
+  await shell.keyboard.type('star')
+  await option(picker, '⭐', 'results').click()
+  await expect(picker).toHaveCount(0)
+  await expect(tile.locator('.favorite__emoji')).toHaveText('⭐')
+
+  // Escape closes it, and the keys leave its search at once; so does a click outside it.
+  picker = await changeIcon(o, r, t)
+  await expect(search).toBeFocused()
+  await shell.keyboard.press('Escape')
+  await expect.poll(() => shell.evaluate(() => document.activeElement?.tagName ?? '')).not.toBe('INPUT')
+  await expect(picker).toHaveCount(0)
+  picker = await changeIcon(o, r, t)
+  await row(shell, other).click()
+  await expect(picker).toHaveCount(0)
+  expect((await tab(app, t))?.icon).toBe('🫎')
+
+  // Remove icon: the favicon comes back.
+  picker = await changeIcon(o, r, t)
+  await picker.getByRole('button', { name: 'Remove icon' }).click()
+  await expect(picker).toHaveCount(0)
+  await expect(icon).toHaveCount(0)
+  await expect(r.locator('img.favicon')).toBeVisible()
+  await expect.poll(async () => (await tab(app, t))?.icon).toBeUndefined()
+
+  // SP-05: the Space icon's picker shows the same emoji used last and the same skin tone, and still
+  // sets the Space's icon.
+  await shell.getByTestId('space-title-row').hover()
+  await shell.getByTestId('space-menu-button').click()
+  const overlay = await viewPage(app, 'overlay')
+  await overlay.getByTestId('menu-icon').click()
+  const spacePicker = overlay.getByTestId('emoji-picker')
+  await expect(overlay.getByTestId('emoji-search')).toBeFocused()
+  expect(await recents(spacePicker)).toEqual(['⭐', '☀️', '🫎', '👋🏽'])
+  await overlay.getByTestId('emoji-tone').click()
+  await expect(overlay.getByRole('radio', { name: 'Medium', exact: true })).toHaveAttribute('aria-checked', 'true')
+  await overlay.getByTestId('emoji-search').fill('rocket')
+  await overlay.getByTestId('emoji-option').first().click()
+  await expect.poll(async () => (await state(app)).spaces[spaceId]?.icon).toBe('🚀')
+})
+
+for (const reduced of [false, true]) {
+  test(`[TB-12][FL-25]${reduced ? '[FL-28]' : ''} the icon picker ${reduced ? 'with reduced motion fades in and out, at its size' : 'opens from 0.97 and fades out as it closes'}`, async () => {
+    const o = await launch()
+    const { app, shell } = o
+    if (reduced) {
+      await action(app, 'app.toggleReduceMotion')
+      await expect(shell.locator('html')).toHaveClass(/\breduce-motion\b/)
+    }
+    const t = await newTab(app, fx.url('/page/Moving'))
+    await settled(shell)
+    await row(shell, t).click({ button: 'right' })
+    await menuFor(app, t)
+    const rec = await record(shell, { pop: '[data-testid="icon-picker"]' }, { maxMs: 20_000 })
+    expect(await chooseRowMenu(app, 'Change Icon…')).toBe(true)
+    const picker = shell.getByTestId('icon-picker')
+    await expect(picker.getByTestId('emoji-search')).toBeFocused()
+    await expect.poll(() => picker.evaluate((el) => getComputedStyle(el).opacity)).toBe('1')
+    await shell.keyboard.press('Escape')
+    await expect(picker).toHaveCount(0)
+    const r = await rec.stop()
+    const esc = r.inputs.find((i) => i.type === 'keydown' && i.key === 'Escape')
+    if (!esc) throw new Error('Escape never reached the shell')
+    const open = r.frames.filter((f) => f.i < esc.frame && f.els.pop)
+    const first = open[0]?.els.pop
+    const full = open.at(-1)?.els.pop
+    if (!first || !full) throw new Error('the picker never showed')
+    const closing = r.frames.filter((f) => f.i >= esc.frame && (f.els.pop?.opacity ?? 0) > 0.01)
+    expect(first.opacity, 'it fades in').toBeLessThan(0.99)
+    if (reduced) expect(first.width / full.width, 'at its size').toBeGreaterThan(0.999)
+    else expect(first.width / full.width, 'from about 0.97').toBeLessThanOrEqual(0.99)
+    expect(closing.length, 'it fades out').toBeGreaterThanOrEqual(2)
   })
 }

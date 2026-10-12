@@ -1,5 +1,5 @@
 import { Search, Trash2 } from 'lucide-react'
-import { type CSSProperties, type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, type KeyboardEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { EMOJI_CATEGORIES, type EmojiEntry, SKIN_TONES, withTone } from './emoji-data'
 import './emoji-picker.css'
 
@@ -86,7 +86,8 @@ export function EmojiPicker({ onPick, onRemove, current, autoFocus, compact }: E
   const modifier = tone?.modifier ?? ''
   const currentKey = current ? baseKey(current) : ''
 
-  useEffect(() => {
+  // The search has the keyboard from the frame the picker first shows: what is typed finds the emoji.
+  useLayoutEffect(() => {
     if (autoFocus) inputRef.current?.focus()
   }, [autoFocus])
 
