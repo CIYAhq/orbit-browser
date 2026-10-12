@@ -8,6 +8,7 @@ import {
 } from '../../shared/commands/extensions'
 import { DEFAULT_PROFILE_ID } from '../../shared/defaults'
 import { storeConfig } from '../../shared/extension-store'
+import { popupAnchorOf } from '../../shared/extensions'
 import { isPrivateProfileId } from '../../shared/private'
 import type { ProfileId, Tab, TabId, WindowId } from '../../shared/state'
 import type { MainContext } from '../context'
@@ -16,6 +17,7 @@ import { isUnplacedImportTab } from '../import/unplaced'
 import { withDialog } from '../media/dialog-watch'
 import type { ActionContext, CallContext } from '../registry'
 import { ExtensionDialogs } from './dialogs'
+import { ExtensionPopups, type PopupInfo } from './popup'
 import { ExtensionService } from './service'
 import { registerStore } from './store'
 
@@ -28,6 +30,8 @@ export interface ExtensionTestHooks {
   loaded: (profileId: ProfileId) => string[]
   /** Installs a .crx file's bytes as the file picker would, answering the confirmation with `accept`. */
   installBytes: (profileId: ProfileId, bytes: Uint8Array, accept: boolean) => Promise<InstallResult>
+  /** The window's extension popup (EX-05), if one is open. */
+  popup: (windowId: WindowId) => PopupInfo | null
 }
 
 /**
@@ -132,6 +136,15 @@ export function registerExtensions(ctx: MainContext): void {
     return found?.id
   }
 
+  // ---- Popups (EX-05): what an extension's icon or row opens ----
+
+  const popups = new ExtensionPopups(ctx, service, (windowId, url) => {
+    // A page it asks for opens as a tab, at the top of Today (EX-12).
+    const profileId = windowProfile(windowId)
+    const target = mainWindowFor({ windowId }, profileId)
+    if (target) void commands.run('tabs.create', { url, activate: true }, { windowId: target }).catch(() => {})
+  })
+
   // ---- The page's commands and Orbit's UI (EX-07, EX-08, EX-09) ----
 
   commands.register('extensions.pageInfo', (_args, c): ExtensionsPageInfo => {
@@ -156,7 +169,28 @@ export function registerExtensions(ctx: MainContext): void {
     service.confirmRemove(profileFor(c, profileId), id, c.windowId ?? windows.focusedWindowId()),
   )
 
-  commands.register('extensions.reload', ({ id, profileId }, c) => service.reload(profileFor(c, profileId), id))
+  commands.register('extensions.reload', ({ id, profileId }, c) => {
+    const owner = profileFor(c, profileId)
+    popups.closeFor(owner, id)
+    return service.reload(owner, id)
+  })
+
+  // A click on its pinned icon or its row (EX-03, EX-04): its popup (EX-05). Orbit's UI only.
+  commands.register('extensions.run', ({ id, profileId, anchor, inspect }, c) => {
+    const windowId = c.windowId ?? windows.focusedWindowId()
+    const where = popupAnchorOf(anchor)
+    if (!windowId || !where || typeof id !== 'string') return 'none'
+    const ext = service.get(profileFor(c, profileId), id)
+    if (!ext?.enabled) return 'none'
+    if (!ext.popup) {
+      // Its button would tell its service worker (chrome.action.onClicked), which the engine can't do yet.
+      ctx.toast(windowId, `${ext.name} has no popup, and Orbit can’t run its button yet.`)
+      return 'none'
+    }
+    const shown = popups.show(windowId, ext, where, inspect === true)
+    if (shown === 'none') ctx.toast(windowId, `${ext.name} isn’t running.${ext.error ? ` ${ext.error}` : ''}`)
+    return shown
+  })
 
   commands.register('extensions.openOptions', async ({ id, profileId }, c) => {
     const owner = profileFor(c, profileId)
@@ -252,6 +286,7 @@ export function registerExtensions(ctx: MainContext): void {
       },
       installBytes: (profileId, bytes, accept) =>
         service.installCrx(profileId, new Uint8Array(bytes), async () => accept),
+      popup: (windowId) => popups.info(windowId),
     }
     ;(globalThis as unknown as { __orbitExtensions: ExtensionTestHooks }).__orbitExtensions = hooks
   }

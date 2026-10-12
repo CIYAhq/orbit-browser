@@ -4,6 +4,7 @@ import { connectionOf, peekShown, shownTabId } from '../../../../shared/nav'
 import { SITE_PANEL } from '../../../../shared/site'
 import { displayHost } from '../../../../shared/url'
 import { invoke, runAction } from '../../api'
+import { PinnedExtensions } from '../../extensions/PinnedExtensions'
 import { useKeymap } from '../../keys/live'
 import { useOrbit } from '../../store'
 import { TweakButton } from '../../tweaks/TweakButton'
@@ -17,7 +18,8 @@ const COPIED_MS = 1200
  * in split view), a warning before it on insecure pages (no padlock on secure ones), a copy-link
  * button and, at the right end, the site controls button (NV-16), which opens the site controls
  * panel under the field. Clicking the host edits the URL in the command bar. When the page tried
- * to open pop-ups without a click, a button says so and offers them (NV-09).
+ * to open pop-ups without a click, a button says so and offers them (NV-09). Pinned extensions'
+ * icons follow the host while the pointer is over the sidebar (extensions lane, EX-04).
  */
 export function Address({ windowId }: { windowId: string }) {
   // The tooltips follow remapped shortcuts (KS-18).
@@ -107,6 +109,7 @@ export function Address({ windowId }: { windowId: string }) {
       >
         <span className="address__text">{page ? displayHost(page) : 'Search or enter address'}</span>
       </button>
+      <PinnedExtensions windowId={windowId} />
       {page && blockedPopups > 0 && (
         <button
           type="button"

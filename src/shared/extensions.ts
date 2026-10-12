@@ -5,9 +5,11 @@
  * - Keys: an extension is installed per profile (EX-09), so the state keys it by profile and ID.
  * - Manifests: what Orbit reads of one (name, version, icons, popup, options page, permissions),
  *   with `__MSG_name__` texts taken from its `_locales`, as the engine does when it loads one.
- * - Permissions in plain language, for the confirmation (EX-02) and the extensions page (EX-07).
+ * - Permissions in plain language, for the confirmation (EX-02) and the extensions page (EX-07), and
+ *   whether an extension may run on a given page (the site controls panel, EX-03).
  * - CRX3 files: the header's proofs and signed data, which main verifies (src/main/extensions/crx.ts),
  *   and the extension ID they name.
+ * - Popups (EX-05): where one goes in its window, and how big it may be.
  */
 import type { InstalledExtension, ProfileId } from './state'
 
@@ -44,6 +46,14 @@ export function pinnedExtensions(all: Record<string, InstalledExtension>, profil
   return extensionsOf(all, profileId)
     .filter((e) => e.enabled && e.pinnedAt !== undefined)
     .sort((a, b) => (a.pinnedAt ?? 0) - (b.pinnedAt ?? 0))
+}
+
+/** The site controls panel's list (EX-03): a profile's enabled extensions, pinned first (in pin order), then by name. */
+export function panelExtensions(all: Record<string, InstalledExtension>, profileId: ProfileId): InstalledExtension[] {
+  const enabled = extensionsOf(all, profileId).filter((e) => e.enabled)
+  const pinned = enabled.filter((e) => e.pinnedAt !== undefined).sort((a, b) => (a.pinnedAt ?? 0) - (b.pinnedAt ?? 0))
+  const rest = enabled.filter((e) => e.pinnedAt === undefined).sort((a, b) => a.name.localeCompare(b.name))
+  return [...pinned, ...rest]
 }
 
 // ---- Manifests ------------------------------------------------------------
@@ -301,6 +311,55 @@ export function siteAccessText(patterns: readonly string[]): string {
   return `On ${sites[0]}, ${sites[1]} and ${sites.length - 2} other sites`
 }
 
+/** The schemes `<all_urls>` covers, and those a `*` scheme does. */
+const ALL_URLS_SCHEMES = new Set(['http', 'https', 'ws', 'wss', 'ftp', 'file'])
+const DEFAULT_PORT: Readonly<Record<string, string>> = { http: '80', https: '443', ws: '80', wss: '443' }
+
+/**
+ * Whether a match pattern (or `<all_urls>`) covers a page's address, as the engine matches them:
+ * `*` as the scheme is http and https, `*.example.com` is the site and its subdomains, a pattern
+ * without a port takes any port, and `*` in the path is any text.
+ */
+export function patternMatches(pattern: string, url: string): boolean {
+  let u: URL
+  try {
+    u = new URL(url)
+  } catch {
+    return false
+  }
+  const scheme = u.protocol.slice(0, -1).toLowerCase()
+  if (pattern === '<all_urls>') return ALL_URLS_SCHEMES.has(scheme)
+  const m = /^([^:/]+):\/\/([^/]*)(\/.*)$/.exec(pattern)
+  if (!m) return false
+  const wanted = (m[1] ?? '').toLowerCase()
+  if (wanted === '*' ? scheme !== 'http' && scheme !== 'https' : wanted !== scheme) return false
+  if (scheme !== 'file') {
+    const hostPort = /^(\*|(?:\*\.)?[^:*]+)(?::(\*|\d+))?$/.exec(m[2] ?? '')
+    if (!hostPort) return false
+    const host = (hostPort[1] ?? '').toLowerCase()
+    const name = u.hostname.toLowerCase()
+    if (host !== '*') {
+      const base = host.replace(/^\*\./, '')
+      if (name !== base && !(host.startsWith('*.') && name.endsWith(`.${base}`))) return false
+    }
+    const port = hostPort[2]
+    if (port !== undefined && port !== '*' && (u.port || DEFAULT_PORT[scheme] || '') !== port) return false
+  }
+  const path = (m[3] ?? '/')
+    .split('*')
+    .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+    .join('.*')
+  return new RegExp(`^${path}$`, 's').test(u.pathname + u.search)
+}
+
+/** Where an extension may run, seen from one page (EX-03): every site, this one, or not this one. */
+export type SiteAccess = 'all' | 'this' | 'none'
+
+export function siteAccessOn(patterns: readonly string[], url: string): SiteAccess {
+  if (reachesAllSites(patterns)) return 'all'
+  return patterns.some((p) => patternMatches(p, url)) ? 'this' : 'none'
+}
+
 /** The all-sites line, in the spec's words (EX-02). */
 export const ALL_SITES_TEXT = 'Read and change all your data on all websites'
 
@@ -535,4 +594,77 @@ export function crxSignedPrefix(signedHeaderData: Uint8Array): Uint8Array {
   new DataView(out.buffer).setUint32(SIGNED_PREFIX.length, signedHeaderData.length, true)
   out.set(signedHeaderData, SIGNED_PREFIX.length + 4)
   return out
+}
+
+// ---- Popups (EX-05) ---------------------------------------------------------
+
+/** An extension popup's size limits, as in Chromium: its page's own size, within these. */
+export const POPUP_MIN = { width: 25, height: 25 } as const
+export const POPUP_MAX = { width: 800, height: 600 } as const
+/** Room kept between a popup and the window's edges, and between it and what it hangs from. */
+export const POPUP_MARGIN = 8
+export const POPUP_GAP = 6
+
+/**
+ * What a popup hangs from, in window coordinates: a pinned icon in the address field (`below` it),
+ * or a row of the site controls panel (`beside` it: the rect spans the panel, at the row's height).
+ */
+export interface PopupAnchor {
+  x: number
+  y: number
+  width: number
+  height: number
+  side: 'below' | 'beside'
+}
+
+export interface PopupRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value))
+
+/** A rect from the UI, or null when it isn't one. */
+export function popupAnchorOf(value: unknown): PopupAnchor | null {
+  if (!value || typeof value !== 'object') return null
+  const a = value as Partial<Record<keyof PopupAnchor, unknown>>
+  const nums = [a.x, a.y, a.width, a.height]
+  if (!nums.every((n) => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) < 100_000)) return null
+  if ((a.width as number) < 0 || (a.height as number) < 0) return null
+  const side = a.side === 'beside' ? 'beside' : 'below'
+  return { x: a.x as number, y: a.y as number, width: a.width as number, height: a.height as number, side }
+}
+
+/**
+ * Where a popup goes in a window of `area` (EX-05): its page's preferred size within the limits and
+ * the window, under its icon (above it when there is no room below) or beside its panel (on the
+ * other side when there is no room), kept inside the window.
+ */
+export function popupBounds(
+  anchor: PopupAnchor,
+  preferred: { width: number; height: number },
+  area: { width: number; height: number },
+): PopupRect {
+  const roomWidth = Math.max(POPUP_MIN.width, area.width - 2 * POPUP_MARGIN)
+  const roomHeight = Math.max(POPUP_MIN.height, area.height - 2 * POPUP_MARGIN)
+  const width = clamp(Math.ceil(preferred.width || 0), POPUP_MIN.width, Math.min(POPUP_MAX.width, roomWidth))
+  const height = clamp(Math.ceil(preferred.height || 0), POPUP_MIN.height, Math.min(POPUP_MAX.height, roomHeight))
+  let x: number
+  let y: number
+  if (anchor.side === 'below') {
+    x = anchor.x
+    y = anchor.y + anchor.height + POPUP_GAP
+    const above = anchor.y - POPUP_GAP - height
+    if (y + height > area.height - POPUP_MARGIN && above >= POPUP_MARGIN) y = above
+  } else {
+    x = anchor.x + anchor.width + POPUP_GAP
+    y = anchor.y
+    const before = anchor.x - POPUP_GAP - width
+    if (x + width > area.width - POPUP_MARGIN && before >= POPUP_MARGIN) x = before
+  }
+  x = clamp(x, POPUP_MARGIN, area.width - POPUP_MARGIN - width)
+  y = clamp(y, POPUP_MARGIN, area.height - POPUP_MARGIN - height)
+  return { x: Math.round(x), y: Math.round(y), width, height }
 }

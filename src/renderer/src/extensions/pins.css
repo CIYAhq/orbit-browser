@@ -1,0 +1,38 @@
+/* Pinned extensions in the sidebar's address field (EX-04): only while the pointer is over the sidebar. */
+
+.ext-pins {
+  display: none;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  /* Four icons at most: the rest are in the site controls panel (EX-03). */
+  max-width: 104px;
+  overflow: hidden;
+}
+
+.sidebar:hover .ext-pins,
+.sidebar:focus-within .ext-pins {
+  display: flex;
+  animation: ext-pins-in var(--dur-fast, 120ms) var(--ease-out, ease-out);
+}
+
+.reduce-motion .sidebar:hover .ext-pins,
+.reduce-motion .sidebar:focus-within .ext-pins {
+  animation: none;
+}
+
+@keyframes ext-pins-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.ext-pins__button .ext-icon {
+  border-radius: 3px;
+}
+
+.ext-pins__button .ext-icon--generic {
+  background: transparent;
+  color: inherit;
+}

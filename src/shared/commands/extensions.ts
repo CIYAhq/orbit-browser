@@ -1,4 +1,5 @@
 import type { ActionDef } from '../actions'
+import type { PopupAnchor } from '../extensions'
 import type { ProfileId } from '../state'
 
 /**
@@ -78,6 +79,16 @@ export interface ExtensionCommands {
   'extensions.storeListing': { args: { tabId: string }; result: StoreListing | null }
   /** Add to Orbit (EX-01): downloads the listing's extension into the tab's profile, after Orbit's confirmation. */
   'extensions.installFromStore': { args: { tabId: string }; result: InstallResult }
+  /**
+   * A click on an extension's pinned icon or its row in the site controls panel (EX-03, EX-04):
+   * its popup opens in the calling window, hung from `anchor` (EX-05). 'closed': that click had just
+   * closed the same popup (it toggles). 'none': it has no popup, or isn't running (a toast says so).
+   * `inspect` (Inspect Popup, Developer mode): with its DevTools, in a window of their own.
+   */
+  'extensions.run': {
+    args: { id: string; profileId: ProfileId; anchor: PopupAnchor; inspect?: boolean }
+    result: 'popup' | 'closed' | 'none'
+  }
 }
 
 /** The command bar's and menus' extension actions (EX-01, EX-07). */

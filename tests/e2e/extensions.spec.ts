@@ -157,11 +157,33 @@ async function pickNext(app: ElectronApplication, path: string | null): Promise<
   }, path)
 }
 
+/** A window's extension popup, as main has it (EX-05). */
+interface PopupInfo {
+  id: string
+  profileId: string
+  url: string
+  shown: boolean
+  focused: boolean
+  bounds: { x: number; y: number; width: number; height: number }
+  contentsId: number
+  escapes: number
+}
+
 interface Hooks {
-  __orbit: { state: () => OrbitState; ctx: { tabs: { contents: (id: string) => Electron.WebContents | undefined } } }
+  __orbit: {
+    state: () => OrbitState
+    ctx: {
+      tabs: { contents: (id: string) => Electron.WebContents | undefined }
+      windows: {
+        get: (id: string) => Electron.BrowserWindow | undefined
+        isUi: (contents: Electron.WebContents) => boolean
+      }
+    }
+  }
   __orbitExtensions: {
     loaded: (profileId: string) => string[]
     installBytes: (profileId: string, bytes: Uint8Array, accept: boolean) => Promise<{ ok: boolean; error?: string }>
+    popup: (windowId: string) => PopupInfo | null
   }
 }
 
@@ -800,4 +822,472 @@ test('[EX-01] Without a store a test names, Orbit makes no store request: no API
   await expect(shell.getByTestId('toast').filter({ hasText: 'doesn’t open the extension store' })).toBeVisible()
   expect(Object.keys((await state(app)).tabs).length).toBe(tabs)
   expect(store.downloads.length).toBe(before)
+})
+
+// ---- The UI: the site controls panel's list (EX-03), pinned icons (EX-04), popups (EX-05) ----
+
+const BROAD = 'Orbit Broad Test Extension'
+/** Room a popup keeps from the window's edges, and the gap to what it hangs from. */
+const MARGIN = 8
+const GAP = 6
+
+/** The first window's ID. */
+const firstWindow = async (app: ElectronApplication) => Object.keys((await state(app)).windows)[0] as string
+
+/** The window's extension popup (EX-05), null when none is open. */
+const popupIn = (app: ElectronApplication, windowId: string) =>
+  app.evaluate((_e, w) => (globalThis as unknown as Hooks).__orbitExtensions.popup(w), windowId)
+
+/** Waits until the window's popup shows, and gives it. */
+async function shownPopup(app: ElectronApplication, windowId: string): Promise<PopupInfo> {
+  await expect.poll(async () => (await popupIn(app, windowId))?.shown ?? false).toBe(true)
+  return (await popupIn(app, windowId)) as PopupInfo
+}
+
+/** Runs a script in a web contents (a popup's page), by its ID. */
+const inPopup = (app: ElectronApplication, contentsId: number, script: string) =>
+  app.evaluate(
+    ({ webContents }, [id, js]) => {
+      const contents = webContents.fromId(id as number)
+      return contents && !contents.isDestroyed() ? contents.executeJavaScript(js as string, true) : 'no popup'
+    },
+    [contentsId, script] as const,
+  )
+
+/** Presses keys in a web contents as the OS delivers them: Orbit's key handling sees them first. */
+async function typeIn(app: ElectronApplication, contentsId: number, keys: string[]): Promise<void> {
+  await app.evaluate(
+    ({ webContents }, [id, list]) => {
+      const contents = webContents.fromId(id as number)
+      if (!contents || contents.isDestroyed()) throw new Error('no such page')
+      for (const keyCode of list as string[]) {
+        contents.sendInputEvent({ type: 'keyDown', keyCode })
+        if (keyCode.length === 1) contents.sendInputEvent({ type: 'char', keyCode })
+        contents.sendInputEvent({ type: 'keyUp', keyCode })
+      }
+    },
+    [contentsId, keys] as const,
+  )
+}
+
+/** The address of the web contents with the keyboard. */
+const focusedUrl = (app: ElectronApplication) =>
+  app.evaluate(({ webContents }) => webContents.getFocusedWebContents()?.getURL() ?? 'nothing')
+
+/** Gives a tab's page the keyboard, as a click on it does. */
+async function focusTab(app: ElectronApplication, tabId: string): Promise<void> {
+  await app.evaluate((_e, id) => (globalThis as unknown as Hooks).__orbit.ctx.tabs.contents(id)?.focus(), tabId)
+}
+
+/** Gives one of the window's views the keyboard (the shell: a press on the sidebar). */
+async function focusView(app: ElectronApplication, view: 'shell' | 'overlay'): Promise<void> {
+  await app.evaluate(({ webContents }, v) => {
+    webContents
+      .getAllWebContents()
+      .find((c) => !c.isDestroyed() && c.getURL().includes(`view=${v}`))
+      ?.focus()
+  }, view)
+}
+
+/** Does something to the first window in main. */
+const inWindow = (app: ElectronApplication, windowId: string, what: 'blur' | 'shrink' | 'contentSize' | 'maximized') =>
+  app.evaluate(
+    (_e, [id, act]) => {
+      const win = (globalThis as unknown as Hooks).__orbit.ctx.windows.get(id as string)
+      if (!win) throw new Error('no window')
+      if (act === 'blur') win.emit('blur')
+      if (act === 'shrink') {
+        const [w = 0, h = 0] = win.getSize()
+        win.setSize(w - 40, h)
+      }
+      if (act === 'maximized') return win.isMaximized()
+      return win.getContentSize()
+    },
+    [windowId, what] as const,
+  )
+
+test('[EX-03] The site controls panel lists the profile’s enabled extensions, pinned first; the pin and each row’s menu (right-click or ⋯) pin, show site access, open options, remove and manage', async () => {
+  const { app } = orbit
+  const { profileId } = await current(app)
+  const broad = pack(FIXTURES.broad, makeKey(), 'broad.crx')
+  const basic = pack(FIXTURES.basic, makeKey(), 'basic.crx')
+  await install(app, profileId, broad)
+  await install(app, profileId, basic)
+  await visit(app, 'ExtList')
+  const overlay = await viewPage(app, 'overlay')
+  await run(app, 'site.openControls', {})
+  const rows = overlay.getByTestId('ext-row')
+
+  // By name, each saying whether it reaches this page.
+  await expect(rows).toHaveCount(2)
+  await expect(rows.nth(0)).toHaveAttribute('data-ext', broad.id)
+  await expect(rows.nth(0)).toContainText(BROAD)
+  await expect(rows.nth(1)).toHaveAttribute('data-ext', basic.id)
+  await expect(rows.nth(1)).toContainText(NAME)
+  await expect(rows.nth(0)).toContainText('Has access to this site')
+  await expect(rows.nth(1)).toContainText('Has access to this site')
+
+  // The pin: pinned ones first.
+  await rows.nth(1).getByTestId('ext-pin-toggle').click()
+  await expect(rows.nth(0)).toHaveAttribute('data-ext', basic.id)
+  await expect(rows.nth(0)).toHaveAttribute('data-pinned', 'true')
+  await expect(rows.nth(0).getByTestId('ext-pin-toggle')).toHaveAttribute('aria-pressed', 'true')
+  await expect(rows.nth(1)).toHaveAttribute('data-pinned', 'false')
+  expect((await entryOf(app, profileId, basic.id))?.pinnedAt).toEqual(expect.any(Number))
+
+  // Right-click: the row's menu, in the panel. Its site access is shown (the engine gives an
+  // extension every site it asked for, so it can't be changed here).
+  await rows.nth(1).click({ button: 'right' })
+  const menu = overlay.getByTestId('ext-menu')
+  await expect(menu).toHaveAttribute('data-ext', broad.id)
+  await expect(menu.getByRole('menuitem')).toHaveText([
+    'Pin to Top',
+    'Site access: On all sites',
+    'Remove from Orbit…',
+    'Manage Extensions',
+  ])
+  await expect(overlay.getByTestId('ext-menu-access')).toBeDisabled()
+  // Esc closes the menu and leaves the panel open.
+  await overlay.keyboard.press('Escape')
+  await expect(menu).toHaveCount(0)
+  await expect(overlay.getByTestId('site-controls')).toBeVisible()
+
+  // ⋯ on the pinned one: Unpin, Options, its access to this site.
+  await rows.nth(0).getByTestId('ext-more').click()
+  await expect(menu).toHaveAttribute('data-ext', basic.id)
+  await expect(menu.getByRole('menuitem')).toHaveText([
+    'Unpin',
+    'Options',
+    'Site access: On this site',
+    'Remove from Orbit…',
+    'Manage Extensions',
+  ])
+  await overlay.getByTestId('ext-menu-pin').click()
+  await expect.poll(async () => (await entryOf(app, profileId, basic.id))?.pinnedAt).toBeUndefined()
+  await expect(rows.nth(0)).toHaveAttribute('data-ext', broad.id)
+
+  // From the keyboard: Shift+F10 opens it at its first item, ↓ skips what can't be chosen, Esc
+  // gives the focus back to the row.
+  await rows.nth(1).getByTestId('ext-run').focus()
+  await overlay.keyboard.press('Shift+F10')
+  await expect(overlay.getByTestId('ext-menu-pin')).toBeFocused()
+  await overlay.keyboard.press('ArrowDown')
+  await expect(overlay.getByTestId('ext-menu-options')).toBeFocused()
+  await overlay.keyboard.press('ArrowDown')
+  await expect(overlay.getByTestId('ext-menu-remove')).toBeFocused()
+  await overlay.keyboard.press('Escape')
+  await expect(menu).toHaveCount(0)
+  await expect(rows.nth(1).getByTestId('ext-run')).toBeFocused()
+
+  // Options: its page in a tab, the panel closed.
+  await rows.nth(1).getByTestId('ext-more').click()
+  await overlay.getByTestId('ext-menu-options').click()
+  await expect(overlay.getByTestId('site-controls')).toHaveCount(0)
+  const options = `chrome-extension://${basic.id}/options.html`
+  await expect.poll(() => inContents(app, options, 'document.documentElement.dataset.options')).toBe('ready')
+
+  // On a page no extension runs on (the extension's own), the rows don't claim it.
+  await run(app, 'site.openControls', {})
+  await expect(rows).toHaveCount(2)
+  await expect(rows.nth(0)).toContainText('No popup')
+  await expect(rows.nth(1)).not.toContainText('access')
+  await rows.nth(0).click({ button: 'right' })
+  await expect(overlay.getByTestId('ext-menu-access')).toHaveText('Site access: Not on this page')
+
+  // Remove from Orbit…: Orbit's own question (EX-08).
+  await overlay.getByTestId('ext-menu-remove').click()
+  await expect(overlay.getByTestId('ext-dialog-title')).toHaveText(`Remove “${BROAD}”?`)
+  await overlay.getByTestId('ext-dialog-confirm').click()
+  await expect.poll(() => installed(app, profileId)).toEqual([basic.id])
+
+  // Manage: the extensions page.
+  await run(app, 'site.openControls', {})
+  await expect(rows).toHaveCount(1)
+  await overlay.getByTestId('ext-manage').click()
+  const page = await tabPage(app, PAGE_URL)
+  await expect(page.getByTestId('ext-card')).toHaveCount(1)
+  await expect(overlay.getByTestId('site-controls')).toHaveCount(0)
+
+  // Turned off, it isn't listed.
+  expect(await run(app, 'extensions.setEnabled', { id: basic.id, enabled: false, profileId })).toBe(true)
+  await visit(app, 'ExtListOff')
+  await run(app, 'site.openControls', {})
+  await expect(overlay.getByTestId('ext-none')).toHaveText('No extensions in this profile.')
+  await expect(rows).toHaveCount(0)
+})
+
+test('[EX-05] A row runs its extension: its popup opens beside the panel at its page’s size and takes the keyboard; Esc gives it back unless the page used it; no popup, and Orbit says so', async () => {
+  const { app, shell } = orbit
+  const { profileId } = await current(app)
+  const windowId = await firstWindow(app)
+  const broad = pack(FIXTURES.broad, makeKey(), 'broad.crx')
+  const basic = pack(FIXTURES.basic, makeKey(), 'basic.crx')
+  await install(app, profileId, broad)
+  await install(app, profileId, basic)
+  await visit(app, 'ExtRun')
+  const overlay = await viewPage(app, 'overlay')
+  await run(app, 'site.openControls', {})
+  const rows = overlay.getByTestId('ext-row')
+  await expect(rows).toHaveCount(2)
+
+  // Without a popup (an action only its service worker would hear), a toast says Orbit can't run it.
+  await rows.nth(0).getByTestId('ext-run').click()
+  await expect(shell.getByTestId('toast').filter({ hasText: `${BROAD} has no popup` })).toBeVisible()
+  expect(await popupIn(app, windowId)).toBeNull()
+
+  // Its popup: beside the panel, level with the row, at its page's size, with the keyboard.
+  await run(app, 'site.openControls', {})
+  await rows.nth(1).getByTestId('ext-run').click()
+  const popup = await shownPopup(app, windowId)
+  expect(popup.url).toBe(`chrome-extension://${basic.id}/popup.html`)
+  expect(await inPopup(app, popup.contentsId, 'document.documentElement.dataset.popup')).toBe('ready')
+  const panel = (await overlay.getByTestId('site-controls').boundingBox()) as { x: number; width: number }
+  const row = (await rows.nth(1).boundingBox()) as { y: number }
+  expect(popup.bounds.x).toBe(Math.round(panel.x + panel.width + GAP))
+  expect(popup.bounds.y).toBe(Math.round(row.y))
+  expect(popup.bounds.width).toBe(272)
+  const fits = `innerWidth >= document.documentElement.scrollWidth && innerHeight >= document.documentElement.scrollHeight`
+  expect(await inPopup(app, popup.contentsId, fits)).toBe(true)
+  await expect(overlay.getByTestId('site-controls')).toBeVisible()
+  await expect.poll(() => focusedUrl(app)).toBe(popup.url)
+
+  // Esc closes it; the panel it opened from has the keyboard again.
+  await typeIn(app, popup.contentsId, ['Escape'])
+  await expect.poll(() => popupIn(app, windowId)).toBeNull()
+  await expect(overlay.getByTestId('site-controls')).toBeVisible()
+  await expect.poll(() => focusedUrl(app)).toContain('view=overlay')
+
+  // A page that uses Esc (to close a menu of its own, say) keeps its popup open.
+  await rows.nth(1).getByTestId('ext-run').click()
+  const again = await shownPopup(app, windowId)
+  await inPopup(
+    app,
+    again.contentsId,
+    `window.addEventListener('keydown', (e) => { if (e.key === 'Escape') e.preventDefault() }), true`,
+  )
+  await typeIn(app, again.contentsId, ['Escape'])
+  await expect.poll(async () => (await popupIn(app, windowId))?.escapes).toBe(1)
+  expect((await popupIn(app, windowId))?.contentsId).toBe(again.contentsId)
+
+  // The panel it opened from closing closes it.
+  await run(app, 'overlay.close', {})
+  await expect.poll(() => popupIn(app, windowId)).toBeNull()
+})
+
+test('[EX-04][EX-05] Pinned icons show in the address field while the pointer is over the sidebar; a click opens the popup under its icon, which takes typed keys and closes on Esc, a click elsewhere, another app, a second click, a resize or another tab', async () => {
+  const { app, shell } = orbit
+  const { profileId } = await current(app)
+  const windowId = await firstWindow(app)
+  const basic = pack(FIXTURES.basic, makeKey(), 'basic.crx')
+  await install(app, profileId, basic)
+  const first = await visit(app, 'ExtPinnedOne')
+  const tabId = await visit(app, 'ExtPinned')
+  const pins = shell.getByTestId('ext-pins')
+  await expect(pins).toHaveCount(0)
+  expect(await run(app, 'extensions.pin', { id: basic.id, pinned: true, profileId })).toBe(true)
+
+  // Only while the pointer is over the sidebar.
+  await shell.mouse.move(1000, 500)
+  await focusTab(app, tabId)
+  await expect(pins).toBeAttached()
+  await expect(pins).toBeHidden()
+  await shell.getByTestId('address').hover()
+  const icon = shell.getByTestId('ext-pinned')
+  await expect(icon).toBeVisible()
+  await expect(icon).toHaveAttribute('aria-label', NAME)
+  await expect(icon).toHaveAttribute('data-ext', basic.id)
+
+  // They are the pins of the window's Space's profile (EX-09): a Space with a profile of its own
+  // shows none, and its tabs' panel lists none.
+  const { spaceId } = await current(app)
+  const work = (await run(app, 'profiles.create', { name: 'Work' })) as string
+  const workSpace = (await run(app, 'spaces.create', { name: 'Work', profileId: work, activate: false })) as string
+  await visit(app, 'ExtPinnedWork', workSpace)
+  await run(app, 'spaces.switch', { spaceId: workSpace })
+  await expect.poll(async () => (await current(app)).profileId).toBe(work)
+  await expect(pins).toHaveCount(0)
+  const overlay = await viewPage(app, 'overlay')
+  await run(app, 'site.openControls', {})
+  await expect(overlay.getByTestId('ext-none')).toBeVisible()
+  await expect(overlay.getByTestId('ext-row')).toHaveCount(0)
+  await run(app, 'overlay.close', {})
+  await run(app, 'spaces.switch', { spaceId })
+  await expect(pins).toHaveCount(1)
+  await focusTab(app, tabId)
+  await shell.getByTestId('address').hover()
+  await expect(icon).toBeVisible()
+
+  // A click: the popup, under the icon, with the keyboard; keys typed go to it.
+  const box = (await icon.boundingBox()) as { x: number; y: number; height: number }
+  await icon.click()
+  const popup = await shownPopup(app, windowId)
+  expect(popup.bounds.x).toBe(Math.round(box.x))
+  expect(popup.bounds.y).toBe(Math.round(box.y + box.height + GAP))
+  await expect.poll(() => focusedUrl(app)).toBe(popup.url)
+  await inPopup(app, popup.contentsId, `document.getElementById('field').focus(), true`)
+  await typeIn(app, popup.contentsId, ['h', 'i'])
+  expect(await inPopup(app, popup.contentsId, `document.getElementById('field').value`)).toBe('hi')
+  // Double-clicking it does nothing to the window.
+  await app.evaluate(({ webContents }, id) => {
+    const contents = webContents.fromId(id)
+    for (const type of ['mouseDown', 'mouseUp'] as const)
+      contents?.sendInputEvent({ type, x: 100, y: 10, clickCount: 2 })
+  }, popup.contentsId)
+  expect(await inWindow(app, windowId, 'maximized')).toBe(false)
+
+  // Esc: closed, and the page has the keyboard again.
+  await typeIn(app, popup.contentsId, ['Escape'])
+  await expect.poll(() => popupIn(app, windowId)).toBeNull()
+  await expect.poll(() => focusedUrl(app)).toContain('/page/ExtPinned')
+
+  // A click elsewhere in Orbit (the page takes the keyboard).
+  await icon.click()
+  await shownPopup(app, windowId)
+  await focusTab(app, tabId)
+  await expect.poll(() => popupIn(app, windowId)).toBeNull()
+
+  // A second click on its icon: the press takes the keyboard from the popup, which closes, and the
+  // click leaves it closed.
+  await icon.click()
+  await shownPopup(app, windowId)
+  await focusView(app, 'shell')
+  await expect.poll(() => popupIn(app, windowId)).toBeNull()
+  const anchor = { x: box.x, y: box.y, width: 16, height: box.height, side: 'below' }
+  expect(await runIn(app, windowId, 'extensions.run', { id: basic.id, profileId, anchor })).toBe('closed')
+  expect(await popupIn(app, windowId)).toBeNull()
+
+  // Another app.
+  await icon.click()
+  await shownPopup(app, windowId)
+  await inWindow(app, windowId, 'blur')
+  await expect.poll(() => popupIn(app, windowId)).toBeNull()
+
+  // Another tab shown.
+  await icon.click()
+  await shownPopup(app, windowId)
+  await run(app, 'tabs.activate', { tabId: first })
+  await expect.poll(() => popupIn(app, windowId)).toBeNull()
+
+  // The window resized.
+  await icon.click()
+  await shownPopup(app, windowId)
+  await inWindow(app, windowId, 'shrink')
+  await expect.poll(() => popupIn(app, windowId)).toBeNull()
+})
+
+test('[EX-05] A popup keeps to 800×600 and the window; what it opens is a tab; it gets nothing of Orbit’s; its page closing or crashing, or its extension turned off, closes only it; Inspect Popup’s DevTools keep it open', async () => {
+  const { app, shell } = orbit
+  const { profileId } = await current(app)
+  const windowId = await firstWindow(app)
+  const basic = pack(FIXTURES.basic, makeKey(), 'basic.crx')
+  await install(app, profileId, basic)
+  const other = await visit(app, 'ExtPopupOther')
+  const tabId = await visit(app, 'ExtPopupPage')
+  expect(await run(app, 'extensions.pin', { id: basic.id, pinned: true, profileId })).toBe(true)
+  await shell.getByTestId('address').hover()
+  const icon = shell.getByTestId('ext-pinned')
+
+  // Its page grows past the limits: the popup follows, up to 800×600, inside the window.
+  await icon.click()
+  const popup = await shownPopup(app, windowId)
+  await inPopup(
+    app,
+    popup.contentsId,
+    `document.body.style.width = '1200px'; document.body.style.height = '900px'; true`,
+  )
+  const [width = 0, height = 0] = (await inWindow(app, windowId, 'contentSize')) as number[]
+  const big = { width: Math.min(800, width - 2 * MARGIN), height: Math.min(600, height - 2 * MARGIN) }
+  await expect.poll(async () => (await popupIn(app, windowId))?.bounds).toEqual(expect.objectContaining(big))
+  const at = (await popupIn(app, windowId))?.bounds as PopupInfo['bounds']
+  expect(at.x).toBeGreaterThanOrEqual(MARGIN)
+  expect(at.y).toBeGreaterThanOrEqual(MARGIN)
+  expect(at.x + at.width).toBeLessThanOrEqual(width - MARGIN)
+  expect(at.y + at.height).toBeLessThanOrEqual(height - MARGIN)
+
+  // It gets nothing of Orbit's: no bridge, and main doesn't take it for Orbit's UI (ipc.ts refuses it).
+  expect(await inPopup(app, popup.contentsId, 'typeof window.orbit')).toBe('undefined')
+  const ui = await app.evaluate(({ webContents }, id) => {
+    const contents = webContents.fromId(id)
+    return contents ? (globalThis as unknown as Hooks).__orbit.ctx.windows.isUi(contents) : null
+  }, popup.contentsId)
+  expect(ui).toBe(false)
+
+  // What it opens is a tab of the window, shown; the popup closes.
+  const target = fx.url('/page/FromPopup')
+  await inPopup(app, popup.contentsId, `setTimeout(() => window.open(${JSON.stringify(target)}), 0), true`)
+  await expect
+    .poll(async () => {
+      const s = await state(app)
+      const win = s.windows[windowId]
+      const active = win ? win.activeTab[win.spaceId] : undefined
+      return active ? s.tabs[active]?.url : ''
+    })
+    .toBe(target)
+  await expect.poll(() => popupIn(app, windowId)).toBeNull()
+  const opened = Object.values((await state(app)).windows).filter((w) => w.kind !== 'main')
+  expect(opened).toEqual([])
+
+  // Its page closes itself: the keyboard goes back to the page.
+  await run(app, 'tabs.activate', { tabId })
+  await shell.getByTestId('address').hover()
+  await icon.click()
+  const closing = await shownPopup(app, windowId)
+  await inPopup(app, closing.contentsId, 'setTimeout(() => window.close(), 0), true')
+  await expect.poll(() => popupIn(app, windowId)).toBeNull()
+  await expect.poll(() => focusedUrl(app)).toContain('/page/ExtPopupPage')
+
+  // Its page crashes: only the popup goes; the tab and Orbit go on, and it opens again.
+  await icon.click()
+  const crashing = await shownPopup(app, windowId)
+  await app.evaluate(({ webContents }, id) => webContents.fromId(id)?.forcefullyCrashRenderer(), crashing.contentsId)
+  await expect.poll(() => popupIn(app, windowId)).toBeNull()
+  await reload(app, tabId, '/page/ExtPopupPage')
+  await expect.poll(() => mark(app, tabId, 'orbitTestExtension')).toBe(basic.id)
+  await shell.getByTestId('address').hover()
+  await icon.click()
+  await shownPopup(app, windowId)
+
+  // Turned off: its popup closes, and its icon goes.
+  expect(await run(app, 'extensions.setEnabled', { id: basic.id, enabled: false, profileId })).toBe(true)
+  await expect.poll(() => popupIn(app, windowId)).toBeNull()
+  await expect(icon).toHaveCount(0)
+  expect(await run(app, 'extensions.setEnabled', { id: basic.id, enabled: true, profileId })).toBe(true)
+
+  // Developer mode's Inspect Popup: while its DevTools are open, it stays when it loses the
+  // keyboard or Orbit loses focus; closing them closes it.
+  await run(app, 'extensions.setDevMode', { on: true })
+  const overlay = await viewPage(app, 'overlay')
+  await run(app, 'site.openControls', {})
+  await overlay.getByTestId('ext-row').click({ button: 'right' })
+  await overlay.getByTestId('ext-menu-inspect').click()
+  const inspected = await shownPopup(app, windowId)
+  const devtools = (id: number) =>
+    app.evaluate(({ webContents }, c) => webContents.fromId(c)?.isDevToolsOpened() ?? false, id)
+  await expect.poll(() => devtools(inspected.contentsId)).toBe(true)
+  await inWindow(app, windowId, 'blur')
+  await focusTab(app, tabId)
+  await expect.poll(() => focusedUrl(app)).toContain('/page/ExtPopupPage')
+  expect((await popupIn(app, windowId))?.contentsId).toBe(inspected.contentsId)
+  await app.evaluate(({ webContents }, c) => webContents.fromId(c)?.closeDevTools(), inspected.contentsId)
+  await expect.poll(() => popupIn(app, windowId)).toBeNull()
+
+  // While they keep it open, the panel it opened from closing still closes it, and so does another
+  // tab shown (the panel stays).
+  const inspect = async () => {
+    await run(app, 'overlay.close', {})
+    await run(app, 'site.openControls', {})
+    await overlay.getByTestId('ext-row').click({ button: 'right' })
+    await overlay.getByTestId('ext-menu-inspect').click()
+    const kept = await shownPopup(app, windowId)
+    await expect.poll(() => devtools(kept.contentsId)).toBe(true)
+    return kept
+  }
+  const kept = await inspect()
+  await run(app, 'overlay.close', {})
+  await expect.poll(() => popupIn(app, windowId)).toBeNull()
+  expect(await devtools(kept.contentsId)).toBe(false)
+  await inspect()
+  await run(app, 'tabs.activate', { tabId: other })
+  await expect.poll(() => popupIn(app, windowId)).toBeNull()
+  await expect(overlay.getByTestId('site-controls')).toBeVisible()
 })
